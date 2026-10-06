@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/explanation.schema.json",
+  "title": "GroundedExplanation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "incident_id", "summary", "claims"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "incident_id": {"type": "string"},
+    "summary": {"type": "string"},
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "evidence_refs"],
+        "properties": {
+          "text": {"type": "string", "minLength": 1},
+          "evidence_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

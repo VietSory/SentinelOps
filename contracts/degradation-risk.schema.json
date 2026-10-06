@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/degradation-risk.schema.json",
+  "title": "DegradationRiskResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "service", "observed_at", "risk_score", "state", "model_name", "model_version"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "service": {"type": "string"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "risk_score": {"type": "number", "minimum": 0, "maximum": 1},
+    "state": {"enum": ["normal", "watch", "degrading"]},
+    "model_name": {"const": "xgboost"},
+    "model_version": {"type": "string", "minLength": 1}
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "incident_id": "INC-DEMO-001",
+  "detected_at": "2026-10-06T14:20:00Z",
+  "state": "incident",
+  "severity": "high",
+  "affected_services": ["rds", "payment-service", "checkout-service"],
+  "service_signals": [
+    {"service": "rds", "anomaly_score": 0.96, "degradation_risk": 0.91, "first_anomaly_at": "2026-10-06T14:16:00Z"},
+    {"service": "payment-service", "anomaly_score": 0.88, "degradation_risk": 0.82, "first_anomaly_at": "2026-10-06T14:17:00Z"},
+    {"service": "checkout-service", "anomaly_score": 0.74, "degradation_risk": 0.67, "first_anomaly_at": "2026-10-06T14:18:00Z"}
+  ],
+  "root_cause_ranking": [
+    {"service": "rds", "score": 0.91, "evidence_refs": ["E-001", "E-002", "E-003"]},
+    {"service": "payment-service", "score": 0.62, "evidence_refs": ["E-004"]}
+  ],
+  "evidence": [
+    {"id": "E-001", "type": "metric", "service": "rds", "observed_at": "2026-10-06T14:16:00Z", "fact": "RDS connection utilization rose abnormally before downstream latency increased.", "source_ref": "cloudwatch://demo/rds/connections"},
+    {"id": "E-002", "type": "timeline", "service": "rds", "observed_at": "2026-10-06T14:16:00Z", "fact": "RDS was the earliest anomalous component in the correlated incident window.", "source_ref": "incident-timeline://INC-DEMO-001"},
+    {"id": "E-003", "type": "trace", "service": "payment-service", "observed_at": "2026-10-06T14:17:00Z", "fact": "Payment spans show calls to RDS preceding payment timeout errors.", "source_ref": "xray://trace/demo"},
+    {"id": "E-004", "type": "log", "service": "payment-service", "observed_at": "2026-10-06T14:17:00Z", "fact": "Payment emitted database timeout error patterns.", "source_ref": "cloudwatch-logs://demo/payment"}
+  ]
+}

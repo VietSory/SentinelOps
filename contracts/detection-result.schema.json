@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/detection-result.schema.json",
+  "title": "DetectionResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "service", "observed_at", "anomaly_score", "is_anomalous", "model_name", "model_version"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "service": {"type": "string"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "anomaly_score": {"type": "number", "minimum": 0, "maximum": 1},
+    "is_anomalous": {"type": "boolean"},
+    "model_name": {"const": "isolation-forest"},
+    "model_version": {"type": "string", "minLength": 1}
+  }
+}

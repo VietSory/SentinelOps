@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/telemetry.schema.json",
+  "title": "TelemetryPoint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "timestamp", "service", "p95_latency_ms", "error_rate"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "service": {"type": "string", "minLength": 1},
+    "trace_id": {"type": ["string", "null"]},
+    "cpu_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "memory_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "p95_latency_ms": {"type": "number", "minimum": 0},
+    "error_rate": {"type": "number", "minimum": 0, "maximum": 1},
+    "timeout_count": {"type": ["integer", "null"], "minimum": 0},
+    "db_connections_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+    "queue_lag": {"type": ["number", "null"], "minimum": 0},
+    "restart_count": {"type": ["integer", "null"], "minimum": 0},
+    "log_error_count": {"type": ["integer", "null"], "minimum": 0}
+  }
+}

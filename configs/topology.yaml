@@ -1,0 +1,10 @@
+version: 1
+dependencies:
+  checkout-service:
+    - payment-service
+    - inventory-service
+  payment-service:
+    - rds
+  inventory-service:
+    - rds
+  rds: []
