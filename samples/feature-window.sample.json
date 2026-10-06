@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "service": "payment-service",
+  "window_start": "2026-10-06T14:15:00Z",
+  "window_end": "2026-10-06T14:20:00Z",
+  "features": {
+    "p95_latency_ms_mean_5m": 391.2,
+    "p95_latency_ms_slope_5m": 48.7,
+    "error_rate_mean_5m": 0.026,
+    "error_rate_slope_5m": 0.006,
+    "timeout_count_mean_5m": 10.4,
+    "log_error_count_mean_5m": 15.2
+  }
+}

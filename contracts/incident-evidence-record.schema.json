@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/incident-evidence-record.schema.json",
+  "title": "IncidentEvidenceRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "incident_id", "detected_at", "state", "severity",
+    "affected_services", "service_signals", "root_cause_ranking", "evidence"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "incident_id": {"type": "string", "minLength": 1},
+    "detected_at": {"type": "string", "format": "date-time"},
+    "state": {"enum": ["degrading", "incident", "recovering", "recovered", "escalated"]},
+    "severity": {"enum": ["low", "medium", "high", "critical"]},
+    "affected_services": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "service_signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["service", "anomaly_score"],
+        "properties": {
+          "service": {"type": "string"},
+          "anomaly_score": {"type": "number", "minimum": 0, "maximum": 1},
+          "degradation_risk": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "first_anomaly_at": {"type": ["string", "null"], "format": "date-time"}
+        }
+      }
+    },
+    "root_cause_ranking": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["service", "score", "evidence_refs"],
+        "properties": {
+          "service": {"type": "string"},
+          "score": {"type": "number", "minimum": 0, "maximum": 1},
+          "evidence_refs": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "fact"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "type": {"enum": ["metric", "log", "trace", "topology", "change", "model", "timeline"]},
+          "service": {"type": ["string", "null"]},
+          "observed_at": {"type": ["string", "null"], "format": "date-time"},
+          "fact": {"type": "string", "minLength": 1},
+          "source_ref": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}

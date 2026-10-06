@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/remediation-action.schema.json",
+  "title": "RemediationAction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "action_id", "incident_id", "runbook_id", "target",
+    "action_type", "dry_run", "approved", "blast_radius", "status"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "action_id": {"type": "string"},
+    "incident_id": {"type": "string"},
+    "runbook_id": {"type": "string"},
+    "target": {"type": "string"},
+    "action_type": {"enum": ["restart", "scale", "rollback"]},
+    "dry_run": {"type": "boolean"},
+    "approved": {"type": "boolean"},
+    "blast_radius": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_pods", "max_replicas_delta"],
+      "properties": {
+        "max_pods": {"type": "integer", "minimum": 0},
+        "max_replicas_delta": {"type": "integer", "minimum": 0}
+      }
+    },
+    "status": {"enum": ["proposed", "blocked", "executing", "verifying", "recovered", "rolled_back", "escalated"]}
+  }
+}
