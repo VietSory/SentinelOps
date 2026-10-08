@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sentinelops"
-version = "0.2.0"
+version = "0.2.1"
 description = "Evidence-driven AIOps platform for cloud-native reliability"
 requires-python = ">=3.11,<3.13"
 dependencies = [
@@ -14,7 +14,10 @@ dependencies = [
   "jsonschema==4.23.0",
   "PyYAML==6.0.2",
   "httpx==0.28.1",
-  "asyncpg==0.30.0"
+  "asyncpg==0.30.0",
+  "opentelemetry-api==1.45.1",
+  "opentelemetry-sdk==1.45.1",
+  "opentelemetry-exporter-otlp-proto-grpc==1.45.1"
 ]
 
 [project.optional-dependencies]

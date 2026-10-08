@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
         await app.state.db.close()
 
 
-app = FastAPI(title="SentinelOps Payment Testbed", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="SentinelOps Payment Testbed", version="0.2.1", lifespan=lifespan)
 install_request_context(app, SERVICE_NAME)
 
 
