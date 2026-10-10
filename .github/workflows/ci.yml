@@ -17,3 +17,26 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: python scripts/validate_contracts.py
       - run: pytest -q
+
+  observability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: docker compose config --quiet
+      - run: docker compose up --build -d --wait --wait-timeout 120
+      - run: python scripts/step2_smoke_test.py
+      - run: python scripts/step3_smoke_test.py
+      - name: Collect testbed diagnostics
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color --tail 200
+      - name: Stop testbed
+        if: always()
+        run: docker compose down --volumes --remove-orphans

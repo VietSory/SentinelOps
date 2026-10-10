@@ -9,6 +9,9 @@ services:
       - "4318:4318"
       - "8889:8889"
       - "13133:13133"
+    depends_on:
+      jaeger:
+        condition: service_started
 
   jaeger:
     image: cr.jaegertracing.io/jaegertracing/jaeger:2.21.0

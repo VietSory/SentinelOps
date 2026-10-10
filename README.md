@@ -48,6 +48,22 @@ curl http://127.0.0.1:8000/health
 
 OpenAPI docs are available at `http://127.0.0.1:8000/docs`.
 
+## Local testbed and observability
+
+The repository also includes the Step 2 microservices and Step 3 OpenTelemetry
+baseline. With Docker running and the virtual environment activated:
+
+```bash
+docker compose up --build -d --wait --wait-timeout 120
+python scripts/step2_smoke_test.py
+python scripts/step3_smoke_test.py
+```
+
+Jaeger is available at `http://127.0.0.1:16686`; Collector metrics are exposed at
+`http://127.0.0.1:8889/metrics`. See [Step 3 observability](docs/STEP3_OBSERVABILITY.md)
+for the verification gates and troubleshooting. The AIOps API above remains a
+Foundation skeleton; this testbed does not yet perform ML, RCA or remediation.
+
 ## Contract validation
 
 ```bash
