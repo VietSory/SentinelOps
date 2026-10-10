@@ -20,7 +20,7 @@ def set_payment_fault(client: httpx.Client, mode: str, delay_ms: int = 0) -> Non
 
 
 def main() -> None:
-    with httpx.Client(timeout=10.0) as client:
+    with httpx.Client(timeout=10.0, trust_env=False) as client:
         expect(client.get(f"{CHECKOUT}/ready"), 200, "checkout readiness")
         expect(client.get(f"{PAYMENT}/ready"), 200, "payment readiness")
         expect(client.get(f"{INVENTORY}/ready"), 200, "inventory readiness")
@@ -29,31 +29,38 @@ def main() -> None:
         expect(inventory, 200, "inventory read")
 
         payload = {"sku": "sku-001", "quantity": 1, "amount": 99.90, "currency": "USD"}
-        healthy = client.post(f"{CHECKOUT}/v1/checkout", json=payload)
-        expect(healthy, 200, "healthy checkout")
-        correlation_id = healthy.headers.get("x-correlation-id")
-        if not correlation_id or healthy.json()["correlation_id"] != correlation_id:
-            raise RuntimeError("correlation ID was not returned consistently")
-        print("PASS healthy checkout", healthy.json())
+        original = client.get(f"{PAYMENT}/internal/faults")
+        expect(original, 200, "read payment fault")
+        original_fault = original.json()
+        try:
+            set_payment_fault(client, "healthy")
+            healthy = client.post(f"{CHECKOUT}/v1/checkout", json=payload)
+            expect(healthy, 200, "healthy checkout")
+            correlation_id = healthy.headers.get("x-correlation-id")
+            if not correlation_id or healthy.json()["correlation_id"] != correlation_id:
+                raise RuntimeError("correlation ID was not returned consistently")
+            print("PASS healthy checkout", healthy.json())
 
-        set_payment_fault(client, "latency", 1200)
-        started = time.perf_counter()
-        delayed = client.post(f"{CHECKOUT}/v1/checkout", json=payload)
-        elapsed = time.perf_counter() - started
-        expect(delayed, 200, "latency checkout")
-        if elapsed < 1.0:
-            raise RuntimeError(f"latency injection did not propagate; elapsed={elapsed:.2f}s")
-        print(f"PASS latency propagation elapsed={elapsed:.2f}s")
+            set_payment_fault(client, "latency", 1200)
+            started = time.perf_counter()
+            delayed = client.post(f"{CHECKOUT}/v1/checkout", json=payload)
+            elapsed = time.perf_counter() - started
+            expect(delayed, 200, "latency checkout")
+            if elapsed < 1.0:
+                raise RuntimeError(f"latency injection did not propagate; elapsed={elapsed:.2f}s")
+            print(f"PASS latency propagation elapsed={elapsed:.2f}s")
 
-        set_payment_fault(client, "error")
-        failed = client.post(f"{CHECKOUT}/v1/checkout", json=payload)
-        expect(failed, 502, "payment cascading error")
-        print("PASS cascading failure", failed.json())
+            set_payment_fault(client, "error")
+            failed = client.post(f"{CHECKOUT}/v1/checkout", json=payload)
+            expect(failed, 502, "payment cascading error")
+            print("PASS cascading failure", failed.json())
 
-        set_payment_fault(client, "healthy")
-        recovered = client.post(f"{CHECKOUT}/v1/checkout", json=payload)
-        expect(recovered, 200, "recovered checkout")
-        print("PASS recovery after fault reset")
+            set_payment_fault(client, "healthy")
+            recovered = client.post(f"{CHECKOUT}/v1/checkout", json=payload)
+            expect(recovered, 200, "recovered checkout")
+            print("PASS recovery after fault reset")
+        finally:
+            set_payment_fault(client, original_fault["mode"], original_fault["delay_ms"])
 
     print("STEP 2 SMOKE TEST: PASS")
 

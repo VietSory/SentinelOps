@@ -22,7 +22,7 @@ def configure(service_name: str) -> tuple[trace.Tracer, metrics.Meter]:
     resource = Resource.create(
         {
             "service.name": service_name,
-            "service.version": os.getenv("SERVICE_VERSION", "0.2.0"),
+            "service.version": os.getenv("SERVICE_VERSION", "0.2.1"),
             "service.namespace": "sentinelops",
             "deployment.environment": os.getenv("DEPLOYMENT_ENVIRONMENT", "local"),
         }

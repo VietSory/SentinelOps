@@ -63,11 +63,15 @@ async def ready() -> dict[str, object]:
     statuses: dict[str, str] = {}
     async with httpx.AsyncClient(timeout=2.0, trust_env=False) as client:
         for service, url in (
-            ("payment-service", f"{PAYMENT_URL}/health"),
-            ("inventory-service", f"{INVENTORY_URL}/health"),
+            ("payment-service", f"{PAYMENT_URL}/ready"),
+            ("inventory-service", f"{INVENTORY_URL}/ready"),
         ):
             try:
-                response = await client.get(url, headers=downstream_headers())
+                with new_client_span(tracer, service, "GET") as span:
+                    response = await client.get(url, headers=downstream_headers())
+                    span.set_attribute("http.response.status_code", response.status_code)
+                    if response.status_code >= 400:
+                        response.raise_for_status()
                 statuses[service] = "ok" if response.status_code == 200 else "unavailable"
             except httpx.HTTPError:
                 statuses[service] = "unavailable"
@@ -83,28 +87,28 @@ async def checkout(payload: CheckoutRequest) -> CheckoutResponse:
 
     try:
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            headers = downstream_headers()
-            with new_client_span(tracer, "inventory-service", "GET"):
+            with new_client_span(tracer, "inventory-service", "GET") as span:
                 inventory_response = await client.get(
-                    f"{INVENTORY_URL}/v1/inventory/{payload.sku}", headers=headers
+                    f"{INVENTORY_URL}/v1/inventory/{payload.sku}", headers=downstream_headers()
                 )
-            await raise_for_downstream(inventory_response, "inventory-service")
+                span.set_attribute("http.response.status_code", inventory_response.status_code)
+                await raise_for_downstream(inventory_response, "inventory-service")
             inventory = inventory_response.json()
             if inventory["quantity"] < payload.quantity:
                 raise HTTPException(status_code=409, detail="insufficient inventory")
 
-            headers = downstream_headers()
-            with new_client_span(tracer, "payment-service", "POST"):
+            with new_client_span(tracer, "payment-service", "POST") as span:
                 payment_response = await client.post(
                     f"{PAYMENT_URL}/v1/payments/charge",
-                    headers=headers,
+                    headers=downstream_headers(),
                     json={
                         "order_id": checkout_id,
                         "amount": payload.amount,
                         "currency": payload.currency,
                     },
                 )
-            await raise_for_downstream(payment_response, "payment-service")
+                span.set_attribute("http.response.status_code", payment_response.status_code)
+                await raise_for_downstream(payment_response, "payment-service")
             payment = payment_response.json()
     except httpx.TimeoutException as exc:
         log_event(SERVICE_NAME, "downstream_timeout", checkout_id=checkout_id)

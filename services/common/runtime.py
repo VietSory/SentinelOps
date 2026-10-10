@@ -3,19 +3,20 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 from contextvars import ContextVar
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from opentelemetry import trace
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from services.common.observability import configure, extract_context
 
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="unknown")
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(message)s")
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(message)s", stream=sys.stdout)
 logger = logging.getLogger("sentinelops-testbed")
 
 
@@ -61,7 +62,7 @@ def install_request_context(app: FastAPI, service_name: str) -> None:
         parent_context = extract_context(request.headers)
         started = time.perf_counter()
         status_code = 500
-        route_template = request.url.path
+        route_template = "__unmatched__"
         try:
             with tracer.start_as_current_span(
                 f"{service_name} {request.method}",
@@ -79,13 +80,16 @@ def install_request_context(app: FastAPI, service_name: str) -> None:
                     response = await call_next(request)
                     status_code = response.status_code
                     response.headers["x-correlation-id"] = correlation_id
+                    response.headers["x-trace-id"] = format(span.get_span_context().trace_id, "032x")
+                    return response
+                finally:
                     route = request.scope.get("route")
                     if route is not None and getattr(route, "path", None):
                         route_template = route.path
                     span.set_attribute("http.response.status_code", status_code)
                     span.set_attribute("http.route", route_template)
-                    return response
-                finally:
+                    if status_code >= 500:
+                        span.set_status(Status(StatusCode.ERROR, f"HTTP {status_code}"))
                     duration_ms = round((time.perf_counter() - started) * 1000, 2)
                     attrs = {
                         "service": service_name,
