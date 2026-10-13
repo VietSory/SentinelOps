@@ -16,5 +16,6 @@ CREATE TABLE IF NOT EXISTS payments (
 INSERT INTO inventory(sku, name, quantity) VALUES
     ('sku-001', 'Mechanical Keyboard', 50),
     ('sku-002', 'Wireless Mouse', 100),
-    ('sku-003', 'USB-C Dock', 25)
+    ('sku-003', 'USB-C Dock', 25),
+    ('sku-004', 'Monitor apache', 199)
 ON CONFLICT (sku) DO NOTHING;
