@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "scope": "local RED telemetry/features; no model/AWS claim",
+  "source_profile": "prometheus-increase-60s-5s/v1",
+  "observation_count": 27,
+  "quality_counts": {
+    "valid": 24,
+    "incomplete": 3
+  },
+  "eligible_features_by_service": {
+    "checkout-service": 5,
+    "inventory-service": 5,
+    "payment-service": 5
+  },
+  "payment_max_p95_ms": 1237.5,
+  "payment_max_error_rate": 1.0,
+  "workload_outcomes": {
+    "200": 1260,
+    "502": 360,
+    "other": 0
+  },
+  "manifest_ref": "artifact://manifests/7c6c551691ce51bc0285659f2f6e0f96ba0be2fce21747be019b97997d2e920f.json",
+  "database_client_spans_verified": 2,
+  "snapshot_started_on_commit": "7a2b96b",
+  "head_reported_at_completion": "211e4e724c1c2a5b79bdec8b48b84f31721f5765",
+  "evidence_refs": [
+    "artifact://raw/c1876041b563adc5d592a4d175ac20aa14520fa6953e09006e1f54d1360b3e10.json",
+    "artifact://raw/6f9ef185ffc7dab1d5b7fc90d7bb7bc8d513deed7f4d066e10ba8972203395e8.json"
+  ]
+}

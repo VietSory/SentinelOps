@@ -101,10 +101,18 @@ class PrometheusSource:
             raise ValueError("bucket is unaligned or not past the source watermark")
         responses = {}
         for key, expression in queries(service).items():
-            response = self.client.get(self.endpoint + "/api/v1/query", params={"query": expression, "time": end.timestamp()})
-            response.raise_for_status()
-            body = response.json()
-            _vector(body, end)
+            try:
+                response = self.client.get(self.endpoint + "/api/v1/query", params={"query": expression, "time": end.timestamp()})
+                response.raise_for_status()
+                body = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                # Preserve a failed/partial capture for quarantine; never replace
+                # an outage with a zero-valued successful observation.
+                responses[key] = {"expression": expression, "response": {
+                    "status": "error", "errorType": type(exc).__name__,
+                    "error": "source query unavailable or invalid JSON",
+                }}
+                break
             responses[key] = {"expression": expression, "response": body}
         return {
             "capture_version": "1.0", "source_profile": SOURCE_PROFILE,

@@ -95,6 +95,27 @@ def test_old_15_second_profile_remains_replayable_without_reinterpreting_coverag
     assert decode_capture(raw)["quality"]["coverage_ratio"] == 1
 
 
+@pytest.mark.parametrize("mode", ["http_error", "transport_error", "warning"])
+def test_actual_fetch_retains_failed_source_capture_for_quarantine(mode, tmp_path):
+    def handle(request):
+        if mode == "http_error":
+            return httpx.Response(503, text="not available")
+        if mode == "transport_error":
+            raise httpx.ConnectError("not reachable", request=request)
+        value = source_response("requests")
+        value["warnings"] = ["partial results"]
+        return httpx.Response(200, json=value)
+    source = PrometheusSource(transport=httpx.MockTransport(handle))
+    try:
+        raw = source.capture("payment-service", END, now=END+timedelta(seconds=30))
+    finally:
+        source.close()
+    result = process_captures([raw], ArtifactStore(tmp_path))
+    assert len(result["raw_refs"]) == 1
+    assert len(result["quarantine_refs"]) == 1
+    assert result["observation_count"] == result["eligible_feature_count"] == 0
+
+
 def test_saved_capture_replay_is_immutable_order_independent_and_deduplicated(tmp_path):
     captures = [capture(END-timedelta(minutes=i)) for i in range(5)]
     store = ArtifactStore(tmp_path)

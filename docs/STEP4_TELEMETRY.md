@@ -79,3 +79,5 @@ python scripts/collect_infrastructure.py --output artifacts/infrastructure/local
 ```
 
 This local PostgreSQL evidence does not certify an AWS RDS/CloudWatch adapter. Service DB client spans retain parentage without raw SQL/parameters; request-instance IDs allow log deduplication independently of a reused correlation ID. Fault APIs require ENABLE_FAULT_INJECTION=true and a local/test environment; Compose enables them only in the sandbox profile and binds published ports to loopback.
+
+See the [dated local verification report](reports/2026-10-26-phase4-local.md) for actual counts, the failed first attempt, incomplete buckets and the distinction between test execution and raw-evidence archival.

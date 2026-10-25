@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import timedelta
 from typing import Any
 
 from sentinelops.contracts import utc_time
@@ -33,10 +33,15 @@ def process_captures(captures: list[dict[str, Any]], store: ArtifactStore, *, en
     profile = next(iter(profiles), SOURCE_PROFILE)
     as_of = max((utc_time(item["available_at"]) for item in observations), default=None)
     eligible = 0
+    by_service = {service:{} for service in BUSINESS_ROUTES}
+    for observation in observations:
+        by_service[observation["service"]].setdefault(utc_time(observation["bucket_end"]), []).append(observation)
     if as_of:
         for end in windows:
             for service in BUSINESS_ROUTES:
-                feature = build_feature_window(observations, service=service, window_end=end,
+                recent = [item for offset in range(5)
+                          for item in by_service[service].get(end-timedelta(minutes=offset), [])]
+                feature = build_feature_window(recent, service=service, window_end=end,
                                                as_of=as_of, environment=environment, source_profile=profile)
                 feature_refs.append(store.write("features", feature))
                 eligible += int(feature["quality"]["eligible_for_inference"])

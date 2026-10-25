@@ -153,12 +153,12 @@ def build_feature_window(observations: list[dict[str, Any]], *, service: str,
     start_time = window_end - timedelta(seconds=300)
     selected = {}
     for item in observations:
-        validate_payload("observation-envelope.schema.json", item)
-        if item["service"] != service:
+        if item.get("service") != service:
             continue
         observed = utc_time(item["bucket_end"])
         if not start_time < observed <= window_end or utc_time(item["available_at"]) > as_of:
             continue
+        validate_payload("observation-envelope.schema.json", item)
         if item["environment"] != environment or item["source_profile"] != source_profile:
             raise ValueError("mixed environment/source profiles")
         if observed in selected and selected[observed]["record_id"] != item["record_id"]:
