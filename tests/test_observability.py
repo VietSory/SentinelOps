@@ -142,7 +142,8 @@ def test_checkout_propagates_client_span_and_correlates_logs_and_metrics(observe
     assert set(servers) == {"checkout-service", "payment-service", "inventory-service"}
     root = servers["checkout-service"]
     assert root.parent.span_id == int(PARENT_ID, 16)
-    clients = [span for span in observed_apps.exporter.get_finished_spans() if span.kind == SpanKind.CLIENT]
+    clients = [span for span in observed_apps.exporter.get_finished_spans()
+               if span.kind == SpanKind.CLIENT and span.attributes.get("peer.service") != "rds"]
     assert len(clients) == 2
     for client in clients:
         service = client.attributes["peer.service"]
@@ -166,6 +167,26 @@ def test_checkout_propagates_client_span_and_correlates_logs_and_metrics(observe
         assert metrics["sentinelops_http_requests"][0].attributes["status_code"] == 200
     inventory_metrics = metrics_for(observed_apps.readers["inventory-service"])
     assert inventory_metrics["sentinelops_http_requests"][0].attributes["route"] == "/v1/inventory/{sku}"
+    database = [span for span in observed_apps.exporter.get_finished_spans() if span.attributes.get("peer.service") == "rds"]
+    assert len(database) == 2
+    for span in database:
+        service = span.resource.attributes["service.name"]
+        assert span.parent.span_id == servers[service].context.span_id
+        assert span.attributes["db.system.name"] == "postgresql"
+        assert "db.query.text" not in span.attributes
+    request_ids = {record["request_instance_id"] for record in records}
+    assert len(request_ids) == 3
+    assert runtime.request_instance_id_var.get() is None
+
+
+@pytest.mark.parametrize(("enabled", "environment", "expected"), [
+    ("false", "local", 404), ("true", "production", 404), ("true", "local", 200),
+])
+def test_fault_controls_require_explicit_sandbox_enable(observed_apps, monkeypatch, enabled, environment, expected):
+    monkeypatch.setenv("ENABLE_FAULT_INJECTION", enabled)
+    monkeypatch.setenv("DEPLOYMENT_ENVIRONMENT", environment)
+    response = asyncio.run(observed_apps.request(path="/internal/faults", method="GET", service="payment"))
+    assert response.status_code == expected
 
 
 def test_cascading_5xx_marks_server_and_client_spans_and_counts_errors(observed_apps):

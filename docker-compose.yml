@@ -62,6 +62,8 @@ services:
     command: ["uvicorn", "services.payment.app:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       SERVICE_NAME: payment-service
+      ENABLE_FAULT_INJECTION: "true"
+      DEPLOYMENT_ENVIRONMENT: local
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       DATABASE_URL: postgresql://sentinel:sentinel@postgres:5432/sentinelops
     ports:
@@ -84,6 +86,8 @@ services:
     command: ["uvicorn", "services.inventory.app:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       SERVICE_NAME: inventory-service
+      ENABLE_FAULT_INJECTION: "true"
+      DEPLOYMENT_ENVIRONMENT: local
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       DATABASE_URL: postgresql://sentinel:sentinel@postgres:5432/sentinelops
     ports:

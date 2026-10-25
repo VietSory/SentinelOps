@@ -87,7 +87,7 @@ python scripts/collect_telemetry.py --output artifacts/capture --minutes 6
 python -m scripts.step4_smoke_test --output artifacts/step4/local
 ```
 
-The live Step 4 check takes about eight minutes and temporarily controls sandbox
+The live Step 4 check takes about ten minutes and temporarily controls sandbox
 faults; run it without another fault experiment. It checks real histogram/rate
 signals, replay and trace/log evidence, then restores the original fault settings.
 See [Step 4 telemetry](docs/STEP4_TELEMETRY.md). Captures are test evidence, not a

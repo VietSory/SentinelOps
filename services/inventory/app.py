@@ -4,11 +4,12 @@ import os
 from contextlib import asynccontextmanager
 
 import asyncpg
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-from services.common.faults import FaultRequest, FaultState
+from services.common.faults import FaultRequest, FaultState, require_fault_injection
 from services.common.runtime import install_request_context, log_event
+from services.common.observability import new_database_span
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "inventory-service")
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -42,8 +43,9 @@ async def health() -> dict[str, str]:
 @app.get("/ready")
 async def ready(request: Request) -> dict[str, str]:
     try:
-        async with request.app.state.db.acquire() as conn:
-            await conn.fetchval("SELECT 1")
+        with new_database_span(request.app.state.tracer, "SELECT"):
+            async with request.app.state.db.acquire() as conn:
+                await conn.fetchval("SELECT 1")
     except Exception as exc:
         raise HTTPException(status_code=503, detail="database unavailable") from exc
     return {"status": "ready", "service": SERVICE_NAME}
@@ -52,11 +54,12 @@ async def ready(request: Request) -> dict[str, str]:
 @app.get("/v1/inventory/{sku}", response_model=InventoryResponse)
 async def get_inventory(sku: str, request: Request) -> InventoryResponse:
     await fault.apply(SERVICE_NAME)
-    async with request.app.state.db.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT sku, name, quantity FROM inventory WHERE sku = $1",
-            sku,
-        )
+    with new_database_span(request.app.state.tracer, "SELECT"):
+        async with request.app.state.db.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT sku, name, quantity FROM inventory WHERE sku = $1",
+                sku,
+            )
     if row is None:
         raise HTTPException(status_code=404, detail="sku not found")
 
@@ -64,13 +67,13 @@ async def get_inventory(sku: str, request: Request) -> InventoryResponse:
     return InventoryResponse(sku=row["sku"], name=row["name"], quantity=row["quantity"])
 
 
-@app.post("/internal/faults")
+@app.post("/internal/faults", dependencies=[Depends(require_fault_injection)])
 async def set_fault(payload: FaultRequest) -> dict[str, object]:
     fault.update(payload)
     log_event(SERVICE_NAME, "fault_configuration_changed", **fault.snapshot())
     return {"service": SERVICE_NAME, **fault.snapshot()}
 
 
-@app.get("/internal/faults")
+@app.get("/internal/faults", dependencies=[Depends(require_fault_injection)])
 async def get_fault() -> dict[str, object]:
     return {"service": SERVICE_NAME, **fault.snapshot()}

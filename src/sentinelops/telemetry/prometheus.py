@@ -11,7 +11,8 @@ import httpx
 from sentinelops.contracts import utc_time
 from sentinelops.telemetry.core import BUSINESS_ROUTES, BucketMetrics, normalize_bucket, stable_id, timestamp
 
-SOURCE_PROFILE = "prometheus-increase-60s/v1"
+SOURCE_PROFILE = "prometheus-increase-60s-5s/v1"
+SOURCE_INTERVALS = {"prometheus-increase-60s/v1": 15, SOURCE_PROFILE: 5}
 REQUESTS = "sentinelops_http_requests_total"
 DURATION = "sentinelops_http_request_duration_ms_milliseconds_bucket"
 
@@ -52,7 +53,8 @@ def _vector(response: dict[str, Any], end: datetime) -> list[tuple[dict[str, str
 
 
 def decode_capture(capture: dict[str, Any], *, environment: str = "local") -> dict[str, Any]:
-    if capture.get("source_profile") != SOURCE_PROFILE:
+    profile = capture.get("source_profile")
+    if profile not in SOURCE_INTERVALS:
         raise ValueError("unsupported source profile")
     end = utc_time(capture["bucket_end"])
     expected_queries = queries(capture["service"])
@@ -72,12 +74,13 @@ def decode_capture(capture: dict[str, Any], *, environment: str = "local") -> di
         return values[0][1] if values else None
 
     scrapes, series_scrapes, up = scalar("scrapes"), scalar("series_scrapes"), scalar("up")
-    coverage = min(1., (scrapes or 0.) / 4, (series_scrapes or 0.) / 4) if up == 1 else 0.
+    expected = 60 / SOURCE_INTERVALS[profile]
+    coverage = min(1., (scrapes or 0.) / expected, (series_scrapes or 0.) / expected) if up == 1 else 0.
     buckets = tuple(sorted((float(labels["le"]), value) for labels, value in decoded["buckets"]))
     source_ref = "artifact://raw/" + stable_id(capture) + ".json"
     raw = BucketMetrics(
         capture["service"], end, scalar("requests"), scalar("errors"), buckets or None,
-        coverage, utc_time(capture["collected_at"]), (source_ref,), SOURCE_PROFILE,
+        coverage, utc_time(capture["collected_at"]), (source_ref,), profile,
     )
     return normalize_bucket(raw, environment=environment)
 

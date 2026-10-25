@@ -15,6 +15,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 from services.common.observability import configure, extract_context
 
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="unknown")
+request_instance_id_var: ContextVar[str | None] = ContextVar("request_instance_id", default=None)
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(message)s", stream=sys.stdout)
 logger = logging.getLogger("sentinelops-testbed")
@@ -30,6 +31,7 @@ def log_event(service: str, event: str, **fields: object) -> None:
         "service": service,
         "event": event,
         "correlation_id": correlation_id_var.get(),
+        "request_instance_id": request_instance_id_var.get(),
         "trace_id": trace_id,
         "span_id": span_id,
         **fields,
@@ -39,6 +41,7 @@ def log_event(service: str, event: str, **fields: object) -> None:
 
 def install_request_context(app: FastAPI, service_name: str) -> None:
     tracer, meter = configure(service_name)
+    app.state.tracer = tracer
     request_counter = meter.create_counter(
         "sentinelops_http_requests",
         unit="{request}",
@@ -59,6 +62,7 @@ def install_request_context(app: FastAPI, service_name: str) -> None:
     async def request_context(request: Request, call_next):
         correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
         correlation_token = correlation_id_var.set(correlation_id)
+        request_token = request_instance_id_var.set(uuid4().hex)
         parent_context = extract_context(request.headers)
         started = time.perf_counter()
         status_code = 500
@@ -111,4 +115,5 @@ def install_request_context(app: FastAPI, service_name: str) -> None:
                         duration_ms=duration_ms,
                     )
         finally:
+            request_instance_id_var.reset(request_token)
             correlation_id_var.reset(correlation_token)
