@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from sentinelops.contracts import validate_payload
+from sentinelops.contracts import load_schema, validate_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,3 +26,9 @@ def test_invalid_error_rate_is_rejected():
     payload["error_rate"] = 1.5
     with pytest.raises(ValueError):
         validate_payload("telemetry.schema.json", payload)
+
+
+def test_schema_loading_rejects_unknown_names_and_path_traversal():
+    for name in ("../../config.json", "not-present.schema.json"):
+        with pytest.raises(ValueError):
+            load_schema(name)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -10,8 +12,16 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 @lru_cache(maxsize=None)
 def load_schema(name: str) -> dict[str, Any]:
+    if not re.fullmatch(r"[a-z0-9-]+\.schema\.json", name):
+        raise ValueError("invalid schema name")
+    bundled = files("sentinelops").joinpath("schemas", name)
+    if bundled.is_file():
+        return json.loads(bundled.read_text(encoding="utf-8"))
+    # Editable source checkout: the root contracts remain the only authority.
     root = Path(__file__).resolve().parents[2]
     path = root / "contracts" / name
+    if not path.is_file():
+        raise ValueError(f"unknown schema: {name}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 

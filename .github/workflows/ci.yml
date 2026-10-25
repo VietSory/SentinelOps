@@ -17,6 +17,7 @@ jobs:
       - run: pip install -e '.[dev]'
       - run: python scripts/validate_contracts.py
       - run: pytest -q
+      - run: python scripts/check_installed_package.py
 
   observability:
     runs-on: ubuntu-latest
