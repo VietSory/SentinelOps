@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
         ("telemetry.sample.json", "telemetry.schema.json"),
         ("feature-window.sample.json", "feature-window.schema.json"),
         ("incident-evidence-record.sample.json", "incident-evidence-record.schema.json"),
+        ("observation-envelope.sample.json", "observation-envelope.schema.json"),
+        ("feature-envelope.sample.json", "feature-envelope.schema.json"),
     ],
 )
 def test_samples_match_contracts(sample: str, schema: str):

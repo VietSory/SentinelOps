@@ -1,0 +1,44 @@
+# Step 4 — Telemetry and deterministic feature pipeline
+
+Status: contract/transform implementation exists; live source capture and G1 evidence are tracked separately. This phase does not train models or implement RCA/remediation.
+
+## Contracts and code
+
+- `contracts/observation-envelope.schema.json` wraps an unchanged TelemetryPoint when a bucket is eligible, and records explicit quality/availability/provenance when it is not.
+- `contracts/feature-envelope.schema.json` wraps an unchanged FeatureWindow or an explicit abstention.
+- `sentinelops.telemetry.core` implements shared normalization, histogram quantile and batch/online/replay window transforms.
+- `sentinelops.contracts` enforces semantic time ordering, finite values and IER evidence integrity in addition to JSON Schema.
+
+The seven original wire schemas are unchanged (ADR-007). Supplemental metadata is never appended to a frozen strict payload. Root `contracts/` remains authoritative and the wheel build bundles those same files.
+
+## Exact v1 semantics
+
+Buckets are UTC aligned, half-open, 60 seconds. The five-minute feature window contains buckets with end times in `(window_start,window_end]`. Only records with `available_at <= as_of` may enter serving replay. No future bucket, ground truth, run/scenario ID or late data becomes a feature.
+
+`prometheus-increase-60s/v1` uses reset-aware distribution/count increases from Prometheus. Counts can be fractional estimates because `increase` extrapolates scrape samples; the profile does not claim exact event-log counts. Interpolated histogram p95 has bucket-resolution error. Evidence capture retains the actual query results for audit.
+
+Normalization requires at least 30 estimated business requests and ≥80% source coverage in a bucket. Counter/histogram totals must agree within max(1 request, 2%). Empty/missing/low-traffic/invalid buckets do not generate fake healthy payloads. A percentile in the +Inf bucket abstains because the finite upper bound cannot substantiate a latency.
+
+Feature v1 requires at least four eligible buckets out of five:
+
+| Feature | Definition |
+| --- | --- |
+| `request_rate_mean_5m` | Total estimated requests / covered seconds |
+| `p95_latency_ms_mean_5m` | Mean of the valid per-bucket p95 values; not global window p95 |
+| `p95_latency_ms_slope_5m` | OLS slope on actual UTC bucket times, milliseconds/minute |
+| `error_rate_mean_5m` | Total estimated 5xx / total estimated requests |
+| `error_rate_slope_5m` | OLS slope of bucket error ratios per minute |
+
+Input order and identical duplicates do not change feature identity. Conflicting revisions for one service/bucket must be resolved explicitly. Mixed environments/source profiles are rejected. IDs exclude audit-only observation availability/feature evaluation timestamps so rerunning identical eligible inputs is deterministic.
+
+## Validation
+
+```bash
+python scripts/validate_contracts.py
+pytest -q
+python scripts/check_installed_package.py
+```
+
+Tests cover known histogram interpolation/overflow, invalid distributions, weighted ratios, timestamp slopes with a missing bucket, 3/5 abstention, late arrival, future cutoff, duplicates/conflicting revisions, mixed sources, fractional alignment and API semantic rejection.
+
+The sample envelope provenance uses `fixture://` and is synthetic example data. It is not measured healthy/fault telemetry or ML evidence. G1 requires the additional live capture report; G2/G3 require independent datasets and trained model evaluation.

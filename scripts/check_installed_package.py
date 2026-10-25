@@ -17,7 +17,8 @@ from sentinelops.main import app
 from sentinelops.contracts import load_schema
 from fastapi.testclient import TestClient
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',
-             'incident-evidence-record', 'explanation', 'remediation-action'):
+             'incident-evidence-record', 'explanation', 'remediation-action',
+             'observation-envelope', 'feature-envelope'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 client = TestClient(app)
 assert client.get('/health').status_code == 200
