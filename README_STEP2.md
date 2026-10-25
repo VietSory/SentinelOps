@@ -1,46 +1,13 @@
-# SentinelOps — Step 2 overlay
+# SentinelOps — Step 2 testbed entry point
 
-Add these files on top of the completed Foundation v0.1 repository.
+The former overlay installation instructions are superseded: Step 2 is integrated into this repository. Do not overwrite `pyproject.toml` using an old overlay.
 
-This overlay deliberately replaces `pyproject.toml` because Checkout now uses `httpx` at runtime and Payment/Inventory use `asyncpg`.
-
-## Start the testbed
+Use [README.md](README.md) for installation and [docs/STEP2_TESTBED.md](docs/STEP2_TESTBED.md) for workload behavior. The current product baseline is [docs/PRODUCT_SPEC.md](docs/PRODUCT_SPEC.md); the full implementation design and delivery gates are linked there.
 
 ```bash
-docker compose up --build -d
-docker compose ps
-```
-
-Check readiness:
-
-```bash
-curl http://127.0.0.1:8001/ready
-curl http://127.0.0.1:8002/ready
-curl http://127.0.0.1:8003/ready
-```
-
-Run the full smoke scenario:
-
-```bash
+docker compose up --build -d --wait --wait-timeout 120
 python scripts/step2_smoke_test.py
+python scripts/step3_smoke_test.py
 ```
 
-Inspect cross-service structured logs:
-
-```bash
-docker compose logs checkout-service payment-service inventory-service
-```
-
-Stop without deleting data:
-
-```bash
-docker compose down
-```
-
-Reset the entire local testbed including the database volume:
-
-```bash
-./scripts/step2_reset.sh
-```
-
-Detailed intent and DoD: `docs/STEP2_TESTBED.md`.
+These commands preserve the database volume. `scripts/step2_reset.sh` is a destructive sandbox reset; use it only when discarding that sandbox's database is intentional.

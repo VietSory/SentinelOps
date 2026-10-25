@@ -30,6 +30,18 @@ The first Definition of Done is:
 
 > Evidence is computed; LLM explanation is generated. Never the reverse.
 
+## Implementation planning
+
+The implementation planning pack, based on the source review at `20edcae`, is:
+
+- [Delivery plan](docs/DELIVERY_PLAN.md): phases, dependencies, ownership, estimates and deliverables.
+- [Technical specification](docs/TECHNICAL_SPEC.md): component design, data semantics, APIs, model lifecycle and controlled remediation.
+- [Constraints and acceptance gates](docs/CONSTRAINTS_AND_GATES.md): frozen decisions, proposed targets, verification evidence and open decisions.
+
+These documents supplement the product spec and accepted ADRs. New design choices
+are marked as proposals; planned capabilities and acceptance targets are not claims
+of completed implementation or measured performance.
+
 ## Quick start
 
 ```bash
