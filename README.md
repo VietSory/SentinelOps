@@ -76,6 +76,23 @@ Jaeger is available at `http://127.0.0.1:16686`; Collector metrics are exposed a
 for the verification gates and troubleshooting. The AIOps API above remains a
 Foundation skeleton; this testbed does not yet perform ML, RCA or remediation.
 
+## Telemetry history and feature windows
+
+Prometheus at `http://127.0.0.1:9090` retains local metric history for seven days.
+Published testbed ports bind to loopback. Phase 4 adds immutable source captures,
+quality-aware observations and deterministic five-minute feature windows:
+
+```bash
+python scripts/collect_telemetry.py --output artifacts/capture --minutes 6
+python -m scripts.step4_smoke_test --output artifacts/step4/local
+```
+
+The live Step 4 check takes about eight minutes and temporarily controls sandbox
+faults; run it without another fault experiment. It checks real histogram/rate
+signals, replay and trace/log evidence, then restores the original fault settings.
+See [Step 4 telemetry](docs/STEP4_TELEMETRY.md). Captures are test evidence, not a
+trained model or an AWS integration claim.
+
 ## Contract validation
 
 ```bash

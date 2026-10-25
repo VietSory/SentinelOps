@@ -21,7 +21,7 @@ jobs:
 
   observability:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,6 +33,15 @@ jobs:
       - run: docker compose up --build -d --wait --wait-timeout 120
       - run: python scripts/step2_smoke_test.py
       - run: python scripts/step3_smoke_test.py
+      - run: python -m scripts.step4_smoke_test --output artifacts/step4/ci
+      - name: Preserve telemetry capture evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step4-telemetry-evidence
+          path: artifacts/step4/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Collect testbed diagnostics
         if: failure()
         run: |

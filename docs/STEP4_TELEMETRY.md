@@ -1,12 +1,15 @@
 # Step 4 — Telemetry and deterministic feature pipeline
 
-Status: contract/transform implementation exists; live source capture and G1 evidence are tracked separately. This phase does not train models or implement RCA/remediation.
+Status: contracts/transforms, local Prometheus adapter and capture/replay CLI are implemented. Live acceptance results are tracked in dated reports. This phase does not train models or implement RCA/remediation.
 
 ## Contracts and code
 
 - `contracts/observation-envelope.schema.json` wraps an unchanged TelemetryPoint when a bucket is eligible, and records explicit quality/availability/provenance when it is not.
 - `contracts/feature-envelope.schema.json` wraps an unchanged FeatureWindow or an explicit abstention.
 - `sentinelops.telemetry.core` implements shared normalization, histogram quantile and batch/online/replay window transforms.
+- `sentinelops.telemetry.prometheus` uses an exact pinned metric/query catalog, 15s scrape coverage, a 30s watermark and immutable query responses.
+- `sentinelops.telemetry.store` persists content-addressed objects with checksum validation and atomic create-without-overwrite semantics.
+- `sentinelops.telemetry.pipeline` replays saved source captures without network access and quarantines invalid source responses.
 - `sentinelops.contracts` enforces semantic time ordering, finite values and IER evidence integrity in addition to JSON Schema.
 
 The seven original wire schemas are unchanged (ADR-007). Supplemental metadata is never appended to a frozen strict payload. Root `contracts/` remains authoritative and the wheel build bundles those same files.
@@ -37,8 +40,28 @@ Input order and identical duplicates do not change feature identity. Conflicting
 python scripts/validate_contracts.py
 pytest -q
 python scripts/check_installed_package.py
+python scripts/collect_telemetry.py --output artifacts/capture --minutes 6
+python -m scripts.step4_smoke_test --output artifacts/step4/local
 ```
 
 Tests cover known histogram interpolation/overflow, invalid distributions, weighted ratios, timestamp slopes with a missing bucket, 3/5 abstention, late arrival, future cutoff, duplicates/conflicting revisions, mixed sources, fractional alignment and API semantic rejection.
 
 The sample envelope provenance uses `fixture://` and is synthetic example data. It is not measured healthy/fault telemetry or ML evidence. G1 requires the additional live capture report; G2/G3 require independent datasets and trained model evaluation.
+
+The live smoke runs about 450 seconds at three checkouts/second through healthy,
+Payment latency, Payment error and recovery, while capturing each completed UTC
+minute after its watermark. It then verifies canonical fault visibility, eligible
+five-minute features, exact saved-capture replay, and one matching distributed
+trace/structured-log chain. Both original Payment and Inventory faults are
+restored in `finally`. Do not run another fault controller at the same time.
+
+The CLI may query historical buckets, but records actual collection availability.
+Manifest replay mode is `availability-bounded-batch`: rebuilt feature snapshots
+are not historical online alerts and do not substantiate detector MTTD/lead time.
+Capture artefacts remain local/ignored or are uploaded as CI artefacts.
+
+Replay a saved manifest without querying Prometheus:
+
+```bash
+python scripts/collect_telemetry.py --output artifacts/capture --replay-manifest artifact://manifests/REPLACE_WITH_DIGEST.json
+```
