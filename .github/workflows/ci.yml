@@ -34,14 +34,27 @@ jobs:
       - run: python scripts/step2_smoke_test.py
       - run: python scripts/step3_smoke_test.py
       - run: python -m scripts.step4_smoke_test --output artifacts/step4/ci
-      - name: Preserve telemetry capture evidence
+      - name: Publish checksum-backed telemetry summary
         if: always()
+        run: |
+          if [ -f artifacts/step4/ci/smoke-report.json ]; then
+            python -m scripts.summarize_telemetry_evidence artifacts/step4/ci/smoke-report.json
+          else
+            echo 'No successful Step 4 report was generated.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Preserve telemetry capture evidence
+        id: evidence_upload
+        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: step4-telemetry-evidence
           path: artifacts/step4/
           if-no-files-found: ignore
           retention-days: 7
+      - name: Report unavailable artifact transport
+        if: always() && steps.evidence_upload.outcome == 'failure'
+        run: echo '::warning::GitHub artifact transport failed. Live verification results and checksums are in the job summary/logs; raw CI captures were not archived. Release evidence acceptance remains pending archival.'
       - name: Collect testbed diagnostics
         if: failure()
         run: |

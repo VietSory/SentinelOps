@@ -47,6 +47,8 @@ def main() -> None:
             source.close()
     result = process_captures(captures, store)
     print(json.dumps(result, indent=2))
+    if result["quarantine_refs"]:
+        raise SystemExit("one or more source captures were quarantined")
 
 
 if __name__ == "__main__":

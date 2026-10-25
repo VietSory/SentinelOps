@@ -69,8 +69,12 @@ async def exercise(store: ArtifactStore, rps: float) -> tuple[list[dict], dict]:
                 await asyncio.sleep(max(0., bucket+30-time.time()))
                 end = datetime.fromtimestamp(bucket, timezone.utc)
                 for service in BUSINESS_ROUTES:
-                    raw = await asyncio.to_thread(source.capture, service, end)
-                    store.write("raw", raw)
+                    def capture_and_store():
+                        item = source.capture(service, end)
+                        store.write("raw", item)
+                        return item
+                    # Durable NTFS/fsync I/O must not stall the workload event loop.
+                    raw = await asyncio.to_thread(capture_and_store)
                     captures.append(raw)
                 print(f"CAPTURE {end.isoformat()} services=3", flush=True)
                 bucket += 60
@@ -122,6 +126,8 @@ def main() -> None:
     if not 1 <= args.rps <= 10:
         raise SystemExit("--rps must be 1…10")
     store = ArtifactStore(args.output)
+    source_commit = subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip()
+    source_dirty = bool(subprocess.check_output(["git","status","--porcelain"],cwd=ROOT,text=True).strip())
     captures, details = asyncio.run(exercise(store, args.rps))
     manifest = process_captures(captures, store)
     if manifest["quarantine_refs"] or manifest["eligible_feature_count"] < 3:
@@ -150,8 +156,9 @@ def main() -> None:
     evidence_refs = [store.write("raw", {"kind":"trace", "body":response.text}), store.write("raw", {"kind":"logs", "records":logs})]
     report = {"status":"PASS", "scope":"local RED telemetry and features only", "manifest":manifest,
               "evidence_refs":evidence_refs, "details":details,
-              "commit":subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip(),
-              "dirty_worktree":bool(subprocess.check_output(["git","status","--porcelain"],cwd=ROOT,text=True).strip())}
+              "commit_at_start":source_commit, "dirty_worktree_at_start":source_dirty,
+              "commit_at_report":subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip(),
+              "dirty_worktree_at_report":bool(subprocess.check_output(["git","status","--porcelain"],cwd=ROOT,text=True).strip())}
     path = Path(args.output)/"smoke-report.json"
     path.write_text(json.dumps(report, indent=2))
     print(f"STEP 4 SMOKE TEST: PASS; observations={manifest['observation_count']}; eligible_features={manifest['eligible_feature_count']}; report={path}",flush=True)

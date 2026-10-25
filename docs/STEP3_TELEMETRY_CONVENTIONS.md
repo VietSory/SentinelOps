@@ -35,3 +35,7 @@ These are intentionally small baseline signals. Step 4 will derive ML feature wi
 ## Boundaries
 
 Step 3 does not perform anomaly detection, degradation prediction, RCA, LLM explanation, or remediation. It only establishes observable, reproducible telemetry for the existing testbed.
+
+## Phase 4 additions
+
+Logs also carry a per-HTTP-request `request_instance_id`, distinct from correlation IDs that may be reused. Payment and Inventory emit DB CLIENT spans for real pool/query operations, parented to their SERVER spans, without SQL text or parameters. The SDK histogram has explicit millisecond boundaries near the SLO and 1200ms fault. Local Prometheus uses a versioned 5s scrape profile; see Step 4 for source/quality semantics.

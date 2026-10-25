@@ -4,20 +4,21 @@
 
 SentinelOps is the implementation repository for the approved AI4Life 2026 AIOps design. The architecture is contract-first: telemetry, model outputs, RCA results, Incident Evidence Records, LLM explanations, and remediation actions must conform to versioned schemas.
 
-## Foundation milestone
+## Implementation status
 
-This repository starts with the **Foundation & Contract Freeze** milestone. At this stage we intentionally do not deploy EKS, train production models, or enable autonomous remediation yet.
+The repository implements a contract-valid Foundation API skeleton, a real
+three-service/PostgreSQL testbed, distributed OpenTelemetry, local Prometheus
+history, immutable metric captures and deterministic feature windows. Dated
+verification reports live under [docs/reports](docs/reports/).
 
-The first Definition of Done is:
+The API detector remains an explicitly mocked Foundation response until the ML
+gate is implemented. Training/evaluation datasets, real model serving, incident
+correlation/RCA, Bedrock, operator UI, controlled remediation and AWS deployment
+follow the delivery gates; local telemetry evidence does not certify them.
 
-- product spec committed as the source of truth;
-- machine-readable contracts validated in CI;
-- API skeleton starts successfully;
-- `/health` returns OK;
-- `/v1/detect` accepts a valid telemetry/feature payload and returns a contract-valid mock result;
-- `/v1/incidents` can build a valid sample Incident Evidence Record;
-- replay input format exists;
-- contract tests run automatically.
+Runtime contracts remain strict and versioned. Supplemental envelopes carry
+quality, provenance and future lifecycle metadata without changing legacy wire
+payloads. The current architecture baseline is [PRODUCT_SPEC v1.1](docs/PRODUCT_SPEC.md).
 
 ## Architecture boundaries
 
@@ -107,7 +108,10 @@ configs/          Product configuration that is allowed to change without redesi
 docs/             Product spec and ADRs
 samples/          Contract-valid example payloads
 scripts/          Validation/replay/developer utilities
-src/sentinelops/  Control-plane API skeleton
+src/sentinelops/  Control-plane API and telemetry/feature modules
+services/         Monitored Checkout, Payment and Inventory workload
+observability/    Collector and local Prometheus configuration
+infra/            Local database and future deployment infrastructure
 tests/            Contract and API tests
 ```
 

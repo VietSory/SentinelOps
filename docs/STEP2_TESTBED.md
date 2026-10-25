@@ -55,7 +55,7 @@ Payload examples:
 {"mode":"error","delay_ms":0}
 ```
 
-These endpoints exist only to produce deterministic scenarios during local development. They must not be exposed as unauthenticated production controls.
+These endpoints require `ENABLE_FAULT_INJECTION=true` and `DEPLOYMENT_ENVIRONMENT=local` or `test`. They return 404 by default and in non-sandbox environments even if the enable flag is set. Compose explicitly enables them in the sandbox and publishes services only on loopback. They must not be exposed as unauthenticated production controls.
 
 ## Definition of Done
 

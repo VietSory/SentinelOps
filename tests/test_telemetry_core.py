@@ -94,3 +94,20 @@ def test_envelopes_validate_nested_payload_and_exact_alignment():
                         ((100, 60), (math.inf, 60)), 1, END+timedelta(seconds=30), ("fixture://raw",))
     with pytest.raises(ValueError, match="aligned"):
         normalize_bucket(raw)
+
+
+def test_historical_replay_cost_is_bounded_by_the_selected_window(monkeypatch):
+    from sentinelops.telemetry import core
+    items = [observation(i) for i in range(5)]
+    history = [observation(i) for i in range(-100, 0)]
+    original = core.validate_payload
+    calls = []
+
+    def validate(name, payload):
+        calls.append(name)
+        return original(name, payload)
+
+    monkeypatch.setattr(core, "validate_payload", validate)
+    result = window(history+items)
+    assert result["quality"]["coverage_ratio"] == 1
+    assert calls.count("observation-envelope.schema.json") == 5
