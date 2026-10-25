@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/infrastructure-observation.schema.json",
+  "title": "InfrastructureObservation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_id", "component", "environment", "observed_at", "available_at", "metrics", "source_ref", "measurement_scope"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "record_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "component": {"const": "rds"},
+    "environment": {"type": "string", "minLength": 1},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "available_at": {"type": "string", "format": "date-time"},
+    "measurement_scope": {"const": "cluster-client-connections-excluding-collector"},
+    "source_ref": {"type": "string", "pattern": "^postgres-stat://[^@]+$"},
+    "metrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["db_connections_count", "max_connections", "reserved_connections", "db_connections_pct"],
+      "properties": {
+        "db_connections_count": {"type": "integer", "minimum": 0},
+        "max_connections": {"type": "integer", "minimum": 1},
+        "reserved_connections": {"type": "integer", "minimum": 0},
+        "db_connections_pct": {"type": "number", "minimum": 0}
+      }
+    }
+  }
+}

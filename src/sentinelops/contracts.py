@@ -115,3 +115,10 @@ def _semantic_validation(name: str, payload: dict[str, Any]) -> None:
             for field in ("service", "window_start", "window_end"):
                 if payload[field] != payload["payload"][field]:
                     raise ValueError(f"feature envelope {field} mismatch")
+    if name == "infrastructure-observation.schema.json":
+        if utc_time(payload["available_at"]) < utc_time(payload["observed_at"]):
+            raise ValueError("infrastructure availability precedes observation")
+        values = payload["metrics"]
+        usable = values["max_connections"] - values["reserved_connections"]
+        if usable <= 0 or not math.isclose(values["db_connections_pct"], values["db_connections_count"] / usable * 100, abs_tol=1e-9):
+            raise ValueError("infrastructure capacity/percentage mismatch")

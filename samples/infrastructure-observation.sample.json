@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "component": "rds",
+  "environment": "test",
+  "observed_at": "2026-10-26T00:00:00Z",
+  "available_at": "2026-10-26T00:00:01Z",
+  "measurement_scope": "cluster-client-connections-excluding-collector",
+  "source_ref": "postgres-stat://fixture:5432",
+  "metrics": {
+    "db_connections_count": 10,
+    "max_connections": 100,
+    "reserved_connections": 3,
+    "db_connections_pct": 10.309278350515463
+  },
+  "record_id": "289c7185ee210b49c3c6bcd88f7f165d0d3a2b540cfe9166b5427300ce8ccf70"
+}
