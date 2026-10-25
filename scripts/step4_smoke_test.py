@@ -1,6 +1,6 @@
 """Exercise real 60s metric buckets and 300s feature windows in the sandbox.
 
-Runs for about eight minutes. Do not run alongside another fault experiment.
+Runs for about ten minutes. Do not run alongside another fault experiment.
 No model, RCA quality or AWS integration is claimed by this check.
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import PrometheusSource
 from sentinelops.telemetry.store import ArtifactStore
 from scripts.step3_smoke_test import (
-    CHECKOUT, PAYMENT, INVENTORY, JAEGER, validate_trace, validate_logs, read_logs,
+    CHECKOUT, PAYMENT, INVENTORY, JAEGER, validate_trace, validate_logs, read_logs, wait_for,
 )
 from sentinelops.trace_query import decode_v3_trace
 
@@ -47,8 +47,8 @@ async def exercise(store: ArtifactStore, rps: float) -> tuple[list[dict], dict]:
             response.raise_for_status()
 
         started = time.time()
-        final_bucket = int((started+450)//60)*60
-        phases = [("healthy", 0, 90), ("latency", 1200, 120), ("error", 0, 60), ("healthy", 0, 180)]
+        phases = [("healthy", 0, 120), ("latency", 1200, 120), ("error", 0, 120), ("healthy", 0, 180)]
+        final_bucket = int((started+sum(phase[2] for phase in phases))//60)*60
         semaphore = asyncio.Semaphore(16)
         tasks = set()
 
@@ -141,8 +141,9 @@ def main() -> None:
     probe = details["probe"]
     statuses = {service:200 for service in BUSINESS_ROUTES}
     with httpx.Client(timeout=10., trust_env=False) as client:
-        response = client.get(JAEGER+"/api/v3/traces/"+probe["trace_id"])
-        response.raise_for_status()
+        def complete_trace(response):
+            validate_trace(decode_v3_trace(response.text, probe["trace_id"]), probe["trace_id"], probe["correlation_id"], statuses)
+        response = wait_for(client, JAEGER+"/api/v3/traces/"+probe["trace_id"], complete_trace)
         servers = validate_trace(decode_v3_trace(response.text, probe["trace_id"]), probe["trace_id"], probe["correlation_id"], statuses)
     logs = read_logs(details["started_at"])
     validate_logs(logs, probe["trace_id"], probe["correlation_id"], servers, statuses)

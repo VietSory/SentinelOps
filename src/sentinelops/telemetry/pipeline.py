@@ -27,18 +27,22 @@ def process_captures(captures: list[dict[str, Any]], store: ArtifactStore, *, en
         observations.append(item)
         observation_refs.append(store.write("observations", item))
     windows = sorted({utc_time(item["bucket_end"]) for item in observations})
+    profiles = {item["source_profile"] for item in observations}
+    if len(profiles) > 1:
+        raise ValueError("a capture manifest cannot mix source profiles")
+    profile = next(iter(profiles), SOURCE_PROFILE)
     as_of = max((utc_time(item["available_at"]) for item in observations), default=None)
     eligible = 0
     if as_of:
         for end in windows:
             for service in BUSINESS_ROUTES:
                 feature = build_feature_window(observations, service=service, window_end=end,
-                                               as_of=as_of, environment=environment, source_profile=SOURCE_PROFILE)
+                                               as_of=as_of, environment=environment, source_profile=profile)
                 feature_refs.append(store.write("features", feature))
                 eligible += int(feature["quality"]["eligible_for_inference"])
     manifest = {
         "manifest_version": "1.0", "environment": environment,
-        "source_profile": SOURCE_PROFILE, "replay_mode": "availability-bounded-batch",
+        "source_profile": profile, "replay_mode": "availability-bounded-batch",
         "raw_refs": sorted(set(raw_refs)), "observation_refs": sorted(set(observation_refs)),
         "feature_refs": sorted(set(feature_refs)), "quarantine_refs": sorted(set(quarantine_refs)),
         "observation_count": len(observations), "eligible_feature_count": eligible,

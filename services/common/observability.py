@@ -8,12 +8,21 @@ from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExp
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import SpanKind
 
 _CONFIGURED = False
+
+
+def duration_histogram_views() -> list[View]:
+    # Preserve original boundaries and add resolution around the testbed SLO/fault.
+    boundaries = (0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000,
+                  1250, 1500, 2000, 2500, 4000, 5000, 7500, 10000)
+    return [View(instrument_name="sentinelops_http_request_duration_ms",
+                 aggregation=ExplicitBucketHistogramAggregation(boundaries=boundaries))]
 
 
 def configure(service_name: str) -> tuple[trace.Tracer, metrics.Meter]:
@@ -41,7 +50,7 @@ def configure(service_name: str) -> tuple[trace.Tracer, metrics.Meter]:
             OTLPMetricExporter(endpoint=endpoint, insecure=endpoint.startswith("http://")),
             export_interval_millis=2000,
         )
-        meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
+        meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader], views=duration_histogram_views())
         metrics.set_meter_provider(meter_provider)
         _CONFIGURED = True
 
@@ -66,4 +75,11 @@ def new_client_span(tracer: trace.Tracer, dependency: str, method: str):
             "peer.service": dependency,
             "http.request.method": method,
         },
+    )
+
+
+def new_database_span(tracer: trace.Tracer, operation: str):
+    return tracer.start_as_current_span(
+        f"postgresql {operation}", kind=SpanKind.CLIENT,
+        attributes={"peer.service": "rds", "db.system.name": "postgresql", "db.operation.name": operation},
     )

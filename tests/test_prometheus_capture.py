@@ -15,7 +15,7 @@ END = datetime(2026, 10, 26, 0, 10, tzinfo=timezone.utc)
 def source_response(key, end=END):
     values = {"requests": [({}, 120)], "errors": [({}, 12)],
               "buckets": [({"le": "0"}, 0), ({"le": "100"}, 108), ({"le": "200"}, 120), ({"le": "+Inf"}, 120)],
-              "scrapes": [({}, 4)], "series_scrapes": [({}, 4)], "up": [({}, 1)]}
+              "scrapes": [({}, 12)], "series_scrapes": [({}, 12)], "up": [({}, 1)]}
     return {"status": "success", "data": {"resultType": "vector", "result": [
         {"metric": labels, "value": [end.timestamp(), str(value)]} for labels, value in values[key]
     ]}}
@@ -85,6 +85,14 @@ def test_future_or_unaligned_capture_is_blocked_before_http():
                 source.capture("payment-service", end, now=now)
     finally:
         source.close()
+
+
+def test_old_15_second_profile_remains_replayable_without_reinterpreting_coverage():
+    raw = capture()
+    raw["source_profile"] = "prometheus-increase-60s/v1"
+    for key in ("scrapes", "series_scrapes"):
+        raw["queries"][key]["response"]["data"]["result"][0]["value"][1] = "4"
+    assert decode_capture(raw)["quality"]["coverage_ratio"] == 1
 
 
 def test_saved_capture_replay_is_immutable_order_independent_and_deduplicated(tmp_path):

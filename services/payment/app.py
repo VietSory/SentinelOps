@@ -6,11 +6,12 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import asyncpg
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from services.common.faults import FaultRequest, FaultState
+from services.common.faults import FaultRequest, FaultState, require_fault_injection
 from services.common.runtime import install_request_context, log_event
+from services.common.observability import new_database_span
 
 SERVICE_NAME = os.getenv("SERVICE_NAME", "payment-service")
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -53,8 +54,9 @@ async def health() -> dict[str, str]:
 @app.get("/ready")
 async def ready(request: Request) -> dict[str, str]:
     try:
-        async with request.app.state.db.acquire() as conn:
-            await conn.fetchval("SELECT 1")
+        with new_database_span(request.app.state.tracer, "SELECT"):
+            async with request.app.state.db.acquire() as conn:
+                await conn.fetchval("SELECT 1")
     except Exception as exc:
         raise HTTPException(status_code=503, detail="database unavailable") from exc
     return {"status": "ready", "service": SERVICE_NAME}
@@ -66,19 +68,20 @@ async def charge(payload: ChargeRequest, request: Request) -> ChargeResponse:
     payment_id = f"PAY-{uuid4().hex[:12].upper()}"
     created_at = datetime.now(timezone.utc)
 
-    async with request.app.state.db.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO payments(payment_id, order_id, amount, currency, status, created_at)
-            VALUES($1, $2, $3, $4, $5, $6)
-            """,
-            payment_id,
-            payload.order_id,
-            payload.amount,
-            payload.currency.upper(),
-            "approved",
-            created_at,
-        )
+    with new_database_span(request.app.state.tracer, "INSERT"):
+        async with request.app.state.db.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO payments(payment_id, order_id, amount, currency, status, created_at)
+                VALUES($1, $2, $3, $4, $5, $6)
+                """,
+                payment_id,
+                payload.order_id,
+                payload.amount,
+                payload.currency.upper(),
+                "approved",
+                created_at,
+            )
 
     log_event(SERVICE_NAME, "payment_approved", payment_id=payment_id, order_id=payload.order_id)
     return ChargeResponse(
@@ -91,13 +94,13 @@ async def charge(payload: ChargeRequest, request: Request) -> ChargeResponse:
     )
 
 
-@app.post("/internal/faults")
+@app.post("/internal/faults", dependencies=[Depends(require_fault_injection)])
 async def set_fault(payload: FaultRequest) -> dict[str, object]:
     fault.update(payload)
     log_event(SERVICE_NAME, "fault_configuration_changed", **fault.snapshot())
     return {"service": SERVICE_NAME, **fault.snapshot()}
 
 
-@app.get("/internal/faults")
+@app.get("/internal/faults", dependencies=[Depends(require_fault_injection)])
 async def get_fault() -> dict[str, object]:
     return {"service": SERVICE_NAME, **fault.snapshot()}

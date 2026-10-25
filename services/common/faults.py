@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 from typing import Literal
 
@@ -9,6 +10,13 @@ from pydantic import BaseModel, Field
 
 
 FaultMode = Literal["healthy", "latency", "error"]
+
+
+def require_fault_injection() -> None:
+    enabled = os.getenv("ENABLE_FAULT_INJECTION", "false").lower() == "true"
+    sandbox = os.getenv("DEPLOYMENT_ENVIRONMENT", "local") in ("local", "test")
+    if not enabled or not sandbox:
+        raise HTTPException(status_code=404, detail="fault injection disabled")
 
 
 class FaultRequest(BaseModel):
