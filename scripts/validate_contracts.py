@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator
+from sentinelops.contracts import validate_payload
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
@@ -13,6 +14,8 @@ SAMPLE_MAP = {
     "telemetry.sample.json": "telemetry.schema.json",
     "feature-window.sample.json": "feature-window.schema.json",
     "incident-evidence-record.sample.json": "incident-evidence-record.schema.json",
+    "observation-envelope.sample.json": "observation-envelope.schema.json",
+    "feature-envelope.sample.json": "feature-envelope.schema.json",
 }
 
 
@@ -28,10 +31,10 @@ def main() -> None:
 
     for sample_name, schema_name in SAMPLE_MAP.items():
         payload = json.loads((SAMPLES / sample_name).read_text(encoding="utf-8"))
-        schema = json.loads((CONTRACTS / schema_name).read_text(encoding="utf-8"))
-        validator = Draft202012Validator(schema, format_checker=FormatChecker())
-        for err in validator.iter_errors(payload):
-            errors.append(f"{sample_name} -> {schema_name}: {err.message}")
+        try:
+            validate_payload(schema_name, payload)
+        except ValueError as exc:
+            errors.append(f"{sample_name} -> {schema_name}: {exc}")
 
     if errors:
         raise SystemExit("\n".join(errors))

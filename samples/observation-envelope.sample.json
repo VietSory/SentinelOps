@@ -1,0 +1,33 @@
+{
+  "envelope_version": "1.0",
+  "environment": "local",
+  "service": "payment-service",
+  "source_profile": "prometheus-increase-60s/v1",
+  "bucket_start": "2026-10-26T00:09:00Z",
+  "bucket_end": "2026-10-26T00:10:00Z",
+  "available_at": "2026-10-26T00:10:30Z",
+  "ingested_at": "2026-10-26T00:10:30Z",
+  "payload": {
+    "schema_version": "1.0",
+    "timestamp": "2026-10-26T00:10:00Z",
+    "service": "payment-service",
+    "p95_latency_ms": 95.0,
+    "error_rate": 0.016666666666666666
+  },
+  "measurements": {
+    "request_count": 120,
+    "error_count": 2
+  },
+  "quality": {
+    "status": "valid",
+    "coverage_ratio": 1,
+    "eligible_for_inference": true,
+    "reasons": []
+  },
+  "provenance": {
+    "source_refs": [
+      "fixture://sample/4"
+    ]
+  },
+  "record_id": "95295fc16375a93b199a88a04526f2594bf38ad94d3256abfd46ed21c08c89b2"
+}

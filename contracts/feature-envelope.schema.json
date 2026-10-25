@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "$id": "https://sentinelops.local/contracts/feature-envelope.schema.json",
+  "title": "FeatureEnvelope",
+  "properties": {
+    "envelope_version": {
+      "const": "1.0"
+    },
+    "record_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "environment": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "service": {
+      "enum": [
+        "checkout-service",
+        "payment-service",
+        "inventory-service"
+      ]
+    },
+    "payload": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "feature_set_version": {
+      "const": "http-red-5m/v1"
+    },
+    "window_start": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "window_end": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "as_of": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coverage_ratio",
+        "request_count",
+        "eligible_for_inference",
+        "reasons"
+      ],
+      "properties": {
+        "coverage_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "request_count": {
+          "type": "number",
+          "minimum": 0
+        },
+        "eligible_for_inference": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input_refs"
+      ],
+      "properties": {
+        "input_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "envelope_version",
+    "record_id",
+    "environment",
+    "source_profile",
+    "service",
+    "payload",
+    "feature_set_version",
+    "window_start",
+    "window_end",
+    "as_of",
+    "quality",
+    "provenance"
+  ]
+}

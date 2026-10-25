@@ -1,0 +1,39 @@
+{
+  "envelope_version": "1.0",
+  "feature_set_version": "http-red-5m/v1",
+  "environment": "local",
+  "source_profile": "prometheus-increase-60s/v1",
+  "service": "payment-service",
+  "window_start": "2026-10-26T00:05:00Z",
+  "window_end": "2026-10-26T00:10:00Z",
+  "as_of": "2026-10-26T00:10:30Z",
+  "payload": {
+    "schema_version": "1.0",
+    "service": "payment-service",
+    "window_start": "2026-10-26T00:05:00Z",
+    "window_end": "2026-10-26T00:10:00Z",
+    "features": {
+      "request_rate_mean_5m": 2.0,
+      "p95_latency_ms_mean_5m": 95.0,
+      "p95_latency_ms_slope_5m": 0.0,
+      "error_rate_mean_5m": 0.016666666666666666,
+      "error_rate_slope_5m": 0.0
+    }
+  },
+  "quality": {
+    "coverage_ratio": 1.0,
+    "request_count": 600,
+    "eligible_for_inference": true,
+    "reasons": []
+  },
+  "provenance": {
+    "input_refs": [
+      "observation://fa4530bb9923d3e60dc151a346fb0fb1fe146adf1aaa50670f0b166362b9caaf",
+      "observation://38375bfa2328c1bb1766d483cd8710f133cbe290ef7ba33eb013d300bc85d1ca",
+      "observation://b99855d7407c5b01d1034e6d58a4a7c91453253c5e9cf4697c279f89f140415b",
+      "observation://13ef8df6905348d9ce3ad04e25f5e257b69ba894b25854c8a2d9a778f1eff21a",
+      "observation://95295fc16375a93b199a88a04526f2594bf38ad94d3256abfd46ed21c08c89b2"
+    ]
+  },
+  "record_id": "0abcc2f9b9eb6a4b2ec170f123f70538385093736aeca2c0d12c9f92632375d2"
+}

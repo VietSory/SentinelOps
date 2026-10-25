@@ -135,37 +135,7 @@ Các cấu trúc dưới đây là thiết kế, chưa phải các schema file �
 | ChangeEvent | Event ID, actual target, before/after image/config versions, observed time, deployment reference | Evidence operational, tách khỏi fault truth |
 | ActionExecution/AuditEvent | Action/revision/runbook version, policy decision, actor, attempt, request/result timestamps, outcome/reason, verify samples | Approval bool không đủ audit/authorization |
 
-Ví dụ FeatureEnvelope, chỉ là minh họa thiết kế:
-
-```json
-{
-  "envelope_version": "1.0",
-  "feature_set_version": "http-red-5m/v1",
-  "environment": "local",
-  "source_profile": "prometheus-60s/v1",
-  "payload": {
-    "schema_version": "1.0",
-    "service": "payment-service",
-    "window_start": "2026-10-25T03:00:00Z",
-    "window_end": "2026-10-25T03:05:00Z",
-    "features": {
-      "p95_latency_ms_mean_5m": 120.0,
-      "error_rate_mean_5m": 0.01
-    }
-  },
-  "quality": {
-    "coverage_ratio": 1.0,
-    "request_count": 300,
-    "eligible_for_inference": true,
-    "reasons": []
-  },
-  "available_at": "2026-10-25T03:05:30Z",
-  "provenance": {
-    "input_refs": ["object://capture/run-a/normalized/part-001.jsonl"],
-    "config_hash": "example-only"
-  }
-}
-```
+Ví dụ wire-format được validate nằm tại [feature-envelope sample](../samples/feature-envelope.sample.json) và [observation-envelope sample](../samples/observation-envelope.sample.json). Sau implementation phần contracts/transforms, các schema tương ứng và `STEP4_TELEMETRY.md` xác định format v1 thực tế; các manifest/lifecycle contracts khác trong bảng vẫn là phần sẽ triển khai.
 
 Model wrapper chỉ nhận numeric vector theo registry. `environment`, IDs, timestamps, source strings, run/scenario IDs và quality reasons không được tự biến thành model feature. Training label loader là thành phần duy nhất được đọc fault truth store.
 
