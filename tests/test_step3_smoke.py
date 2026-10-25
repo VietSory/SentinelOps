@@ -104,6 +104,23 @@ def test_metrics_require_all_services_histograms_and_error_counters():
         smoke.validate_metrics(text, baseline=text)
 
 
+def test_metric_progress_is_per_instance_across_restarts_and_stale_series():
+    baseline = "\n".join(line.replace('{', '{instance="old",', 1) for line in metrics_text().splitlines())
+    new = "\n".join(line.replace('{', '{instance="new",', 1) for line in metrics_text().splitlines())
+    smoke.validate_metrics(baseline + "\n" + new, baseline)
+    smoke.validate_metrics(new, baseline)  # old resource expired from Collector
+    assert smoke.metric_delta(
+        'requests_total{service="test",instance="a"} 3',
+        'requests_total{service="test",instance="a"} 100',
+        "requests", {"service": "test"},
+    ) == 3
+
+
+def test_nonfinite_metrics_cannot_silently_pass_comparisons():
+    with pytest.raises(ValueError, match="invalid counter"):
+        smoke.validate_metrics(metrics_text().replace('} 4', '} NaN'))
+
+
 def test_parent_reference_cannot_point_to_another_trace(trace_payload):
     trace_payload["data"][0]["spans"][-1]["references"][0]["traceID"] = "f" * 32
     with pytest.raises(ValueError, match="parent from another trace"):

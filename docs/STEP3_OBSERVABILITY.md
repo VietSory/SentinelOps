@@ -107,11 +107,11 @@ at build time. This command preserves the database volume.
 
 The Step 3 smoke test runs healthy, Payment latency, Payment error and recovery
 requests. Each uses a fresh correlation ID and sampled W3C trace ID. The test
-reads each exact trace through Jaeger's UI JSON query API
-(`/api/traces/{trace_id}`), checks SERVER -> CLIENT -> SERVER parentage, compares
+reads each exact trace through Jaeger's stable v3 OTLP JSON query API
+(`/api/v3/traces/{trace_id}`), checks SERVER -> CLIENT -> SERVER parentage, compares
 JSON logs against those server span IDs, and checks that business-route request,
 duration and error counts have increased since its initial metrics snapshot.
-The service registry is checked through `/api/services`. Collector export and
+The service registry is checked through `/api/v3/services`. Collector export and
 Jaeger indexing are polled with bounded timeouts and diagnostic error messages.
 
 The test temporarily controls Payment and Inventory faults and restores both
@@ -148,9 +148,9 @@ docker compose logs --no-color --tail 100 checkout-service payment-service inven
   span, not only whether all three service names are present.
 - Missing metrics can indicate exporter/Collector startup errors; allow for the
   SDK's 2-second export interval and the Collector's batching delay.
-- The smoke test expects Jaeger's UI query API. A 404 after polling should prompt
+- The smoke test expects Jaeger's stable v3 query API. A 404 after polling should prompt
   checking the running image/configuration and rebuilding the current Compose
-  stack. It does not depend on a derived dependency graph or v3 search streaming.
+  stack. The decoder handles v3 JSON/NDJSON frames, rejects stream errors/duplicate IDs and verifies each complete trace; it does not infer success from the service registry alone.
 
 ## Step 2 correction
 

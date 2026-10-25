@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import subprocess
 import time
@@ -11,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+from sentinelops.trace_query import decode_v3_trace
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKOUT = "http://127.0.0.1:8001"
@@ -84,6 +86,8 @@ def validate_trace(
                 raise ValueError(f"correlation ID mismatch for {service}")
             if tags.get("http.response.status_code") != statuses[service]:
                 raise ValueError(f"unexpected HTTP status for {service}: {tags}")
+            if statuses[service] >= 500 and tags.get("error") is not True:
+                raise ValueError(f"missing error span status for {service}")
             servers[service] = span
         elif kind == "client" and service == "checkout-service":
             dependency = tags.get("peer.service")
@@ -92,6 +96,8 @@ def validate_trace(
                     raise ValueError(f"multiple client spans for {dependency}")
                 if tags.get("http.response.status_code") != statuses[dependency]:
                     raise ValueError(f"unexpected downstream HTTP status for {dependency}")
+                if statuses[dependency] >= 500 and tags.get("error") is not True:
+                    raise ValueError(f"missing client error span status for {dependency}")
                 clients[dependency] = span
     if set(servers) != EXPECTED_SERVICES or set(clients) != {"payment-service", "inventory-service"}:
         raise ValueError(f"trace incomplete: servers={sorted(servers)}, clients={sorted(clients)}")
@@ -103,8 +109,8 @@ def validate_trace(
     return servers
 
 
-def metric_value(text: str, prefix: str, labels: dict[str, str], suffix: str = "") -> float:
-    # Collector unit/counter suffixes vary; match the instrument prefix and exact dimensions.
+def metric_series(text: str, prefix: str, labels: dict[str, str], suffix: str = "") -> dict[tuple, float]:
+    values = {}
     for line in text.splitlines():
         name, separator, rest = line.partition("{")
         if not separator or not name.startswith(prefix) or not name.endswith(suffix):
@@ -112,13 +118,32 @@ def metric_value(text: str, prefix: str, labels: dict[str, str], suffix: str = "
         dimensions, separator, value = rest.rpartition("}")
         if not separator:
             continue
-        if not all(
-            re.search(r"(?:^|,)" + re.escape(f"{key}={json.dumps(val)}") + r"(?:,|$)", dimensions)
-            for key, val in labels.items()
-        ):
+        parsed = {
+            key: json.loads('"' + raw + '"')
+            for key, raw in re.findall(r'(\w+)="((?:[^"\\]|\\.)*)"', dimensions)
+        }
+        if not all(parsed.get(key) == val for key, val in labels.items()):
             continue
-        return float(value.split()[0])
-    return 0.0
+        number = float(value.split()[0])
+        if not math.isfinite(number) or number < 0:
+            raise ValueError(f"invalid counter value for {name}")
+        values[(name, tuple(sorted(parsed.items())))] = number
+    return values
+
+
+def metric_value(text: str, prefix: str, labels: dict[str, str], suffix: str = "") -> float:
+    return sum(metric_series(text, prefix, labels, suffix).values())
+
+
+def metric_delta(text: str, baseline: str, prefix: str, labels: dict[str, str], suffix: str = "") -> float:
+    previous = metric_series(baseline, prefix, labels, suffix)
+    current = metric_series(text, prefix, labels, suffix)
+    # Match each resource/instance independently. Expired old series cannot cancel
+    # new-instance progress, and Collector-retained stale series add zero progress.
+    return sum(
+        value - previous.get(key, 0.0) if value >= previous.get(key, 0.0) else value
+        for key, value in current.items()
+    )
 
 
 def validate_metrics(text: str, baseline: str = "") -> None:
@@ -130,17 +155,14 @@ def validate_metrics(text: str, baseline: str = "") -> None:
     for service, (method, route) in routes.items():
         labels = {"service": service, "method": method, "route": route, "status_code": "200"}
         expected = 4 if service == "inventory-service" else 3
-        previous = metric_value(baseline, "sentinelops_http_requests", labels)
-        if metric_value(text, "sentinelops_http_requests", labels) < previous + expected:
+        if metric_delta(text, baseline, "sentinelops_http_requests", labels) < expected:
             raise ValueError(f"request counter missing or not updated for {service}")
-        previous = metric_value(baseline, "sentinelops_http_request_duration_ms", labels, "_count")
-        if metric_value(text, "sentinelops_http_request_duration_ms", labels, "_count") < previous + expected:
+        if metric_delta(text, baseline, "sentinelops_http_request_duration_ms", labels, "_count") < expected:
             raise ValueError(f"duration histogram missing or not updated for {service}")
     for service, status in (("checkout-service", "502"), ("payment-service", "503")):
         method, route = routes[service]
         labels = {"service": service, "method": method, "route": route, "status_code": status}
-        previous = metric_value(baseline, "sentinelops_http_errors", labels)
-        if metric_value(text, "sentinelops_http_errors", labels) < previous + 1:
+        if metric_delta(text, baseline, "sentinelops_http_errors", labels) < 1:
             raise ValueError(f"error counter missing or not updated for {service}")
 
 
@@ -249,20 +271,19 @@ def main() -> None:
         print("PASS healthy checkout, latency, cascading failure and recovery; original faults restored")
 
         def check_services(response: httpx.Response) -> None:
-            found = set(response.json().get("data", []))
+            found = set(response.json().get("services", []))
             if not EXPECTED_SERVICES.issubset(found):
                 raise ValueError(f"Jaeger service registry incomplete: {sorted(found)}")
 
-        wait_for(client, f"{JAEGER}/api/services", check_services)
+        wait_for(client, f"{JAEGER}/api/v3/services", check_services)
         print("PASS Jaeger service registry")
         traces = []
         for trace_id, correlation_id, statuses, _elapsed in runs:
             def check_trace(response: httpx.Response) -> None:
-                validate_trace(response.json(), trace_id, correlation_id, statuses)
+                validate_trace(decode_v3_trace(response.text, trace_id), trace_id, correlation_id, statuses)
 
-            # The UI query API reads one exact trace and avoids streaming v3 search responses.
-            response = wait_for(client, f"{JAEGER}/api/traces/{trace_id}", check_trace)
-            servers = validate_trace(response.json(), trace_id, correlation_id, statuses)
+            response = wait_for(client, f"{JAEGER}/api/v3/traces/{trace_id}", check_trace)
+            servers = validate_trace(decode_v3_trace(response.text, trace_id), trace_id, correlation_id, statuses)
             traces.append((trace_id, correlation_id, servers, statuses))
         print("PASS all four distributed traces and SERVER -> CLIENT -> SERVER parentage")
         wait_for(client, OTEL_METRICS, lambda response: validate_metrics(response.text, baseline_metrics))
