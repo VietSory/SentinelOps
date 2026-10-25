@@ -122,3 +122,48 @@ def _semantic_validation(name: str, payload: dict[str, Any]) -> None:
         usable = values["max_connections"] - values["reserved_connections"]
         if usable <= 0 or not math.isclose(values["db_connections_pct"], values["db_connections_count"] / usable * 100, abs_tol=1e-9):
             raise ValueError("infrastructure capacity/percentage mismatch")
+    if name == "experiment-run.schema.json":
+        start = utc_time(payload["started_at"])
+        finish = utc_time(payload["ended_at"]) if payload["ended_at"] else None
+        if finish and finish <= start:
+            raise ValueError("experiment end must follow start")
+        for key in ("warmup_end_at", "fault_start_at", "recovery_start_at"):
+            if payload[key]:
+                point = utc_time(payload[key])
+                if point < start or (finish and point > finish):
+                    raise ValueError("experiment phase timestamp outside run")
+        previous = start
+        for phase in payload["phase_intervals"]:
+            begin, end = utc_time(phase["start_at"]), utc_time(phase["end_at"])
+            if begin < previous or end <= begin or (finish and end > finish):
+                raise ValueError("experiment phases must be ordered and nonoverlapping")
+            previous = end
+        for service_slo in payload["slo_by_service"].values():
+            first, confirmed = service_slo["first_violation_at"], service_slo["confirmed_at"]
+            if bool(first) != bool(confirmed):
+                raise ValueError("SLO onset and confirmation must be paired")
+            if first and (utc_time(first) < start or utc_time(confirmed) <= utc_time(first)
+                          or (finish and utc_time(confirmed) > finish)):
+                raise ValueError("SLO timestamps outside experiment ordering")
+        if payload["status"] == "completed":
+            if not finish or not payload["warmup_end_at"] or not payload["source_manifest_ref"] or not payload["logs_ref"] or not payload["request_outcomes_ref"]:
+                raise ValueError("completed experiment requires times and evidence references")
+            if (utc_time(payload["warmup_end_at"])-start).total_seconds() < 300:
+                raise ValueError("completed experiment requires a full feature warmup")
+            if payload["scenario_id"] == "S0":
+                if payload["fault_start_at"] or payload["fault_method"] != "none" or payload["affected_services_ground_truth"]:
+                    raise ValueError("healthy scenario cannot declare a fault")
+            elif not payload["fault_start_at"] or payload["fault_method"] == "none":
+                raise ValueError("fault scenario requires actual fault timing/method")
+            if payload["fault_start_at"] and utc_time(payload["fault_start_at"]) < utc_time(payload["warmup_end_at"]):
+                raise ValueError("fault cannot precede completed warmup")
+            if payload["recovery_start_at"] and payload["fault_start_at"] and utc_time(payload["recovery_start_at"]) < utc_time(payload["fault_start_at"]):
+                raise ValueError("recovery cannot precede the fault")
+    if name == "dataset-manifest.schema.json":
+        utc_time(payload["created_at"])
+        ready = payload["training_ready"]
+        if ready != (payload["status"] == "training-ready") or ready == bool(payload["blocking_reasons"]):
+            raise ValueError("dataset readiness contradicts blocking reasons")
+        run_ids = [item["run_id"] for item in payload["run_refs"]]
+        if len(run_ids) != len(set(run_ids)):
+            raise ValueError("duplicate dataset run references")

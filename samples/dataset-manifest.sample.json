@@ -1,0 +1,75 @@
+{
+  "blocking_reasons": [
+    "missing_validation_runs",
+    "missing_test_runs",
+    "insufficient_healthy_train:checkout-service",
+    "insufficient_healthy_calibration:checkout-service",
+    "insufficient_independent_healthy_runs:checkout-service",
+    "insufficient_healthy_train:payment-service",
+    "insufficient_healthy_calibration:payment-service",
+    "insufficient_independent_healthy_runs:payment-service",
+    "insufficient_healthy_train:inventory-service",
+    "insufficient_healthy_calibration:inventory-service",
+    "insufficient_independent_healthy_runs:inventory-service",
+    "missing_risk_classes:train",
+    "insufficient_gradual_runs:train",
+    "missing_risk_classes:validation",
+    "insufficient_gradual_runs:validation"
+  ],
+  "created_at": "2026-10-26T00:30:00Z",
+  "dataset_id": "synthetic-pilot-example",
+  "environment": "local",
+  "excluded_counts": {},
+  "feature_rows_ref": "artifact://features/4091cca2dfff0b67e64e22237836293c96fd1bd73818fd70f7fb3a843d67a784.json",
+  "feature_set_version": "http-red-5m/v1",
+  "healthy_counts": {
+    "test": {},
+    "train": {
+      "payment-service": 1
+    },
+    "validation": {}
+  },
+  "healthy_run_counts": {
+    "test": {},
+    "train": {
+      "payment-service": 1
+    },
+    "validation": {}
+  },
+  "label_protocol_version": "degradation-phase/v1",
+  "risk_negative_counts": {
+    "test": {},
+    "train": {
+      "payment-service": 1
+    },
+    "validation": {}
+  },
+  "risk_positive_counts": {
+    "test": {},
+    "train": {
+      "payment-service": 0
+    },
+    "validation": {}
+  },
+  "risk_positive_run_counts": {
+    "test": 0,
+    "train": 0,
+    "validation": 0
+  },
+  "row_count": 1,
+  "run_refs": [
+    {
+      "declared_split": "train",
+      "run_id": "fixture-run-001",
+      "session_id": "fixture-session-001",
+      "source_manifest_ref": "fixture://source-manifest/001",
+      "truth_ref": "fixture://truth/sample"
+    }
+  ],
+  "schema_version": "1.0",
+  "slo_config_hash": "d5fe80013047a757c0fa0968cb75e6666a951f34f5a34c126fb5feaebdf6bb54",
+  "slo_config_version": "slo/local-v1",
+  "source_profile": "prometheus-increase-60s/v1",
+  "status": "pilot",
+  "training_ready": false
+}

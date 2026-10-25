@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "$id": "https://sentinelops.local/contracts/experiment-run.schema.json",
+  "title": "ExperimentRunManifest",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scenario_id": {
+      "enum": [
+        "S0",
+        "S1",
+        "S2",
+        "S3",
+        "S4",
+        "S5"
+      ]
+    },
+    "declared_split": {
+      "enum": [
+        "train",
+        "validation",
+        "test"
+      ]
+    },
+    "environment": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "status": {
+      "enum": [
+        "running",
+        "completed",
+        "failed"
+      ]
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "dirty_worktree": {
+      "type": "boolean"
+    },
+    "image_digests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkout-service",
+        "payment-service",
+        "inventory-service"
+      ],
+      "properties": {
+        "checkout-service": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "payment-service": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "inventory-service": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "warmup_end_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "fault_start_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "recovery_start_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "root_cause_ground_truth": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "affected_services_ground_truth": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "checkout-service",
+          "payment-service",
+          "inventory-service"
+        ]
+      }
+    },
+    "fault_method": {
+      "enum": [
+        "none",
+        "sandbox-error",
+        "sandbox-latency",
+        "gradual-latency",
+        "bad-deployment",
+        "db-pressure",
+        "multi-fault"
+      ]
+    },
+    "slo_config_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "slo_by_service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkout-service",
+        "payment-service",
+        "inventory-service"
+      ],
+      "properties": {
+        "checkout-service": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "first_violation_at",
+            "confirmed_at",
+            "request_count"
+          ],
+          "properties": {
+            "first_violation_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "confirmed_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "request_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "payment-service": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "first_violation_at",
+            "confirmed_at",
+            "request_count"
+          ],
+          "properties": {
+            "first_violation_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "confirmed_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "request_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "inventory-service": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "first_violation_at",
+            "confirmed_at",
+            "request_count"
+          ],
+          "properties": {
+            "first_violation_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "confirmed_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "request_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "required": [
+        "slo"
+      ],
+      "properties": {
+        "slo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "latency_ms",
+            "error_rate",
+            "minimum_requests",
+            "persistence"
+          ],
+          "properties": {
+            "latency_ms": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "error_rate": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "exclusiveMaximum": 1
+            },
+            "minimum_requests": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "persistence": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "phase_intervals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "phase",
+          "start_at",
+          "end_at"
+        ],
+        "properties": {
+          "phase": {
+            "enum": [
+              "warmup",
+              "healthy",
+              "degrading",
+              "fault",
+              "recovery"
+            ]
+          },
+          "start_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "end_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "source_manifest_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "logs_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "request_outcomes_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "infrastructure_refs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "failure_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "label_protocol_version": {
+      "const": "degradation-phase/v1"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "session_id",
+    "scenario_id",
+    "declared_split",
+    "environment",
+    "source_profile",
+    "seed",
+    "status",
+    "source_commit",
+    "dirty_worktree",
+    "image_digests",
+    "started_at",
+    "ended_at",
+    "warmup_end_at",
+    "fault_start_at",
+    "recovery_start_at",
+    "root_cause_ground_truth",
+    "affected_services_ground_truth",
+    "fault_method",
+    "slo_config_version",
+    "slo_by_service",
+    "parameters",
+    "phase_intervals",
+    "source_manifest_ref",
+    "logs_ref",
+    "request_outcomes_ref",
+    "infrastructure_refs",
+    "failure_reason",
+    "label_protocol_version"
+  ]
+}

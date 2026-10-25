@@ -1,0 +1,292 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "$id": "https://sentinelops.local/contracts/dataset-manifest.schema.json",
+  "title": "DatasetManifest",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "dataset_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "feature_set_version": {
+      "const": "http-red-5m/v1"
+    },
+    "source_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "environment": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "pilot",
+        "training-ready"
+      ]
+    },
+    "training_ready": {
+      "type": "boolean"
+    },
+    "blocking_reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "run_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run_id",
+          "session_id",
+          "declared_split",
+          "truth_ref",
+          "source_manifest_ref"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "session_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "declared_split": {
+            "enum": [
+              "train",
+              "validation",
+              "test"
+            ]
+          },
+          "truth_ref": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_manifest_ref": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "feature_rows_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "row_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "excluded_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "healthy_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "train",
+        "validation",
+        "test"
+      ],
+      "properties": {
+        "train": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "validation": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "test": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "risk_positive_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "train",
+        "validation",
+        "test"
+      ],
+      "properties": {
+        "train": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "validation": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "test": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "risk_negative_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "train",
+        "validation",
+        "test"
+      ],
+      "properties": {
+        "train": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "validation": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "test": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "healthy_run_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "train",
+        "validation",
+        "test"
+      ],
+      "properties": {
+        "train": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "validation": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "test": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "risk_positive_run_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "train",
+        "validation",
+        "test"
+      ],
+      "properties": {
+        "train": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "validation": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "test": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "manifest_ref": {
+      "type": "string",
+      "pattern": "^artifact://manifests/[0-9a-f]{64}\\.json$"
+    },
+    "label_protocol_version": {
+      "const": "degradation-phase/v1"
+    },
+    "slo_config_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "slo_config_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "schema_version",
+    "dataset_id",
+    "created_at",
+    "feature_set_version",
+    "source_profile",
+    "environment",
+    "status",
+    "training_ready",
+    "blocking_reasons",
+    "run_refs",
+    "feature_rows_ref",
+    "row_count",
+    "excluded_counts",
+    "healthy_counts",
+    "risk_positive_counts",
+    "risk_negative_counts",
+    "healthy_run_counts",
+    "risk_positive_run_counts",
+    "label_protocol_version",
+    "slo_config_version",
+    "slo_config_hash"
+  ]
+}

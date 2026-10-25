@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "run_id": "fixture-run-001",
+  "session_id": "fixture-session-001",
+  "scenario_id": "S0",
+  "declared_split": "train",
+  "environment": "local",
+  "source_profile": "prometheus-increase-60s/v1",
+  "seed": 42,
+  "status": "completed",
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "dirty_worktree": false,
+  "image_digests": {
+    "checkout-service": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "payment-service": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "inventory-service": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "started_at": "2026-10-26T00:00:00Z",
+  "ended_at": "2026-10-26T00:20:00Z",
+  "warmup_end_at": "2026-10-26T00:05:00Z",
+  "fault_start_at": null,
+  "recovery_start_at": null,
+  "root_cause_ground_truth": null,
+  "affected_services_ground_truth": [],
+  "fault_method": "none",
+  "slo_config_version": "slo/local-v1",
+  "slo_by_service": {
+    "checkout-service": {
+      "first_violation_at": null,
+      "confirmed_at": null,
+      "request_count": 1000
+    },
+    "payment-service": {
+      "first_violation_at": null,
+      "confirmed_at": null,
+      "request_count": 1000
+    },
+    "inventory-service": {
+      "first_violation_at": null,
+      "confirmed_at": null,
+      "request_count": 1000
+    }
+  },
+  "parameters": {
+    "fixture": true,
+    "rps": 3,
+    "slo": {
+      "latency_ms": 750.0,
+      "error_rate": 0.05,
+      "minimum_requests": 30,
+      "persistence": 2
+    }
+  },
+  "phase_intervals": [
+    {
+      "phase": "warmup",
+      "start_at": "2026-10-26T00:00:00Z",
+      "end_at": "2026-10-26T00:05:00Z"
+    },
+    {
+      "phase": "healthy",
+      "start_at": "2026-10-26T00:05:00Z",
+      "end_at": "2026-10-26T00:20:00Z"
+    }
+  ],
+  "source_manifest_ref": "fixture://source-manifest/001",
+  "logs_ref": "fixture://logs/001",
+  "request_outcomes_ref": "fixture://requests/001",
+  "infrastructure_refs": [],
+  "failure_reason": null,
+  "label_protocol_version": "degradation-phase/v1"
+}
