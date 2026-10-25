@@ -198,7 +198,7 @@ P95 từ local histogram và AWS log distribution có sai số khác nhau. Sourc
 | --- | --- | --- |
 | Timezone | UTC trong mọi record | UI có thể render theo timezone người xem |
 | Bucket | 60 giây | `[start,end)`, UTC-aligned |
-| Prometheus scrape | 15 giây | Không phải feature step |
+| Prometheus scrape | 5 giây ở source profile hiện hành | Điều chỉnh từ 15s sau live coverage failure; không phải feature step |
 | Feature window/step | 300 giây / 60 giây | Chỉ dùng completed buckets trong `[t-300s,t)` |
 | Allowed lateness | Local 30 giây; AWS đề xuất 120 giây | Chốt từ source-lag measurement và version theo profile |
 | Minimum feature coverage | 4/5 buckets | Các feature required vẫn phải available theo registry |

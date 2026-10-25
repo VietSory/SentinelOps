@@ -16,6 +16,7 @@ SAMPLE_MAP = {
     "incident-evidence-record.sample.json": "incident-evidence-record.schema.json",
     "observation-envelope.sample.json": "observation-envelope.schema.json",
     "feature-envelope.sample.json": "feature-envelope.schema.json",
+    "infrastructure-observation.sample.json": "infrastructure-observation.schema.json",
 }
 
 

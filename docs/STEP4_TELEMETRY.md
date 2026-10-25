@@ -67,3 +67,15 @@ python scripts/collect_telemetry.py --output artifacts/capture --replay-manifest
 ```
 
 The initial 15s profile remains decodable for historical captures. The 5s profile expects 12 scrape samples per minute; source quality still requires ≥80% and never reinterprets an old profile at the new rate. The application histogram keeps the original boundaries and adds 1250/1500/2000/4000ms bounds to resolve the 1200ms fault more accurately. Fault APIs require explicit sandbox enable and remain disabled in non-sandbox environments.
+
+## Infrastructure evidence and sandbox controls
+
+`PostgresInfrastructureSource` reads `pg_stat_activity` and configured connection capacity through a read-only connection. A separate InfrastructureObservation records actual server measurement time, denominator, scope and credential-free source URI. The observer excludes its own connection; it does not invent RDS HTTP latency/error values or inject this data into the business feature vector. Percentages can exceed usable non-reserved capacity when reserved slots are occupied; the record preserves that fact rather than clipping it.
+
+Set the local sandbox DATABASE_URL in your shell, then run:
+
+```bash
+python scripts/collect_infrastructure.py --output artifacts/infrastructure/local
+```
+
+This local PostgreSQL evidence does not certify an AWS RDS/CloudWatch adapter. Service DB client spans retain parentage without raw SQL/parameters; request-instance IDs allow log deduplication independently of a reused correlation ID. Fault APIs require ENABLE_FAULT_INJECTION=true and a local/test environment; Compose enables them only in the sandbox profile and binds published ports to loopback.
