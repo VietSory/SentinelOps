@@ -55,6 +55,7 @@ jobs:
           import json
           from pathlib import Path
           from sentinelops.public_data.gamma_audit import audit_gamma
+          from sentinelops.public_data.resources import build_resource_windows
           acquisition=json.loads(Path('artifacts/public-data/gamma-acquisition.json').read_text())
           report=audit_gamma(Path(acquisition['manifest_path']))
           assert report['verified_files']==139 and len(report['experiments'])==1
@@ -62,6 +63,15 @@ jobs:
           assert not any(report['training_ready'].values())
           Path('artifacts/public-data/gamma-audit.json').write_text(json.dumps(report,indent=2))
           print('FROZEN GAMMA ACQUISITION/AUDIT: PASS; MODEL READINESS: NOT ESTABLISHED')
+          first=build_resource_windows(Path(acquisition['manifest_path']),Path('configs/gamma_resource_profile.json'),
+                                       Path('artifacts/public-data/resource-windows'),project=Path.cwd())
+          second=build_resource_windows(Path(acquisition['manifest_path']),Path('configs/gamma_resource_profile.json'),
+                                        Path('artifacts/public-data/resource-replay'),project=Path.cwd())
+          assert first['rows']==580 and first['eligible_feature_rows']==437
+          assert first['frame_sha256']==second['frame_sha256']
+          assert first['feature_values_sha256']==second['feature_values_sha256']
+          assert first['training_ready'] is False and first['activation_allowed'] is False
+          print('REAL GAMMA RESOURCE REPLAY: PASS; MODEL/LABEL GATES REMAIN OPEN')
           PY
       - uses: actions/upload-artifact@v4
         with:

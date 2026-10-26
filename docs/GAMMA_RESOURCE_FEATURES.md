@@ -19,6 +19,8 @@ These units follow the original [cAdvisor metric definitions](https://github.com
 
 The output conforms to the supplemental [research-resource-window schema](../contracts/research-resource-window.schema.json); it is **not** an API FeatureEnvelope and cannot be served under the live HTTP feature registry. Raw metric hashes, source manifest/policy/profile hashes and clean source commit support replay.
 
+`minimum_metric_coverage` includes rejected buckets; feature eligibility depends on at least four common accepted buckets, each meeting the 75% requirement. The frame hash includes source lineage. A separate `feature_values_sha256` excludes acquisition-manifest identity so the same raw observations/profile can be compared across independent acquisitions without timestamp/manifest metadata changing the numeric feature identity.
+
 ## Execution and gates
 
 Commit the implementation and profile first; the CLI refuses to freeze features from a dirty checkout. Acquire the source scope using its project file lock, then:
