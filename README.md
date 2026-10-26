@@ -18,10 +18,14 @@ the full training-readiness gate. Real model serving, incident
 correlation/RCA, Bedrock, operator UI, controlled remediation and AWS deployment
 follow the delivery gates; local telemetry evidence does not certify them.
 
-Training research now prioritizes [public datasets](docs/PUBLIC_DATA_PLAN.md)
-(RCAEval and SMD); local captures support integration and transfer/calibration.
-Pinned download/audit tools verify original publisher checksums. Public benchmark
-models require a matching live feature adapter before activation.
+The [frozen training-data contract](configs/training_data_contract.json) selects
+GAMMA v1 training and RCAEval RCA validation/heldout evaluation, with at most these
+two public sources and no row concatenation. SMD remains historical research.
+See [ADR-011](docs/adr/ADR-011-frozen-gamma-rcaeval-contract.md) and the
+[execution plan](docs/PUBLIC_DATA_PLAN.md). Local captures support integration
+and transfer/calibration. Public bundles require measured live feature/source
+compatibility before activation; XGBoost still requires independent pre-SLO
+gradual labels.
 
 Incident writes persist exact IERs with idempotency and revision checks. See the current
 [phase status](docs/PROJECT_STATUS.md), [experiment protocol](docs/STEP5_EXPERIMENTS.md)

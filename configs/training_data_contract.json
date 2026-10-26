@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "policy_version": "training-data/v1",
+  "approved_on": "2026-10-26",
+  "sources": {
+    "gamma": {
+      "publisher": "gagansomashekar/microservices-bottleneck-detection-dataset",
+      "version": 1,
+      "version_id": 7638732,
+      "role": "primary-training",
+      "declared_license": "Apache-2.0"
+    },
+    "rcaeval": {
+      "publisher": "phamquiluan/RCAEval",
+      "revision": "afeacb11bcc94dadfd1c8f483ee4377b2b8b614e",
+      "role": "rca-validation-and-heldout-evaluation",
+      "ml_fitting_allowed": false,
+      "declared_license": "MIT"
+    }
+  },
+  "combination_strategy": "source-isolated-no-row-concatenation",
+  "split_unit": "experiment-session-before-windowing",
+  "feature_mapping": "verified-semantics-no-implicit-http-red-mapping",
+  "risk_target": "pre-slo-gradual-degradation",
+  "risk_readiness": "independent-slo-and-precursor-evidence-required",
+  "on_gate_failure": "report-failure-without-changing-sources-targets-or-test-thresholds",
+  "third_source_allowed": false,
+  "activation_requires": "live-feature-source-parity-and-G3-G7"
+}
