@@ -23,6 +23,7 @@ from sentinelops.public_data.gamma import load_gamma_manifest
 from sentinelops.public_data.gamma_audit import audit_gamma
 from sentinelops.public_data.resources import resource_window
 from sentinelops.public_data.phases import parse_phases
+from sentinelops.public_data.gamma_archive import RangeReader
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',
