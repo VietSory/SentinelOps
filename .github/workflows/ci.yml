@@ -104,6 +104,26 @@ jobs:
           assert all(not group['final_holdout_eligible'] for group in native['groups'] if group['development_inspected'])
           Path('artifacts/public-data/native-admission-summary.json').write_text(json.dumps(admission,indent=2))
           print('REAL NATIVE EVIDENCE/GROUP ADMISSION: PASS; MODEL/SPLIT GATES REMAIN OPEN')
+          from sentinelops.public_data.dataset import build_grouped_dataset
+          from sentinelops.public_data.gamma import canonical_bytes
+          import hashlib
+          dataset=build_grouped_dataset(path,Path(admission['report_path']),Path('configs/gamma_resource_cohort_scope.json'),
+              Path('configs/gamma_resource_cohort_files.json'),Path('configs/gamma_source_groups.json'),
+              Path('configs/gamma_resource_splits.json'),Path('configs/gamma_resource_profile.json'),
+              Path('artifacts/public-data/grouped-dataset'),project=Path.cwd())
+          assert sum(dataset['case_counts'].values())==194
+          assert dataset['training_ready'] is False and dataset['risk_target_available'] is False
+          assert dataset['source_reference_is_healthy_certificate'] is False
+          fields=('experiment','entity','window_start','window_end','max_input_observed_at','eligible_for_features','features','quality')
+          capability=[]
+          for line in Path('artifacts/public-data/grouped-dataset/resource-windows.jsonl').open():
+              row=json.loads(line)
+              if row['experiment']=='cpu_aug12_25min_200_0':
+                  capability.append({key:row[key] for key in fields})
+          legacy_identity={'feature_set_version':dataset['feature_set_version'],'profile_sha256':dataset['profile_sha256'],'windows':capability}
+          assert len(capability)==580
+          assert hashlib.sha256(canonical_bytes(legacy_identity)).hexdigest()=='e00da06523d3a4dbce22ca6ef4c9f9130818aff8b66232715b07095bbc064cc5'
+          print('GROUP-FIRST DATASET/LEGACY FEATURE PARITY: PASS; MODEL/HEALTH/SLO READINESS NOT ESTABLISHED')
           PY
       - name: Acquire frozen GAMMA capability scope and audit real source tables
         run: |

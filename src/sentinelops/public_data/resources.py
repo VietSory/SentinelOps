@@ -129,6 +129,15 @@ def iso(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def window_cutoffs(series_by_metric: dict, profile: dict) -> range:
+    validate_profile(profile)
+    if set(series_by_metric) != set(METRICS) or not all(series_by_metric.values()):
+        raise ValueError("resource cutoffs require four nonempty native metric series")
+    first = math.ceil(max(points[0][0] for points in series_by_metric.values()) / 60) * 60
+    last = math.floor(min(points[-1][0] for points in series_by_metric.values()) / 60) * 60
+    return range(first + profile["warmup_seconds"] + 300, last + 1, 60)
+
+
 def build_resource_windows(manifest_path: Path, profile_path: Path, output: Path, *, project: Path | None = None) -> dict:
     profile_blob = profile_path.read_bytes()
     profile = json.loads(profile_blob)
@@ -177,9 +186,7 @@ def build_resource_windows(manifest_path: Path, profile_path: Path, output: Path
             if set(native) != set(METRICS) or not all(native.values()):
                 excluded["missing-required-series"] += 1
                 continue
-            first = math.ceil(max(points[0][0] for points in native.values()) / 60) * 60
-            last = math.floor(min(points[-1][0] for points in native.values()) / 60) * 60
-            for end in range(first + profile["warmup_seconds"] + 300, last + 1, 60):
+            for end in window_cutoffs(native, profile):
                 result = resource_window(native, end, profile)
                 latest = result.pop("max_input_time")
                 row = {"schema_version": "1.0", "feature_set_version": profile["feature_set_version"],

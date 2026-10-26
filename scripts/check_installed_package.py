@@ -26,6 +26,7 @@ from sentinelops.public_data.phases import parse_phases
 from sentinelops.public_data.gamma_archive import RangeReader
 from sentinelops.public_data.cohort import load_cohort_manifest
 from sentinelops.public_data.admission import admit_case, session_groups
+from sentinelops.public_data.dataset import build_grouped_dataset
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',
