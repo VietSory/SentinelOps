@@ -19,6 +19,41 @@ jobs:
       - run: pytest -q
       - run: python scripts/check_installed_package.py
 
+  public-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -e '.[ml,dev]'
+      - run: pytest -q tests/test_public_data*.py
+      - name: Verify pinned publisher data and audit real Parquet tables
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import httpx
+          from sentinelops.public_data.downloads import download_rcaeval
+          from sentinelops.public_data.audit import audit_rcaeval
+          catalog=json.loads(Path('configs/public_datasets.json').read_text())
+          with httpx.Client(timeout=60,follow_redirects=True,trust_env=False) as client:
+              selected=download_rcaeval(client,catalog['rcaeval'],Path('data/raw/public'))
+          report=audit_rcaeval(Path(selected['manifest_path']))
+          assert report['index_cases']==735 and len(report['downloaded_cases'])==3
+          output=Path('artifacts/public-data/source-audit.json')
+          output.parent.mkdir(parents=True,exist_ok=True)
+          output.write_text(json.dumps(report,indent=2))
+          print('PINNED PUBLIC DATA SOURCE AUDIT: PASS')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-data-source-audit
+          path: artifacts/public-data/
+          retention-days: 7
+
   incident-storage:
     runs-on: ubuntu-latest
     timeout-minutes: 5

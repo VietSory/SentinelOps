@@ -19,5 +19,6 @@ Breaking changes require a new ADR before code is merged.
 | [007](ADR-007-contract-compatibility-and-provenance.md) | Accepted 2026-10-26 | Strict legacy payloads, supplemental envelopes, semantic validation |
 | [008](ADR-008-event-time-and-evaluation.md) | Accepted 2026-10-26 | Time, missingness, provenance and evaluation semantics |
 | [009](ADR-009-payment-rollback-runbook.md) | Accepted 2026-10-26 | Known-good Payment image rollback |
+| [010](ADR-010-public-training-data-and-transfer.md) | Accepted 2026-10-26 | Public research/training sources, local integration and source-transfer gates |
 
 ADR-001…005 remain current. ADR-007 supersedes the contradictory unknown-field rule and example wire formats in historical PRODUCT_SPEC v1.0; that source is archived. Numeric thresholds/performance targets are not automatically accepted or measured by these ADRs.
