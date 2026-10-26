@@ -55,6 +55,8 @@ Không xác nhận đã hoàn thành Step 1–3 chỉ từ việc file hiện di
 
 Mỗi hạng mục có một owner và reviewer khác owner. Tên người được gán tại G0, không tự suy ra từ git author. Có thể làm song song các workstream khi đã chốt interface; không bỏ qua gate dữ liệu để train hoặc gate an toàn để bật remediation.
 
+**Quy trình bàn giao owner chốt ngày 2026-10-26:** chia thay đổi thành các commit nhỏ với prefix `feat:`, `fix:` hoặc `docs:`; chạy các kiểm tra phù hợp trước khi đẩy trực tiếp lên `main`. Theo dõi CI trên `main` và sửa lỗi nếu có. Chỉ mở PR hoặc chuỗi PR khi owner yêu cầu; không để owner phải merge thủ công từng phần công việc. Việc đưa implementation lên `main` không tự xác nhận các gate ML/sản phẩm đã PASS.
+
 ## 5. Phụ thuộc và ước lượng
 
 ```mermaid

@@ -58,6 +58,10 @@ These documents supplement the product spec and accepted ADRs. New design choice
 are marked as proposals; planned capabilities and acceptance targets are not claims
 of completed implementation or measured performance.
 
+Delivery uses small `feat:`, `fix:` and `docs:` commits pushed directly to `main`
+after appropriate checks, as requested by the owner. Open pull requests only when
+explicitly requested; monitor CI after publishing.
+
 ## Quick start
 
 Use Python 3.11 (CI/runtime baseline) or 3.12.
