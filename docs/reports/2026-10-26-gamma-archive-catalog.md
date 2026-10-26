@@ -8,7 +8,7 @@ Clean implementation commit `7d21b59f0e88e6fbd2800b9f6fb18fb979d7d327` inventori
 - **Two archive range responses, 21,493,042 body bytes**, plus separate bounded publisher metadata requests. This is transferred response-body content, not a network billing estimate.
 - **190 processed experiment names; 182 have all three processed request types.** The catalogue contains 559 processed files, 85,872 raw metric files, 6,484 pod-description files and other original modalities. Completeness of a filename inventory does not prove independent experiments or complete request sampling.
 
-The immutable canonical inventory is `data/raw/public/inventories/69934c78fb790eeaa12931f25669770b50e44c70b647fd98c8a6d63698b4caf8.json`. The [small project catalogue lock](../../configs/gamma_v1_archive_catalog.json) freezes this SHA256 and source/policy/archive identity. The [measured report](evidence/2026-10-26-gamma-archive-catalog.json) records exact counts and modality distribution. Publisher version, declared license and metadata remained unchanged across inventory.
+The immutable canonical inventory is `data/raw/public/inventories/69934c78fb790eeaa12931f25669770b50e44c70b647fd98c8a6d63698b4caf8.json`. The [small project catalogue lock](../../configs/gamma_v1_archive_catalog.json) freezes this SHA256 and source/policy/archive identity. A second real acquisition from clean commit `dfc7b8e0ef24d3d0dd3ecd0500dbf5d3fe04c3b5` passed that exact lock and reproduced the identical catalogue hash, 129,510 entries and 21,493,042 archive body bytes. The [measured report](evidence/2026-10-26-gamma-archive-catalog.json) records exact counts and modality distribution. Publisher version, declared license and metadata remained unchanged across inventory/replay.
 
 ## What this enables
 
