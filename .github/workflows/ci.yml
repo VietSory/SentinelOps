@@ -50,15 +50,16 @@ jobs:
           PY
       - name: Acquire frozen GAMMA capability scope and audit real source tables
         run: |
-          python scripts/download_gamma.py --file-lock configs/gamma_v1_audit_files.json --result-file artifacts/public-data/gamma-acquisition.json
+          python scripts/download_gamma.py --file-lock configs/gamma_v1_phase_files.json --include-phase-evidence --result-file artifacts/public-data/gamma-acquisition.json
           python - <<'PY'
           import json
           from pathlib import Path
           from sentinelops.public_data.gamma_audit import audit_gamma
           from sentinelops.public_data.resources import build_resource_windows
+          from sentinelops.public_data.phases import audit_phase_labels
           acquisition=json.loads(Path('artifacts/public-data/gamma-acquisition.json').read_text())
           report=audit_gamma(Path(acquisition['manifest_path']))
-          assert report['verified_files']==139 and len(report['experiments'])==1
+          assert report['verified_files']==142 and len(report['experiments'])==1
           assert report['activation_allowed'] is False
           assert not any(report['training_ready'].values())
           Path('artifacts/public-data/gamma-audit.json').write_text(json.dumps(report,indent=2))
@@ -70,8 +71,14 @@ jobs:
           assert first['rows']==580 and first['eligible_feature_rows']==437
           assert first['frame_sha256']==second['frame_sha256']
           assert first['feature_values_sha256']==second['feature_values_sha256']
+          assert first['feature_values_sha256']=='e00da06523d3a4dbce22ca6ef4c9f9130818aff8b66232715b07095bbc064cc5'
           assert first['training_ready'] is False and first['activation_allowed'] is False
           print('REAL GAMMA RESOURCE REPLAY: PASS; MODEL/LABEL GATES REMAIN OPEN')
+          labels=audit_phase_labels(Path(acquisition['manifest_path']),Path('artifacts/public-data/resource-windows'),
+                                    Path('artifacts/public-data/interference-labels'),project=Path.cwd())
+          assert labels['rows']==580 and len(labels['events']['cpu_aug12_25min_200_0'])==9
+          assert labels['training_ready'] is False and labels['activation_allowed'] is False
+          print('NATIVE INTERFERENCE LABEL AUDIT: PASS; NOT A PRECURSOR/SLO TARGET')
           PY
       - uses: actions/upload-artifact@v4
         with:
