@@ -61,6 +61,18 @@ def _finite_values(value: Any) -> None:
 
 
 def _semantic_validation(name: str, payload: dict[str, Any]) -> None:
+    if name == "research-interference-label.schema.json":
+        start, end = utc_time(payload["window_start"]), utc_time(payload["window_end"])
+        if (end - start).total_seconds() != 300 or end.timestamp() % 60:
+            raise ValueError("interference labels require aligned five-minute windows")
+        direct, global_seconds = payload["direct_interference_seconds"], payload["any_host_interference_seconds"]
+        if direct > global_seconds:
+            raise ValueError("direct interference cannot exceed any-host union coverage")
+        expected = ("direct-recorded-interference" if direct else "other-host-interference-context" if global_seconds
+                    else "boundary-uncertain" if payload["overlapping_or_guarded_event_ids"]
+                    else "no-recorded-interference-reference")
+        if payload["label"] != expected or (global_seconds > 0 and not payload["overlapping_or_guarded_event_ids"]):
+            raise ValueError("interference label contradicts interval evidence")
     if name == "research-resource-window.schema.json":
         start, end = utc_time(payload["window_start"]), utc_time(payload["window_end"])
         if (end - start).total_seconds() != 300 or end.timestamp() % 60:

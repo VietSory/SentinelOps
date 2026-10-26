@@ -175,3 +175,45 @@ def test_project_frozen_hash_rejects_same_size_changed_source_bytes_before_publi
             fetch_gamma_file(client, "owner/source", tmp_path / "data.csv", item, max_expanded=100, max_wire=100,
                              expected_sha256=hashlib.sha256(original).hexdigest())
     assert not (tmp_path / "data.csv").exists()
+
+
+def file_lock(files):
+    from sentinelops.public_data.policy import policy_hash
+    return {"lock_version": "gamma-project-file-lock/v1", "source_version": 1,
+            "training_data_policy_hash": policy_hash(load_policy()), "selection": [EXPERIMENT],
+            "files": {name: {"size": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}
+                      for name, blob in files.items()}}
+
+
+def test_phase_scope_is_explicit_and_cannot_extend_a_lock_with_other_data(tmp_path):
+    files = source_files()
+    phase = f"raw_dataset/{EXPERIMENT}/userv2_phases"
+    files[phase] = b"native phase evidence\n"
+    with httpx.Client(transport=transport(files)) as client:
+        old = inventory_gamma(client, load_policy(), [EXPERIMENT])
+        assert phase not in {item["name"] for item in old["selected_files"]}
+        assert "include_phase_evidence" not in old
+        result = download_gamma(client, tmp_path, experiments=[EXPERIMENT], workers=1,
+                                include_phase_evidence=True, phase_extension=True, file_lock=file_lock(source_files()))
+    manifest, acquired, _ = load_gamma_manifest(Path(result["manifest_path"]))
+    assert phase in acquired and manifest["phase_only_lock_extension"] is True
+    files[f"raw_dataset/{EXPERIMENT}/prom_metrics/other_container_memory_usage_bytes"] = b"[]"
+    with httpx.Client(transport=transport(files)) as client:
+        with pytest.raises(ValueError, match="exact inventory"):
+            download_gamma(client, tmp_path, experiments=[EXPERIMENT], include_phase_evidence=True,
+                           phase_extension=True, file_lock=file_lock(source_files()))
+
+
+def test_verified_cache_reuse_does_not_fetch_and_corrupt_cache_is_never_silently_repaired(tmp_path):
+    item = {"name": "processed_dataset/compose/data.csv", "size": 4}
+    target = tmp_path / "data.csv"
+    target.write_bytes(b"data")
+    digest = hashlib.sha256(b"data").hexdigest()
+    with httpx.Client(transport=httpx.MockTransport(lambda request: pytest.fail("cache read reached network"))) as client:
+        result = fetch_gamma_file(client, "owner/source", target, item, max_expanded=100, max_wire=100,
+                                  expected_sha256=digest)
+        assert result["wire_bytes"] == 0 and result["transport_verification"] == "project-frozen-cache"
+        target.write_bytes(b"evil")
+        with pytest.raises(ValueError, match="cached GAMMA file"):
+            fetch_gamma_file(client, "owner/source", target, item, max_expanded=100, max_wire=100,
+                             expected_sha256=digest)

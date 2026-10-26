@@ -95,19 +95,26 @@ def experiment_id(name: str) -> str | None:
     return None
 
 
-def selected_file(name: str, selected: set[str]) -> bool:
+def phase_file(name: str) -> bool:
+    return re.fullmatch(r"raw_dataset/[a-z0-9_]+/[A-Za-z0-9][A-Za-z0-9_.-]*_phases", name) is not None
+
+
+def selected_file(name: str, selected: set[str], *, include_phase_evidence: bool = False) -> bool:
     if name in META_FILES or experiment_id(name) in selected:
         return True
     parts = name.split("/")
     if len(parts) < 3 or parts[0] != "raw_dataset" or parts[1] not in selected:
         return False
+    if include_phase_evidence and phase_file(name):
+        return True
     return (len(parts) == 3 and parts[2] == "args.txt") or (
         len(parts) == 4 and parts[2] == "prom_metrics" and any(parts[3].endswith("_" + key) for key in METRICS)) or (
         len(parts) == 4 and parts[2] == "processed_traces"
         and re.fullmatch(r"(compose|home|user)_graph_paths_[1-9][0-9]*", parts[3]) is not None)
 
 
-def inventory_gamma(client, policy: dict, experiments: list[str], *, max_pages: int = 60) -> dict:
+def inventory_gamma(client, policy: dict, experiments: list[str], *, max_pages: int = 60,
+                    include_phase_evidence: bool = False) -> dict:
     require_training_source("gamma", policy)
     selected = sorted(set(experiments))
     if not selected or len(selected) != len(experiments) or any(not re.fullmatch(r"[a-z0-9_]+", name) for name in selected):
@@ -147,7 +154,7 @@ def inventory_gamma(client, policy: dict, experiments: list[str], *, max_pages: 
             item = {"name": name, "size": size}
             if experiment_id(name) is not None:
                 catalog.append(item)
-            if selected_file(name, set(selected)):
+            if selected_file(name, set(selected), include_phase_evidence=include_phase_evidence):
                 retained.append(item)
         if completed:
             break
@@ -174,6 +181,7 @@ def inventory_gamma(client, policy: dict, experiments: list[str], *, max_pages: 
     return {"inventory_version": "gamma-inventory/v1", "metadata": metadata,
             "source_version": 1, "version_id": 7638732, "training_data_policy_hash": policy_hash(policy),
             "selection": selected, "processed_catalog": catalog, "selected_files": retained,
+            **({"include_phase_evidence": True} if include_phase_evidence else {}),
             "scope_complete": True, "metadata_pages": pages,
             "omitted_raw_modalities": ["application-logs", "kubernetes-logs", "full-traces", "other-resource-metrics"]}
 
@@ -185,9 +193,19 @@ def fetch_gamma_file(client, publisher: str, target: Path, item: dict, *, max_ex
         raise ValueError("GAMMA file exceeds expanded size budget")
     safe_relative(name)
     graph_metadata = re.fullmatch(r"raw_dataset/[a-z0-9_]+/processed_traces/(compose|home|user)_graph_paths_[1-9][0-9]*", name)
-    if name not in META_FILES and not (name.endswith((".csv", "/args.txt")) or "/prom_metrics/" in name or graph_metadata):
+    if name not in META_FILES and not (name.endswith((".csv", "/args.txt")) or "/prom_metrics/" in name or graph_metadata or phase_file(name)):
         raise ValueError("non-data GAMMA file refused")
     url = f"{API}/download/{publisher}/{quote(name, safe='')}?datasetVersionNumber=1"
+    if expected_sha256 is not None and target.exists():
+        if target.stat().st_size != size:
+            raise ValueError("cached GAMMA file differs from the project-frozen size; no silent repair")
+        data = target.read_bytes()
+        if len(data) != size or hashlib.sha256(data).hexdigest() != expected_sha256:
+            raise ValueError("cached GAMMA file differs from the project-frozen hash; no silent repair")
+        return {"path": str(target), "source_path": name, "source_url": url, "size": size,
+                "sha256": expected_sha256, "publisher_checksum": None, "checksum_origin": "locally-frozen-sha256",
+                "project_expected_sha256": expected_sha256, "transport_verification": "project-frozen-cache",
+                "wire_bytes": 0}
     chunks = []
     wire_size = 0
     with client.stream("GET", url) as response:
@@ -234,12 +252,16 @@ def fetch_gamma_file(client, publisher: str, target: Path, item: dict, *, max_ex
 def download_gamma(client, root: Path, *, experiments: list[str] | None = None, policy: dict | None = None,
                    max_bytes: int = 256_000_000, max_file_bytes: int = 128_000_000,
                    max_wire_bytes: int = 32_000_000, max_total_wire_bytes: int = 128_000_000,
-                   max_pages: int = 60, workers: int = 4, file_lock: dict | None = None) -> dict:
+                   max_pages: int = 60, workers: int = 4, file_lock: dict | None = None,
+                   include_phase_evidence: bool = False, phase_extension: bool = False) -> dict:
     policy = load_policy() if policy is None else policy
     require_training_source("gamma", policy)
     if not 1 <= workers <= 4:
         raise ValueError("GAMMA downloader supports one to four bounded workers")
-    inventory = inventory_gamma(client, policy, DEFAULT_EXPERIMENTS if experiments is None else experiments, max_pages=max_pages)
+    if phase_extension and (not include_phase_evidence or file_lock is None):
+        raise ValueError("phase-only extension requires the frozen base file lock and phase scope")
+    inventory = inventory_gamma(client, policy, DEFAULT_EXPERIMENTS if experiments is None else experiments, max_pages=max_pages,
+                                include_phase_evidence=include_phase_evidence)
     items = inventory["selected_files"]
     if sum(item["size"] for item in items) > max_bytes or any(item["size"] > max_file_bytes for item in items):
         raise ValueError("GAMMA selection exceeds its expanded size budget")
@@ -250,9 +272,14 @@ def download_gamma(client, root: Path, *, experiments: list[str] | None = None, 
             or file_lock.get("selection") != inventory["selection"]):
             raise ValueError("GAMMA project file lock differs from source policy/selection")
         locked_files = file_lock["files"]
-        if set(locked_files) != {item["name"] for item in items}:
-            raise ValueError("GAMMA project file lock does not cover the exact inventory")
+        selected_names = {item["name"] for item in items}
+        extra = selected_names - set(locked_files)
+        if set(locked_files) != selected_names:
+            if not (phase_extension and set(locked_files) < selected_names and all(phase_file(name) for name in extra)):
+                raise ValueError("GAMMA project file lock does not cover the exact inventory")
         for item in items:
+            if item["name"] not in locked_files:
+                continue
             locked = locked_files[item["name"]]
             if locked.get("size") != item["size"] or not re.fullmatch(r"[0-9a-f]{64}", locked.get("sha256", "")):
                 raise ValueError("GAMMA project file lock size/hash is invalid")
@@ -285,6 +312,7 @@ def download_gamma(client, root: Path, *, experiments: list[str] | None = None, 
         "source_version_id": 7638732, "publisher": publisher, "declared_license": "Apache-2.0",
         "selection": inventory["selection"], "inventory_path": str(inventory_path), "inventory_sha256": inventory_sha,
         "training_data_policy_hash": policy_hash(policy), "files": records,
+        **({"phase_evidence_included": True, "phase_only_lock_extension": phase_extension} if include_phase_evidence else {}),
         "project_file_lock_sha256": hashlib.sha256(canonical_bytes(file_lock)).hexdigest() if file_lock is not None else None,
         "created_at": datetime.now(timezone.utc).isoformat(), "serving_compatible": False, "activation_allowed": False,
         "wire_bytes": consumed_wire, "expanded_bytes": sum(item["size"] for item in items),
@@ -317,8 +345,11 @@ def load_gamma_manifest(path: Path, *, policy: dict | None = None) -> tuple[dict
         or inventory.get("scope_complete") is not True or inventory.get("source_version") != 1
         or inventory.get("version_id") != 7638732):
         raise ValueError("GAMMA inventory/selection differs from manifest")
+    include_phases = inventory.get("include_phase_evidence", False)
+    if not isinstance(include_phases, bool) or include_phases != manifest.get("phase_evidence_included", False):
+        raise ValueError("GAMMA phase scope differs between inventory and manifest")
     expected = {item["name"]: item["size"] for item in inventory["selected_files"]}
-    if len(expected) != len(inventory["selected_files"]) or any(not selected_file(name, set(manifest["selection"])) for name in expected):
+    if len(expected) != len(inventory["selected_files"]) or any(not selected_file(name, set(manifest["selection"]), include_phase_evidence=include_phases) for name in expected):
         raise ValueError("GAMMA inventory has duplicate or unselected file identities")
     files = {}
     for record in manifest["files"]:

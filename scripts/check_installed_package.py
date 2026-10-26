@@ -22,6 +22,7 @@ from sentinelops.public_data.audit import load_verified_manifest
 from sentinelops.public_data.gamma import load_gamma_manifest
 from sentinelops.public_data.gamma_audit import audit_gamma
 from sentinelops.public_data.resources import resource_window
+from sentinelops.public_data.phases import parse_phases
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',
@@ -29,7 +30,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'observation-envelope', 'feature-envelope', 'infrastructure-observation',
              'experiment-run', 'dataset-manifest', 'incident-write',
              'incident-envelope', 'incident-list', 'api-error', 'training-data-policy',
-             'research-resource-window'):
+             'research-resource-window', 'research-interference-label'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 client = TestClient(app)
 assert client.get('/health').status_code == 200

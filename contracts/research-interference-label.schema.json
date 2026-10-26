@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/research-interference-label.schema.json",
+  "title": "ResearchRecordedInterferenceLabel",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "label_version", "experiment", "entity", "hosting_node", "window_start", "window_end", "resource_window_sha256", "source_manifest_sha256", "boundary_guard_seconds", "eligible_for_features", "activation_allowed", "precursor_target_available", "label", "direct_interference_seconds", "any_host_interference_seconds", "overlapping_or_guarded_event_ids"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "label_version": {"const": "gamma-recorded-interference/v1"},
+    "experiment": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+    "entity": {"type": "string", "minLength": 1},
+    "hosting_node": {"type": "string", "minLength": 1},
+    "window_start": {"type": "string", "format": "date-time"},
+    "window_end": {"type": "string", "format": "date-time"},
+    "resource_window_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "boundary_guard_seconds": {"const": 1},
+    "eligible_for_features": {"type": "boolean"},
+    "activation_allowed": {"const": false},
+    "precursor_target_available": {"const": false},
+    "label": {"enum": ["direct-recorded-interference", "other-host-interference-context", "boundary-uncertain", "no-recorded-interference-reference"]},
+    "direct_interference_seconds": {"type": "number", "minimum": 0, "maximum": 300},
+    "any_host_interference_seconds": {"type": "number", "minimum": 0, "maximum": 300},
+    "overlapping_or_guarded_event_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+  }
+}

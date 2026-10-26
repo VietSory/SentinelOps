@@ -1,0 +1,578 @@
+{
+  "lock_version": "gamma-project-file-lock/v1",
+  "source_version": 1,
+  "training_data_policy_hash": "ef0eb1b1c95a67faf424501e657c5e6530d49a1d18af7cbf59f9c07740afa21f",
+  "selection": [
+    "cpu_aug12_25min_200_0"
+  ],
+  "files": {
+    "meta-data/meta-data/compose_ms_rpc_map.csv": {
+      "size": 1857,
+      "sha256": "fde21aac8f4d6211617a7a7b74d9ca616154052a180973147d7a40e63ff3a798"
+    },
+    "meta-data/meta-data/home_ms_rpc_map.csv": {
+      "size": 508,
+      "sha256": "f2280ac04b7c64c2dec347af1c4a8857aedeae176ae3435aa1e0a12b35db256a"
+    },
+    "meta-data/meta-data/placement.csv": {
+      "size": 791,
+      "sha256": "fec05eec0bc3ddbc6bbe7f674ea1b880e820cc76d2585b4becd77352181ed83d"
+    },
+    "meta-data/meta-data/user_ms_rpc_map.csv": {
+      "size": 631,
+      "sha256": "60bd4785c7a69924a9122e1b6434dacacb584456a95dfd3be81c59152340c1b0"
+    },
+    "processed_dataset/compose/multi-modal-data-separate/cpu_aug12_25min_200_0_graph_1.csv": {
+      "size": 32529055,
+      "sha256": "66b3502f1fd8a2971ec9d06d6e194321b9408b00b9f609cf8318d07e31206aa1"
+    },
+    "processed_dataset/home/multi-modal-data-separate/cpu_aug12_25min_200_0_graph_2.csv": {
+      "size": 65727286,
+      "sha256": "d5eded0a63bd8147adc0214f00c7ee0d459b71d7656166f865ffc98e470818a4"
+    },
+    "processed_dataset/user/multi-modal-data-separate/cpu_aug12_25min_200_0_graph_2.csv": {
+      "size": 42570143,
+      "sha256": "6303498f1c15b960d5094937668130cad4309c65687ddee596c4100e0e44db0a"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/args.txt": {
+      "size": 422,
+      "sha256": "71a50777d6f15822061c911219c54a7edc0091dc5b8446b46bd2d08f16cd9da7"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/compose_graph_paths_1": {
+      "size": 232,
+      "sha256": "5a8843e4e36d7341cfc2c67cdae6ae86684aa13faa8ad1a3adf1327b776c982d"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/compose_graph_paths_2": {
+      "size": 237,
+      "sha256": "ffab2f4541bbbcfa81d24668284e0a9320d3d378f2374bbf749f849f7d6dc0cd"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/compose_graph_paths_3": {
+      "size": 232,
+      "sha256": "4dc7e56edf780b81d6e4102d5cf83c1979b0328bdc29d076542f4ceb06c317f8"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/compose_graph_paths_4": {
+      "size": 237,
+      "sha256": "530df82134ca04a87eed6aca281699c3bd67a7e6c9797847630121ee835c24d4"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/compose_graph_paths_5": {
+      "size": 284,
+      "sha256": "35ad483142fa9b1748cb0df975d6d0023117e1b4e6cacd9a414ca1c7529b5532"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/home_graph_paths_1": {
+      "size": 64,
+      "sha256": "2863c05a062546d379e6d236f3cc3e5a08f622b1aa7c624770a5582f5fe51dca"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/home_graph_paths_2": {
+      "size": 30,
+      "sha256": "e736bc67d366bd9235c2557c8e41ee978b998b2862c92bb7c9d44351772c8a95"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/user_graph_paths_1": {
+      "size": 93,
+      "sha256": "dc77bd77b85c03506981d0a7d5aace12c7cb235e83a80b1a10f8bf88fcc9fd05"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/user_graph_paths_2": {
+      "size": 64,
+      "sha256": "1e951988f2842221c83b3b12fca5d3c5c90c0e35891e18956b5f3608d23c6e3d"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/user_graph_paths_3": {
+      "size": 30,
+      "sha256": "c33bf6a0d4b7c3d77a91122d7fc9b3584a07de2122ca2051dfdaeba661b9cc68"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/processed_traces/user_graph_paths_4": {
+      "size": 58,
+      "sha256": "35425c515b1b2f416c74686c5aeac4e0e0c89fc801b29ff10c048aa8f5c53378"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/compose-post-redis_container_cpu_usage_seconds_total": {
+      "size": 7109,
+      "sha256": "65e2b1d6ecb534435f856d0a8fa9a41f838437ead2a6469c78eceff0a2564d14"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/compose-post-redis_container_memory_usage_bytes": {
+      "size": 6701,
+      "sha256": "3878693eee6c06cece8809c1d4c61c51f40c296906c04d74c14b6d4669ddb08f"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/compose-post-redis_container_network_receive_bytes_total": {
+      "size": 6892,
+      "sha256": "a305fd750774d45290b922ae3d3c9995dea1216a0722c06439003c7b5f752191"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/compose-post-redis_container_network_transmit_bytes_total": {
+      "size": 6776,
+      "sha256": "e28a29b5063fbe0a7219a8c47d0c793d560a44a6ed51a281cf77420426bdfeb7"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/compose-post-service_container_cpu_usage_seconds_total": {
+      "size": 7099,
+      "sha256": "456cbe32a2bb3adfd6a9bd838ea08e61086e3267e5a88e1ef921c910cabab99c"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/compose-post-service_container_memory_usage_bytes": {
+      "size": 6499,
+      "sha256": "c5e90bfb54c6d127340f5110371659d18b177067c415f05cfe14ddedff69db0e"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/compose-post-service_container_network_receive_bytes_total": {
+      "size": 6677,
+      "sha256": "176da82bee45f6d6f78914e09fa3db5c18028bc56454559638d4931762555a4d"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/compose-post-service_container_network_transmit_bytes_total": {
+      "size": 6716,
+      "sha256": "f5215ba837b9a4cbb5f21d0e1ac3da844e57ce461cdb041e94a98e8112b320ae"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/home-timeline-redis_container_cpu_usage_seconds_total": {
+      "size": 7108,
+      "sha256": "938d3ba6a9b67df75c849d837f63adf4968c8b00eff74f1fd3ceb5036a08a995"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/home-timeline-redis_container_memory_usage_bytes": {
+      "size": 6881,
+      "sha256": "e396711649e2cfb029be1520f47693ed322a4bf832134790b4332487336ebabe"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/home-timeline-redis_container_network_receive_bytes_total": {
+      "size": 4984,
+      "sha256": "9b1a7f305140f1300b10c2146e5f2616e1b694cb65b919c1a85d316b67a8e1e0"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/home-timeline-redis_container_network_transmit_bytes_total": {
+      "size": 4945,
+      "sha256": "481f34ceb9666209560b56e4df81b3c4b3cd409fbaf1945b9cea843e1bb3b80f"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/home-timeline-service_container_cpu_usage_seconds_total": {
+      "size": 7252,
+      "sha256": "3e4a19d3c710bf8775477debecc678f36f070242b84d0bafc885c7b9ea23dce7"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/home-timeline-service_container_memory_usage_bytes": {
+      "size": 6594,
+      "sha256": "c350b606d48a2a36ebe8f93080f210692de116ccf4ef532523dad7cb1516debb"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/home-timeline-service_container_network_receive_bytes_total": {
+      "size": 6933,
+      "sha256": "ab928feaec45360c93d23b3adcb7bc0dd028b60f6a4c42e3f9985d4de7acdb78"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/home-timeline-service_container_network_transmit_bytes_total": {
+      "size": 6935,
+      "sha256": "2a82ac3c413c64b7ed988c1a8601ad953865a3e90ea9996347e39db4d768cf65"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/jaeger_container_cpu_usage_seconds_total": {
+      "size": 7296,
+      "sha256": "da66705818d87818bdc65d8d7088df2dc04cf90080ff4230ea3991d0e5383ae1"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/jaeger_container_memory_usage_bytes": {
+      "size": 6983,
+      "sha256": "542fd6416e13039ad75a19527634fb2c382e150e3ac1b55ff13b653b430f84fd"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/jaeger_container_network_receive_bytes_total": {
+      "size": 6864,
+      "sha256": "7bf3ae463b9e24bbaf5636316d1b2a53cbc210b1d9acf5ec307d1f62cb0f33f7"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/jaeger_container_network_transmit_bytes_total": {
+      "size": 6275,
+      "sha256": "d4b5e95ae5ccdd57a2d80c2b527804c4d391f4a8ddc2178a33db027be70eeb7f"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-frontend_container_cpu_usage_seconds_total": {
+      "size": 5711,
+      "sha256": "7af1151a234cd687635992e3788ad5de0ea3c76d1649180faa2425b37d8bab2c"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-frontend_container_memory_usage_bytes": {
+      "size": 5420,
+      "sha256": "c46f1b5278afb23f855aa13ffbac28d90301e6f4b409efabc31579c16141d905"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-frontend_container_network_receive_bytes_total": {
+      "size": 5143,
+      "sha256": "79a9f0a90c7762eeecb3aedc9beaad04e00189100c6c46ff0903a8882cd4a60c"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-frontend_container_network_transmit_bytes_total": {
+      "size": 5091,
+      "sha256": "d9a8117177369edaa789e51b1fad462787fac4a224ff74ac76ecbab7823477a8"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-memcached_container_cpu_usage_seconds_total": {
+      "size": 7238,
+      "sha256": "8159db7ddc50b94bd20258010746c57c66f7e4d8f436aa8be31347f475a46ecc"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-memcached_container_memory_usage_bytes": {
+      "size": 6758,
+      "sha256": "e15cc6238ae7d7ad00735589d1c036f6157329f0c09f32c7716ef860e5f92a96"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-memcached_container_network_receive_bytes_total": {
+      "size": 6211,
+      "sha256": "b689af6efba1c048637be983c022480f0e6cb7bb3f8c3d4b9330523d69a43ff1"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-memcached_container_network_transmit_bytes_total": {
+      "size": 6089,
+      "sha256": "25519bfd657076df135233ed29c375d35aadab1996e0a96eee8f5e5168da55b4"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-mongodb_container_cpu_usage_seconds_total": {
+      "size": 7027,
+      "sha256": "d17ad100eb8c61441ebce3fdd684ecf3aec0914c2cfb417c929a6bbbbe9c4aac"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-mongodb_container_memory_usage_bytes": {
+      "size": 6656,
+      "sha256": "b832b219a23408b2ce841ec804125aa1aa1330f303e3dda1970b30f74c82c534"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-mongodb_container_network_receive_bytes_total": {
+      "size": 4884,
+      "sha256": "fdd441e450975b2193bbe7685f7256de00c4284212aa6b8ab63b207ad71ab15a"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-mongodb_container_network_transmit_bytes_total": {
+      "size": 4833,
+      "sha256": "4e15864523519c5ffd3970cbb9f96c8db742969879e20969bda1b367441e7a5a"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-service_container_cpu_usage_seconds_total": {
+      "size": 7122,
+      "sha256": "06b9f1ecc4cdb0deb3f64af48a07604d0838a4986eaa1662c86a4664ff7bbb55"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-service_container_memory_usage_bytes": {
+      "size": 6585,
+      "sha256": "7ce3fc0cd509ced03a0eecd007f0aaab02a827aa933b14000643962a3c8a3916"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-service_container_network_receive_bytes_total": {
+      "size": 6733,
+      "sha256": "20b0959b35ba797ecb3bb2d0ad8c0ab73ad25bf1111baa394716b52ac9091370"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/media-service_container_network_transmit_bytes_total": {
+      "size": 6751,
+      "sha256": "25179b1f4c947f89f5616576165bd4851d6c8bce88cafad268032d964ba83e1d"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/nginx-thrift_container_cpu_usage_seconds_total": {
+      "size": 7090,
+      "sha256": "10decfba203a24903cd57542732291c5afa29b6a7dfa2fb9c1f73344e6d95b04"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/nginx-thrift_container_memory_usage_bytes": {
+      "size": 6587,
+      "sha256": "5036f3101cb9dbe40f30865a2e361ed615574fe8976b1ef01e99ccd5bd6ad44b"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/nginx-thrift_container_network_receive_bytes_total": {
+      "size": 7021,
+      "sha256": "9765ecc6fe6550bb8a93c60a5d08f035a0110a89953079086c1ac6b2e5dc8093"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/nginx-thrift_container_network_transmit_bytes_total": {
+      "size": 7036,
+      "sha256": "d3c006f1ab70bfb8f99ad023bf7a66d77f2b2e96f36b15478441dfa991352ec2"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-memcached_container_cpu_usage_seconds_total": {
+      "size": 7181,
+      "sha256": "a88db09eefaa1162b95cbb7008a77ec7ef462b703bf8244c744e719833a15a45"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-memcached_container_memory_usage_bytes": {
+      "size": 6658,
+      "sha256": "fb024d850d1d1ea16ce5d5ab0ad29ccdc6a06de9d7494d68583fefc0bf6b4a9c"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-memcached_container_network_receive_bytes_total": {
+      "size": 7028,
+      "sha256": "853a34f9993288c0a67fb4926290d9628f7abfcc6689d5000fae708c51ee3f3e"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-memcached_container_network_transmit_bytes_total": {
+      "size": 7076,
+      "sha256": "c3afcb2f6f2c724dc59cb9ec2f01a2c24f11249ea1630d54c29eaef501f486e6"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-mongodb_container_cpu_usage_seconds_total": {
+      "size": 7247,
+      "sha256": "eb7fd7fe2fea6c36b73cd149895ad0e0f2a67b9777637c4a9ac35aad4b70e944"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-mongodb_container_memory_usage_bytes": {
+      "size": 6887,
+      "sha256": "b68d54996c9682c488ff2bb10a2af63690abf660bc855b4c13c52aae6f492e5e"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-mongodb_container_network_receive_bytes_total": {
+      "size": 6647,
+      "sha256": "25d5d07aff330eb46d40f5335a29671f0277abfdcd4cbd18b7bacd1e2baa491f"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-mongodb_container_network_transmit_bytes_total": {
+      "size": 6767,
+      "sha256": "68e4d4bb1bd4b519982531596e1fd8b567e97f8d6bec5a02dab0048cf17c0e26"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-service_container_cpu_usage_seconds_total": {
+      "size": 7278,
+      "sha256": "9698b37f45a727d9c5f0fae666859277bddd8f1303e6cd7c5ba20c2eea0006f0"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-service_container_memory_usage_bytes": {
+      "size": 6707,
+      "sha256": "4212448d000e159b70f296f632bc918152baaad59f3fd7ae01b0983ab23651b6"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-service_container_network_receive_bytes_total": {
+      "size": 6867,
+      "sha256": "2c1353fe1e0b7f0e8eb5311c71cae745c3062c1027ddaac8ad3cf78b3ec37667"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/post-storage-service_container_network_transmit_bytes_total": {
+      "size": 6869,
+      "sha256": "1534ec7d22a95e7d0867ac1c088374a6dfb93dfa4cbeb08820f72b3f17236e35"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-mongodb_container_cpu_usage_seconds_total": {
+      "size": 7368,
+      "sha256": "f75d2f323830ed3f9525801ffbc53d273083f5f1d4701067bd541cc01f58f744"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-mongodb_container_memory_usage_bytes": {
+      "size": 7059,
+      "sha256": "5dc5059bf7f64b95606bda4c909211bcda0d323d93a85f3ab8e175ada5e19c28"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-mongodb_container_network_receive_bytes_total": {
+      "size": 6363,
+      "sha256": "852b09dfd8389e03f6894c079fda6efe97328b82b021070cda8d2f0154ddeb5f"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-mongodb_container_network_transmit_bytes_total": {
+      "size": 6481,
+      "sha256": "10050b8ae6d268c715a6338a2a85dbd665af1cdd3fab3c6e3075fe90844d5a13"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-redis_container_cpu_usage_seconds_total": {
+      "size": 7339,
+      "sha256": "120415d6135c27d07e8ec7c98617cbd7d1af017359a0763193f4ef66b9f4fd16"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-redis_container_memory_usage_bytes": {
+      "size": 6811,
+      "sha256": "5638c6202c685555650fbcfe74dae5c7a7775096bcb4e2856c7ecff2dd8f0edb"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-redis_container_network_receive_bytes_total": {
+      "size": 6549,
+      "sha256": "db2024df171eeecf330b1bc0674068f465edad36a4129e4861c159d5ab6188aa"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-redis_container_network_transmit_bytes_total": {
+      "size": 6562,
+      "sha256": "f125350288d29815779bf04987a101024bf14f7555d08b412093b242a596296f"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-service_container_cpu_usage_seconds_total": {
+      "size": 7213,
+      "sha256": "72608d258c733a38108306070b7abad961dc62f6655e735762d22ff10184ec4c"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-service_container_memory_usage_bytes": {
+      "size": 6644,
+      "sha256": "15e3836a966bcfc2fbb6249d763ce734f3e38e5f28feb02a83a3f3513478b730"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-service_container_network_receive_bytes_total": {
+      "size": 6783,
+      "sha256": "5f7999931c3261c342a98a86b978fb2144be5616a429b1c5334e9e9c7197ac0e"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/social-graph-service_container_network_transmit_bytes_total": {
+      "size": 6783,
+      "sha256": "d6faefbaf2cb7c9a67e4a7f44cdf78c995a2299a3616ee77b74c528409e45f93"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/text-service_container_cpu_usage_seconds_total": {
+      "size": 7102,
+      "sha256": "68845f30feaee5e5dba51359c9ae50b29259b8e6b629bc94fdb9a058a54a1e59"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/text-service_container_memory_usage_bytes": {
+      "size": 6531,
+      "sha256": "173b365c4bf94fd80aa40810726acc484e52a734d3c304b4f14f332988083c8e"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/text-service_container_network_receive_bytes_total": {
+      "size": 6461,
+      "sha256": "bb135c224e5bbe5187e1f9ef97897948caa7e1a75bacfc9481f79dba17e23802"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/text-service_container_network_transmit_bytes_total": {
+      "size": 6470,
+      "sha256": "ee153fc2186ff40f4cb69957fe63ca61b5da8b8d792807ea53629654cab84bdd"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/unique-id-service_container_cpu_usage_seconds_total": {
+      "size": 7110,
+      "sha256": "7a3fd3bca3ee5b6d5e6fe9bdebfe141d8ac2fec5cc628348e62e2d8c43a33080"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/unique-id-service_container_memory_usage_bytes": {
+      "size": 6585,
+      "sha256": "9f66c3ea3630e81cd0186b93e4d0fcd4b28b9344fea4989f790c6f17889d76e9"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/unique-id-service_container_network_receive_bytes_total": {
+      "size": 6661,
+      "sha256": "754f4041e36620ec1c07742c30b3a043a2f9bff885f4bf78616361dda13bb170"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/unique-id-service_container_network_transmit_bytes_total": {
+      "size": 6684,
+      "sha256": "876f40fc0c1df9d550ec148b07650438b81905484405c4d752a7fd3c63762c82"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-memcached_container_cpu_usage_seconds_total": {
+      "size": 7003,
+      "sha256": "59f69b475a45c815bf11cf0070b81b8c41e794c286de0be147e127a0a7a601d2"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-memcached_container_memory_usage_bytes": {
+      "size": 6538,
+      "sha256": "406f62a500c55ca66e72cbfa25b2820dbcd7117cbf75aa398b12876657b17669"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-memcached_container_network_receive_bytes_total": {
+      "size": 4933,
+      "sha256": "52d47040f59fd3cd958c800d153ae8f3d690d20cf25b5354f9f29c4b0e831312"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-memcached_container_network_transmit_bytes_total": {
+      "size": 4887,
+      "sha256": "677e3b303b226c30127c766468fe0e684d8d53e44c93b5f176af7f23f52b0ab5"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-mongodb_container_cpu_usage_seconds_total": {
+      "size": 6838,
+      "sha256": "ca2f7c9a7a2d836d4ff87d67da26b87bf8fe3b1369d2970631339a213338e268"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-mongodb_container_memory_usage_bytes": {
+      "size": 6516,
+      "sha256": "1498dd8dcdeeeac6f218b098217e762ba5d3ab37cc279b69aed6634fdefac065"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-mongodb_container_network_receive_bytes_total": {
+      "size": 6600,
+      "sha256": "fdc3bbf17ceaf952616b1e4db1cddfd5a7905aa84bc1aec210005549e18b8f11"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-mongodb_container_network_transmit_bytes_total": {
+      "size": 6499,
+      "sha256": "94005e9d9fbdef191a6ac40379514f86096d5fecde2413effc3adbaab72ee8b2"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-service_container_cpu_usage_seconds_total": {
+      "size": 7091,
+      "sha256": "7bab4dfc7f89b3d554b317893e0fc58a1d668c635040bd4f0a630ba9c71eeb9a"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-service_container_memory_usage_bytes": {
+      "size": 6535,
+      "sha256": "9f79af6b76eb5f76156099e8111a9dfee856f63c0a3bba7fc5c2d663dc7548e9"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-service_container_network_receive_bytes_total": {
+      "size": 6434,
+      "sha256": "09d2f6ca7e720fd248fd440c3cb737c74115a4c82e3a4d920b12af2308b53d73"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/url-shorten-service_container_network_transmit_bytes_total": {
+      "size": 6468,
+      "sha256": "d9e6e94b86e857727a28571a6267aef2e6ebfd4e655c90d57177612246648e72"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-memcached_container_cpu_usage_seconds_total": {
+      "size": 7264,
+      "sha256": "57a37b498b8f58f18bd0fe55fa50ad4f525b1e946e73c46e96e169f7c125d288"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-memcached_container_memory_usage_bytes": {
+      "size": 6751,
+      "sha256": "c4e83563a2dff1e971f92f2a4cf00766f223b8f6c66de654319143b05b5ec394"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-memcached_container_network_receive_bytes_total": {
+      "size": 6652,
+      "sha256": "8c4ebb92e6cf9bc32049846f64580b05b75c154d61f8babfffac0f277a639b4b"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-memcached_container_network_transmit_bytes_total": {
+      "size": 6577,
+      "sha256": "1c56ac23b73105565edfe5756e50fbff1ddffaa9a537befa42e8122519e8ba51"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-mention-service_container_cpu_usage_seconds_total": {
+      "size": 7208,
+      "sha256": "e062836f63e52cd4cef1d6b91c5da357b0bd61548516ab5c6149738c1a3bb4fe"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-mention-service_container_memory_usage_bytes": {
+      "size": 6646,
+      "sha256": "83fa90d819d5c59e42f6d1e8ba81125e2f03d1c36b89b01fc4cfae0ca087fee1"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-mention-service_container_network_receive_bytes_total": {
+      "size": 6670,
+      "sha256": "6817c741373118b85c6f991faefaa897e8f1b64b90d4e9698d943eab5ded1a03"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-mention-service_container_network_transmit_bytes_total": {
+      "size": 6689,
+      "sha256": "85ea51da7e0160791bdec1ba87259562aa631a04ec537d214a1edbdbabf25116"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-mongodb_container_cpu_usage_seconds_total": {
+      "size": 7073,
+      "sha256": "46e19a302a35754925137a3b691fdb18c6ce5c5f475600a5261fd6fb803b1b14"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-mongodb_container_memory_usage_bytes": {
+      "size": 6648,
+      "sha256": "ac320c1ae30e1b4406d65fab268310fd82a6d104bd6dffc33e82e40a06c2d0a3"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-mongodb_container_network_receive_bytes_total": {
+      "size": 6646,
+      "sha256": "053a04d002baa064c99e8ce4e104cc5f8e1b78c087b7ae95265d8e708e99e21f"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-mongodb_container_network_transmit_bytes_total": {
+      "size": 6624,
+      "sha256": "1aac573218f9bb57fdcab894718333eb7238dc9d520e7c0b030e90db841445ec"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-service_container_cpu_usage_seconds_total": {
+      "size": 7182,
+      "sha256": "bcfd56be554f4a19451fff90fe4dedadfb0e3792ad7791c050bfd4e086c43a7e"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-service_container_memory_usage_bytes": {
+      "size": 6639,
+      "sha256": "a571d22882f962c96fa30dffe2d0c4f0de8588d4ca662a8c9e2de47ee9e7920e"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-service_container_network_receive_bytes_total": {
+      "size": 6557,
+      "sha256": "4b8e725ce614bcbd73ea924ddff08d8815ba7a238b8e67ddbda6a22969f9f352"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-service_container_network_transmit_bytes_total": {
+      "size": 6577,
+      "sha256": "7ac7ffd56bd06824abd0e87b9598c5024a6e6c2f01834afba52ffd812fd15bcd"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-mongodb_container_cpu_usage_seconds_total": {
+      "size": 7227,
+      "sha256": "066eb362e517c5dbb6fbe69c15ca1e5f9ce10c980d77dd690af2914b7444a59a"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-mongodb_container_memory_usage_bytes": {
+      "size": 6880,
+      "sha256": "6413ee683ce2833affc3e675ccb81c81519fa13e43c84c7dbc7be2d790699b14"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-mongodb_container_network_receive_bytes_total": {
+      "size": 6737,
+      "sha256": "9c08f362b25afa16f1c51b66deb4b64464b26b63c8e0b2f8d7e348be048f8854"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-mongodb_container_network_transmit_bytes_total": {
+      "size": 6874,
+      "sha256": "f78649d9fc02fc88fd1d226253299db90271d2c32b530a90f46f9b75662b5f42"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-redis_container_cpu_usage_seconds_total": {
+      "size": 7092,
+      "sha256": "7de7b48bc5784a8b39a77f914205f8476d83492e6a4de4f4ccfaa22eec153c0e"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-redis_container_memory_usage_bytes": {
+      "size": 6563,
+      "sha256": "6f01dcec89094659200558cca341fd4aaa19593bee10a0bb1722e20e94a4ae47"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-redis_container_network_receive_bytes_total": {
+      "size": 6597,
+      "sha256": "2c16e8efafd738a576e72496106c523da9895b825001c16ae70016e34d938082"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-redis_container_network_transmit_bytes_total": {
+      "size": 6568,
+      "sha256": "23c398cf5666720edcdb81ab44bf6cfbebd8be3274ffb6ba82f35923d77f3ecf"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-service_container_cpu_usage_seconds_total": {
+      "size": 7244,
+      "sha256": "7372b4fa305166244b910815f9b58cce838f813cf6b41573f728ada4f07939af"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-service_container_memory_usage_bytes": {
+      "size": 6704,
+      "sha256": "99450ef59085fc2f72ac112d3da5182576218de7d11f37cf6146b072c14f015c"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-service_container_network_receive_bytes_total": {
+      "size": 7075,
+      "sha256": "7183796a9ad0111d308e70a94173005c24eaf4322ee30911a7f81082192854e1"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/user-timeline-service_container_network_transmit_bytes_total": {
+      "size": 7062,
+      "sha256": "3d5aea21595d2f503d050b35b5d72684219b160546efff8fb4254ca750e39678"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/write-home-timeline-rabbitmq_container_cpu_usage_seconds_total": {
+      "size": 7365,
+      "sha256": "d33aa33e67f141b1f8e039ef5d012bf15a341f6eb90c2149728f530c61ee75d5"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/write-home-timeline-rabbitmq_container_memory_usage_bytes": {
+      "size": 6998,
+      "sha256": "ecd6d6c531776b16fd890ef9b09ed937a68390b431923793bbda4ac952cfeb7a"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/write-home-timeline-rabbitmq_container_network_receive_bytes_total": {
+      "size": 6514,
+      "sha256": "3e9d5fff04dd98b27d3c01de86487d42f5f43442845ac5dee79b2d2ae43e4bfc"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/write-home-timeline-rabbitmq_container_network_transmit_bytes_total": {
+      "size": 6512,
+      "sha256": "a3d0012ab94b080855c0daa5d4b3a003ed5090c1cdb90d4a370dac2666e70444"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/write-home-timeline-service_container_cpu_usage_seconds_total": {
+      "size": 7156,
+      "sha256": "3cded7a6d454b24325355989e0617513793179045d36355b3b34cbfd034aa37f"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/write-home-timeline-service_container_memory_usage_bytes": {
+      "size": 6587,
+      "sha256": "79871f057af6a6e50a775cfbdbc34d8a67c64c460496924096fbeda046028755"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/write-home-timeline-service_container_network_receive_bytes_total": {
+      "size": 6289,
+      "sha256": "73f1d43bbaf38c38d9c77cbda3b467c03292dd749b3dd2b3a950335bf7509a6a"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/prom_metrics/write-home-timeline-service_container_network_transmit_bytes_total": {
+      "size": 6322,
+      "sha256": "b30f70351b296ceeae306f78645dd58809db65a104d203179b976ed6684ff035"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/userv2_phases": {
+      "size": 413,
+      "sha256": "ee20b715390b1cd11f4f91f8472158817cd80719e24f776659769a9db004675f"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/userv3_phases": {
+      "size": 413,
+      "sha256": "23c38cb7a0f0cdc116802ce3fc1c107229bd3e91b02f8134b9f32d436ff148d4"
+    },
+    "raw_dataset/cpu_aug12_25min_200_0/userv8_phases": {
+      "size": 412,
+      "sha256": "ab17e03898d6926ce88a28c00cab4e0e4a838255996d191b59588ea0c175c90d"
+    }
+  }
+}
