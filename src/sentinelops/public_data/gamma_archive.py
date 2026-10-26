@@ -23,6 +23,9 @@ class RangeReader(io.RawIOBase):
         if max_bytes < 65536 or not 65536 <= max_request_bytes <= max_bytes:
             raise ValueError("invalid archive range byte budgets")
         self.client, self.url = client, url
+        # Resolve the canonical API redirect once. This private download lease
+        # may contain a signature; it must never enter reports, locks or logs.
+        self._download_url = url
         self.max_bytes, self.max_request_bytes = max_bytes, max_request_bytes
         self.body_bytes = self.requests = self.position = 0
         self.reserved_bytes = 0
@@ -47,9 +50,9 @@ class RangeReader(io.RawIOBase):
                 self.reserved_bytes += length
         with self._budget_lock:
             self.requests += 1
-        with self.client.stream("GET", self.url, headers={"Range": value, "Accept-Encoding": "identity"}) as response:
+        with self.client.stream("GET", self._download_url, headers={"Range": value, "Accept-Encoding": "identity"}) as response:
             if response.status_code != 206:
-                raise ValueError("archive server did not honor the exact byte range; full download refused")
+                raise ValueError(f"archive returned HTTP {response.status_code} for {value}; exact 206 required, full download refused")
             match = re.fullmatch(r"bytes ([0-9]+)-([0-9]+)/([0-9]+)", response.headers.get("content-range", ""))
             if not match or response.headers.get("content-encoding", "identity") != "identity":
                 raise ValueError("invalid archive Content-Range or content encoding")
@@ -80,6 +83,7 @@ class RangeReader(io.RawIOBase):
                 parts.append(chunk)
             if received != length:
                 raise ValueError("truncated archive range response")
+            self._download_url = str(response.url)
             return start, b"".join(parts)
 
     def readable(self):
