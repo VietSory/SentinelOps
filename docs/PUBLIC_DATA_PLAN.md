@@ -28,7 +28,20 @@ Existing RCAEval acquisition/audit:
   --output artifacts/research/public-datasets/rcaeval-audit.json
 ```
 
-The three acquired cases and full 735-case index are a capability audit only. The pinned release has no traces for RE2/RE3 Sock Shop and no logs for one RE2 Train Ticket case. Missing modalities cannot become fabricated evidence. GAMMA acquisition/audit is the next implementation slice under the frozen contract.
+The three acquired RCAEval cases and full 735-case index are a capability audit only. The pinned release has no traces for RE2/RE3 Sock Shop and no logs for one RE2 Train Ticket case. Missing modalities cannot become fabricated evidence.
+
+GAMMA's first capability scope is the first preselected CPU/200-RPS experiment, not a training/holdout selection. It includes all three published processed request types, graph-path metadata, args, four selected raw resource metrics and placement/RPC maps. Reproduce the exact 139-file scope using project-frozen hashes:
+
+```bash
+.venv-ml/bin/python scripts/download_gamma.py \
+  --file-lock configs/gamma_v1_audit_files.json \
+  --result-file artifacts/research/gamma-acquisition.json
+.venv-ml/bin/python scripts/audit_gamma.py \
+  --manifest data/raw/public/manifests/DOWNLOAD_HASH.json \
+  --output artifacts/research/gamma-audit.json
+```
+
+The result file supplies `DOWNLOAD_HASH`. New result/audit paths are exclusive and do not overwrite prior runs. The downloader bounds metadata pages, wire/expanded bytes and worker count, validates single-file ZIP size/CRC and refuses scripts/path escapes. The committed lock records **project** hashes, not independently published file checksums. [The measured initial audit](reports/2026-10-26-gamma-source-audit.md) records source defects and readiness blockers. Acquisition success is not permission to fit a model.
 
 ## Dataset freeze and modeling
 

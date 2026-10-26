@@ -29,7 +29,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -e '.[ml,dev]'
-      - run: pytest -q tests/test_public_data*.py
+      - run: pytest -q tests/test_public_data*.py tests/test_gamma*.py tests/test_training_data_policy.py
       - name: Verify pinned publisher data and audit real Parquet tables
         run: |
           python - <<'PY'
@@ -47,6 +47,21 @@ jobs:
           output.parent.mkdir(parents=True,exist_ok=True)
           output.write_text(json.dumps(report,indent=2))
           print('PINNED PUBLIC DATA SOURCE AUDIT: PASS')
+          PY
+      - name: Acquire frozen GAMMA capability scope and audit real source tables
+        run: |
+          python scripts/download_gamma.py --file-lock configs/gamma_v1_audit_files.json --result-file artifacts/public-data/gamma-acquisition.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from sentinelops.public_data.gamma_audit import audit_gamma
+          acquisition=json.loads(Path('artifacts/public-data/gamma-acquisition.json').read_text())
+          report=audit_gamma(Path(acquisition['manifest_path']))
+          assert report['verified_files']==139 and len(report['experiments'])==1
+          assert report['activation_allowed'] is False
+          assert not any(report['training_ready'].values())
+          Path('artifacts/public-data/gamma-audit.json').write_text(json.dumps(report,indent=2))
+          print('FROZEN GAMMA ACQUISITION/AUDIT: PASS; MODEL READINESS: NOT ESTABLISHED')
           PY
       - uses: actions/upload-artifact@v4
         with:

@@ -19,6 +19,8 @@ from sentinelops.api_settings import Settings
 from sentinelops.incidents.repository import IncidentRepository
 from sentinelops.public_data.downloads import fetch_file
 from sentinelops.public_data.audit import load_verified_manifest
+from sentinelops.public_data.gamma import load_gamma_manifest
+from sentinelops.public_data.gamma_audit import audit_gamma
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',

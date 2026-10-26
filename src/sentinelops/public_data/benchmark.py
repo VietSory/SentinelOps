@@ -18,6 +18,7 @@ from sklearn.metrics import average_precision_score,confusion_matrix,precision_r
 from sklearn.preprocessing import RobustScaler
 
 from sentinelops.public_data.audit import load_verified_manifest,require_verified_file
+from sentinelops.public_data.policy import require_historical_smd
 
 
 def valid_matrix(values):
@@ -85,9 +86,10 @@ def _write_json(path,value):
         json.dump(value,stream,indent=2,allow_nan=False);stream.write("\n");stream.flush();os.fsync(stream.fileno())
 
 
-def run_benchmark(manifest_path: Path,protocol_path: Path,output: Path,*,project: Path) -> dict:
+def run_benchmark(manifest_path: Path,protocol_path: Path,output: Path,*,project: Path,historical_reproduction: bool = False) -> dict:
     manifest,files=load_verified_manifest(manifest_path)
     protocol=json.loads(protocol_path.read_text())
+    require_historical_smd(protocol["machine"],acknowledged=historical_reproduction)
     if manifest["dataset"]!="SMD" or manifest["selection"]!=[protocol["machine"]]:
         raise ValueError("source selection differs from the frozen benchmark protocol")
     commit=subprocess.check_output(["git","rev-parse","HEAD"],cwd=project,text=True).strip()
