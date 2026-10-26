@@ -1,0 +1,14 @@
+{
+  "profile_version": "gamma-native-admission/v1",
+  "namespace": "social-network",
+  "service_label": "app-name",
+  "node_pattern": "userv[0-9]+",
+  "phase_pairing": "strict-kind-measure-closed-intervals",
+  "clock_unit": "unix-seconds",
+  "clock_guard_seconds": 1,
+  "maximum_capture_span_seconds": 7200,
+  "session_purge_seconds": 300,
+  "grouping": ["observed-utc-day-with-purge", "directory-replicate-family"],
+  "training_ready": false,
+  "activation_allowed": false
+}

@@ -83,6 +83,20 @@ jobs:
           assert all((previous[name]['size'],previous[name]['sha256'])==(records[name]['size'],records[name]['sha256']) for name in shared)
           Path('artifacts/public-data/gamma-cohort-manifest.json').write_bytes(path.read_bytes())
           print('COMPLETE RAW COHORT CONTENT/FILE-TREE REPLAY: PASS; SEMANTIC/SPLIT/TRAINING GATES REMAIN OPEN')
+          from sentinelops.public_data.admission import audit_cohort_admission
+          admission=audit_cohort_admission(path,Path('configs/gamma_resource_cohort_scope.json'),
+              Path('configs/gamma_resource_cohort_files.json'),Path('configs/gamma_admission_profile.json'),
+              Path('configs/gamma_development_inspections.json'),Path('artifacts/public-data/native-admission'),project=Path.cwd())
+          assert admission['case_count']==194 and sum(admission['status_counts'].values())==194
+          assert admission['training_ready'] is False and admission['activation_allowed'] is False
+          native=json.loads(Path(admission['report_path']).read_text())
+          by_case={row['experiment']:row for row in native['cases']}
+          assert by_case['cpu_aug12_25min_200_0']['status']=='native-evidence-admitted'
+          assert by_case['mem_sep22_10min_800_0']['status']=='quarantined'
+          assert by_case['net_oct4_10min_800_0']['status']=='quarantined'
+          assert all(not group['final_holdout_eligible'] for group in native['groups'] if group['development_inspected'])
+          Path('artifacts/public-data/native-admission-summary.json').write_text(json.dumps(admission,indent=2))
+          print('REAL NATIVE EVIDENCE/GROUP ADMISSION: PASS; MODEL/SPLIT GATES REMAIN OPEN')
           PY
       - name: Acquire frozen GAMMA capability scope and audit real source tables
         run: |
