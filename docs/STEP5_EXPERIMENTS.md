@@ -1,6 +1,6 @@
 # Step 5 — Experiment truth and dataset protocol
 
-Status: manifest/labeling/dataset-freeze implementation; live experiment harness and sufficient independent data are tracked separately. G2 is not PASS merely because these modules or synthetic fixtures exist.
+Status: manifest/labeling/dataset-freeze implementation and a bounded local S0/S1/S3 runner. Live acceptance evidence and sufficient independent data are tracked separately. G2 is not PASS merely because these modules or synthetic fixtures exist.
 
 ## Separation of truth and serving
 
@@ -44,3 +44,22 @@ The loader verifies the run's immutable truth copy and recomputes SLO labels fro
 ## Validation scope
 
 Unit tests cover sustained/gapped/partial-bucket SLOs, raw-log deduplication, affected-service labels, abrupt/post-incident exclusions, vector metadata leakage, session/time/source separation, copied features, dirty sources and immutable dataset IDs. Live collection, run inventory and model quality require separate evidence; no model is trained or promoted by this phase's fixture tests.
+
+## Local experiment runner
+
+On Linux/WSL, start the Docker Compose stack and commit the source, then run from the repository root with the installed Python 3.11 environment:
+
+```bash
+python scripts/run_experiment.py --scenario S0 --split train \
+  --warmup-seconds 300 --active-seconds 300 --seed 42
+```
+
+Each invocation creates an opaque `artifacts/experiments/run-UUID/` directory. The runner holds a nonblocking file lock for the entire experiment, validates the actual Prometheus 5s scrape configuration, captures image IDs and loaded source/schema hashes, and persists the declared split before generating traffic. Keep the testbed exclusive: do not run Step 2/3/4 smoke tests, another load generator or deployment changes during an experiment. External business traffic causes failure; the lock coordinates this runner only.
+
+S1 applies a bounded Payment latency/error fault. S3 ramps Payment latency every 30s, then observes recovery. Fault experiments require at least 120s recovery; every run requires at least 300s warmup. S2/S4/S5 are rejected until actual deployment/DB/multiple-fault adapters exist. Default load is 3 requests/s with seeded ±5% jitter; queue saturation fails instead of accumulating unlimited pending requests. Requested rate is a generator setting, not a measured throughput claim.
+
+Prometheus queries run after the 30s watermark and blocking capture I/O runs off the traffic event loop. The runner archives business logs, available full business traces and optional native PostgreSQL observations when `DATABASE_URL` is explicitly provided. Control/configuration logs and phase-tagged client outcomes stay in `truth/`; serving evidence excludes control events. Raw duration logs supply SLO labels independently from histogram features.
+
+The runner restores both original sandbox fault states in `finally`, including preflight failure/cancellation. It persists a failed run and partial evidence when possible; failed/dirty runs cannot enter a dataset. A hard process/host kill cannot execute cleanup: inspect both `/internal/faults` endpoints before reusing the sandbox. `--allow-dirty` is only for diagnostic pilot evidence; it does not bypass the dataset clean-source gate. Editing loaded source/contracts during collection marks the run dirty.
+
+After completion, use `scripts/build_dataset.py` as above. A single 10-minute healthy run must require `--allow-pilot`; it cannot satisfy the independent-run, calibration, gradual-positive or holdout requirements. Do not train or claim G2 from this smoke-sized dataset.
