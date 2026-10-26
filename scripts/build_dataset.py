@@ -8,6 +8,7 @@ from pathlib import Path
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.experiments.datasets import assemble_dataset
 from sentinelops.experiments.labels import SLOConfig, measure_slo
+from sentinelops.experiments.verification import verify_source_replay
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 from sentinelops.telemetry.store import ArtifactStore
 
@@ -32,7 +33,7 @@ def load_run(path: Path) -> dict:
         expected = {key:measured[key] for key in ("first_violation_at","confirmed_at","request_count")}
         if run["slo_by_service"][service] != expected:
             raise ValueError("recorded labels do not match independent server logs")
-    features = [source_store.read(reference) for reference in manifest["feature_refs"]]
+    features = verify_source_replay(source_store,manifest,run)
     return {"run":run,"features":features,"truth_ref":f"experiment-truth://{run['run_id']}/{stable_id(run)}"}
 
 
