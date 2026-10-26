@@ -54,6 +54,19 @@ def test_native_identity_comes_from_labels_and_node_not_pod_or_file_name():
     assert len(result["events"]) == 1 and result["training_ready"] is False
 
 
+def test_excluded_monitoring_node_does_not_quarantine_other_native_services():
+    content = case_content()
+    prefix = f"raw_dataset/{EXPERIMENT}/"
+    content[prefix + "pods_describe/jaeger.log"] = pod(entity="jaeger", node="userv17-jaeger").encode()
+    for metric in METRICS:
+        content[prefix + "prom_metrics/jaeger_" + metric] = content[prefix + "prom_metrics/service_" + metric]
+    result = admit_case(EXPERIMENT, content, profile())
+    assert result["status"] == "native-evidence-admitted" and set(result["entities"]) == {"service"}
+    assert result["entity_exclusions"]["jaeger"] == ["excluded-monitoring-entity"]
+    with pytest.raises(ValueError, match="VM lists"):
+        phase_targets({"bottlenecked_nodes": ["userv17-jaeger"]}, profile())
+
+
 @pytest.mark.parametrize("text", [pod(namespace="other"), pod().replace("app-name=service", "app=service"),
     pod().replace("userv2/127.0.0.1", "<none>"), pod() + pod(), pod().replace("+0000", "")])
 def test_ambiguous_or_incomplete_native_pods_are_not_guessed(text):

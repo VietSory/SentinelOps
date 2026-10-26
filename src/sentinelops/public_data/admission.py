@@ -18,7 +18,7 @@ from sentinelops.public_data.resources import validate_series
 
 def validate_admission_profile(profile: dict) -> None:
     fixed = {"profile_version": "gamma-native-admission/v1", "namespace": "social-network",
-        "service_label": "app-name", "node_pattern": "userv[0-9]+",
+        "service_label": "app-name", "target_node_pattern": "userv[0-9]+",
         "phase_pairing": "strict-kind-measure-closed-intervals", "clock_unit": "unix-seconds",
         "clock_guard_seconds": 1, "maximum_capture_span_seconds": 7200, "session_purge_seconds": 300,
         "grouping": ["observed-utc-day-with-purge", "directory-replicate-family"],
@@ -53,7 +53,9 @@ def parse_pod(text: str, profile: dict) -> dict:
     if len(identities) != 1 or not re.fullmatch(r"[a-z0-9][a-z0-9.-]*", identities[0]):
         raise ValueError("pod lacks a unique native app-name identity")
     node = fields["Node"][0].split("/", 1)[0]
-    if not re.fullmatch(profile["node_pattern"], node):
+    # Kubernetes node identity is not the interference tool's VM allowlist.
+    # For example the observed, excluded Jaeger pod uses userv17-jaeger.
+    if len(node) > 253 or not all(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", part) for part in node.split(".")):
         raise ValueError("pod hosting node is unavailable or unrecognized")
     try:
         started = parsedate_to_datetime(fields["Start Time"][0])
@@ -87,7 +89,7 @@ def phase_targets(args: dict, profile: dict) -> dict[str, tuple[str, str | None]
         groups.append(("", kind, args.get("bottlenecked_nodes")))
     result = {}
     for prefix, kind, nodes in groups:
-        if (not isinstance(nodes, list) or any(not isinstance(node, str) or not re.fullmatch(profile["node_pattern"], node) for node in nodes)
+        if (not isinstance(nodes, list) or any(not isinstance(node, str) or not re.fullmatch(profile["target_node_pattern"], node) for node in nodes)
             or len(set(nodes)) != len(nodes)):
             raise ValueError("native targets must be unique VM lists")
         for node in nodes:

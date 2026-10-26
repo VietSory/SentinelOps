@@ -2,7 +2,7 @@
   "profile_version": "gamma-native-admission/v1",
   "namespace": "social-network",
   "service_label": "app-name",
-  "node_pattern": "userv[0-9]+",
+  "target_node_pattern": "userv[0-9]+",
   "phase_pairing": "strict-kind-measure-closed-intervals",
   "clock_unit": "unix-seconds",
   "clock_guard_seconds": 1,
