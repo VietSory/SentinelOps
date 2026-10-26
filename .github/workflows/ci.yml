@@ -215,6 +215,24 @@ jobs:
       - run: python scripts/step2_smoke_test.py
       - run: python scripts/step3_smoke_test.py
       - run: python -m scripts.step4_smoke_test --output artifacts/step4/ci
+      - name: Verify objective health signals from the real captured telemetry
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from sentinelops.incidents.health_replay import replay_health_manifest
+          from sentinelops.telemetry.store import ArtifactStore
+          source=ArtifactStore('artifacts/step4/ci')
+          smoke=json.loads(Path('artifacts/step4/ci/smoke-report.json').read_text())
+          health=replay_health_manifest(source,smoke['manifest']['manifest_ref'],
+              json.loads(Path('configs/slo_health_policy.json').read_text()),Path('artifacts/step4/health'),project=Path.cwd())
+          assert health['signal_count']==3*health['bucket_count']
+          assert health['raw_normalization_parity'] is True
+          assert health['event_counts'].get('payment-service/incident_opened',0)>=1
+          assert health['historical_emission_times_verified'] is False
+          assert health['model_outputs_available'] is False and health['actions_dispatched'] is False
+          print('REAL CAPTURE OBJECTIVE SLO HEALTH REPLAY: PASS',health['event_counts'])
+          PY
       - name: Publish checksum-backed telemetry summary
         if: always()
         run: |

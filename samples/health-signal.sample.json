@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "signal_version": "slo-health/v1",
+  "source": "slo",
+  "service": "payment-service",
+  "environment": "local",
+  "source_profile": "prometheus-increase-60s/v1",
+  "bucket_end": "2026-10-26T00:10:00Z",
+  "evaluated_at": "2026-10-26T00:10:30Z",
+  "policy_sha256": "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560",
+  "availability": "ELIGIBLE",
+  "health": "healthy",
+  "incident_active": false,
+  "breach_streak": 0,
+  "clear_streak": 1,
+  "episode_start_at": null,
+  "episode_confirmed_at": null,
+  "event": "observation",
+  "observation_ref": "artifact://observations/c47364cb36e1141d58c658d190c5648f98d13ad02124a25006fdf487a1d2e8b9.json",
+  "evidence_refs": [
+    "artifact://observations/c47364cb36e1141d58c658d190c5648f98d13ad02124a25006fdf487a1d2e8b9.json"
+  ],
+  "reasons": [],
+  "previous_signal_id": null,
+  "model_outputs_available": false,
+  "signal_id": "a094cf46f32815f302aaae408b7302349b20f2a47b22727b6f476c6ccfdbca71"
+}

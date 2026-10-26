@@ -26,6 +26,7 @@ SAMPLE_MAP = {
     "api-error.sample.json": "api-error.schema.json",
     "research-resource-window.sample.json": "research-resource-window.schema.json",
     "research-interference-label.sample.json": "research-interference-label.schema.json",
+    "health-signal.sample.json": "health-signal.schema.json",
 }
 
 

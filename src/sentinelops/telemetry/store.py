@@ -9,7 +9,7 @@ import re
 import tempfile
 from typing import Any
 
-KINDS = {"raw", "observations", "features", "manifests", "quarantine"}
+KINDS = {"raw", "observations", "features", "manifests", "quarantine", "signals"}
 
 
 class ArtifactStore:

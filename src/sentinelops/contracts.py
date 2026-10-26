@@ -61,6 +61,9 @@ def _finite_values(value: Any) -> None:
 
 
 def _semantic_validation(name: str, payload: dict[str, Any]) -> None:
+    if name == "health-signal.schema.json":
+        from sentinelops.incidents.health import validate_signal
+        validate_signal(payload)
     if name == "research-interference-label.schema.json":
         start, end = utc_time(payload["window_start"]), utc_time(payload["window_end"])
         if (end - start).total_seconds() != 300 or end.timestamp() % 60:

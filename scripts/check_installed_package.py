@@ -17,6 +17,8 @@ from sentinelops.main import app
 from sentinelops.api import create_app
 from sentinelops.api_settings import Settings
 from sentinelops.incidents.repository import IncidentRepository
+from sentinelops.incidents.health import advance_health
+from sentinelops.incidents.health_replay import replay_health_manifest
 from sentinelops.public_data.downloads import fetch_file
 from sentinelops.public_data.audit import load_verified_manifest
 from sentinelops.public_data.gamma import load_gamma_manifest
@@ -34,7 +36,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'observation-envelope', 'feature-envelope', 'infrastructure-observation',
              'experiment-run', 'dataset-manifest', 'incident-write',
              'incident-envelope', 'incident-list', 'api-error', 'training-data-policy',
-             'research-resource-window', 'research-interference-label'):
+             'research-resource-window', 'research-interference-label', 'health-signal'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 client = TestClient(app)
 assert client.get('/health').status_code == 200

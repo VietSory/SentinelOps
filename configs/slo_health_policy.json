@@ -1,0 +1,10 @@
+{
+  "policy_version": "slo-health/local-v1",
+  "latency_ms": 750.0,
+  "error_rate": 0.05,
+  "minimum_requests": 30,
+  "minimum_coverage": 0.8,
+  "entry_buckets": 2,
+  "recovery_buckets": 3,
+  "maximum_lag_seconds": 60
+}
