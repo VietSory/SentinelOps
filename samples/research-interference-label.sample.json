@@ -1,0 +1,23 @@
+{
+  "activation_allowed": false,
+  "any_host_interference_seconds": 151.99840116500854,
+  "boundary_guard_seconds": 1,
+  "direct_interference_seconds": 151.99840116500854,
+  "eligible_for_features": true,
+  "entity": "compose-post-redis",
+  "experiment": "cpu_aug12_25min_200_0",
+  "hosting_node": "userv2",
+  "label": "direct-recorded-interference",
+  "label_version": "gamma-recorded-interference/v1",
+  "overlapping_or_guarded_event_ids": [
+    "1013e1f98008aa066b5f47c34bca9b33fb90ce296b8ac0d102c8dcc30edef437",
+    "bb5ea39c96eaf63fc20adc047d378986f31b6bed8251844a9c8cf3b310b62b58",
+    "cb0a96837de10094fff3d42d62d370bec69ca1887f26a573fb0e5ae22f4a381f"
+  ],
+  "precursor_target_available": false,
+  "resource_window_sha256": "5ce99573a78a3b75e312886da36bc2bdf6045de9900af9eb0cefb8407316d646",
+  "schema_version": "1.0",
+  "source_manifest_sha256": "40c2257e2fd328e51719f51f9ca671a7b48c981fc07f5562ae6fdd549f2d492e",
+  "window_end": "2023-08-14T23:39:00Z",
+  "window_start": "2023-08-14T23:34:00Z"
+}
