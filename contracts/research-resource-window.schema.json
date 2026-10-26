@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/research-resource-window.schema.json",
+  "title": "ResearchResourceWindow",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "feature_set_version", "source_profile", "mode", "experiment", "entity", "window_start", "window_end", "max_input_observed_at", "source_manifest_sha256", "profile_sha256", "eligible_for_features", "features", "quality", "activation_allowed", "arrival_times_verified"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "feature_set_version": {"const": "gamma-resource-5m/v1"},
+    "source_profile": {"const": "gamma-raw-resource/v1"},
+    "mode": {"const": "event-time-analytical"},
+    "experiment": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+    "entity": {"type": "string", "minLength": 1},
+    "window_start": {"type": "string", "format": "date-time"},
+    "window_end": {"type": "string", "format": "date-time"},
+    "max_input_observed_at": {"type": ["string", "null"], "format": "date-time"},
+    "source_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "profile_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "eligible_for_features": {"type": "boolean"},
+    "activation_allowed": {"const": false},
+    "arrival_times_verified": {"const": false},
+    "features": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["cpu_cores_mean_5m", "cpu_cores_slope_5m", "memory_bytes_mean_5m", "memory_bytes_slope_5m", "network_receive_bytes_per_second_mean_5m", "network_transmit_bytes_per_second_mean_5m"],
+          "properties": {
+            "cpu_cores_mean_5m": {"type": "number", "minimum": 0},
+            "cpu_cores_slope_5m": {"type": "number"},
+            "memory_bytes_mean_5m": {"type": "number", "minimum": 0},
+            "memory_bytes_slope_5m": {"type": "number"},
+            "network_receive_bytes_per_second_mean_5m": {"type": "number", "minimum": 0},
+            "network_transmit_bytes_per_second_mean_5m": {"type": "number", "minimum": 0}
+          }
+        }
+      ]
+    },
+    "quality": {
+      "type": "object", "additionalProperties": false,
+      "required": ["valid_buckets", "required_buckets", "reasons", "minimum_metric_coverage"],
+      "properties": {
+        "valid_buckets": {"type": "integer", "minimum": 0, "maximum": 5},
+        "required_buckets": {"const": 4},
+        "reasons": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "minimum_metric_coverage": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

@@ -43,6 +43,8 @@ GAMMA's first capability scope is the first preselected CPU/200-RPS experiment, 
 
 The result file supplies `DOWNLOAD_HASH`. New result/audit paths are exclusive and do not overwrite prior runs. The downloader bounds metadata pages, wire/expanded bytes and worker count, validates single-file ZIP size/CRC and refuses scripts/path escapes. The committed lock records **project** hashes, not independently published file checksums. [The measured initial audit](reports/2026-10-26-gamma-source-audit.md) records source defects and readiness blockers. Acquisition success is not permission to fit a model.
 
+The next processing slice is [causal raw-resource windows](GAMMA_RESOURCE_FEATURES.md), under the separate `gamma-resource-5m/v1` research identity. Its raw counter/gauge features do not require guessing RPC mapping or HTTP error fields. Eligible feature vectors still require independent source labels and grouped splits before model fitting.
+
 ## Dataset freeze and modeling
 
 1. Group all modalities, request types, graph variants, derived copies and overlapping captures from one experiment/session before windowing. Freeze a deterministic grouped development/validation/test partition and temporal embargo where continuous boundaries require it. Report independent run counts. No row-random splits.

@@ -1,0 +1,36 @@
+{
+  "profile_version": "gamma-raw-resource/v1",
+  "feature_set_version": "gamma-resource-5m/v1",
+  "mode": "event-time-analytical",
+  "bucket_seconds": 60,
+  "lookback_seconds": 300,
+  "step_seconds": 60,
+  "warmup_seconds": 300,
+  "minimum_valid_buckets": 4,
+  "minimum_time_coverage": 0.75,
+  "maximum_sample_gap_seconds": 30,
+  "gauge_maximum_age_seconds": 30,
+  "excluded_entities": ["jaeger"],
+  "ordered_features": [
+    "cpu_cores_mean_5m",
+    "cpu_cores_slope_5m",
+    "memory_bytes_mean_5m",
+    "memory_bytes_slope_5m",
+    "network_receive_bytes_per_second_mean_5m",
+    "network_transmit_bytes_per_second_mean_5m"
+  ],
+  "semantics": {
+    "cpu": "delta cumulative CPU seconds / covered seconds; cores, not percent",
+    "memory": "time-weighted left-held bytes, bounded by maximum gauge age",
+    "network": "delta cumulative bytes / covered seconds; not HTTP request rate",
+    "counter_intervals": "only pairs observed by bucket end; reset and excessive-gap intervals excluded",
+    "mean": "covered-time-weighted mean over the same valid buckets for all metrics",
+    "slope": "OLS over actual bucket-end minutes; cores/minute and bytes/minute",
+    "labels": "none; feature eligibility does not establish healthy or precursor labels",
+    "availability": "source observation times only; arrival times are not supplied"
+  },
+  "references": [
+    "https://prometheus.io/docs/prometheus/latest/querying/api/",
+    "https://github.com/google/cadvisor/blob/master/docs/storage/prometheus.md"
+  ]
+}
