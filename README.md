@@ -6,22 +6,21 @@ SentinelOps is the implementation repository for the approved AI4Life 2026 AIOps
 
 ## Implementation status
 
-The repository implements a contract-valid Foundation API skeleton, a real
+The repository implements a protected incident API, a real
 three-service/PostgreSQL testbed, distributed OpenTelemetry, local Prometheus
 history, immutable metric captures, deterministic feature windows, predeclared
 local experiments and an isolated PostgreSQL incident repository. Dated
 verification reports live under [docs/reports](docs/reports/).
 
-The API detector remains an explicitly mocked Foundation response until the ML
-gate is implemented. The healthy dataset collected so far is a pilot and fails
+The API detector returns 503 until a real validated model is available; Foundation
+fixtures require explicit local demo mode. The dataset collected so far is a pilot and fails
 the full training-readiness gate. Real model serving, incident
 correlation/RCA, Bedrock, operator UI, controlled remediation and AWS deployment
 follow the delivery gates; local telemetry evidence does not certify them.
 
-The incident repository is verified independently; the Foundation HTTP incident
-endpoint still echoes until the API persistence migration. See the current
+Incident writes persist exact IERs with idempotency and revision checks. See the current
 [phase status](docs/PROJECT_STATUS.md), [experiment protocol](docs/STEP5_EXPERIMENTS.md)
-and [incident storage guide](docs/STEP7_INCIDENT_STORE.md).
+and [incident API guide](docs/STEP7_INCIDENT_API.md).
 
 Runtime contracts remain strict and versioned. Supplemental envelopes carry
 quality, provenance and future lifecycle metadata without changing legacy wire
@@ -52,8 +51,10 @@ of completed implementation or measured performance.
 
 ## Quick start
 
+Use Python 3.11 (CI/runtime baseline) or 3.12.
+
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 pytest -q
@@ -82,7 +83,7 @@ python scripts/step3_smoke_test.py
 Jaeger is available at `http://127.0.0.1:16686`; Collector metrics are exposed at
 `http://127.0.0.1:8889/metrics`. See [Step 3 observability](docs/STEP3_OBSERVABILITY.md)
 for the verification gates and troubleshooting. The AIOps API above remains a
-Foundation skeleton; this testbed does not yet perform ML, RCA or remediation.
+separate control process; this testbed does not yet perform ML, RCA or remediation.
 
 ## Telemetry history and feature windows
 

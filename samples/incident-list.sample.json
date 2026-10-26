@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "items": [
+    {
+      "incident_id": "INC-DEMO-001",
+      "revision": 1,
+      "state": "incident",
+      "severity": "high",
+      "detected_at": "2026-10-06T14:20:00Z",
+      "affected_services": [
+        "rds",
+        "payment-service",
+        "checkout-service"
+      ]
+    }
+  ],
+  "next_cursor": null
+}

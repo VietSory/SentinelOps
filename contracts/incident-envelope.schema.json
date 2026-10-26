@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/incident-envelope.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "incident_id",
+    "revision",
+    "recorded_at",
+    "payload",
+    "context",
+    "actor",
+    "reason",
+    "timeline"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "incident_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9223372036854775807
+    },
+    "recorded_at": {
+      "type": "string",
+      "minLength": 1,
+      "format": "date-time"
+    },
+    "payload": {
+      "$ref": "https://sentinelops.local/contracts/incident-evidence-record.schema.json"
+    },
+    "context": {
+      "allOf": [
+        {
+          "$ref": "https://sentinelops.local/contracts/incident-write.schema.json#/$defs/context"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "lifecycle_stage": {
+              "enum": [
+                "OPEN",
+                "RCA_READY",
+                "EXPLAINED",
+                "MITIGATION_PLANNED",
+                "MITIGATING",
+                "VERIFYING",
+                "RECOVERED",
+                "ROLLED_BACK",
+                "ESCALATED",
+                "CLOSED"
+              ]
+            }
+          },
+          "required": [
+            "lifecycle_stage"
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "timeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "events",
+        "next_after_revision"
+      ],
+      "properties": {
+        "events": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "event_id",
+              "incident_id",
+              "revision",
+              "event_type",
+              "lifecycle_stage",
+              "actor",
+              "reason",
+              "recorded_at"
+            ],
+            "properties": {
+              "event_id": {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              "incident_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9223372036854775807
+              },
+              "event_type": {
+                "const": "incident.revised"
+              },
+              "lifecycle_stage": {
+                "enum": [
+                  "OPEN",
+                  "RCA_READY",
+                  "EXPLAINED",
+                  "MITIGATION_PLANNED",
+                  "MITIGATING",
+                  "VERIFYING",
+                  "RECOVERED",
+                  "ROLLED_BACK",
+                  "ESCALATED",
+                  "CLOSED"
+                ]
+              },
+              "actor": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "recorded_at": {
+                "type": "string",
+                "minLength": 1,
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        "next_after_revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

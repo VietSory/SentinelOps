@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
+from sentinelops.schema_registry import CONTRACT_REGISTRY
 
 
 @lru_cache(maxsize=None)
@@ -31,6 +32,7 @@ def validate_payload(schema_name: str, payload: dict[str, Any]) -> None:
     validator = Draft202012Validator(
         load_schema(schema_name),
         format_checker=FormatChecker(),
+        registry=CONTRACT_REGISTRY,
     )
     errors = sorted(validator.iter_errors(payload), key=lambda e: list(e.path))
     if errors:
@@ -59,6 +61,9 @@ def _finite_values(value: Any) -> None:
 
 
 def _semantic_validation(name: str, payload: dict[str, Any]) -> None:
+    if name in ("incident-write.schema.json","incident-envelope.schema.json","incident-list.schema.json"):
+        from sentinelops.incidents.validation import validate_wrapper
+        validate_wrapper(name,payload)
     if name == "feature-window.schema.json":
         if utc_time(payload["window_start"]) >= utc_time(payload["window_end"]):
             raise ValueError("window_start must precede window_end")

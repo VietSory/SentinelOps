@@ -19,6 +19,10 @@ SAMPLE_MAP = {
     "infrastructure-observation.sample.json": "infrastructure-observation.schema.json",
     "experiment-run.sample.json": "experiment-run.schema.json",
     "dataset-manifest.sample.json": "dataset-manifest.schema.json",
+    "incident-write.sample.json": "incident-write.schema.json",
+    "incident-envelope.sample.json": "incident-envelope.schema.json",
+    "incident-list.sample.json": "incident-list.schema.json",
+    "api-error.sample.json": "api-error.schema.json",
 }
 
 

@@ -7,13 +7,28 @@ from uuid import UUID,uuid4
 import asyncpg
 
 from sentinelops.incidents.domain import IncidentConflict, IncidentNotFound, IncidentWrite, check_transition
+from sentinelops.contracts import validate_payload
 from sentinelops.telemetry.core import timestamp
 
 
+class RepositoryIntegrityError(RuntimeError):
+    pass
+
+
 def snapshot(row) -> dict:
-    return {"schema_version":"1.0","incident_id":row["incident_id"],"revision":row["revision"],
-            "recorded_at":timestamp(row["recorded_at"]),"payload":json.loads(row["payload"]),
-            "context":json.loads(row["context"]),"actor":row["actor"],"reason":row["reason"]}
+    try:
+        result = {"schema_version":"1.0","incident_id":row["incident_id"],"revision":row["revision"],
+                  "recorded_at":timestamp(row["recorded_at"]),"payload":json.loads(row["payload"]),
+                  "context":json.loads(row["context"]),"actor":row["actor"],"reason":row["reason"]}
+        validate_payload("incident-envelope.schema.json",{**result,"timeline":{"events":[],"next_after_revision":None}})
+        context = {key:value for key,value in result["context"].items() if key!="lifecycle_stage"}
+        command = IncidentWrite(result["payload"],result["context"]["lifecycle_stage"],result["revision"]-1,
+                                row["idempotency_key"],result["actor"],result["reason"],context)
+        if command.fingerprint()!=row["request_hash"]:
+            raise ValueError("stored request fingerprint differs")
+        return result
+    except (ValueError,KeyError,TypeError) as exc:
+        raise RepositoryIntegrityError("stored incident snapshot failed integrity checks") from exc
 
 
 class IncidentRepository:
@@ -82,7 +97,7 @@ class IncidentRepository:
             raise IncidentConflict("incident/idempotency identity conflicts with a concurrent write") from exc
 
     async def get(self,identifier: str,revision: int | None = None) -> dict:
-        if revision is not None and (type(revision) is not int or revision < 1):
+        if revision is not None and (type(revision) is not int or not 1<=revision<=2**63-1):
             raise ValueError("revision must be a positive integer")
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""SELECT v.* FROM sentinel_control.incident_versions v
@@ -92,10 +107,29 @@ class IncidentRepository:
             raise IncidentNotFound(identifier)
         return snapshot(row)
 
-    async def history(self,identifier: str) -> list[dict]:
+    async def history(self,identifier: str,*,after_revision: int = 0,limit: int = 100,max_revision: int | None = None) -> list[dict]:
+        if type(after_revision) is not int or not 0<=after_revision<=2**63-1 or type(limit) is not int or not 1<=limit<=100:
+            raise ValueError("invalid history pagination")
+        if max_revision is not None and (type(max_revision) is not int or not 1<=max_revision<=2**63-1):
+            raise ValueError("invalid history upper revision")
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM sentinel_control.incident_events WHERE incident_id=$1 ORDER BY revision",identifier)
+            rows = await conn.fetch("""SELECT * FROM sentinel_control.incident_events WHERE incident_id=$1
+                AND revision>$2 AND ($3::bigint IS NULL OR revision<=$3) ORDER BY revision LIMIT $4""",
+                identifier,after_revision,max_revision,limit)
         return [{**dict(row),"event_id":str(row["event_id"]),"recorded_at":timestamp(row["recorded_at"])} for row in rows]
+
+    async def list_current(self,*,limit: int = 50,after: tuple | None = None,state: str | None = None,service: str | None = None) -> list[dict]:
+        if type(limit) is not int or not 1<=limit<=100:
+            raise ValueError("list limit must be 1…100")
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""SELECT v.*,i.created_at FROM sentinel_control.incidents i
+                JOIN sentinel_control.incident_versions v ON v.incident_id=i.incident_id AND v.revision=i.current_revision
+                WHERE ($1::timestamptz IS NULL OR (i.created_at,i.incident_id)>($1,$2::text))
+                  AND ($3::text IS NULL OR v.payload->>'state'=$3)
+                  AND ($4::text IS NULL OR (v.payload->'affected_services') ? $4)
+                ORDER BY i.created_at,i.incident_id LIMIT $5""",
+                after[0] if after else None,after[1] if after else None,state,service,limit+1)
+        return [{**snapshot(row),"created_at":timestamp(row["created_at"])} for row in rows]
 
     async def claim_events(self,*,limit: int = 10,lease_seconds: int = 60) -> list[dict]:
         if type(limit) is not int or not 1 <= limit <= 100 or type(lease_seconds) is not int or not 1 <= lease_seconds <= 600:

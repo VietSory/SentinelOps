@@ -36,6 +36,7 @@ jobs:
       - run: docker compose -p sentinelops-control -f docker-compose.control.yml restart control-postgres
       - run: docker compose -p sentinelops-control -f docker-compose.control.yml up -d --wait --wait-timeout 60
       - run: python scripts/check_incident_store.py --verify-report artifacts/incidents/store-acceptance.json
+      - run: python scripts/check_incident_api.py --restart-database
       - name: Preserve incident storage evidence
         uses: actions/upload-artifact@v4
         with:

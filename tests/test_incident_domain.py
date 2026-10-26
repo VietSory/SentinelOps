@@ -76,3 +76,16 @@ def test_trigger_provenance_requires_unique_signals_and_source_references():
     payload = {**command.payload,"root_cause_ranking":[{"service":"rds","score":.9,"evidence_refs":["invented"]}]}
     with pytest.raises(ValueError,match="unknown or empty evidence"):
         replace(command,payload=payload).validate()
+
+
+@pytest.mark.parametrize("context",[None,[],{"unexpected":"field"}])
+def test_malformed_context_is_rejected_as_input_error(context):
+    with pytest.raises(ValueError,match="invalid incident context"):
+        replace(command_fixture(),context=context).validate()
+
+
+@pytest.mark.parametrize("identifier",["slash/id","line\nbreak","x"*257,"nul\x00id"])
+def test_stored_identifier_cannot_break_routes_or_headers(identifier):
+    command=command_fixture()
+    with pytest.raises(ValueError,match="URI-safe"):
+        replace(command,payload={**command.payload,"incident_id":identifier}).validate()

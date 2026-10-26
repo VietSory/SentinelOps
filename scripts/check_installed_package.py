@@ -14,22 +14,41 @@ sys.path.insert(0, sys.argv[1])
 import sentinelops
 assert Path(sentinelops.__file__).resolve().is_relative_to(Path(sys.argv[1]))
 from sentinelops.main import app
+from sentinelops.api import create_app
+from sentinelops.api_settings import Settings
 from sentinelops.incidents.repository import IncidentRepository
-from sentinelops.contracts import load_schema
+from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',
              'incident-evidence-record', 'explanation', 'remediation-action',
              'observation-envelope', 'feature-envelope', 'infrastructure-observation',
-             'experiment-run', 'dataset-manifest'):
+             'experiment-run', 'dataset-manifest', 'incident-write',
+             'incident-envelope', 'incident-list', 'api-error'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 client = TestClient(app)
 assert client.get('/health').status_code == 200
 payload = {'schema_version':'1.0', 'service':'payment-service',
     'window_start':'2026-10-25T00:00:00Z', 'window_end':'2026-10-25T00:05:00Z',
     'features':{'latency': 100}}
-assert client.post('/v1/detect', json=payload).status_code == 200
+assert client.post('/v1/detect', json=payload).status_code == 503
 assert client.post('/v1/detect', json={}).status_code == 422
-assert client.post('/v1/incidents/demo').status_code == 200
+assert client.post('/v1/incidents/demo').status_code == 404
+demo = TestClient(create_app(Settings(demo_mode=True)))
+assert demo.post('/v1/detect', json=payload).headers['x-sentinelops-mode'] == 'demo'
+assert demo.post('/v1/incidents/demo').status_code == 200
+ier = demo.post('/v1/incidents/demo').json()
+write = {'schema_version':'1.0','payload':ier,'context':{
+    'availability':'UNKNOWN','recovery_source':None,'source_refs':['fixture://wheel'],
+    'config_refs':['config://wheel/v1'],'trigger_sources':[{'source':'manual','signal_id':'wheel',
+        'emitted_at':ier['detected_at'],'source_ref':'fixture://wheel'}]},
+    'lifecycle_stage':'OPEN','reason':'installed wheel contract reference validation'}
+validate_payload('incident-write.schema.json', write)
+write['payload']['invented'] = True
+try:
+    validate_payload('incident-write.schema.json', write)
+    raise AssertionError('nested frozen IER schema was not enforced')
+except ValueError:
+    pass
 print('INSTALLED WHEEL SMOKE TEST: PASS')
 '''
 

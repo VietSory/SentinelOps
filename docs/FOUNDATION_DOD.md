@@ -6,7 +6,7 @@ Local engineering verification was completed on 2026-10-26; see [baseline eviden
 - [x] All JSON Schemas pass JSON Schema validation.
 - [x] Contract-valid samples exist for telemetry, feature window, and Incident Evidence Record.
 - [x] `/health` returns HTTP 200.
-- [x] `/v1/detect` validates input and returns a contract-valid skeleton detection result.
+- [x] `/v1/detect` validates input. Current default returns 503 without a model; contract-valid skeleton results require explicit local demo mode (see Step 7 API migration).
 - [x] `/v1/incidents` accepts a contract-valid Incident Evidence Record.
 - [x] `scripts/replay.py` accepts an external telemetry JSONL scenario.
 - [x] CI runs schema validation and tests on every PR.

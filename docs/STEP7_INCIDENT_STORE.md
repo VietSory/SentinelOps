@@ -1,6 +1,6 @@
 # Incident storage foundation
 
-This is the storage/lifecycle work allowed to start before G3 in the delivery plan. It does not implement correlation/RCA, model inference, recovery verification or remediation authorization and does not close G4. The foundation HTTP incident endpoint remains an echo until its separately tested persistence migration.
+This is the storage/lifecycle work allowed to start before G3 in the delivery plan. It does not implement correlation/RCA, model inference, recovery verification or remediation authorization and does not close G4. The separately tested [HTTP persistence migration](STEP7_INCIDENT_API.md) connects this repository; the original storage acceptance remains a dated checkpoint.
 
 ## Isolation and local setup
 
