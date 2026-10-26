@@ -21,7 +21,7 @@ jobs:
 
   public-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -60,6 +60,29 @@ jobs:
           assert report['response_body_bytes']<=32_000_000
           assert report['training_ready'] is False and report['activation_allowed'] is False
           print('COMPLETE GAMMA ZIP64 INVENTORY: PASS; MEMBER DATA ARE NOT ALL VERIFIED')
+          PY
+      - name: Acquire and verify the predeclared complete raw-resource cohort
+        run: |
+          python scripts/download_gamma_cohort.py --file-tree-lock configs/gamma_resource_cohort_files.json --result-file artifacts/public-data/gamma-cohort-acquisition.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from sentinelops.public_data.cohort import load_cohort_manifest
+          result=json.loads(Path('artifacts/public-data/gamma-cohort-acquisition.json').read_text())
+          scope=json.loads(Path('configs/gamma_resource_cohort_scope.json').read_text())
+          lock=json.loads(Path('configs/gamma_resource_cohort_files.json').read_text())
+          path=Path(result['manifest_path'])
+          manifest,groups=load_cohort_manifest(path,scope,expected_tree=lock)
+          assert len(groups)==195 and manifest['file_tree_lock']['files']==30364
+          assert manifest['experiments']==194 and manifest['training_ready'] is False
+          assert manifest['role_counts']=={'args':194,'placement':6484,'resource':23048,'phase':634,'global-metadata':4}
+          records={row['source_path']:row for bundle in groups.values() for row in bundle['members']}
+          previous=json.loads(Path('configs/gamma_v1_phase_files.json').read_text())['files']
+          shared=set(previous)&set(records)
+          assert len(shared)==128
+          assert all((previous[name]['size'],previous[name]['sha256'])==(records[name]['size'],records[name]['sha256']) for name in shared)
+          Path('artifacts/public-data/gamma-cohort-manifest.json').write_bytes(path.read_bytes())
+          print('COMPLETE RAW COHORT CONTENT/FILE-TREE REPLAY: PASS; SEMANTIC/SPLIT/TRAINING GATES REMAIN OPEN')
           PY
       - name: Acquire frozen GAMMA capability scope and audit real source tables
         run: |
