@@ -24,6 +24,7 @@ SAMPLE_MAP = {
     "incident-envelope.sample.json": "incident-envelope.schema.json",
     "incident-list.sample.json": "incident-list.schema.json",
     "api-error.sample.json": "api-error.schema.json",
+    "research-resource-window.sample.json": "research-resource-window.schema.json",
 }
 
 

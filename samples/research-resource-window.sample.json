@@ -1,0 +1,32 @@
+{
+  "activation_allowed": false,
+  "arrival_times_verified": false,
+  "eligible_for_features": true,
+  "entity": "compose-post-redis",
+  "experiment": "cpu_aug12_25min_200_0",
+  "feature_set_version": "gamma-resource-5m/v1",
+  "features": {
+    "cpu_cores_mean_5m": 0.048158049991485485,
+    "cpu_cores_slope_5m": -0.007019046676286502,
+    "memory_bytes_mean_5m": 46668057.20818685,
+    "memory_bytes_slope_5m": 5246975.118356121,
+    "network_receive_bytes_per_second_mean_5m": 124827.51118185319,
+    "network_transmit_bytes_per_second_mean_5m": 63760.989403431755
+  },
+  "max_input_observed_at": "2023-08-14T23:38:59.741000Z",
+  "mode": "event-time-analytical",
+  "profile_sha256": "777fa4d25417e0c8bb38a630aae04e143b5d607fa8e48c31574ad8bc8b9ba9ef",
+  "quality": {
+    "minimum_metric_coverage": 0.7055999994277954,
+    "reasons": [
+      "insufficient-time-coverage"
+    ],
+    "required_buckets": 4,
+    "valid_buckets": 4
+  },
+  "schema_version": "1.0",
+  "source_manifest_sha256": "249d60f50a99ca909be07e4f3938d1d870dc2ac81f0727f3056ac52ddd621c3a",
+  "source_profile": "gamma-raw-resource/v1",
+  "window_end": "2023-08-14T23:39:00Z",
+  "window_start": "2023-08-14T23:34:00Z"
+}
