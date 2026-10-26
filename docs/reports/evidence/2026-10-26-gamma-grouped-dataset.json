@@ -1,0 +1,130 @@
+{
+  "activation_allowed": false,
+  "blocking_reasons": [
+    "recorded interference/reference is a research proxy, not healthy/SLO/precursor truth",
+    "model-specific independent reference support and evaluation protocol still require acceptance",
+    "source resource features are not verified as the live five HTTP RED features"
+  ],
+  "case_counts": {
+    "calibration/native-evidence-admitted": 20,
+    "development/native-evidence-admitted": 10,
+    "quarantine/quarantined": 57,
+    "test/native-evidence-admitted": 17,
+    "test/quarantined": 1,
+    "train/native-evidence-admitted": 54,
+    "train/quarantined": 35
+  },
+  "counts": {
+    "calibration/candidate": 11434,
+    "calibration/feature-eligible": 8776,
+    "development/candidate": 5716,
+    "development/feature-eligible": 4456,
+    "test/candidate": 4551,
+    "test/feature-eligible": 3481,
+    "train/candidate": 7909,
+    "train/feature-eligible": 6058
+  },
+  "dataset_version": "gamma-grouped-resource/v1",
+  "feature_eligible_label_counts": {
+    "calibration/boundary-uncertain": 20,
+    "calibration/direct-recorded-interference": 1602,
+    "calibration/no-recorded-interference-reference": 553,
+    "calibration/other-host-interference-context": 6601,
+    "development/direct-recorded-interference": 1034,
+    "development/no-recorded-interference-reference": 227,
+    "development/other-host-interference-context": 3195,
+    "test/direct-recorded-interference": 483,
+    "test/no-recorded-interference-reference": 161,
+    "test/other-host-interference-context": 2837,
+    "train/direct-recorded-interference": 1137,
+    "train/no-recorded-interference-reference": 590,
+    "train/other-host-interference-context": 4331
+  },
+  "feature_set_version": "gamma-resource-5m/v1",
+  "feature_values_sha256": "1b36a0aa46c8d1d34b437ffb976cf093610e00fcc096179f487a170e8b85f227",
+  "frame_sha256": "fe7b7a280120ab904e18f50f19a46a0749c4b0e303704319a92b0e172823044a",
+  "health_labels_available": false,
+  "index_sha256": "6cac27d5df3e66a59764a7410b97b1af2a99bff07e2d5746693fabf657c17959",
+  "label_counts": {
+    "calibration/boundary-uncertain": 29,
+    "calibration/direct-recorded-interference": 2376,
+    "calibration/no-recorded-interference-reference": 748,
+    "calibration/other-host-interference-context": 8281,
+    "development/direct-recorded-interference": 1490,
+    "development/no-recorded-interference-reference": 290,
+    "development/other-host-interference-context": 3936,
+    "test/direct-recorded-interference": 596,
+    "test/no-recorded-interference-reference": 203,
+    "test/other-host-interference-context": 3752,
+    "train/direct-recorded-interference": 1711,
+    "train/no-recorded-interference-reference": 786,
+    "train/other-host-interference-context": 5412
+  },
+  "label_sha256": "097095986c12bf23e1b3a0a64340fa2c4841dcde9f51e8f1416a4d677788171a",
+  "live_compatible": false,
+  "mode": "offline-grouped-source-benchmark",
+  "native_admission_sha256": "fddede8fba9981197a13c498c298edc1f1edf592115be23d2694f65baea2fce2",
+  "profile_sha256": "777fa4d25417e0c8bb38a630aae04e143b5d607fa8e48c31574ad8bc8b9ba9ef",
+  "risk_target_available": false,
+  "rows": 29610,
+  "source_commit": "65bafe8603cba298809a7cf140378d2863f129a8",
+  "source_file_tree_sha256": "ee11cd27de2451194fbe9df68365cbe6c67b0982d3b48f9dd0fb74b49374c3c6",
+  "source_manifest_sha256": "190c2cc83635d67f883e48392216ae18ef0fbb011bbf8dda8f320a6a86fb6497",
+  "source_reference_is_healthy_certificate": false,
+  "source_reference_traffic_verified": false,
+  "split_sha256": "b6ab07014084eb79f88538765acffb39e49cb602b6a51fa24a7ab1c3e5980c9b",
+  "training_data_policy_hash": "ef0eb1b1c95a67faf424501e657c5e6530d49a1d18af7cbf59f9c07740afa21f",
+  "training_ready": false,
+  "report_sha256": "aa4c81fa49d28f57aaeedd8de13807509a894e7eaf8b50998174e61aa3e64f48",
+  "eligible_rows": 22771,
+  "excluded_rows": 6839,
+  "legacy_numeric_sha256": "e00da06523d3a4dbce22ca6ef4c9f9130818aff8b66232715b07095bbc064cc5",
+  "reference_support": {
+    "train": {
+      "rows": 590,
+      "cases": 14,
+      "groups": 4,
+      "cutoffs": 28,
+      "minimum_rows_per_entity": 8,
+      "maximum_rows_per_entity": 26
+    },
+    "calibration": {
+      "rows": 553,
+      "cases": 20,
+      "groups": 2,
+      "cutoffs": 27,
+      "minimum_rows_per_entity": 8,
+      "maximum_rows_per_entity": 23
+    },
+    "development": {
+      "rows": 227,
+      "cases": 10,
+      "groups": 1,
+      "cutoffs": 10,
+      "minimum_rows_per_entity": 2,
+      "maximum_rows_per_entity": 10
+    },
+    "test": {
+      "rows": 161,
+      "cases": 7,
+      "groups": 1,
+      "cutoffs": 7,
+      "minimum_rows_per_entity": 1,
+      "maximum_rows_per_entity": 7
+    }
+  },
+  "exclusion_reason_counts": {
+    "insufficient-time-coverage": 6839,
+    "sample-gap": 19
+  },
+  "verification": {
+    "all_three_store_hashes_verified": true,
+    "all_row_hash_links_verified": true,
+    "unique_window_keys": 29610,
+    "legacy_rows": 580,
+    "legacy_feature_eligible": 437,
+    "full_python_tests": 281,
+    "final_installed_wheel_smoke": "pass",
+    "actual_source_exit_code": 0
+  }
+}
