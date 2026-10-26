@@ -135,3 +135,22 @@ def test_file_and_directory_cannot_alias_the_same_canonical_output_path(tmp_path
     with httpx.Client(transport=transport) as client:
         with pytest.raises(ValueError, match="canonical and unique"):
             freeze_archive_catalog(client, tmp_path)
+
+
+def test_archive_redirect_is_resolved_once_and_signed_lease_is_not_the_public_source_identity():
+    blob = zip_blob({"data": b"x" * 100_000})
+    object_transport, requests = range_transport(blob)
+    api_calls = []
+
+    def respond(request):
+        if request.url.host == "publisher.test":
+            api_calls.append(request.url)
+            return httpx.Response(307, headers={"location": "https://storage.test/object?signature=private-lease"})
+        return object_transport.handle_request(request)
+
+    with httpx.Client(transport=httpx.MockTransport(respond), follow_redirects=True) as client:
+        reader = RangeReader(client, "https://publisher.test/archive")
+        assert reader.read(4) == blob[:4]
+        assert reader.url == "https://publisher.test/archive"
+        assert "signature" not in repr(reader)
+    assert len(api_calls) == 1 and len(requests) == 2
