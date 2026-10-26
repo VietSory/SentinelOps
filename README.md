@@ -18,6 +18,11 @@ the full training-readiness gate. Real model serving, incident
 correlation/RCA, Bedrock, operator UI, controlled remediation and AWS deployment
 follow the delivery gates; local telemetry evidence does not certify them.
 
+Training research now prioritizes [public datasets](docs/PUBLIC_DATA_PLAN.md)
+(RCAEval and SMD); local captures support integration and transfer/calibration.
+Pinned download/audit tools verify original publisher checksums. Public benchmark
+models require a matching live feature adapter before activation.
+
 Incident writes persist exact IERs with idempotency and revision checks. See the current
 [phase status](docs/PROJECT_STATUS.md), [experiment protocol](docs/STEP5_EXPERIMENTS.md)
 and [incident API guide](docs/STEP7_INCIDENT_API.md).

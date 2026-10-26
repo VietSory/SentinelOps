@@ -1,0 +1,17 @@
+{
+  "protocol_version": "smd-if-research/v1",
+  "dataset": "SMD",
+  "machine": "machine-1-1",
+  "selection_reason": "first lexicographic machine, fixed before scoring; one-machine pilot only",
+  "fit_fraction_of_official_train": 0.7,
+  "calibration_fraction_of_official_train": 0.3,
+  "calibration_exceedance_budget": 0.01,
+  "random_seed": 42,
+  "preprocessing": {"isolation_forest": "RobustScaler median/IQR fitted on fit prefix only", "imputation": "none; reject nonfinite values"},
+  "isolation_forest": {"n_estimators": 256, "max_samples": 256, "n_jobs": 2},
+  "statistical_baseline": {"method": "maximum absolute training median/MAD deviation", "scale_floor": 0.000001},
+  "test_policy": "freeze preprocessing/model/quantile before one evaluation of official test; no threshold search on test labels",
+  "metrics": ["precision", "recall", "f1", "average_precision", "roc_auc", "false_positives_per_1000_normal_points"],
+  "point_adjustment": false,
+  "activation_allowed": false
+}

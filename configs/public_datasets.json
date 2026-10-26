@@ -1,0 +1,18 @@
+{
+  "catalog_version": "public-data/v1",
+  "rcaeval": {
+    "repository": "phamquiluan/RCAEval",
+    "revision": "afeacb11bcc94dadfd1c8f483ee4377b2b8b614e",
+    "homepage": "https://huggingface.co/datasets/phamquiluan/RCAEval",
+    "paper": "https://arxiv.org/abs/2412.17015",
+    "declared_license": "MIT",
+    "default_cases": ["re1ob_adservice_cpu_1", "re2ob_checkoutservice_cpu_1", "re3ob_adservice_f3_1"]
+  },
+  "smd": {
+    "repository": "NetManAIOps/OmniAnomaly",
+    "revision": "7fb0e0acf89ea49908896bcc9f9e80fcfff6baf4",
+    "homepage": "https://github.com/NetManAIOps/OmniAnomaly",
+    "declared_license": "MIT",
+    "default_machine": "machine-1-1"
+  }
+}

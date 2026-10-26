@@ -234,6 +234,8 @@ Không forward-fill latency/error qua outage. Optional null được xử lý b�
 
 ## 7. Experiment và dataset design
 
+Research training sources follow [ADR-010](adr/ADR-010-public-training-data-and-transfer.md) and [the public-data plan](PUBLIC_DATA_PLAN.md). Existing local scenario/window inventories describe live integration/transfer acceptance. External datasets retain their own source/feature/label identities and must not be silently coerced into `http-red-5m/v1`.
+
 ### 7.1 Scenario catalog
 
 | ID | Scenario | Root ground truth | Serving evidence được phép | Expectation |

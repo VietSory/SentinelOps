@@ -4,13 +4,13 @@ Status: manifest/labeling/dataset-freeze implementation and a bounded local S0/S
 
 ## Training data sources
 
-The primary dataset is telemetry measured from the actual three-service/PostgreSQL testbed under harness-generated traffic and controlled faults. It is experimental workload data, not production-user traffic or hand-authored metric values. No public dataset is currently selected as the training authority.
+The primary research/training direction is now [published public datasets](PUBLIC_DATA_PLAN.md), as requested by the repository owner and accepted in ADR-010. RCAEval is the main microservice/RCA corpus and SMD supplies an external anomaly benchmark. The local three-service/PostgreSQL captures below are measured integration/transfer evidence, not the primary research corpus. They are experimental workload measurements, not production-user traffic or hand-authored metrics.
 
 | Source | Training/evaluation use |
 | --- | --- |
-| Local Prometheus, populated by service OTel metrics | Closed 60s observations → 300s features at 60s steps; five registered RED/trend features |
-| Healthy independent runs | Per-service median/MAD and Isolation Forest training; separate healthy calibration runs select thresholds |
-| Healthy + gradual-degradation runs | XGBoost precursor-phase development labels, with run/time-separated validation/test |
+| Local Prometheus, populated by service OTel metrics | Live adapter/integration: closed 60s observations → 300s features at 60s steps; five registered RED/trend features |
+| Healthy independent local runs | Source parity, nominal calibration/transfer evidence for a compatible live model |
+| Healthy + gradual-degradation local runs | Independent integration labels and validation of live precursor semantics |
 | Unsampled business server logs | Independent raw-duration/error SLO labels; not labels derived from model predictions |
 | Jaeger, structured logs, native PostgreSQL observations and actual change events | Retained RCA/evaluation evidence; not automatically appended to the five-feature model vector |
 | Out-of-band run truth | Fault/scenario/root-cause timing for labeling/evaluation only; excluded from serving model input |

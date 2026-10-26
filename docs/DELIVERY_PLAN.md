@@ -137,6 +137,8 @@ Các lệnh trên là kế hoạch xác minh tại P0, không phải kết quả
 
 ## 8. P5 — Experiment Harness và dataset có ground truth
 
+**Cập nhật nguồn 2026-10-26:** theo yêu cầu owner và [ADR-010](adr/ADR-010-public-training-data-and-transfer.md), public datasets là nguồn nghiên cứu/training/evaluation chính. [PUBLIC_DATA_PLAN.md](PUBLIC_DATA_PLAN.md) xác định RCAEval/SMD, provenance, split và compatibility. Harness local bên dưới phục vụ integration, label/source parity và transfer/calibration; không tiếp tục dùng hai local pilots nhỏ làm nguồn training chính. Không đếm public rows thành 300/100 live RED windows khi feature semantics chưa khớp.
+
 **Mục tiêu:** Tạo dữ liệu đủ để học và đánh giá, có run độc lập và kiểm soát leakage.
 
 **Công việc**
