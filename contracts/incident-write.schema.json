@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/incident-write.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "payload",
+    "context",
+    "lifecycle_stage",
+    "reason"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "payload": {
+      "$ref": "https://sentinelops.local/contracts/incident-evidence-record.schema.json"
+    },
+    "context": {
+      "$ref": "#/$defs/context",
+      "unevaluatedProperties": false
+    },
+    "lifecycle_stage": {
+      "enum": [
+        "OPEN",
+        "RCA_READY",
+        "EXPLAINED",
+        "MITIGATION_PLANNED",
+        "MITIGATING",
+        "VERIFYING",
+        "RECOVERED",
+        "ROLLED_BACK",
+        "ESCALATED",
+        "CLOSED"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    }
+  },
+  "$defs": {
+    "context": {
+      "type": "object",
+      "required": [
+        "availability",
+        "trigger_sources",
+        "source_refs",
+        "config_refs",
+        "recovery_source"
+      ],
+      "properties": {
+        "availability": {
+          "enum": [
+            "ELIGIBLE",
+            "UNKNOWN"
+          ]
+        },
+        "trigger_sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "signal_id",
+              "emitted_at",
+              "source_ref"
+            ],
+            "properties": {
+              "source": {
+                "enum": [
+                  "anomaly",
+                  "risk",
+                  "slo",
+                  "manual"
+                ]
+              },
+              "signal_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "emitted_at": {
+                "type": "string",
+                "minLength": 1,
+                "format": "date-time"
+              },
+              "source_ref": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "source_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "config_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "recovery_source": {
+          "enum": [
+            null,
+            "natural",
+            "action",
+            "manual"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -416,7 +416,7 @@ New interfaces MUST có OpenAPI/JSON Schema và producer/consumer fixtures trư�
 
 Status policy: 422 invalid schema/semantics/features; 404 missing resource; 409 conflicting revision/idempotency payload; 401/403 unauthorized; 503 unavailable required dependency/model. Error object có code, message, request ID; không lộ DSN, stack trace hoặc secret. Side-effect endpoint cần idempotency key và expected incident revision.
 
-Foundation `POST /v1/incidents` đang echo; chuyển sang persistence là hành vi mới cần migration/tests/documentation. Không dùng endpoint write này làm public arbitrary evidence upload trong AWS; chỉ trusted producers/authorized operators.
+Foundation `POST /v1/incidents` ban đầu echo. [Migration persistence hiện tại](STEP7_INCIDENT_API.md) giữ nguyên IER body, yêu cầu bearer identity, `If-Match`/idempotency, trả revision qua headers và cung cấp context/list contracts riêng. Import được ghi là manual assertion, không tự thành model/RCA/recovery evidence; các action/recovery writers chưa tích hợp bị chặn. Không dùng endpoint write này làm public arbitrary evidence upload trong AWS; chỉ trusted producers/authorized operators. Local static-token adapter chưa thay thế production identity adapter.
 
 ## 12. Grounded explanation
 

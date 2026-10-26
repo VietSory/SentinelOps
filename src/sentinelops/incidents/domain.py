@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 from typing import Any
 
 from sentinelops.contracts import utc_time, validate_payload
@@ -42,6 +43,8 @@ class IncidentWrite:
 
     def validate(self) -> None:
         validate_payload("incident-evidence-record.schema.json",self.payload)
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}",self.payload["incident_id"]):
+            raise ValueError("stored incident IDs must be URI-safe ASCII identifiers of at most 256 characters")
         if type(self.expected_revision) is not int or self.expected_revision < 0:
             raise ValueError("expected revision must be a nonnegative integer")
         if any(not isinstance(value,str) or not value.strip() or len(value)>256
@@ -62,7 +65,7 @@ class IncidentWrite:
         if state not in allowed:
             raise ValueError("IER state disagrees with lifecycle projection")
         expected = {"availability","trigger_sources","source_refs","config_refs","recovery_source"}
-        if set(self.context) != expected or self.context["availability"] not in ("ELIGIBLE","UNKNOWN"):
+        if not isinstance(self.context,dict) or set(self.context) != expected or self.context["availability"] not in ("ELIGIBLE","UNKNOWN"):
             raise ValueError("invalid incident context")
         if self.context["recovery_source"] not in (None,"natural","action","manual"):
             raise ValueError("invalid recovery source")
@@ -75,10 +78,12 @@ class IncidentWrite:
             raise ValueError("incident requires explicit trigger provenance")
         identities = set()
         for trigger in triggers:
-            if set(trigger) != {"source","signal_id","emitted_at","source_ref"} or trigger["source"] not in ("anomaly","risk","slo","manual"):
+            if not isinstance(trigger,dict) or set(trigger) != {"source","signal_id","emitted_at","source_ref"} or trigger["source"] not in ("anomaly","risk","slo","manual"):
                 raise ValueError("invalid trigger provenance")
             if any(not isinstance(trigger[key],str) or not trigger[key].strip() for key in ("signal_id","source_ref")):
                 raise ValueError("missing trigger identity/reference")
+            if not isinstance(trigger["emitted_at"],str):
+                raise ValueError("trigger emission time must be UTC text")
             utc_time(trigger["emitted_at"])
             identity = (trigger["source"],trigger["signal_id"])
             if identity in identities:

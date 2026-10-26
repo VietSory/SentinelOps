@@ -20,6 +20,8 @@ Kiến trúc triển khai đã được repository owner chấp nhận ngày 202
 
 ## 2. Điểm xuất phát đã quan sát
 
+Bảng dưới là snapshot baseline `20edcae`, không phải trạng thái mới nhất. Kết quả runtime và phần đã triển khai tiếp được cập nhật tại [PROJECT_STATUS.md](PROJECT_STATUS.md).
+
 | Thành phần | Hiện trạng trong repo | Bằng chứng hiện có | Việc cần làm để xác nhận |
 | --- | --- | --- | --- |
 | Step 1 — Foundation | FastAPI skeleton, 7 JSON Schema, 3 sample, validator/replay JSONL | `src/sentinelops/`, `contracts/`, `samples/`, `tests/test_api.py`, `tests/test_contracts.py` | Chạy lại schema/API tests và đóng checklist Foundation |
