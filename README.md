@@ -8,13 +8,20 @@ SentinelOps is the implementation repository for the approved AI4Life 2026 AIOps
 
 The repository implements a contract-valid Foundation API skeleton, a real
 three-service/PostgreSQL testbed, distributed OpenTelemetry, local Prometheus
-history, immutable metric captures and deterministic feature windows. Dated
+history, immutable metric captures, deterministic feature windows, predeclared
+local experiments and an isolated PostgreSQL incident repository. Dated
 verification reports live under [docs/reports](docs/reports/).
 
 The API detector remains an explicitly mocked Foundation response until the ML
-gate is implemented. Training/evaluation datasets, real model serving, incident
+gate is implemented. The healthy dataset collected so far is a pilot and fails
+the full training-readiness gate. Real model serving, incident
 correlation/RCA, Bedrock, operator UI, controlled remediation and AWS deployment
 follow the delivery gates; local telemetry evidence does not certify them.
+
+The incident repository is verified independently; the Foundation HTTP incident
+endpoint still echoes until the API persistence migration. See the current
+[phase status](docs/PROJECT_STATUS.md), [experiment protocol](docs/STEP5_EXPERIMENTS.md)
+and [incident storage guide](docs/STEP7_INCIDENT_STORE.md).
 
 Runtime contracts remain strict and versioned. Supplemental envelopes carry
 quality, provenance and future lifecycle metadata without changing legacy wire
