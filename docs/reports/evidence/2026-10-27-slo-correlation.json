@@ -1,0 +1,106 @@
+{
+  "scope": "conservative episode correlation software and development-source replay; not RCA accuracy",
+  "source_commit": "e00212ae1bc9f2a3968ceff87cb7dbf93d86138a",
+  "full_python_tests": 325,
+  "focused_health_correlation_tests": 30,
+  "cases": {
+    "s0": {
+      "mode": "event-time-analytical",
+      "as_of": "2026-10-26T03:12:00Z",
+      "source_scope_sha256": "93528175c8ffb477e112531c5ef0ee114712a2500f5c05c15c82c6529509644a",
+      "topology_sha256": "ef83d6691437734bbec3c8de806e41d30a178b5ed219a1e0f4be0c4f496e87bd",
+      "source_identity": [
+        "local",
+        "prometheus-increase-60s-5s/v1",
+        "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560"
+      ],
+      "duplicate_count": 0,
+      "future_count": 0,
+      "non_opening_count": 30,
+      "opening_facts": [],
+      "groups": [],
+      "historical_emissions_verified": false,
+      "rca_evaluated": false,
+      "actions_allowed": false,
+      "result_id": "e0289f72bc391775c0c26dd6f819ef94f7f48be0dbdcee0f002c0b592e9f2e93",
+      "report_ref": "artifact://manifests/37920d883127628d7d715ea968d16a22f9f665a4a7b83ecac8431807dbcb1c12.json",
+      "upstream_health_report_ref": "artifact://manifests/93528175c8ffb477e112531c5ef0ee114712a2500f5c05c15c82c6529509644a.json",
+      "input_signals": 30,
+      "input_signal_ids_sha256": "6baa9becb3b5981f81063fc58e6cef59e1cd37cadde2e1b5b6c7455a32b4a298",
+      "opening_episodes": 0,
+      "group_count": 0,
+      "byte_identical_replay": true
+    },
+    "s3": {
+      "mode": "event-time-analytical",
+      "as_of": "2026-10-26T03:37:00Z",
+      "source_scope_sha256": "604fa0a5cb1276dc449acc955f2e7ab91a590b7754698b7bb716465fdd5de059",
+      "topology_sha256": "ef83d6691437734bbec3c8de806e41d30a178b5ed219a1e0f4be0c4f496e87bd",
+      "source_identity": [
+        "local",
+        "prometheus-increase-60s-5s/v1",
+        "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560"
+      ],
+      "duplicate_count": 0,
+      "future_count": 0,
+      "non_opening_count": 58,
+      "opening_facts": [
+        {
+          "episode_start_at": "2026-10-26T03:29:00Z",
+          "evaluated_at": "2026-10-26T03:32:00Z",
+          "service": "checkout-service",
+          "signal_id": "76550834196ad7b9aa5823fc35b7ae03a6ae62bc4f9ceb2aeb17b93933c8abf7"
+        },
+        {
+          "episode_start_at": "2026-10-26T03:29:00Z",
+          "evaluated_at": "2026-10-26T03:32:00Z",
+          "service": "payment-service",
+          "signal_id": "891ec795297ba00329d2e8d167cb96264800d9c686b720a4ed46d989eb5b9403"
+        }
+      ],
+      "groups": [
+        {
+          "affected_services": [
+            "checkout-service",
+            "payment-service"
+          ],
+          "dependency_support": [
+            {
+              "candidate_signal_id": "891ec795297ba00329d2e8d167cb96264800d9c686b720a4ed46d989eb5b9403",
+              "consumer": "checkout-service",
+              "dependency": "payment-service",
+              "path": [
+                "checkout-service",
+                "payment-service"
+              ]
+            }
+          ],
+          "first_onset_at": "2026-10-26T03:29:00Z",
+          "group_id": "b3bfd77cd66be204656b4319309643a711bfc0c8e0e5f2607d9d7379807cb557",
+          "grouping_reason": "dependency-path",
+          "last_onset_at": "2026-10-26T03:29:00Z",
+          "signal_ids": [
+            "76550834196ad7b9aa5823fc35b7ae03a6ae62bc4f9ceb2aeb17b93933c8abf7",
+            "891ec795297ba00329d2e8d167cb96264800d9c686b720a4ed46d989eb5b9403"
+          ],
+          "source_scope_sha256": "604fa0a5cb1276dc449acc955f2e7ab91a590b7754698b7bb716465fdd5de059",
+          "structural_candidates": [
+            "payment-service"
+          ],
+          "topology_sha256": "ef83d6691437734bbec3c8de806e41d30a178b5ed219a1e0f4be0c4f496e87bd"
+        }
+      ],
+      "historical_emissions_verified": false,
+      "rca_evaluated": false,
+      "actions_allowed": false,
+      "result_id": "e0b269605c5411968bab2cc35e1da4251a9fe4d99d1e59c5731c12689bc215e7",
+      "report_ref": "artifact://manifests/f2a5d5898b2438ae6e88ca005d509cf0fa090032f07112ff6f1e4547c55b86c8.json",
+      "upstream_health_report_ref": "artifact://manifests/604fa0a5cb1276dc449acc955f2e7ab91a590b7754698b7bb716465fdd5de059.json",
+      "input_signals": 60,
+      "input_signal_ids_sha256": "5b9a038941e9af41e9e267de55915b5fc60b6156d2aec2e67db26bc908461d28",
+      "opening_episodes": 2,
+      "group_count": 1,
+      "byte_identical_replay": true
+    }
+  }
+}
