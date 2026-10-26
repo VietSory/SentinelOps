@@ -77,6 +77,8 @@ jobs:
           labels=audit_phase_labels(Path(acquisition['manifest_path']),Path('artifacts/public-data/resource-windows'),
                                     Path('artifacts/public-data/interference-labels'),project=Path.cwd())
           assert labels['rows']==580 and len(labels['events']['cpu_aug12_25min_200_0'])==9
+          assert labels['label_counts']=={'direct-recorded-interference':152,'no-recorded-interference-reference':29,'other-host-interference-context':399}
+          assert labels['feature_eligible_label_counts']=={'direct-recorded-interference':92,'no-recorded-interference-reference':23,'other-host-interference-context':322}
           assert labels['training_ready'] is False and labels['activation_allowed'] is False
           print('NATIVE INTERFERENCE LABEL AUDIT: PASS; NOT A PRECURSOR/SLO TARGET')
           PY
