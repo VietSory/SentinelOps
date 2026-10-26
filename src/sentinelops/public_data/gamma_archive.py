@@ -7,6 +7,7 @@ import io
 from pathlib import Path
 import re
 import subprocess
+from threading import Lock
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 from sentinelops.public_data.downloads import safe_relative
@@ -24,6 +25,8 @@ class RangeReader(io.RawIOBase):
         self.client, self.url = client, url
         self.max_bytes, self.max_request_bytes = max_bytes, max_request_bytes
         self.body_bytes = self.requests = self.position = 0
+        self.reserved_bytes = 0
+        self._budget_lock = Lock()
         self.size = self.etag = None
         self.cache = []
         start, blob = self.fetch("bytes=-65536", suffix=True)
@@ -38,10 +41,13 @@ class RangeReader(io.RawIOBase):
                 raise ValueError("invalid archive range request")
             start, end = map(int, match.groups())
             length = end - start + 1
-            if not 0 <= start <= end < self.size or length > self.max_request_bytes or self.body_bytes + length > self.max_bytes:
-                raise ValueError("archive request exceeds its range/body budget")
-        with self.client.stream("GET", self.url, headers={"Range": value, "Accept-Encoding": "identity"}) as response:
+            with self._budget_lock:
+                if not 0 <= start <= end < self.size or length > self.max_request_bytes or self.reserved_bytes + length > self.max_bytes:
+                    raise ValueError("archive request exceeds its range/body budget")
+                self.reserved_bytes += length
+        with self._budget_lock:
             self.requests += 1
+        with self.client.stream("GET", self.url, headers={"Range": value, "Accept-Encoding": "identity"}) as response:
             if response.status_code != 206:
                 raise ValueError("archive server did not honor the exact byte range; full download refused")
             match = re.fullmatch(r"bytes ([0-9]+)-([0-9]+)/([0-9]+)", response.headers.get("content-range", ""))
@@ -54,17 +60,21 @@ class RangeReader(io.RawIOBase):
             if (suffix and (start != max(0, total - 65536) or end != total - 1)) or (not suffix and value != expected):
                 raise ValueError("archive response range differs from requested bytes")
             etag = response.headers.get("etag")
-            if self.size is None:
-                self.size, self.etag = total, etag
-            elif self.size != total or self.etag != etag:
-                raise ValueError("archive identity changed between range responses")
             length = end - start + 1
-            if length > self.max_request_bytes or self.body_bytes + length > self.max_bytes:
-                raise ValueError("archive range exceeds its request/total body budget")
+            with self._budget_lock:
+                if self.size is None:
+                    self.size, self.etag = total, etag
+                elif self.size != total or self.etag != etag:
+                    raise ValueError("archive identity changed between range responses")
+                if suffix:
+                    if length > self.max_request_bytes or self.reserved_bytes + length > self.max_bytes:
+                        raise ValueError("archive range exceeds its request/total body budget")
+                    self.reserved_bytes += length
             parts, received = [], 0
             for chunk in response.iter_bytes():
                 received += len(chunk)
-                self.body_bytes += len(chunk)
+                with self._budget_lock:
+                    self.body_bytes += len(chunk)
                 if received > length or self.body_bytes > self.max_bytes:
                     raise ValueError("archive stream exceeds declared range/body budget")
                 parts.append(chunk)
@@ -114,7 +124,7 @@ def archive_catalog(client, *, policy=None, max_bytes=32_000_000, max_entries=25
     require_training_source("gamma", policy)
     metadata = publisher_metadata(client, policy)
     url = f"{API}/download/{policy['sources']['gamma']['publisher']}?datasetVersionNumber=1"
-    reader = RangeReader(client, url, max_bytes=max_bytes)
+    reader = RangeReader(client, url, max_bytes=max_bytes, max_request_bytes=min(24_000_000, max_bytes))
     try:
         archive = ZipFile(reader)
         entries = archive.infolist()
