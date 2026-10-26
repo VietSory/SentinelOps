@@ -322,6 +322,8 @@ RECOVERING -> INCIDENT nếu verify fail
 
 Persistence đếm bucket/window IDs mới; duplicate replay không cộng lần thứ hai. Dùng hysteresis để thoát trạng thái; không đóng incident chỉ từ một clean sample. Default entry là hai consecutive eligible observations, exit/verification dùng ba buckets theo policy; thresholds cụ thể được version.
 
+Implementation checkpoint: [objective SLO health producer](STEP7_SLO_HEALTH.md) and [real captured-source replay](reports/2026-10-26-slo-health-replay.md) implement this rule-source prerequisite with explicit UNKNOWN, policy/source identity and immutable decisions. This is separate from model outputs and independent unsampled-log evaluation labels. Continuous worker checkpoints, correlated IER writing and action verification remain pending; replay decision clocks are not historical emissions.
+
 ### 9.3 Incident lifecycle và projection
 
 ```text

@@ -9,6 +9,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 CHECK = r'''
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 import sentinelops
@@ -38,6 +39,12 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'incident-envelope', 'incident-list', 'api-error', 'training-data-policy',
              'research-resource-window', 'research-interference-label', 'health-signal'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
+policy={'policy_version':'slo-health/local-v1','latency_ms':750.,'error_rate':.05,
+    'minimum_requests':30,'minimum_coverage':.8,'entry_buckets':2,'recovery_buckets':3,'maximum_lag_seconds':60}
+health=advance_health(None,None,service='payment-service',environment='test',source_profile='wheel/v1',
+    bucket_end=datetime(2026,10,26,tzinfo=timezone.utc),evaluated_at=datetime(2026,10,26,tzinfo=timezone.utc),policy=policy)
+validate_payload('health-signal.schema.json',health)
+assert health['availability']=='UNKNOWN' and health['health'] is None
 client = TestClient(app)
 assert client.get('/health').status_code == 200
 payload = {'schema_version':'1.0', 'service':'payment-service',

@@ -1,0 +1,190 @@
+{
+  "scope": "objective SLO signal software and captured-source replay; no model/RCA/action acceptance",
+  "source_commit": "9c0ef671ff4c2f5b39aa6153af4298de82826632",
+  "full_python_tests": 299,
+  "focused_tests": 18,
+  "cases": {
+    "s0": {
+      "mode": "availability-aware-replay",
+      "source_manifest_ref": "artifact://manifests/ba77c069e21fb90ffe02627450ff06fe19b4f437f06ed7d306b06293e0d1807b.json",
+      "normalization_manifest_ref": "artifact://manifests/a23a77dba6122f284f783856b6b1fabe22204be1002a14c189d02ba198b33976.json",
+      "policy": {
+        "entry_buckets": 2,
+        "error_rate": 0.05,
+        "latency_ms": 750.0,
+        "maximum_lag_seconds": 60,
+        "minimum_coverage": 0.8,
+        "minimum_requests": 30,
+        "policy_version": "slo-health/local-v1",
+        "recovery_buckets": 3
+      },
+      "policy_sha256": "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560",
+      "bucket_count": 10,
+      "raw_capture_count": 30,
+      "source_observation_count": 30,
+      "source_quarantine_count": 0,
+      "signal_count": 30,
+      "event_counts": {
+        "checkout-service/data_unknown": 1,
+        "checkout-service/observation": 9,
+        "inventory-service/data_unknown": 1,
+        "inventory-service/observation": 9,
+        "payment-service/data_unknown": 1,
+        "payment-service/observation": 9
+      },
+      "availability_counts": {
+        "checkout-service/ELIGIBLE": 9,
+        "checkout-service/UNKNOWN": 1,
+        "inventory-service/ELIGIBLE": 9,
+        "inventory-service/UNKNOWN": 1,
+        "payment-service/ELIGIBLE": 9,
+        "payment-service/UNKNOWN": 1
+      },
+      "health_counts": {
+        "checkout-service/None": 1,
+        "checkout-service/healthy": 9,
+        "inventory-service/None": 1,
+        "inventory-service/healthy": 9,
+        "payment-service/None": 1,
+        "payment-service/healthy": 9
+      },
+      "raw_normalization_parity": true,
+      "historical_emission_times_verified": false,
+      "model_outputs_available": false,
+      "rca_evaluated": false,
+      "actions_dispatched": false,
+      "report_ref": "artifact://manifests/93528175c8ffb477e112531c5ef0ee114712a2500f5c05c15c82c6529509644a.json",
+      "signal_refs_sha256": "93e187f4d0ad9dcf28f2fb24d09d6814e9215c127e4eed164ee96f69d36aac30",
+      "byte_identical_replay": true,
+      "events": [],
+      "final_health": {
+        "checkout-service": {
+          "health": "healthy",
+          "availability": "ELIGIBLE",
+          "incident_active": false,
+          "clear_streak": 3
+        },
+        "inventory-service": {
+          "health": "healthy",
+          "availability": "ELIGIBLE",
+          "incident_active": false,
+          "clear_streak": 3
+        },
+        "payment-service": {
+          "health": "healthy",
+          "availability": "ELIGIBLE",
+          "incident_active": false,
+          "clear_streak": 3
+        }
+      }
+    },
+    "s3": {
+      "mode": "availability-aware-replay",
+      "source_manifest_ref": "artifact://manifests/bc4c790e504db574892f0d0fb0ba50cb875e9d36961a7c41e6d6a00023202ee7.json",
+      "normalization_manifest_ref": "artifact://manifests/e527c3b441de23a1973cdbcd65ea84a0310df514c2387f401647935000329ce4.json",
+      "policy": {
+        "entry_buckets": 2,
+        "error_rate": 0.05,
+        "latency_ms": 750.0,
+        "maximum_lag_seconds": 60,
+        "minimum_coverage": 0.8,
+        "minimum_requests": 30,
+        "policy_version": "slo-health/local-v1",
+        "recovery_buckets": 3
+      },
+      "policy_sha256": "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560",
+      "bucket_count": 20,
+      "raw_capture_count": 60,
+      "source_observation_count": 60,
+      "source_quarantine_count": 0,
+      "signal_count": 60,
+      "event_counts": {
+        "checkout-service/data_unknown": 1,
+        "checkout-service/incident_opened": 1,
+        "checkout-service/observation": 17,
+        "checkout-service/recovery_confirmed": 1,
+        "inventory-service/data_unknown": 1,
+        "inventory-service/observation": 19,
+        "payment-service/data_unknown": 1,
+        "payment-service/incident_opened": 1,
+        "payment-service/observation": 18
+      },
+      "availability_counts": {
+        "checkout-service/ELIGIBLE": 19,
+        "checkout-service/UNKNOWN": 1,
+        "inventory-service/ELIGIBLE": 19,
+        "inventory-service/UNKNOWN": 1,
+        "payment-service/ELIGIBLE": 19,
+        "payment-service/UNKNOWN": 1
+      },
+      "health_counts": {
+        "checkout-service/None": 1,
+        "checkout-service/degrading": 1,
+        "checkout-service/healthy": 13,
+        "checkout-service/incident": 3,
+        "checkout-service/recovering": 2,
+        "inventory-service/None": 1,
+        "inventory-service/healthy": 19,
+        "payment-service/None": 1,
+        "payment-service/degrading": 1,
+        "payment-service/healthy": 12,
+        "payment-service/incident": 4,
+        "payment-service/recovering": 2
+      },
+      "raw_normalization_parity": true,
+      "historical_emission_times_verified": false,
+      "model_outputs_available": false,
+      "rca_evaluated": false,
+      "actions_dispatched": false,
+      "report_ref": "artifact://manifests/604fa0a5cb1276dc449acc955f2e7ab91a590b7754698b7bb716465fdd5de059.json",
+      "signal_refs_sha256": "6c9ae0775473fb74b021ca86aa03d8293ae829031b7379133a3613a63ede74f4",
+      "byte_identical_replay": true,
+      "events": [
+        {
+          "service": "checkout-service",
+          "event": "incident_opened",
+          "bucket_end": "2026-10-26T03:31:00Z",
+          "evaluated_at": "2026-10-26T03:32:00Z",
+          "episode_start_at": "2026-10-26T03:29:00Z",
+          "episode_confirmed_at": "2026-10-26T03:32:00Z"
+        },
+        {
+          "service": "payment-service",
+          "event": "incident_opened",
+          "bucket_end": "2026-10-26T03:31:00Z",
+          "evaluated_at": "2026-10-26T03:32:00Z",
+          "episode_start_at": "2026-10-26T03:29:00Z",
+          "episode_confirmed_at": "2026-10-26T03:32:00Z"
+        },
+        {
+          "service": "checkout-service",
+          "event": "recovery_confirmed",
+          "bucket_end": "2026-10-26T03:36:00Z",
+          "evaluated_at": "2026-10-26T03:37:00Z",
+          "episode_start_at": "2026-10-26T03:29:00Z",
+          "episode_confirmed_at": "2026-10-26T03:32:00Z"
+        }
+      ],
+      "final_health": {
+        "checkout-service": {
+          "health": "healthy",
+          "availability": "ELIGIBLE",
+          "incident_active": false,
+          "clear_streak": 3
+        },
+        "inventory-service": {
+          "health": "healthy",
+          "availability": "ELIGIBLE",
+          "incident_active": false,
+          "clear_streak": 3
+        },
+        "payment-service": {
+          "health": "recovering",
+          "availability": "ELIGIBLE",
+          "incident_active": true,
+          "clear_streak": 2
+        }
+      }
+    }
+  }
+}
