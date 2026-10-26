@@ -47,6 +47,8 @@ The [causal raw-resource windows](GAMMA_RESOURCE_FEATURES.md) slice is measured 
 
 ## Dataset freeze and modeling
 
+The [measured native admission](reports/2026-10-26-gamma-native-admission.md) accounts for all 194 cases: 101 native-evidence admitted and 93 quarantined. [Group constraints](../configs/gamma_source_groups.json) freeze 19 conservative groups and full inspected-group exclusions; seven groups are candidate final holdout. These constraints do not assign splits or certify independence, healthy references, feature coverage or model readiness. Freeze whole-group assignments before building cohort windows; keep unsupported-case denominators and the original quality/target rules.
+
 1. Group all modalities, request types, graph variants, derived copies and overlapping captures from one experiment/session before windowing. Freeze a deterministic grouped development/validation/test partition and temporal embargo where continuous boundaries require it. Report independent run counts. No row-random splits.
 2. Define a source-specific feature registry after capability audit. Fit verified healthy training windows only; use healthy validation for IF/MAD calibration under the same false-alert/persistence protocol. Freeze artifacts and thresholds before test scoring. No point adjustment. Report exclusions/missingness and uncertainty by experiment.
 3. Keep XGBoost's target: gradual degradation **before independently measured SLO breach**. Bottleneck flags, warmup and phase names alone do not establish it. Require eligible healthy/benign negatives, gradual positives and independent development runs. Freeze evidence-backed labels/SLO before model comparison. Missing evidence means `not-ready`, not a current-fault classifier under the risk name.

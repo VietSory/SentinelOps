@@ -88,8 +88,15 @@ jobs:
               Path('configs/gamma_resource_cohort_files.json'),Path('configs/gamma_admission_profile.json'),
               Path('configs/gamma_development_inspections.json'),Path('artifacts/public-data/native-admission'),project=Path.cwd())
           assert admission['case_count']==194 and sum(admission['status_counts'].values())==194
+          assert admission['status_counts']=={'native-evidence-admitted':101,'quarantined':93}
+          assert admission['group_count']==19 and admission['candidate_final_holdout_groups']==7
           assert admission['training_ready'] is False and admission['activation_allowed'] is False
           native=json.loads(Path(admission['report_path']).read_text())
+          frozen_groups=json.loads(Path('configs/gamma_source_groups.json').read_text())
+          assert native['groups']==frozen_groups['groups']
+          assert native['profile_sha256']==frozen_groups['admission_profile_sha256']
+          assert native['source_file_tree_sha256']==frozen_groups['source_file_tree_sha256']
+          assert native['inspections_sha256']==frozen_groups['inspections_sha256']
           by_case={row['experiment']:row for row in native['cases']}
           assert by_case['cpu_aug12_25min_200_0']['status']=='native-evidence-admitted'
           assert by_case['mem_sep22_10min_800_0']['status']=='quarantined'

@@ -1,0 +1,392 @@
+{
+  "group_version": "gamma-source-groups/v1",
+  "source_scope_sha256": "82caad8e694015112e14173777da292d780f5136264de2719af0940c03221b42",
+  "source_file_tree_sha256": "ee11cd27de2451194fbe9df68365cbe6c67b0982d3b48f9dd0fb74b49374c3c6",
+  "admission_profile_sha256": "daa277019b5dfc3b6149bc3a1bbbbf3d347a7950ce598e1413b98d2f00179d6e",
+  "inspections_sha256": "89567d8868c21d0f90125f90907d87ceb89843fc25dcba04a51ff2938c883d55",
+  "constraints_only": true,
+  "split_assignments_frozen": false,
+  "training_ready": false,
+  "activation_allowed": false,
+  "groups": [
+    {
+      "admitted_cases": 10,
+      "development_inspected": [
+        "cpu_aug12_25min_200_0"
+      ],
+      "experiments": [
+        "cpu_aug12_25min_200_0",
+        "cpu_aug12_25min_200_1",
+        "cpu_aug12_25min_200_2",
+        "cpu_aug12_25min_200_3",
+        "cpu_aug12_25min_200_4",
+        "cpu_aug12_25min_200_5",
+        "cpu_aug12_25min_200_6",
+        "cpu_aug12_25min_200_7",
+        "cpu_aug12_25min_200_8",
+        "cpu_aug12_25min_200_9"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "4618e8db0e168eaf0218f4a26aa985152037f3645623ec640ac1251b99418500",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 2,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_aug18_25min_800_0",
+        "cpu_aug18_25min_800_1",
+        "cpu_aug18_25min_800_2"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "96377771e901a90b0cf59a658c91b6f6168ae4ff641a48b5b9c1d52bf48098d8",
+      "unknown_clock_cases": [
+        "cpu_aug18_25min_800_2"
+      ]
+    },
+    {
+      "admitted_cases": 10,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_aug30_25min_800_0",
+        "cpu_aug30_25min_800_1",
+        "cpu_aug30_25min_800_2",
+        "cpu_aug30_25min_800_3",
+        "cpu_aug30_25min_800_4",
+        "cpu_aug30_25min_800_5",
+        "cpu_aug30_25min_800_6",
+        "cpu_aug30_25min_800_7",
+        "cpu_aug30_25min_800_8",
+        "cpu_aug30_25min_800_9"
+      ],
+      "final_holdout_eligible": true,
+      "group_id": "43b97d8b45458430966ffd98fb65192753acd9ecafb832ce1cd8cdde09b168de",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 7,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_aug9_25min_400_0",
+        "cpu_aug9_25min_400_1",
+        "cpu_aug9_25min_400_2",
+        "cpu_aug9_25min_400_3",
+        "cpu_aug9_25min_400_4",
+        "cpu_aug9_25min_400_5",
+        "cpu_aug9_25min_400_6",
+        "cpu_aug9_25min_400_7",
+        "cpu_aug9_25min_400_8",
+        "cpu_aug9_25min_400_9"
+      ],
+      "final_holdout_eligible": true,
+      "group_id": "9fa2c45ed77b76cc64efaa2674992f483cbcbd868b3e00c5914a323e51bb28f0",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 0,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_july27_60min_800_0"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "f3ac930b241f7f7dc3df5f2a57e45f6a28431810b0a9e7a5714b6f6313162ef9",
+      "unknown_clock_cases": [
+        "cpu_july27_60min_800_0"
+      ]
+    },
+    {
+      "admitted_cases": 0,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_july28_800_0"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "640bcc6bd29e06b47f2cc7a932ffd316f8b1aa47c3755fd229f98016943fbf31",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 0,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_july29_25min_800_0",
+        "cpu_july29_30min_800_0",
+        "cpu_july30_25min_800_0"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "cea7e4fb07e7740871ad55ca8befc0d1d2dbfab450a39f336d4af6d389d5dbf2",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 0,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_july29_800_0"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "449938a70aec85f051cc3a9f355999f4296af411141b6cf0cef59a7869447910",
+      "unknown_clock_cases": [
+        "cpu_july29_800_0"
+      ]
+    },
+    {
+      "admitted_cases": 3,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_july30_25min_repeat_800_0",
+        "cpu_july30_25min_repeat_800_1",
+        "cpu_july30_25min_repeat_800_2"
+      ],
+      "final_holdout_eligible": true,
+      "group_id": "ab1dd288775f4953dbc833e68c9369094e432a04bc9a473b59b965565b5bcd82",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 0,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_july31_25min_repeat_800_0",
+        "cpu_july31_25min_repeat_800_1",
+        "cpu_july31_25min_repeat_800_2",
+        "cpu_july31_25min_repeat_800_3",
+        "cpu_july31_25min_repeat_800_4",
+        "cpu_july31_25min_repeat_800_5",
+        "cpu_july31_25min_repeat_800_6",
+        "cpu_july31_25min_repeat_800_7",
+        "cpu_july31_25min_repeat_800_8",
+        "cpu_july31_25min_repeat_800_9"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "651d8cbeeb99b7f26328a1e4e27244c90246d813560dda25dc22fa178be43b03",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 8,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_july31_25min_rerun_800_1",
+        "cpu_july31_25min_rerun_800_2",
+        "cpu_july31_25min_rerun_800_3",
+        "cpu_july31_25min_rerun_800_4",
+        "cpu_july31_25min_rerun_800_5",
+        "cpu_july31_25min_rerun_800_6",
+        "cpu_july31_25min_rerun_800_7",
+        "cpu_july31_25min_rerun_800_8",
+        "cpu_july31_25min_rerun_800_9"
+      ],
+      "final_holdout_eligible": true,
+      "group_id": "acc7d22c4da326728dda6d3a24367718a10152d224c8e0f2f19120c04b2812d8",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 30,
+      "development_inspected": [
+        "net_oct4_10min_800_0"
+      ],
+      "experiments": [
+        "cpu_mem_oct2_10min_800_0",
+        "cpu_mem_oct2_10min_800_1",
+        "cpu_mem_oct2_10min_800_10",
+        "cpu_mem_oct2_10min_800_11",
+        "cpu_mem_oct2_10min_800_12",
+        "cpu_mem_oct2_10min_800_13",
+        "cpu_mem_oct2_10min_800_14",
+        "cpu_mem_oct2_10min_800_15",
+        "cpu_mem_oct2_10min_800_16",
+        "cpu_mem_oct2_10min_800_17",
+        "cpu_mem_oct2_10min_800_18",
+        "cpu_mem_oct2_10min_800_19",
+        "cpu_mem_oct2_10min_800_2",
+        "cpu_mem_oct2_10min_800_20",
+        "cpu_mem_oct2_10min_800_21",
+        "cpu_mem_oct2_10min_800_22",
+        "cpu_mem_oct2_10min_800_23",
+        "cpu_mem_oct2_10min_800_24",
+        "cpu_mem_oct2_10min_800_25",
+        "cpu_mem_oct2_10min_800_26",
+        "cpu_mem_oct2_10min_800_27",
+        "cpu_mem_oct2_10min_800_28",
+        "cpu_mem_oct2_10min_800_29",
+        "cpu_mem_oct2_10min_800_3",
+        "cpu_mem_oct2_10min_800_4",
+        "cpu_mem_oct2_10min_800_5",
+        "cpu_mem_oct2_10min_800_6",
+        "cpu_mem_oct2_10min_800_7",
+        "cpu_mem_oct2_10min_800_8",
+        "cpu_mem_oct2_10min_800_9",
+        "net_oct4_10min_800_0",
+        "net_oct4_10min_800_1",
+        "net_oct4_10min_800_10",
+        "net_oct4_10min_800_11",
+        "net_oct4_10min_800_12",
+        "net_oct4_10min_800_13",
+        "net_oct4_10min_800_14",
+        "net_oct4_10min_800_15",
+        "net_oct4_10min_800_16",
+        "net_oct4_10min_800_17",
+        "net_oct4_10min_800_18",
+        "net_oct4_10min_800_19",
+        "net_oct4_10min_800_2",
+        "net_oct4_10min_800_20",
+        "net_oct4_10min_800_21",
+        "net_oct4_10min_800_22",
+        "net_oct4_10min_800_23",
+        "net_oct4_10min_800_24",
+        "net_oct4_10min_800_25",
+        "net_oct4_10min_800_26",
+        "net_oct4_10min_800_27",
+        "net_oct4_10min_800_28",
+        "net_oct4_10min_800_29",
+        "net_oct4_10min_800_3",
+        "net_oct4_10min_800_4",
+        "net_oct4_10min_800_5",
+        "net_oct4_10min_800_6",
+        "net_oct4_10min_800_7",
+        "net_oct4_10min_800_8",
+        "net_oct4_10min_800_9"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "dccb2ade61972897be5a0e0326428089fdf346cffb0f1d2fae3364e3206598b4",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 10,
+      "development_inspected": [
+        "cpu_mem_sep29_10min_800_0"
+      ],
+      "experiments": [
+        "cpu_mem_sep29_10min_800_0",
+        "cpu_mem_sep29_10min_800_1",
+        "cpu_mem_sep29_10min_800_2",
+        "cpu_mem_sep29_10min_800_3",
+        "cpu_mem_sep29_10min_800_4",
+        "cpu_mem_sep29_10min_800_5",
+        "cpu_mem_sep29_10min_800_6",
+        "cpu_mem_sep29_10min_800_7",
+        "cpu_mem_sep29_10min_800_8",
+        "cpu_mem_sep29_10min_800_9",
+        "mem_sep29_10min_800_0"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "e00cae1d001292fff7c8d8cf25192981a00d83ef9e7877fed3e4d65d47d45ae0",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 9,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_sept20_10min_800_0",
+        "cpu_sept20_10min_800_1",
+        "cpu_sept20_10min_800_2",
+        "cpu_sept20_10min_800_3",
+        "cpu_sept20_10min_800_4",
+        "cpu_sept20_10min_800_5",
+        "cpu_sept20_10min_800_6",
+        "cpu_sept20_10min_800_7",
+        "cpu_sept20_10min_800_8"
+      ],
+      "final_holdout_eligible": true,
+      "group_id": "67974b9fd6860ccca6cc66d50779a0b867e1e052baba8b050f849ed05cb3ba4d",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 10,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_sept4_25min_800_0",
+        "cpu_sept4_25min_800_1",
+        "cpu_sept4_25min_800_2",
+        "cpu_sept4_25min_800_3",
+        "cpu_sept4_25min_800_4",
+        "cpu_sept4_25min_800_5",
+        "cpu_sept4_25min_800_6",
+        "cpu_sept4_25min_800_7",
+        "cpu_sept4_25min_800_8",
+        "cpu_sept4_25min_800_9"
+      ],
+      "final_holdout_eligible": true,
+      "group_id": "52e2ef200b52ef7dac9d4f35cb723f06b04fddc62e2432e1daa09ca2a14004d2",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 2,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_sept9_25min_800_0",
+        "cpu_sept9_25min_800_1"
+      ],
+      "final_holdout_eligible": true,
+      "group_id": "e8bdaf3a13cec7300a04b1ea34b7f5a2a2d9f3ef79425a130b6cb6fba26106f4",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 0,
+      "development_inspected": [],
+      "experiments": [
+        "cpu_test_july24_800_0"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "09daa852d1cfc08d38f335af2d01323247b1050ffaf76ec1354462dd88eac2a2",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 0,
+      "development_inspected": [
+        "mem_sep22_10min_800_0"
+      ],
+      "experiments": [
+        "mem_sep22_10min_800_0",
+        "mem_sep22_10min_800_1",
+        "mem_sep22_10min_800_2",
+        "mem_sep22_10min_800_3",
+        "mem_sep22_10min_800_4",
+        "mem_sep22_10min_800_5",
+        "mem_sep22_10min_800_6",
+        "mem_sep22_10min_800_7",
+        "mem_sep22_10min_800_8",
+        "mem_sep22_10min_800_9"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "b4f95582ebb74066419e22cf50d0b7d6454d155af77645508860bc05fa07b4f1",
+      "unknown_clock_cases": []
+    },
+    {
+      "admitted_cases": 0,
+      "development_inspected": [],
+      "experiments": [
+        "mem_sep25_10min_800_0",
+        "mem_sep25_10min_800_1",
+        "mem_sep25_10min_800_10",
+        "mem_sep25_10min_800_11",
+        "mem_sep25_10min_800_12",
+        "mem_sep25_10min_800_13",
+        "mem_sep25_10min_800_14",
+        "mem_sep25_10min_800_15",
+        "mem_sep25_10min_800_16",
+        "mem_sep25_10min_800_17",
+        "mem_sep25_10min_800_18",
+        "mem_sep25_10min_800_19",
+        "mem_sep25_10min_800_2",
+        "mem_sep25_10min_800_20",
+        "mem_sep25_10min_800_21",
+        "mem_sep25_10min_800_22",
+        "mem_sep25_10min_800_23",
+        "mem_sep25_10min_800_24",
+        "mem_sep25_10min_800_25",
+        "mem_sep25_10min_800_26",
+        "mem_sep25_10min_800_27",
+        "mem_sep25_10min_800_28",
+        "mem_sep25_10min_800_29",
+        "mem_sep25_10min_800_3",
+        "mem_sep25_10min_800_4",
+        "mem_sep25_10min_800_5",
+        "mem_sep25_10min_800_6",
+        "mem_sep25_10min_800_7",
+        "mem_sep25_10min_800_8",
+        "mem_sep25_10min_800_9"
+      ],
+      "final_holdout_eligible": false,
+      "group_id": "9e9dbe6a9170531b9b8155cf4174fe2dd48e96bef46245811278c9b00d288e72",
+      "unknown_clock_cases": []
+    }
+  ]
+}
