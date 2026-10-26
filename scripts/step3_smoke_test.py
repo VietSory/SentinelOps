@@ -220,10 +220,10 @@ def main() -> None:
         traces = []
         for trace_id, correlation_id, statuses, _elapsed in runs:
             def check_trace(response: httpx.Response) -> None:
-                validate_trace(decode_v3_trace(response.text, trace_id), trace_id, correlation_id, statuses)
+                validate_trace(decode_v3_trace(response.text, trace_id), trace_id, correlation_id, statuses, require_timing=True)
 
             response = wait_for(client, f"{JAEGER}/api/v3/traces/{trace_id}", check_trace)
-            servers = validate_trace(decode_v3_trace(response.text, trace_id), trace_id, correlation_id, statuses)
+            servers = validate_trace(decode_v3_trace(response.text, trace_id), trace_id, correlation_id, statuses, require_timing=True)
             traces.append((trace_id, correlation_id, servers, statuses))
         print("PASS all four distributed traces and SERVER -> CLIENT -> SERVER parentage")
         wait_for(client, OTEL_METRICS, lambda response: validate_metrics(response.text, baseline_metrics))

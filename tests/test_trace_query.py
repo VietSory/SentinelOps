@@ -44,6 +44,37 @@ def test_otlp_stream_decodes_all_resources_and_validates_client_parentage(frames
     assert len(decoded["data"][0]["spans"]) == 5
     servers = validate_trace(decoded, TRACE_ID, "request-a", {s: 200 for s in EXPECTED_SERVICES})
     assert set(servers) == EXPECTED_SERVICES
+    assert all(span["timing"] is None for span in decoded["data"][0]["spans"])
+    with pytest.raises(ValueError, match="lacks native span timing"):
+        validate_trace(decoded, TRACE_ID, "request-a", {s: 200 for s in EXPECTED_SERVICES}, require_timing=True)
+
+
+def test_exact_nanosecond_timing_and_zero_duration_survive_string_and_integer_encoding(frames):
+    start = 1792984632890188101
+    for frame in frames:
+        for span in frame["result"]["resourceSpans"][0]["scopeSpans"][0]["spans"]:
+            span.update(startTimeUnixNano=str(start), endTimeUnixNano=start + 1)
+    # Exact one-nanosecond spans would collapse under a float timestamp round trip.
+    decoded = decode_v3_trace(body(frames), TRACE_ID)
+    assert all(span["timing"] == {"start_unix_ns": start, "end_unix_ns": start+1, "duration_ns": 1}
+               for span in decoded["data"][0]["spans"])
+    validate_trace(decoded, TRACE_ID, "request-a", {s: 200 for s in EXPECTED_SERVICES}, require_timing=True)
+    first = frames[0]["result"]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    first.update(startTimeUnixNano=0, endTimeUnixNano="0")
+    assert decode_v3_trace(body(frames), TRACE_ID)["data"][0]["spans"][0]["timing"]["duration_ns"] == 0
+    decoded["data"][0]["spans"][0]["timing"]["duration_ns"] = 0
+    with pytest.raises(ValueError, match="inconsistent native span timing"):
+        validate_trace(decoded, TRACE_ID, "request-a", {s: 200 for s in EXPECTED_SERVICES}, require_timing=True)
+
+
+@pytest.mark.parametrize(("start", "end"), [(1, None), (None, 1), (True, 2), (1.5, 2), (-1, 2),
+    (1, 2**64), ("1e18", "2"), ("", "2"), (3, 2), ("NaN", "2"), ("1.0", "2"), (None, None)])
+def test_declared_invalid_or_partial_timing_is_not_silently_zeroed(frames, start, end):
+    span = frames[0]["result"]["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    span.update(startTimeUnixNano=start, endTimeUnixNano=end)
+    if start is None and end is not None: span.pop("startTimeUnixNano")
+    if end is None and start is not None: span.pop("endTimeUnixNano")
+    with pytest.raises(ValueError): decode_v3_trace(body(frames), TRACE_ID)
 
 
 @pytest.mark.parametrize("mutation", ["another_trace", "duplicate", "zero_span", "no_service", "stream_error"])

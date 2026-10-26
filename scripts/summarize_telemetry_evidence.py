@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.contracts import utc_time
 
 
 def summarize(path: Path) -> dict:
@@ -17,8 +18,14 @@ def summarize(path: Path) -> dict:
     recorded = store.read(manifest["manifest_ref"])
     if recorded != {key:value for key,value in manifest.items() if key != "manifest_ref"}:
         raise ValueError("report manifest differs from its immutable snapshot")
+    capture_clocks = {}
     for reference in manifest["raw_refs"] + report["evidence_refs"]:
-        store.read(reference)
+        raw = store.read(reference)
+        if reference in report["evidence_refs"]:
+            clock = raw.get("collected_at")
+            if clock is not None:
+                utc_time(clock)
+            capture_clocks[reference] = clock
     observations = [store.read(ref) for ref in manifest["observation_refs"]]
     features = [store.read(ref) for ref in manifest["feature_refs"]]
     return {
@@ -30,6 +37,7 @@ def summarize(path: Path) -> dict:
         "observation_quality": dict(Counter(item["quality"]["status"] for item in observations)),
         "eligible_features_by_service": dict(Counter(item["service"] for item in features if item["payload"] is not None)),
         "quarantine_count": len(manifest["quarantine_refs"]),
+        "evidence_capture_clocks": capture_clocks,
         "workload_outcomes": report["details"]["counters"], "evidence_refs": report["evidence_refs"],
         "raw_archive_required_for_release": True,
     }

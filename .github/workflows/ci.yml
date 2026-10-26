@@ -222,8 +222,11 @@ jobs:
           from pathlib import Path
           from sentinelops.incidents.health_replay import replay_health_manifest
           from sentinelops.telemetry.store import ArtifactStore
+          from sentinelops.contracts import utc_time
           source=ArtifactStore('artifacts/step4/ci')
           smoke=json.loads(Path('artifacts/step4/ci/smoke-report.json').read_text())
+          for reference in smoke['evidence_refs']:
+              utc_time(source.read(reference)['collected_at'])
           health=replay_health_manifest(source,smoke['manifest']['manifest_ref'],
               json.loads(Path('configs/slo_health_policy.json').read_text()),Path('artifacts/step4/health'),project=Path.cwd())
           assert health['signal_count']==3*health['bucket_count']

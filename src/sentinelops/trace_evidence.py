@@ -22,6 +22,7 @@ def validate_trace(
     trace_id: str,
     correlation_id: str,
     statuses: dict[str, int],
+    *, require_timing: bool = False,
 ) -> dict[str, dict[str, Any]]:
     traces = payload.get("data", [])
     if len(traces) != 1 or traces[0]["traceID"].lower().zfill(32) != trace_id:
@@ -32,6 +33,15 @@ def validate_trace(
     servers: dict[str, dict[str, Any]] = {}
     clients: dict[str, dict[str, Any]] = {}
     for span in spans:
+        timing = span.get("timing")
+        if require_timing and timing is None:
+            raise ValueError("trace lacks native span timing required by this consumer")
+        if timing is not None:
+            if (not isinstance(timing, dict) or set(timing) != {"start_unix_ns", "end_unix_ns", "duration_ns"}
+                or any(type(value) is not int or not 0 <= value <= 2**64 - 1 for value in timing.values())
+                or timing["end_unix_ns"] < timing["start_unix_ns"]
+                or timing["duration_ns"] != timing["end_unix_ns"] - timing["start_unix_ns"]):
+                raise ValueError("trace has inconsistent native span timing")
         if span["traceID"].lower().zfill(32) != trace_id:
             raise ValueError("response contains a span from another trace")
         service = processes[span["processID"]]["serviceName"]

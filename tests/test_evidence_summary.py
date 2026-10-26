@@ -27,6 +27,20 @@ def test_summary_verifies_content_and_does_not_invent_legacy_start_commit(tmp_pa
     assert result["commit_at_report"] == "legacy-end-only"
     assert result["eligible_features_by_service"] == {"payment-service":1}
     assert result["raw_archive_required_for_release"] is True
+    assert set(result["evidence_capture_clocks"].values()) == {None}
+
+
+def test_summary_preserves_capture_clocks_and_rejects_non_utc_metadata(tmp_path):
+    path = make_report(tmp_path)
+    report = json.loads(path.read_text())
+    store = ArtifactStore(tmp_path)
+    raw = store.write("raw", {"kind":"trace", "collected_at":"2026-10-26T00:00:00Z"})
+    report["evidence_refs"] = [raw]; path.write_text(json.dumps(report))
+    assert summarize(path)["evidence_capture_clocks"] == {raw:"2026-10-26T00:00:00Z"}
+    raw = store.write("raw", {"kind":"trace", "collected_at":"2026-10-26T00:00:00"})
+    report["evidence_refs"] = [raw]; path.write_text(json.dumps(report))
+    with pytest.raises(ValueError, match="UTC"):
+        summarize(path)
 
 
 def test_summary_rejects_tampered_report_or_raw_evidence(tmp_path):

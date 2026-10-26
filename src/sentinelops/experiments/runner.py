@@ -195,7 +195,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                         if any(tag["key"]=="span.kind" and tag["value"]=="server" for tag in span["tags"])}
             if not set(BUSINESS_ROUTES) <= services:
                 raise ValueError("incomplete trace snapshot")
-            return serving.write("raw",{"kind":"trace","trace_id":trace_id,"body":response.text})
+            return serving.write("raw",{"kind":"trace","trace_id":trace_id,"body":response.text,
+                                        "collected_at":timestamp(datetime.now(timezone.utc))})
 
         async def collect():
             bucket = int(time.time()//60)*60+60
@@ -283,7 +284,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
     try:
         full,admitted = serving_logs(project,run["started_at"])
         truth.write("raw",{"kind":"full-experiment-logs","records":full})
-        run["logs_ref"] = serving.write("raw",{"kind":"serving-logs","records":admitted})
+        run["logs_ref"] = serving.write("raw",{"kind":"serving-logs","records":admitted,
+                                              "collected_at":timestamp(datetime.now(timezone.utc))})
         run["request_outcomes_ref"] = truth.write("raw",{"outcomes":outcomes})
         correlations = {item["correlation_id"] for item in outcomes}
         if any(item["correlation_id"] not in correlations for item in admitted if item["event"] == "request_completed"):

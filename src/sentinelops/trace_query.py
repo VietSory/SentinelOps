@@ -33,6 +33,31 @@ def _hex_id(value: str, length: int) -> str:
     return value.lower()
 
 
+def _span_timing(span: dict) -> dict | None:
+    """Preserve fixed64 epoch nanoseconds without a float round trip.
+
+    Legacy captures without both fields retain unavailable timing. Partial or
+    malformed declared timing is an error, not an invented zero duration.
+    """
+    keys = ("startTimeUnixNano", "endTimeUnixNano")
+    if not any(key in span for key in keys):
+        return None
+    if not all(key in span for key in keys):
+        raise ValueError("OTLP span timing requires both start and end")
+    values = []
+    for key in keys:
+        value = span[key]
+        if isinstance(value, str) and re.fullmatch(r"[0-9]{1,20}", value):
+            value = int(value)
+        if type(value) is not int or not 0 <= value <= 2**64 - 1:
+            raise ValueError("OTLP span time must be an exact unsigned 64-bit integer")
+        values.append(value)
+    start, end = values
+    if end < start:
+        raise ValueError("OTLP span end precedes start")
+    return {"start_unix_ns": start, "end_unix_ns": end, "duration_ns": end - start}
+
+
 def decode_v3_trace(body: str, trace_id: str) -> dict[str, Any]:
     trace_id = _hex_id(trace_id, 32)
     processes: dict[str, dict[str, str]] = {}
@@ -81,6 +106,7 @@ def decode_v3_trace(body: str, trace_id: str) -> dict[str, Any]:
                     spans.append({
                         "traceID": trace_id, "spanID": span_id, "processID": process_id,
                         "references": references,
+                        "timing": _span_timing(span),
                         "tags": [{"key": key, "value": value} for key, value in attributes.items()],
                     })
     if not spans:

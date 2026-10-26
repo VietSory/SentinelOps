@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import httpx
 
-from sentinelops.telemetry.core import BUSINESS_ROUTES
+from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
 from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import PrometheusSource
 from sentinelops.telemetry.store import ArtifactStore
@@ -144,12 +144,15 @@ def main() -> None:
     statuses = {service:200 for service in BUSINESS_ROUTES}
     with httpx.Client(timeout=10., trust_env=False) as client:
         def complete_trace(response):
-            validate_trace(decode_v3_trace(response.text, probe["trace_id"]), probe["trace_id"], probe["correlation_id"], statuses)
+            validate_trace(decode_v3_trace(response.text, probe["trace_id"]), probe["trace_id"], probe["correlation_id"], statuses, require_timing=True)
         response = wait_for(client, JAEGER+"/api/v3/traces/"+probe["trace_id"], complete_trace)
-        servers = validate_trace(decode_v3_trace(response.text, probe["trace_id"]), probe["trace_id"], probe["correlation_id"], statuses)
+        servers = validate_trace(decode_v3_trace(response.text, probe["trace_id"]), probe["trace_id"], probe["correlation_id"], statuses, require_timing=True)
+    trace_collected_at = timestamp(datetime.now(timezone.utc))
     logs = read_logs(details["started_at"])
+    logs_collected_at = timestamp(datetime.now(timezone.utc))
     validate_logs(logs, probe["trace_id"], probe["correlation_id"], servers, statuses)
-    evidence_refs = [store.write("raw", {"kind":"trace", "body":response.text}), store.write("raw", {"kind":"logs", "records":logs})]
+    evidence_refs = [store.write("raw", {"kind":"trace", "body":response.text,"collected_at":trace_collected_at}),
+                     store.write("raw", {"kind":"logs", "records":logs,"collected_at":logs_collected_at})]
     report = {"status":"PASS", "scope":"local RED telemetry and features only", "manifest":manifest,
               "evidence_refs":evidence_refs, "details":details,
               "commit_at_start":source_commit, "dirty_worktree_at_start":source_dirty,

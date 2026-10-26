@@ -1,0 +1,13 @@
+# Native trace timing and receipt clocks
+
+The internal Jaeger v3 decoder now retains observed span start/end time and duration for evidence consumers. Previously it preserved parentage/status while discarding native timing, so a successful topology smoke could not establish temporal evidence readiness.
+
+`span.timing` is either `null` for legacy payloads missing both timing fields, or an object with exact integer `start_unix_ns`, `end_unix_ns` and `duration_ns`. Missing timing is not a zero-duration span. Half-present, boolean, fractional, negative, overflowing and reversed timestamps fail parsing. Valid zero-duration spans remain distinguishable from missing fields.
+
+The [OpenTelemetry span definition](https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/trace/v1/trace.proto) specifies epoch nanoseconds and end time at or after start; the [OTLP JSON specification](https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md) permits numeric or decimal-string encoding of fixed64 values. Supported numeric inputs here are exact integers; floating-point timestamp decoding is refused to avoid losing nanoseconds. Values retain unsigned 64-bit bounds. No conversion through seconds, milliseconds or floating-point arithmetic is used to calculate duration.
+
+`validate_trace(..., require_timing=True)` requires complete, consistent timing on every returned span in addition to existing trace identity, parentage, correlation and status checks. Real Step 3/4 smoke consumers enable it. Legacy topology/status callers can still use the default behavior, but cannot claim temporal readiness from that alone. Parent-child clock containment or cross-host temporal precedence is not asserted without clock uncertainty evidence.
+
+New Step 4 and experiment-runner trace/log snapshots record UTC `collected_at` after the complete response/log read. This is a receipt observation, not the event timestamp or proof of earliest backend availability. Step 4 evidence summaries preserve these clocks and show null for older snapshots without them; CI verifies receipt metadata on newly captured evidence. Existing immutable captures are not rewritten or backdated.
+
+Retaining event time and recording new receipt clocks are prerequisites for RCA evidence, not a diagnosis or causal proof. Existing development snapshots lacking receipt clocks remain unsuitable for verified online cutoff/MTTD/lead-time claims. Later RCA consumers must check freshness/cutoff, source/clock uncertainty, missing modalities and evidence links separately; no model or remediation action is enabled by these fields.
