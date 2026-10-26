@@ -57,3 +57,10 @@ def test_manifest_is_verified_before_table_data_are_admitted(tmp_path):
     selected.write_bytes(b"changed")
     with pytest.raises(ValueError,match="manifest checksum"):
         load_verified_manifest(selected)
+
+
+def test_reader_cannot_include_a_table_omitted_from_the_verified_manifest(tmp_path):
+    from sentinelops.public_data.audit import require_verified_file
+    table=tmp_path/"unverified.txt";table.write_text("exists but not verified")
+    with pytest.raises(ValueError,match="not covered"):
+        require_verified_file({},table)
