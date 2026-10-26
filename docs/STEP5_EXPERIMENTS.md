@@ -2,6 +2,22 @@
 
 Status: manifest/labeling/dataset-freeze implementation and a bounded local S0/S1/S3 runner. Live acceptance evidence and sufficient independent data are tracked separately. G2 is not PASS merely because these modules or synthetic fixtures exist.
 
+## Training data sources
+
+The primary dataset is telemetry measured from the actual three-service/PostgreSQL testbed under harness-generated traffic and controlled faults. It is experimental workload data, not production-user traffic or hand-authored metric values. No public dataset is currently selected as the training authority.
+
+| Source | Training/evaluation use |
+| --- | --- |
+| Local Prometheus, populated by service OTel metrics | Closed 60s observations → 300s features at 60s steps; five registered RED/trend features |
+| Healthy independent runs | Per-service median/MAD and Isolation Forest training; separate healthy calibration runs select thresholds |
+| Healthy + gradual-degradation runs | XGBoost precursor-phase development labels, with run/time-separated validation/test |
+| Unsampled business server logs | Independent raw-duration/error SLO labels; not labels derived from model predictions |
+| Jaeger, structured logs, native PostgreSQL observations and actual change events | Retained RCA/evaluation evidence; not automatically appended to the five-feature model vector |
+| Out-of-band run truth | Fault/scenario/root-cause timing for labeling/evaluation only; excluded from serving model input |
+| Future AWS CloudWatch/X-Ray captures | Separate environment/source-profile inventory, parity checks and AWS training/recalibration before activation |
+
+Full planned coverage is S0…S5 in the delivery/technical spec. The current CLI implements only S0/S1/S3; real deployment, DB-pressure and independent-multiple-fault adapters remain required. Local model weights cannot be assumed valid for AWS without the source/environment gate. Collected pilot fixtures/phase labels alone do not establish detector accuracy or calibrated risk probabilities.
+
 ## Separation of truth and serving
 
 Each run declares its split, opaque run/session IDs, seed, source/code/image versions, parameters and scenario before collection. Ground truth, control phases and SLO labels belong to a separate `truth/` store. Serving capture/feature objects belong to `serving/`; run/scenario/phase IDs and labels never become model vector entries.
@@ -59,6 +75,8 @@ Each invocation creates an opaque `artifacts/experiments/run-UUID/` directory. T
 S1 applies a bounded Payment latency/error fault. S3 ramps Payment latency every 30s, then observes recovery. Fault experiments require at least 120s recovery; every run requires at least 300s warmup. S2/S4/S5 are rejected until actual deployment/DB/multiple-fault adapters exist. Default load is 3 requests/s with seeded ±5% jitter; queue saturation fails instead of accumulating unlimited pending requests. Requested rate is a generator setting, not a measured throughput claim.
 
 Prometheus queries run after the 30s watermark and blocking capture I/O runs off the traffic event loop. The runner archives business logs, available full business traces and optional native PostgreSQL observations when `DATABASE_URL` is explicitly provided. Control/configuration logs and phase-tagged client outcomes stay in `truth/`; serving evidence excludes control events. Raw duration logs supply SLO labels independently from histogram features.
+
+UTC readiness is rechecked after bounded monotonic sleeps; waking a timer does not itself prove the source watermark elapsed. A UTC wait times out after 120s; only an explicit not-yet-ready watermark can trigger the bounded capture retry. Other validation errors remain failures. Failed runs retain exception class and file/function/line diagnostics in truth without exception messages, locals or source text.
 
 The runner restores both original sandbox fault states in `finally`, including preflight failure/cancellation. It persists a failed run and partial evidence when possible; failed/dirty runs cannot enter a dataset. A hard process/host kill cannot execute cleanup: inspect both `/internal/faults` endpoints before reusing the sandbox. `--allow-dirty` is only for diagnostic pilot evidence; it does not bypass the dataset clean-source gate. Editing loaded source/contracts during collection marks the run dirty.
 

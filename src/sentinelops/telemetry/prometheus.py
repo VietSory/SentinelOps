@@ -14,6 +14,11 @@ from sentinelops.telemetry.core import BUSINESS_ROUTES, BucketMetrics, normalize
 
 SOURCE_PROFILE = "prometheus-increase-60s-5s/v1"
 SOURCE_INTERVALS = {"prometheus-increase-60s/v1": 15, SOURCE_PROFILE: 5}
+
+
+class BucketNotReady(ValueError):
+    """The UTC source watermark has not actually elapsed yet."""
+
 REQUESTS = "sentinelops_http_requests_total"
 DURATION = "sentinelops_http_request_duration_ms_milliseconds_bucket"
 
@@ -111,8 +116,10 @@ class PrometheusSource:
         current = now or datetime.now(timezone.utc)
         timestamp(end)
         timestamp(current)
-        if end.timestamp() % 60 or current < end + timedelta(seconds=30):
-            raise ValueError("bucket is unaligned or not past the source watermark")
+        if end.timestamp() % 60:
+            raise ValueError("bucket is unaligned")
+        if current < end + timedelta(seconds=30):
+            raise BucketNotReady("bucket is not past the source watermark")
         responses = {}
         for key, expression in queries(service).items():
             try:

@@ -21,11 +21,13 @@ import httpx
 
 from sentinelops.contracts import validate_payload
 from sentinelops.experiments.labels import SLOConfig, measure_slo
+from sentinelops.experiments.diagnostics import failure_context
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.infrastructure import PostgresInfrastructureSource
 from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE
 from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.telemetry.scheduling import capture_ready_bucket,wait_until_utc
 from sentinelops.trace_query import decode_v3_trace
 
 CHECKOUT = "http://127.0.0.1:8001"
@@ -185,11 +187,6 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                                  "status":status,"trace_id":trace_id,"correlation_id":correlation})
                 recent.append({"trace_id":trace_id,"completed_at":time.time()})
 
-        def capture_one(service,end):
-            raw = source.capture(service,end)
-            serving.write("raw",raw)
-            return raw
-
         def capture_trace(trace_id):
             response = source.client.get("http://127.0.0.1:16686/api/v3/traces/"+trace_id)
             response.raise_for_status()
@@ -203,12 +200,12 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         async def collect():
             bucket = int(time.time()//60)*60+60
             while ended is None or bucket <= int(ended.timestamp()//60)*60:
-                await asyncio.sleep(max(0.,bucket+30-time.time()))
+                await wait_until_utc(bucket+30)
                 if ended is not None and bucket > int(ended.timestamp()//60)*60:
                     break
                 end = datetime.fromtimestamp(bucket,timezone.utc)
                 for service in BUSINESS_ROUTES:
-                    captures.append(await asyncio.to_thread(capture_one,service,end))
+                    captures.append(await capture_ready_bucket(source,service,end,store=serving))
                 if os.getenv("DATABASE_URL"):
                     item = await PostgresInfrastructureSource(os.environ["DATABASE_URL"]).capture()
                     infra_refs.append(await asyncio.to_thread(serving.write,"observations",item))
@@ -270,6 +267,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             await collector
         except BaseException as exc:
             failure = type(exc).__name__
+            run["parameters"]["failure_context"] = failure_context(exc,project)
             ended = datetime.now(timezone.utc)
         finally:
             if collector and not collector.done():
@@ -277,7 +275,9 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             if active: await asyncio.gather(*tuple(active),return_exceptions=True)
             for url,original in originals.items():
                 try: await set_fault(url,original["mode"],original["delay_ms"])
-                except Exception: failure = "FaultRestoreFailed"
+                except Exception as exc:
+                    failure = "FaultRestoreFailed"
+                    run["parameters"].setdefault("restore_failure_context",[]).append(failure_context(exc,project))
             source.close()
     run["ended_at"] = timestamp(ended or datetime.now(timezone.utc))
     try:
@@ -305,6 +305,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         if config.scenario == "S0" and any(value["first_violation_at"] for value in run["slo_by_service"].values()): failure = failure or "HealthyRunBreachedSLO"
     except Exception as exc:
         failure = failure or type(exc).__name__
+        run["parameters"]["evidence_failure_context"] = failure_context(exc,project)
     run["dirty_worktree"] = dirty or any(not Path(path).is_file() or hashlib.sha256(Path(path).read_bytes()).hexdigest()!=digest for path,digest in hashes.items())
     run["status"],run["failure_reason"] = ("failed",failure) if failure else ("completed",None)
     validate_payload("experiment-run.schema.json",run)

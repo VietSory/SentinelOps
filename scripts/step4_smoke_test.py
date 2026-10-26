@@ -20,6 +20,7 @@ from sentinelops.telemetry.core import BUSINESS_ROUTES
 from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import PrometheusSource
 from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.telemetry.scheduling import capture_ready_bucket,wait_until_utc
 from scripts.step3_smoke_test import (
     CHECKOUT, PAYMENT, INVENTORY, JAEGER, validate_trace, validate_logs, read_logs, wait_for,
 )
@@ -66,15 +67,10 @@ async def exercise(store: ArtifactStore, rps: float) -> tuple[list[dict], dict]:
         async def capture_loop():
             bucket = int(started//60)*60 + 60
             while bucket <= final_bucket:
-                await asyncio.sleep(max(0., bucket+30-time.time()))
+                await wait_until_utc(bucket+30)
                 end = datetime.fromtimestamp(bucket, timezone.utc)
                 for service in BUSINESS_ROUTES:
-                    def capture_and_store():
-                        item = source.capture(service, end)
-                        store.write("raw", item)
-                        return item
-                    # Durable NTFS/fsync I/O must not stall the workload event loop.
-                    raw = await asyncio.to_thread(capture_and_store)
+                    raw = await capture_ready_bucket(source,service,end,store=store)
                     captures.append(raw)
                 print(f"CAPTURE {end.isoformat()} services=3", flush=True)
                 bucket += 60
