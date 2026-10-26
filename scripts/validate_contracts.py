@@ -27,6 +27,7 @@ SAMPLE_MAP = {
     "research-resource-window.sample.json": "research-resource-window.schema.json",
     "research-interference-label.sample.json": "research-interference-label.schema.json",
     "health-signal.sample.json": "health-signal.schema.json",
+    "correlation-result.sample.json": "correlation-result.schema.json",
 }
 
 

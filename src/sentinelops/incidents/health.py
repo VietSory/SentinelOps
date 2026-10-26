@@ -58,7 +58,7 @@ def validate_signal(signal: dict) -> None:
         confirmed = utc_time(signal["episode_confirmed_at"])
         if not utc_time(signal["episode_start_at"]) < confirmed <= evaluated:
             raise ValueError("episode confirmation time is inconsistent")
-    if signal["event"] == "incident_opened" and not signal["incident_active"]:
+    if signal["event"] == "incident_opened" and (not signal["incident_active"] or signal["health"] != "incident"):
         raise ValueError("opening event requires an active incident")
     if signal["event"] == "recovery_confirmed" and (signal["incident_active"] or signal["health"] != "healthy"):
         raise ValueError("recovery event cannot retain an active incident")

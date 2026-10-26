@@ -1,0 +1,91 @@
+{
+  "schema_version": "1.0",
+  "correlation_version": "slo-topology/v1",
+  "mode": "event-time-analytical",
+  "as_of": "2026-10-26T01:00:00Z",
+  "window_seconds": 120,
+  "source_scope_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "topology_sha256": "ef83d6691437734bbec3c8de806e41d30a178b5ed219a1e0f4be0c4f496e87bd",
+  "source_identity": [
+    "local",
+    "prometheus-increase-60s/v1",
+    "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560"
+  ],
+  "topology_snapshot": {
+    "version": 1,
+    "dependencies": {
+      "checkout-service": [
+        "payment-service",
+        "inventory-service"
+      ],
+      "payment-service": [
+        "rds"
+      ],
+      "inventory-service": [
+        "rds"
+      ],
+      "rds": []
+    }
+  },
+  "input_signal_ids": [
+    "b41d4cc26b3760e066813ef38ded9cdfe308be29c8f1f869cf54c620df29b517",
+    "fa17e300da3da29973a119ab6c05f91fc3922901c57ca5336ae2b871c8e76c23"
+  ],
+  "opening_signal_ids": [
+    "b41d4cc26b3760e066813ef38ded9cdfe308be29c8f1f869cf54c620df29b517",
+    "fa17e300da3da29973a119ab6c05f91fc3922901c57ca5336ae2b871c8e76c23"
+  ],
+  "opening_facts": [
+    {
+      "signal_id": "b41d4cc26b3760e066813ef38ded9cdfe308be29c8f1f869cf54c620df29b517",
+      "service": "payment-service",
+      "episode_start_at": "2026-10-26T00:00:00Z",
+      "evaluated_at": "2026-10-26T00:02:30Z"
+    },
+    {
+      "signal_id": "fa17e300da3da29973a119ab6c05f91fc3922901c57ca5336ae2b871c8e76c23",
+      "service": "checkout-service",
+      "episode_start_at": "2026-10-26T00:00:00Z",
+      "evaluated_at": "2026-10-26T00:02:30Z"
+    }
+  ],
+  "duplicate_count": 0,
+  "future_count": 0,
+  "non_opening_count": 0,
+  "groups": [
+    {
+      "signal_ids": [
+        "b41d4cc26b3760e066813ef38ded9cdfe308be29c8f1f869cf54c620df29b517",
+        "fa17e300da3da29973a119ab6c05f91fc3922901c57ca5336ae2b871c8e76c23"
+      ],
+      "affected_services": [
+        "checkout-service",
+        "payment-service"
+      ],
+      "first_onset_at": "2026-10-26T00:00:00Z",
+      "last_onset_at": "2026-10-26T00:00:00Z",
+      "structural_candidates": [
+        "payment-service"
+      ],
+      "grouping_reason": "dependency-path",
+      "dependency_support": [
+        {
+          "consumer": "checkout-service",
+          "dependency": "payment-service",
+          "path": [
+            "checkout-service",
+            "payment-service"
+          ],
+          "candidate_signal_id": "b41d4cc26b3760e066813ef38ded9cdfe308be29c8f1f869cf54c620df29b517"
+        }
+      ],
+      "topology_sha256": "ef83d6691437734bbec3c8de806e41d30a178b5ed219a1e0f4be0c4f496e87bd",
+      "source_scope_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "group_id": "17952e097db6b462ba98c24cc751a5226f07661c3e93c9a24cad0d3920f4512f"
+    }
+  ],
+  "historical_emissions_verified": false,
+  "rca_evaluated": false,
+  "actions_allowed": false,
+  "result_id": "dee318f0e4035d276485454bdfa9bc8f167e4f2d7035f2a6a36f219bca6e08e9"
+}

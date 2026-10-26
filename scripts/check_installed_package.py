@@ -20,6 +20,8 @@ from sentinelops.api_settings import Settings
 from sentinelops.incidents.repository import IncidentRepository
 from sentinelops.incidents.health import advance_health
 from sentinelops.incidents.health_replay import replay_health_manifest
+from sentinelops.incidents.correlation import correlate_health
+from sentinelops.incidents.correlation_replay import replay_correlation
 from sentinelops.public_data.downloads import fetch_file
 from sentinelops.public_data.audit import load_verified_manifest
 from sentinelops.public_data.gamma import load_gamma_manifest
@@ -37,7 +39,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'observation-envelope', 'feature-envelope', 'infrastructure-observation',
              'experiment-run', 'dataset-manifest', 'incident-write',
              'incident-envelope', 'incident-list', 'api-error', 'training-data-policy',
-             'research-resource-window', 'research-interference-label', 'health-signal'):
+             'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 policy={'policy_version':'slo-health/local-v1','latency_ms':750.,'error_rate':.05,
     'minimum_requests':30,'minimum_coverage':.8,'entry_buckets':2,'recovery_buckets':3,'maximum_lag_seconds':60}
@@ -45,6 +47,9 @@ health=advance_health(None,None,service='payment-service',environment='test',sou
     bucket_end=datetime(2026,10,26,tzinfo=timezone.utc),evaluated_at=datetime(2026,10,26,tzinfo=timezone.utc),policy=policy)
 validate_payload('health-signal.schema.json',health)
 assert health['availability']=='UNKNOWN' and health['health'] is None
+correlation=correlate_health([],{'version':1,'dependencies':{'payment-service':[]}},
+    as_of=datetime(2026,10,26,tzinfo=timezone.utc),source_scope_sha256='b'*64)
+assert correlation['groups']==[] and correlation['actions_allowed'] is False
 client = TestClient(app)
 assert client.get('/health').status_code == 200
 payload = {'schema_version':'1.0', 'service':'payment-service',

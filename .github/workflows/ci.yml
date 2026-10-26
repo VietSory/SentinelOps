@@ -235,6 +235,14 @@ jobs:
           assert health['historical_emission_times_verified'] is False
           assert health['model_outputs_available'] is False and health['actions_dispatched'] is False
           print('REAL CAPTURE OBJECTIVE SLO HEALTH REPLAY: PASS',health['event_counts'])
+          import yaml
+          from sentinelops.incidents.correlation_replay import replay_correlation
+          correlated=replay_correlation(ArtifactStore('artifacts/step4/health'),health['report_ref'],
+              yaml.safe_load(Path('configs/topology.yaml').read_text()),Path('artifacts/step4/correlation'),project=Path.cwd())
+          result=correlated['correlation']
+          assert any({'checkout-service','payment-service'}<=set(group['affected_services']) for group in result['groups'])
+          assert result['actions_allowed'] is False and result['rca_evaluated'] is False
+          print('REAL CAPTURE CONSERVATIVE EPISODE CORRELATION: PASS',len(result['groups']))
           PY
       - name: Publish checksum-backed telemetry summary
         if: always()
