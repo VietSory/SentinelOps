@@ -1,0 +1,9 @@
+{
+  "lock_version": "gamma-archive-catalog-lock/v1",
+  "source_version": 1,
+  "version_id": 7638732,
+  "training_data_policy_hash": "ef0eb1b1c95a67faf424501e657c5e6530d49a1d18af7cbf59f9c07740afa21f",
+  "catalog_sha256": "69934c78fb790eeaa12931f25669770b50e44c70b647fd98c8a6d63698b4caf8",
+  "archive_bytes": 10111803053,
+  "entries": 129510
+}
