@@ -7,6 +7,7 @@ import math
 from typing import Any
 
 import httpx
+import yaml
 
 from sentinelops.contracts import utc_time
 from sentinelops.telemetry.core import BUSINESS_ROUTES, BucketMetrics, normalize_bucket, stable_id, timestamp
@@ -92,6 +93,19 @@ class PrometheusSource:
 
     def close(self) -> None:
         self.client.close()
+
+    def verify_configuration(self) -> dict[str, str]:
+        response = self.client.get(self.endpoint+"/api/v1/status/config")
+        response.raise_for_status()
+        body = response.json()
+        if body.get("status") != "success":
+            raise ValueError("Prometheus configuration is unavailable")
+        config = yaml.safe_load(body["data"]["yaml"])
+        jobs = [job for job in config.get("scrape_configs",[]) if job.get("job_name") == "otel-collector"]
+        interval = jobs[0].get("scrape_interval",config.get("global",{}).get("scrape_interval")) if len(jobs)==1 else None
+        if interval != "5s":
+            raise ValueError("Prometheus scrape configuration does not match the 5s source profile")
+        return {"scrape_interval":interval,"configuration_hash":stable_id(config)}
 
     def capture(self, service: str, end: datetime, *, now: datetime | None = None) -> dict[str, Any]:
         current = now or datetime.now(timezone.utc)
