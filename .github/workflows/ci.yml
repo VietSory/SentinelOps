@@ -48,6 +48,19 @@ jobs:
           output.write_text(json.dumps(report,indent=2))
           print('PINNED PUBLIC DATA SOURCE AUDIT: PASS')
           PY
+      - name: Verify complete pinned GAMMA archive member inventory with bounded ranges
+        run: |
+          python scripts/inventory_gamma_archive.py --file-lock configs/gamma_v1_archive_catalog.json --result-file artifacts/public-data/gamma-archive-catalog.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('artifacts/public-data/gamma-archive-catalog.json').read_text())
+          assert report['lock']['entries']==129510 and report['processed_experiments']==190
+          assert report['complete_request_type_experiments']==182
+          assert report['response_body_bytes']<=32_000_000
+          assert report['training_ready'] is False and report['activation_allowed'] is False
+          print('COMPLETE GAMMA ZIP64 INVENTORY: PASS; MEMBER DATA ARE NOT ALL VERIFIED')
+          PY
       - name: Acquire frozen GAMMA capability scope and audit real source tables
         run: |
           python scripts/download_gamma.py --file-lock configs/gamma_v1_phase_files.json --include-phase-evidence --result-file artifacts/public-data/gamma-acquisition.json
