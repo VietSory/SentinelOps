@@ -126,3 +126,19 @@ def test_concurrent_prefetch_reserves_the_total_budget_before_network():
                 except ValueError as exc:
                     assert "budget" in str(exc)
         assert successes == 1 and reader.body_bytes == reader.reserved_bytes == 65540
+
+
+def test_self_hashed_manifest_cannot_misrepresent_role_counts_or_serving_readiness(tmp_path):
+    transport, _ = range_transport(zip_blob(source()))
+    with httpx.Client(transport=transport) as client:
+        _, scope, lock = prepare(client)
+        result = download_cohort(client, tmp_path, scope, lock)
+    original = Path(result["manifest_path"])
+    for field, value in (("role_counts", {"args": 999}), ("serving_compatible", True)):
+        altered = json.loads(original.read_text())
+        altered[field] = value
+        blob = canonical_bytes(altered)
+        path = original.parent / (hashlib.sha256(blob).hexdigest() + ".json")
+        path.write_bytes(blob)
+        with pytest.raises(ValueError, match="counts disagree|source/scope"):
+            load_cohort_manifest(path, scope)

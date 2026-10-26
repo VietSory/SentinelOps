@@ -1,0 +1,12 @@
+{
+  "record_version": "gamma-development-inspections/v1",
+  "source_scope_sha256": "82caad8e694015112e14173777da292d780f5136264de2719af0940c03221b42",
+  "holdout_excluded_experiments": [
+    "cpu_aug12_25min_200_0",
+    "cpu_mem_sep29_10min_800_0",
+    "mem_sep22_10min_800_0",
+    "net_oct4_10min_800_0"
+  ],
+  "group_policy": "exclude-entire-connected-session-group-from-final-holdout",
+  "reason": "native source format and metadata inspection before cohort session/split freeze; no model outcomes measured"
+}

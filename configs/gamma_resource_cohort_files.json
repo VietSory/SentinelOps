@@ -1,0 +1,8 @@
+{
+  "lock_version": "gamma-cohort-file-tree/v1",
+  "scope_sha256": "82caad8e694015112e14173777da292d780f5136264de2719af0940c03221b42",
+  "catalog_sha256": "69934c78fb790eeaa12931f25669770b50e44c70b647fd98c8a6d63698b4caf8",
+  "files": 30364,
+  "expanded_bytes": 86833728,
+  "source_file_tree_sha256": "ee11cd27de2451194fbe9df68365cbe6c67b0982d3b48f9dd0fb74b49374c3c6"
+}

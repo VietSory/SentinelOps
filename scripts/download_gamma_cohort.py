@@ -27,4 +27,4 @@ if __name__ == "__main__":
     args.result_file.parent.mkdir(parents=True, exist_ok=True)
     with args.result_file.open("x") as stream:
         stream.write(json.dumps(summary, indent=2) + "\n")
-    print(json.dumps(summary, indent=2))
+    print(json.dumps({key: value for key, value in summary.items() if key != "scope"}, indent=2))

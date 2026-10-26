@@ -206,7 +206,9 @@ def load_cohort_manifest(path: Path, scope: dict, *, expected_tree: dict | None 
         or manifest.get("publisher") != policy["sources"]["gamma"]["publisher"]
         or manifest.get("training_data_policy_hash") != policy_hash(policy)
         or manifest.get("scope") != scope or manifest.get("scope_sha256") != scope_sha
-        or manifest.get("activation_allowed") is not False or manifest.get("training_ready") is not False):
+        or manifest.get("activation_allowed") is not False or manifest.get("training_ready") is not False
+        or manifest.get("serving_compatible") is not False
+        or manifest.get("storage") != "project-zip-shards-original-member-bytes/v1"):
         raise ValueError("cohort manifest differs from the frozen source/scope policy")
     root = path.parent.parent.resolve()
     catalog_blob = (root / "inventories" / (scope["catalog_sha256"] + ".json")).read_bytes()
@@ -239,6 +241,12 @@ def load_cohort_manifest(path: Path, scope: dict, *, expected_tree: dict | None 
     if (seen != set(selected) or set(groups) != {None, *scope["experiments"]}
         or frozen_tree != manifest["file_tree_lock"] or (expected_tree is not None and frozen_tree != expected_tree)):
         raise ValueError("cohort file coverage/tree differs from frozen evidence")
+    case_roles = {group: dict(Counter(item["role"] for item in bundle["members"])) for group, bundle in groups.items() if group is not None}
+    missing = {role: [group for group, roles in case_roles.items() if role not in roles] for role in ("resource", "placement", "phase")}
+    if (manifest.get("experiments") != len(scope["experiments"])
+        or manifest.get("role_counts") != dict(Counter(item["role"] for item in records))
+        or manifest.get("case_role_counts") != case_roles or manifest.get("cases_missing_roles") != missing):
+        raise ValueError("cohort summary counts disagree with verified member coverage")
     return manifest, groups
 
 
