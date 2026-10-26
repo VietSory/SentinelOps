@@ -39,7 +39,7 @@ python scripts/build_dataset.py \
   --dataset-id pilot-v1 --allow-pilot
 ```
 
-The loader verifies the run's immutable truth copy and recomputes SLO labels from captured logs before assembly. This CLI requires real completed run directories; the example directory is a placeholder.
+The loader verifies the run's immutable truth copy and recomputes SLO labels from captured logs before assembly. It also checks every referenced raw/normalized/feature object, reconstructs the exact normalization manifest from raw captures, rejects control truth in serving evidence, and verifies retained business traces against server logs (status, correlation/span IDs, routes and CLIENT/SERVER parentage). A hash-valid caller-authored feature is insufficient without reproducible raw lineage. Infrastructure references must validate and match the run's environment. This CLI requires real completed run directories; the example directory is a placeholder.
 
 ## Validation scope
 

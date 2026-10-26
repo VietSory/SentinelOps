@@ -10,6 +10,9 @@ from sentinelops.experiments.datasets import assemble_dataset
 from sentinelops.experiments.labels import feature_vector, label_feature, measure_slo
 from sentinelops.telemetry.core import BUSINESS_ROUTES, BucketMetrics, build_feature_window, normalize_bucket, timestamp
 from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.telemetry.pipeline import process_captures
+from sentinelops.telemetry.prometheus import SOURCE_PROFILE,queries
+from test_prometheus_capture import capture
 from scripts.build_dataset import load_run
 
 START = datetime(2026,10,26,tzinfo=timezone.utc)
@@ -147,28 +150,99 @@ def test_completed_run_cannot_hide_missing_capture_or_short_warmup():
         with pytest.raises(ValueError): validate_payload("experiment-run.schema.json",invalid)
 
 
-def test_run_loader_recomputes_labels_from_immutable_server_log_capture(tmp_path):
+def stored_run_fixture(tmp_path):
     run = run_fixture()
+    run["source_profile"] = SOURCE_PROFILE
     source = ArtifactStore(tmp_path/"serving")
     records = []
+    trace_id = "1"*32
     for service,(method,route) in BUSINESS_ROUTES.items():
         for minute in range(20):
             for record in completed_logs(minute,route=route):
                 record["service"],record["method"] = service,method
                 record["request_instance_id"] = service+"-"+record["request_instance_id"]
+                record["trace_id"] = trace_id
+                record["correlation_id"] = "fixture-correlation"
+                record["span_id"] = {"checkout-service":"1","inventory-service":"3","payment-service":"5"}[service].zfill(16)
                 records.append(record)
         run["slo_by_service"][service]["request_count"] = 800
-    run["logs_ref"] = source.write("raw",{"records":records})
-    feature = source.write("features",feature_fixture(run))
-    run["source_manifest_ref"] = source.write("manifests",{
-        "feature_refs":[feature],"environment":run["environment"],"source_profile":run["source_profile"],
-    })
-    truth = ArtifactStore(tmp_path/"truth")
+    run["logs_ref"] = source.write("raw",{"kind":"serving-logs","records":records})
+    captures=[]
+    for minute in range(1,21):
+        for service in BUSINESS_ROUTES:
+            raw=capture(START+timedelta(minutes=minute));raw["service"]=service
+            for key,expression in queries(service).items(): raw["queries"][key]["expression"]=expression
+            raw["queries"]["errors"]["response"]["data"]["result"][0]["value"][1]="0"
+            captures.append(raw)
+    base=process_captures(captures,source)
+    resources=[]
+    for service,(method,route) in BUSINESS_ROUTES.items():
+        index,parent={"checkout-service":(1,9),"inventory-service":(3,2),"payment-service":(5,4)}[service]
+        attrs=[{"key":key,"value":{"stringValue":value}} for key,value in (("http.request.method",method),("http.route",route))]
+        attrs.extend([{"key":"http.response.status_code","value":{"intValue":"200"}},
+                      {"key":"sentinelops.correlation_id","value":{"stringValue":"fixture-correlation"}}])
+        spans=[{"traceId":trace_id,"spanId":str(index).zfill(16),"parentSpanId":str(parent).zfill(16),"kind":2,"attributes":attrs}]
+        if service=="checkout-service":
+            for client_id,dependency in ((2,"inventory-service"),(4,"payment-service")):
+                spans.append({"traceId":trace_id,"spanId":str(client_id).zfill(16),"parentSpanId":"1".zfill(16),"kind":3,
+                    "attributes":[{"key":"http.response.status_code","value":{"intValue":"200"}},
+                                  {"key":"peer.service","value":{"stringValue":dependency}}]})
+        resources.append({"resource":{"attributes":[{"key":"service.name","value":{"stringValue":service}}]},
+            "scopeSpans":[{"spans":spans}]})
+    trace=source.write("raw",{"kind":"trace","trace_id":trace_id,"body":json.dumps({"result":{"resourceSpans":resources}})})
+    run["source_manifest_ref"]=source.write("manifests",{**{k:v for k,v in base.items() if k!="manifest_ref"},
+        "normalization_manifest_ref":base["manifest_ref"],"evidence_refs":{"logs":run["logs_ref"],"traces":[trace],"infrastructure":[]}})
+    run["infrastructure_refs"]=[]
+    save_run(tmp_path,run)
+    return run,source
+
+
+def save_run(path,run):
+    truth=ArtifactStore(path/"truth")
     truth.write("manifests",run)
-    (tmp_path/"run.json").write_text(json.dumps(run))
-    assert load_run(tmp_path)["features"][0]["record_id"] == feature_fixture(run)["record_id"]
+    (path/"run.json").write_text(json.dumps(run))
+
+
+def test_run_loader_recomputes_labels_from_immutable_server_log_capture(tmp_path):
+    run,source=stored_run_fixture(tmp_path)
+    loaded=load_run(tmp_path)
+    assert len(loaded["features"])==60
+    assert all(feature["source_profile"]==SOURCE_PROFILE for feature in loaded["features"])
     run["slo_by_service"]["payment-service"]["request_count"] = 801
-    truth.write("manifests",run)
-    (tmp_path/"run.json").write_text(json.dumps(run))
+    save_run(tmp_path,run)
     with pytest.raises(ValueError,match="labels do not match"):
         load_run(tmp_path)
+
+
+@pytest.mark.parametrize("fault",["missing_raw","fabricated_feature","control_truth","probe_trace","disconnected_trace"])
+def test_run_loader_requires_reproducible_raw_lineage_and_business_evidence(tmp_path,fault):
+    run,store=stored_run_fixture(tmp_path)
+    manifest=store.read(run["source_manifest_ref"])
+    if fault=="missing_raw":
+        (store.root/manifest["raw_refs"][0].removeprefix("artifact://")).unlink()
+    elif fault=="fabricated_feature":
+        reference=next(ref for ref in manifest["feature_refs"] if store.read(ref)["payload"])
+        fabricated=store.read(reference)
+        fabricated["payload"]["features"]["request_rate_mean_5m"]+=100
+        validate_payload("feature-envelope.schema.json",fabricated)
+        manifest["feature_refs"].remove(reference)
+        manifest["feature_refs"].append(store.write("features",fabricated))
+    elif fault=="control_truth":
+        raws=[store.read(ref) for ref in manifest["raw_refs"]]
+        raws[0]["scenario_id"]="S3"
+        replay=process_captures(raws,store)
+        manifest={**{k:v for k,v in replay.items() if k!="manifest_ref"},
+            "normalization_manifest_ref":replay["manifest_ref"],"evidence_refs":manifest["evidence_refs"]}
+    else:
+        raw=store.read(manifest["evidence_refs"]["traces"][0])
+        body=json.loads(raw["body"])
+        for resource in body["result"]["resourceSpans"]:
+            for tag in resource["scopeSpans"][0]["spans"][0]["attributes"]:
+                if tag["key"]=="http.route" and fault=="probe_trace": tag["value"]["stringValue"]="/ready"
+        if fault=="disconnected_trace":
+            body["result"]["resourceSpans"][-1]["scopeSpans"][0]["spans"][0]["parentSpanId"]="1".zfill(16)
+        raw["body"]=json.dumps(body)
+        manifest["evidence_refs"]["traces"]=[store.write("raw",raw)]
+    run["source_manifest_ref"]=store.write("manifests",manifest)
+    save_run(tmp_path,run)
+    with pytest.raises(ValueError): load_run(tmp_path)
