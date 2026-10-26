@@ -5,10 +5,12 @@
 **Authorization:** Repository owner requested published datasets from established sources as the training direction instead of relying on the small local experiment corpus.  
 **Related:** ADR-002, ADR-007, ADR-008; supersedes the local-primary training-source assumption in the initial delivery plan.
 
+**Source selection superseded:** [ADR-011](ADR-011-frozen-gamma-rcaeval-contract.md) freezes GAMMA v1 training and RCAEval RCA validation/heldout evaluation. SMD below describes historical initial research. The other provenance and transfer requirements remain current.
+
 ## Decision
 
 - Use externally published, version-pinned datasets as the primary research/training/evaluation corpus. Keep local captures for integration tests, source parity, calibration/transfer and closed-loop verification.
-- Select RCAEval as the main microservice/RCA corpus to expand after format/label audit. Use SMD as an external anomaly-detection benchmark for IF/statistical controls. OpenRCA is a candidate external RCA evaluation corpus, subject to its dataset-specific terms and resource requirements.
+- Historical source selection (superseded by ADR-011): RCAEval format audit and SMD anomaly benchmark. OpenRCA and other surveyed candidates are not admitted to the frozen v1 pair.
 - Download data only, verify publisher checksums and retain source/revision/license declarations. Do not run dataset-provider scripts or copy provider preprocessing that leaks future data.
 - Freeze source-specific splits, feature definitions, labels, preprocessing, metrics and thresholds before test scoring. Test labels cannot select a winning model/threshold.
 - Keep IF as anomaly detector and XGBoost as degradation-risk model. Root-cause labels, injection timestamps and binary anomaly labels are not automatically precursor/SLO labels. Audit or derive appropriate labels under a separately versioned causal protocol before XGBoost fitting.

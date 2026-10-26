@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/training-data-policy.schema.json",
+  "title": "FrozenTrainingDataPolicyV1",
+  "description": "Owner-approved source selection; not a dataset/model readiness certificate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "policy_version", "approved_on", "sources", "combination_strategy", "split_unit", "feature_mapping", "risk_target", "risk_readiness", "on_gate_failure", "third_source_allowed", "activation_requires"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "policy_version": {"const": "training-data/v1"},
+    "approved_on": {"const": "2026-10-26"},
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gamma", "rcaeval"],
+      "properties": {
+        "gamma": {
+          "const": {
+            "publisher": "gagansomashekar/microservices-bottleneck-detection-dataset",
+            "version": 1,
+            "version_id": 7638732,
+            "role": "primary-training",
+            "declared_license": "Apache-2.0"
+          }
+        },
+        "rcaeval": {
+          "const": {
+            "publisher": "phamquiluan/RCAEval",
+            "revision": "afeacb11bcc94dadfd1c8f483ee4377b2b8b614e",
+            "role": "rca-validation-and-heldout-evaluation",
+            "ml_fitting_allowed": false,
+            "declared_license": "MIT"
+          }
+        }
+      }
+    },
+    "combination_strategy": {"const": "source-isolated-no-row-concatenation"},
+    "split_unit": {"const": "experiment-session-before-windowing"},
+    "feature_mapping": {"const": "verified-semantics-no-implicit-http-red-mapping"},
+    "risk_target": {"const": "pre-slo-gradual-degradation"},
+    "risk_readiness": {"const": "independent-slo-and-precursor-evidence-required"},
+    "on_gate_failure": {"const": "report-failure-without-changing-sources-targets-or-test-thresholds"},
+    "third_source_allowed": {"const": false},
+    "activation_requires": {"const": "live-feature-source-parity-and-G3-G7"}
+  }
+}

@@ -9,6 +9,7 @@ from sentinelops.contracts import validate_payload
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
 SAMPLES = ROOT / "samples"
+CONFIG_MAP = {"training_data_contract.json": "training-data-policy.schema.json"}
 
 SAMPLE_MAP = {
     "telemetry.sample.json": "telemetry.schema.json",
@@ -43,10 +44,17 @@ def main() -> None:
         except ValueError as exc:
             errors.append(f"{sample_name} -> {schema_name}: {exc}")
 
+    for config_name, schema_name in CONFIG_MAP.items():
+        payload = json.loads((ROOT / "configs" / config_name).read_text(encoding="utf-8"))
+        try:
+            validate_payload(schema_name, payload)
+        except ValueError as exc:
+            errors.append(f"{config_name} -> {schema_name}: {exc}")
+
     if errors:
         raise SystemExit("\n".join(errors))
 
-    print(f"OK: {len(list(CONTRACTS.glob('*.schema.json')))} schemas + {len(SAMPLE_MAP)} samples validated")
+    print(f"OK: {len(list(CONTRACTS.glob('*.schema.json')))} schemas + {len(SAMPLE_MAP)} samples + {len(CONFIG_MAP)} configurations validated")
 
 
 if __name__ == "__main__":

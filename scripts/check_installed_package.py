@@ -25,7 +25,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'incident-evidence-record', 'explanation', 'remediation-action',
              'observation-envelope', 'feature-envelope', 'infrastructure-observation',
              'experiment-run', 'dataset-manifest', 'incident-write',
-             'incident-envelope', 'incident-list', 'api-error'):
+             'incident-envelope', 'incident-list', 'api-error', 'training-data-policy'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 client = TestClient(app)
 assert client.get('/health').status_code == 200
