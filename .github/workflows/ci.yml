@@ -19,6 +19,36 @@ jobs:
       - run: pytest -q
       - run: python scripts/check_installed_package.py
 
+  incident-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CONTROL_DATABASE_URL: postgresql://control_writer:local-control-writer@127.0.0.1:5433/sentinelops_control
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: docker compose -p sentinelops-control -f docker-compose.control.yml up -d --wait --wait-timeout 120
+      - run: python scripts/check_incident_store.py
+      - run: docker compose -p sentinelops-control -f docker-compose.control.yml restart control-postgres
+      - run: docker compose -p sentinelops-control -f docker-compose.control.yml up -d --wait --wait-timeout 60
+      - run: python scripts/check_incident_store.py --verify-report artifacts/incidents/store-acceptance.json
+      - name: Preserve incident storage evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-storage-evidence
+          path: artifacts/incidents/
+          retention-days: 7
+      - name: Control database diagnostics
+        if: failure()
+        run: docker compose -p sentinelops-control -f docker-compose.control.yml logs --no-color --tail 100
+      - name: Stop control testbed
+        if: always()
+        run: docker compose -p sentinelops-control -f docker-compose.control.yml down --volumes --remove-orphans
+
   observability:
     runs-on: ubuntu-latest
     timeout-minutes: 20

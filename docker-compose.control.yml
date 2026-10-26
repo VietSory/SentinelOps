@@ -1,0 +1,21 @@
+services:
+  control-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sentinelops_control
+      POSTGRES_USER: control_bootstrap
+      POSTGRES_PASSWORD: local-control-bootstrap
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - sentinelops_control:/var/lib/postgresql/data
+      - ./infra/control/001-local-roles.sql:/docker-entrypoint-initdb.d/001-roles.sql:ro
+      - ./infra/control/002-incident-store.sql:/docker-entrypoint-initdb.d/002-incident-store.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U control_bootstrap -d sentinelops_control"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  sentinelops_control:

@@ -329,6 +329,7 @@ VERIFYING -> RECOVERED -> CLOSED
 VERIFYING -> ROLLED_BACK -> ESCALATED
 VERIFYING -> ESCALATED
 OPEN/RCA_READY -> ESCALATED khi không có action an toàn
+OPEN/RCA_READY/EXPLAINED -> VERIFYING khi phục hồi tự nhiên, không có action
 ```
 
 Explanation là nhánh optional, không chặn policy/verification. Internal lifecycle lưu ngoài payload IER với immutable event history.
@@ -340,7 +341,7 @@ Explanation là nhánh optional, không chặn policy/verification. Internal lif
 | RECOVERED/CLOSED sau verify pass | `recovered` |
 | ROLLED_BACK/ESCALATED hoặc CLOSED không phục hồi | `escalated` |
 
-Native restart/natural recovery có thể làm health tốt lại; record phải ghi recovery source. Không gắn là SentinelOps action success nếu không có action execution. Recurrence sau CLOSED tạo incident mới có relation tới incident trước; recurrence khi VERIFYING quay về INCIDENT/escalation theo runbook, không bỏ qua cooldown để tự lặp action.
+Native restart/natural recovery có thể làm health tốt lại; record phải ghi recovery source. Nhánh natural recovery đi thẳng tới VERIFYING với `recovery_source=natural`, vẫn phải đạt đủ telemetry/traffic verification trước RECOVERED; không tạo MITIGATING/action giả để đi qua state machine. Không gắn là SentinelOps action success nếu không có action execution. Recurrence sau CLOSED tạo incident mới có relation tới incident trước; recurrence khi VERIFYING quay về INCIDENT/escalation theo runbook, không bỏ qua cooldown để tự lặp action.
 
 ## 10. Correlation và RCA
 
