@@ -27,13 +27,20 @@ def load_verified_manifest(path: Path) -> tuple[dict,dict[str,Path]]:
     return manifest,files
 
 
+def require_verified_file(files: dict[str,Path],path: Path) -> Path:
+    selected=path.resolve()
+    if selected not in files.values():
+        raise ValueError("table is not covered by the verified download manifest")
+    return selected
+
+
 def audit_rcaeval(manifest_path: Path) -> dict:
     import numpy as np
     import pyarrow.parquet as pq
     manifest,files=load_verified_manifest(manifest_path)
     if manifest["dataset"]!="RCAEval": raise ValueError("not an RCAEval manifest")
     root=manifest_path.parent.parent/"rcaeval"/manifest["revision"]
-    index=pq.read_table(root/"cases.parquet").to_pandas()
+    index=pq.read_table(require_verified_file(files,root/"cases.parquet")).to_pandas()
     if index["case"].duplicated().any(): raise ValueError("RCAEval case index has duplicate identities")
     counts={str(key):int(value) for key,value in index.groupby("dataset").size().items()}
     availability={str(key):{"cases":len(group),"cases_with_logs":int(group.has_logs.sum()),
@@ -43,11 +50,11 @@ def audit_rcaeval(manifest_path: Path) -> dict:
         selected=index[index.case==identifier]
         if len(selected)!=1: raise ValueError("downloaded case does not have exactly one index row")
         row=selected.iloc[0];directory=root/identifier
-        metrics=pq.read_table(directory/"metrics.parquet").to_pandas()
+        metrics=pq.read_table(require_verified_file(files,directory/"metrics.parquet")).to_pandas()
         if "time" not in metrics or len(metrics.columns)!=len(set(metrics.columns)): raise ValueError("invalid metric time/columns")
         time=np.asarray(metrics["time"],dtype=float)
         if not np.isfinite(time).all() or np.any(np.diff(time)<=0): raise ValueError("metric time is not finite/strictly increasing")
-        injection=int((directory/"inject_time.txt").read_text())
+        injection=int(require_verified_file(files,directory/"inject_time.txt").read_text())
         if injection!=int(row.inject_time): raise ValueError("injection timestamp differs from case index")
         values=metrics.drop(columns="time").to_numpy(dtype=float)
         if np.isinf(values).any(): raise ValueError("infinite public metric value")
@@ -61,7 +68,7 @@ def audit_rcaeval(manifest_path: Path) -> dict:
             file=directory/(modality+".parquet")
             detail[modality]={"present":file.exists()}
             if file.exists():
-                table=pq.ParquetFile(file)
+                table=pq.ParquetFile(require_verified_file(files,file))
                 detail[modality].update({"rows":table.metadata.num_rows,"columns":table.schema_arrow.names,
                     "types":{field.name:str(field.type) for field in table.schema_arrow}})
         cases.append(detail)
@@ -81,9 +88,9 @@ def audit_smd(manifest_path: Path) -> dict:
     if manifest["dataset"]!="SMD": raise ValueError("not an SMD manifest")
     root=manifest_path.parent.parent/"smd"/manifest["revision"]/"ServerMachineDataset"
     machine=manifest["selection"][0]
-    train=np.loadtxt(root/"train"/(machine+".txt"),delimiter=",",ndmin=2)
-    test=np.loadtxt(root/"test"/(machine+".txt"),delimiter=",",ndmin=2)
-    labels=np.loadtxt(root/"test_label"/(machine+".txt"),dtype=int,ndmin=1)
+    train=np.loadtxt(require_verified_file(files,root/"train"/(machine+".txt")),delimiter=",",ndmin=2)
+    test=np.loadtxt(require_verified_file(files,root/"test"/(machine+".txt")),delimiter=",",ndmin=2)
+    labels=np.loadtxt(require_verified_file(files,root/"test_label"/(machine+".txt")),ndmin=1)
     if train.shape[1]!=38 or test.shape[1]!=38 or len(labels)!=len(test): raise ValueError("SMD feature/label shapes differ")
     if not np.isfinite(train).all() or not np.isfinite(test).all() or not np.isin(labels,[0,1]).all(): raise ValueError("invalid SMD values/labels")
     return {"audit_version":"public-source-audit/v1","dataset":"SMD","revision":manifest["revision"],
