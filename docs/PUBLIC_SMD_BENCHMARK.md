@@ -1,6 +1,6 @@
 # SMD Isolation Forest / statistical control protocol
 
-This is the first reproducible external-data training experiment under ADR-010. It is an offline one-machine benchmark. It does not activate a model in the live API, establish full-SMD generalization, or provide a trained XGBoost degradation model.
+Historical experiment under ADR-010's original source choice, superseded by [ADR-011](adr/ADR-011-frozen-gamma-rcaeval-contract.md). SMD is excluded from v1 training and will not be expanded. This offline one-machine result does not activate serving, establish full-SMD generalization, or provide a trained XGBoost model. Reproduction now requires the explicit flag below and is restricted to the original machine.
 
 ## Frozen inputs and split
 
@@ -26,6 +26,7 @@ The first test evaluation establishes a baseline. It is not a validation set for
 
 ```bash
 .venv-ml/bin/python scripts/train_public_smd.py \
+  --historical-reproduction \
   --manifest data/raw/public/manifests/6a3dbe8fd39a4612c24c53cd57690a14a78ac1df8100b82bf68ee94d9f23b106.json \
   --output models/public/smd-machine-1-1-seed42-v1
 ```

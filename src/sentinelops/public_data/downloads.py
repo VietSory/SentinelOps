@@ -10,6 +10,8 @@ import tempfile
 
 import httpx
 
+from sentinelops.public_data.policy import load_policy, require_historical_smd
+
 
 def git_blob_sha(data: bytes) -> str:
     return hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()
@@ -86,6 +88,9 @@ def _save_manifest(root,manifest):
 
 def download_rcaeval(client,config: dict,root: Path,*,cases: list[str] | None = None,max_bytes: int = 256_000_000) -> dict:
     repository,revision=config["repository"],config["revision"]
+    source=load_policy()["sources"]["rcaeval"]
+    if repository!=source["publisher"] or revision!=source["revision"]:
+        raise ValueError("RCAEval catalog differs from the frozen training-data/v1 evaluation source")
     selected=sorted(set(cases or config["default_cases"]))
     if not selected or any(not re.fullmatch(r"re[123](ob|ss|tt)_[a-zA-Z0-9_-]+",case) for case in selected):
         raise ValueError("invalid RCAEval case selection")
@@ -110,8 +115,9 @@ def download_rcaeval(client,config: dict,root: Path,*,cases: list[str] | None = 
         "serving_compatible":False,"activation_allowed":False})
 
 
-def download_smd(client,config: dict,root: Path,*,machine: str | None = None,max_bytes: int = 64_000_000) -> dict:
+def download_smd(client,config: dict,root: Path,*,machine: str | None = None,max_bytes: int = 64_000_000,historical_reproduction: bool = False) -> dict:
     machine=machine or config["default_machine"]
+    require_historical_smd(machine,acknowledged=historical_reproduction)
     if not re.fullmatch(r"machine-[123]-[1-9][0-9]*",machine): raise ValueError("invalid SMD machine ID")
     repository,revision=config["repository"],config["revision"]
     destination=root/"smd"/revision
