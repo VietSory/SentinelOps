@@ -195,12 +195,17 @@ def build_resource_windows(manifest_path: Path, profile_path: Path, output: Path
                 if not row["eligible_for_features"]:
                     excluded["insufficient-time-coverage-window"] += 1
     frames = b"".join(canonical_bytes(row) + b"\n" for row in rows)
+    value_fields = ("experiment", "entity", "window_start", "window_end", "max_input_observed_at",
+                    "eligible_for_features", "features", "quality")
+    value_payload = {"feature_set_version": profile["feature_set_version"], "profile_sha256": profile_sha,
+                     "windows": [{key: row[key] for key in value_fields} for row in rows]}
     (output / "resource-windows.jsonl").write_bytes(frames)
     report = {"report_version": "gamma-resource-windows/v1", "source_commit": commit,
         "source_manifest_sha256": manifest_path.stem, "profile_sha256": profile_sha,
         "training_data_policy_hash": manifest["training_data_policy_hash"],
         "feature_set_version": profile["feature_set_version"], "ordered_features": list(FEATURES),
         "frame_sha256": hashlib.sha256(frames).hexdigest(), "rows": len(rows),
+        "feature_values_sha256": hashlib.sha256(canonical_bytes(value_payload)).hexdigest(),
         "eligible_feature_rows": sum(row["eligible_for_features"] for row in rows), "entity_counts": dict(counts),
         "exclusions": dict(excluded), "raw_input_sha256": dict(input_refs),
         "activation_allowed": False, "training_ready": False,

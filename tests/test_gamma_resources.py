@@ -82,6 +82,9 @@ def source_fixture(*, truth_marker):
     files = source_files()
     files["meta-data/meta-data/placement.csv"] = b"service,node\n"
     files[f"raw_dataset/{EXPERIMENT}/args.txt"] = json.dumps({"bottlenecked_nodes": [truth_marker], "phases": [999]}).encode()
+    for name in files:
+        if name.startswith("processed_dataset/"):
+            files[name] = ("label_trace\n" + ("0" if truth_marker == "truth-A" else "1") + "\n").encode()
     for metric, values in series().items():
         files[f"raw_dataset/{EXPERIMENT}/prom_metrics/service_{metric}"] = json.dumps(
             [[1692000000 + time, str(value)] for time, value in values]).encode()
@@ -90,6 +93,7 @@ def source_fixture(*, truth_marker):
 
 def test_native_labels_and_schedules_cannot_enter_resource_feature_values(tmp_path):
     outputs = []
+    hashes = []
     for index, marker in enumerate(("truth-A", "truth-B")):
         with httpx.Client(transport=transport(source_fixture(truth_marker=marker))) as client:
             acquisition = download_gamma(client, tmp_path / str(index), experiments=[EXPERIMENT], workers=1)
@@ -99,9 +103,11 @@ def test_native_labels_and_schedules_cannot_enter_resource_feature_values(tmp_pa
         assert report["rows"] == report["eligible_feature_rows"] == 11
         assert report["training_ready"] is False and report["activation_allowed"] is False
         outputs.append([row["features"] for row in rows])
+        hashes.append(report["feature_values_sha256"])
         row = deepcopy(rows[0])
         row["max_input_observed_at"] = "2099-01-01T00:00:00Z"
         with pytest.raises(ValueError, match="after its cutoff"):
             validate_payload("research-resource-window.schema.json", row)
         assert all(datetime.fromisoformat(row["window_start"].replace("Z", "+00:00")).timestamp() >= 1692000300 for row in rows)
     assert outputs[0] == outputs[1]
+    assert hashes[0] == hashes[1]
