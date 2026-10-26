@@ -14,6 +14,7 @@ sys.path.insert(0, sys.argv[1])
 import sentinelops
 assert Path(sentinelops.__file__).resolve().is_relative_to(Path(sys.argv[1]))
 from sentinelops.main import app
+from sentinelops.incidents.repository import IncidentRepository
 from sentinelops.contracts import load_schema
 from fastapi.testclient import TestClient
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',
