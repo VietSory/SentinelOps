@@ -13,7 +13,7 @@ COMPONENTS = ("anomaly_strength", "temporal_precedence", "dependency_trace_relev
 METHODS = {
     "anomaly_strength": {"if-normalized-score/v1", "infra-connection-pressure/v1"},
     "temporal_precedence": {"disjoint-onset-intervals/v1"},
-    "dependency_trace_relevance": {"native-span-duration-share/v1"},
+    "dependency_trace_relevance": {"native-span-duration-share/v1", "native-span-terminal-error/v1"},
     "log_support": {"business-completion-support/v1"},
     "recent_change_support": {"observed-deployment/v1"},
 }

@@ -227,7 +227,7 @@ jobs:
           smoke=json.loads(Path('artifacts/step4/ci/smoke-report.json').read_text())
           for reference in smoke['evidence_refs']:
               utc_time(source.read(reference)['collected_at'])
-          health=replay_health_manifest(source,smoke['manifest']['manifest_ref'],
+          health=replay_health_manifest(source,smoke['evidence_manifest_ref'],
               json.loads(Path('configs/slo_health_policy.json').read_text()),Path('artifacts/step4/health'),project=Path.cwd())
           assert health['signal_count']==3*health['bucket_count']
           assert health['raw_normalization_parity'] is True
@@ -243,6 +243,20 @@ jobs:
           assert any({'checkout-service','payment-service'}<=set(group['affected_services']) for group in result['groups'])
           assert result['actions_allowed'] is False and result['rca_evaluated'] is False
           print('REAL CAPTURE CONSERVATIVE EPISODE CORRELATION: PASS',len(result['groups']))
+          from sentinelops.incidents.rca_replay import replay_rca
+          rca=replay_rca(source,ArtifactStore('artifacts/step4/health'),ArtifactStore('artifacts/step4/correlation'),
+              correlated['report_ref'],json.loads(Path('configs/rca_policy.json').read_text()),
+              Path('artifacts/step4/rca'),project=Path.cwd())
+          assert rca['group_count']==len(result['groups']) and rca['raw_health_correlation_lineage_verified']
+          assert rca['model_outputs_available'] is False and rca['actions_allowed'] is False
+          assert rca['historical_emissions_verified'] is False
+          for row in rca['results']:
+              assert row['rca']['abstained'] and row['rca']['actions_allowed'] is False
+              for candidate in row['rca']['candidates']:
+                  assert candidate['components']['recent_change_support']['value'] is None
+                  if candidate['service']!='rds':
+                      assert candidate['components']['anomaly_strength']['value'] is None
+          print('REAL CAPTURE EVIDENCE RCA REPLAY: PASS',rca['group_count'])
           PY
       - name: Publish checksum-backed telemetry summary
         if: always()

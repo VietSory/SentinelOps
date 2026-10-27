@@ -151,10 +151,15 @@ def main() -> None:
     logs = read_logs(details["started_at"])
     logs_collected_at = timestamp(datetime.now(timezone.utc))
     validate_logs(logs, probe["trace_id"], probe["correlation_id"], servers, statuses)
-    evidence_refs = [store.write("raw", {"kind":"trace", "body":response.text,"collected_at":trace_collected_at}),
+    evidence_refs = [store.write("raw", {"kind":"trace", "trace_id":probe["trace_id"], "body":response.text,"collected_at":trace_collected_at}),
                      store.write("raw", {"kind":"logs", "records":logs,"collected_at":logs_collected_at})]
+    evidence_manifest = {key:value for key,value in manifest.items() if key != "manifest_ref"}
+    evidence_manifest["normalization_manifest_ref"] = manifest["manifest_ref"]
+    evidence_manifest["evidence_refs"] = {"traces":[evidence_refs[0]],"logs":evidence_refs[1],"infrastructure":[]}
+    evidence_manifest_ref = store.write("manifests",evidence_manifest)
     report = {"status":"PASS", "scope":"local RED telemetry and features only", "manifest":manifest,
               "evidence_refs":evidence_refs, "details":details,
+              "evidence_manifest_ref":evidence_manifest_ref,
               "commit_at_start":source_commit, "dirty_worktree_at_start":source_dirty,
               "commit_at_report":subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip(),
               "dirty_worktree_at_report":bool(subprocess.check_output(["git","status","--porcelain"],cwd=ROOT,text=True).strip())}
