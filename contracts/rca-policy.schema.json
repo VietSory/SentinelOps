@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/rca-policy.schema.json",
+  "title": "Initial deterministic RCA evidence policy",
+  "type": "object", "additionalProperties": false,
+  "required": ["policy_version", "weights", "minimum_score", "minimum_margin", "minimum_coverage", "onset_uncertainty_seconds", "evidence_window_seconds"],
+  "properties": {
+    "policy_version": {"const": "rca-evidence/local-v1"},
+    "weights": {"type": "object", "additionalProperties": false, "required": ["anomaly_strength", "temporal_precedence", "dependency_trace_relevance", "log_support", "recent_change_support"], "properties": {
+      "anomaly_strength": {"$ref": "#/$defs/unit"}, "temporal_precedence": {"$ref": "#/$defs/unit"}, "dependency_trace_relevance": {"$ref": "#/$defs/unit"}, "log_support": {"$ref": "#/$defs/unit"}, "recent_change_support": {"$ref": "#/$defs/unit"}}},
+    "minimum_score": {"$ref": "#/$defs/unit"}, "minimum_margin": {"$ref": "#/$defs/unit"}, "minimum_coverage": {"$ref": "#/$defs/unit"},
+    "onset_uncertainty_seconds": {"type": "integer", "minimum": 0, "maximum": 3600}, "evidence_window_seconds": {"type": "integer", "minimum": 60, "maximum": 3600}
+  },
+  "$defs": {"unit": {"type": "number", "minimum": 0, "maximum": 1}}
+}

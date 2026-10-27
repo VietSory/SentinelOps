@@ -1,0 +1,456 @@
+{
+  "schema_version": "1.0",
+  "rca_version": "evidence-rca/v1",
+  "mode": "event-time-analytical",
+  "as_of": "2026-10-26T01:00:00Z",
+  "policy": {
+    "policy_version": "rca-evidence/local-v1",
+    "weights": {
+      "anomaly_strength": 0.25,
+      "temporal_precedence": 0.2,
+      "dependency_trace_relevance": 0.25,
+      "log_support": 0.15,
+      "recent_change_support": 0.15
+    },
+    "minimum_score": 0.75,
+    "minimum_margin": 0.15,
+    "minimum_coverage": 0.75,
+    "onset_uncertainty_seconds": 60,
+    "evidence_window_seconds": 300
+  },
+  "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+  "correlation": {
+    "schema_version": "1.0",
+    "correlation_version": "slo-topology/v1",
+    "mode": "event-time-analytical",
+    "as_of": "2026-10-26T01:00:00Z",
+    "window_seconds": 120,
+    "source_scope_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "topology_sha256": "ef83d6691437734bbec3c8de806e41d30a178b5ed219a1e0f4be0c4f496e87bd",
+    "source_identity": [
+      "local",
+      "prometheus-increase-60s/v1",
+      "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560"
+    ],
+    "topology_snapshot": {
+      "version": 1,
+      "dependencies": {
+        "checkout-service": [
+          "payment-service",
+          "inventory-service"
+        ],
+        "payment-service": [
+          "rds"
+        ],
+        "inventory-service": [
+          "rds"
+        ],
+        "rds": []
+      }
+    },
+    "input_signal_ids": [
+      "b41d4cc26b3760e066813ef38ded9cdfe308be29c8f1f869cf54c620df29b517",
+      "fa17e300da3da29973a119ab6c05f91fc3922901c57ca5336ae2b871c8e76c23"
+    ],
+    "opening_signal_ids": [
+      "b41d4cc26b3760e066813ef38ded9cdfe308be29c8f1f869cf54c620df29b517",
+      "fa17e300da3da29973a119ab6c05f91fc3922901c57ca5336ae2b871c8e76c23"
+    ],
+    "opening_facts": [
+      {
+        "signal_id": "b41d4cc26b3760e066813ef38ded9cdfe308be29c8f1f869cf54c620df29b517",
+        "service": "payment-service",
+        "episode_start_at": "2026-10-26T00:00:00Z",
+        "evaluated_at": "2026-10-26T00:02:30Z"
+      },
+      {
+        "signal_id": "fa17e300da3da29973a119ab6c05f91fc3922901c57ca5336ae2b871c8e76c23",
+        "service": "checkout-service",
+        "episode_start_at": "2026-10-26T00:00:00Z",
+        "evaluated_at": "2026-10-26T00:02:30Z"
+      }
+    ],
+    "duplicate_count": 0,
+    "future_count": 0,
+    "non_opening_count": 0,
+    "groups": [
+      {
+        "signal_ids": [
+          "b41d4cc26b3760e066813ef38ded9cdfe308be29c8f1f869cf54c620df29b517",
+          "fa17e300da3da29973a119ab6c05f91fc3922901c57ca5336ae2b871c8e76c23"
+        ],
+        "affected_services": [
+          "checkout-service",
+          "payment-service"
+        ],
+        "first_onset_at": "2026-10-26T00:00:00Z",
+        "last_onset_at": "2026-10-26T00:00:00Z",
+        "structural_candidates": [
+          "payment-service"
+        ],
+        "grouping_reason": "dependency-path",
+        "dependency_support": [
+          {
+            "consumer": "checkout-service",
+            "dependency": "payment-service",
+            "path": [
+              "checkout-service",
+              "payment-service"
+            ],
+            "candidate_signal_id": "b41d4cc26b3760e066813ef38ded9cdfe308be29c8f1f869cf54c620df29b517"
+          }
+        ],
+        "topology_sha256": "ef83d6691437734bbec3c8de806e41d30a178b5ed219a1e0f4be0c4f496e87bd",
+        "source_scope_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "group_id": "17952e097db6b462ba98c24cc751a5226f07661c3e93c9a24cad0d3920f4512f"
+      }
+    ],
+    "historical_emissions_verified": false,
+    "rca_evaluated": false,
+    "actions_allowed": false,
+    "result_id": "dee318f0e4035d276485454bdfa9bc8f167e4f2d7035f2a6a36f219bca6e08e9"
+  },
+  "group_id": "17952e097db6b462ba98c24cc751a5226f07661c3e93c9a24cad0d3920f4512f",
+  "source_refs": [
+    "fixture://rca/software-only"
+  ],
+  "evidence": [
+    {
+      "id": "checkout-service/anomaly_strength",
+      "type": "model",
+      "service": "checkout-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "checkout-service/dependency_trace_relevance",
+      "type": "trace",
+      "service": "checkout-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "checkout-service/log_support",
+      "type": "log",
+      "service": "checkout-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "checkout-service/recent_change_support",
+      "type": "change",
+      "service": "checkout-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "inventory-service/anomaly_strength",
+      "type": "model",
+      "service": "inventory-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "inventory-service/dependency_trace_relevance",
+      "type": "trace",
+      "service": "inventory-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "inventory-service/log_support",
+      "type": "log",
+      "service": "inventory-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "inventory-service/recent_change_support",
+      "type": "change",
+      "service": "inventory-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "payment-service/anomaly_strength",
+      "type": "model",
+      "service": "payment-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "payment-service/dependency_trace_relevance",
+      "type": "trace",
+      "service": "payment-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "payment-service/log_support",
+      "type": "log",
+      "service": "payment-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "payment-service/recent_change_support",
+      "type": "change",
+      "service": "payment-service",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "rds/anomaly_strength",
+      "type": "metric",
+      "service": "rds",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    },
+    {
+      "id": "rds/dependency_trace_relevance",
+      "type": "trace",
+      "service": "rds",
+      "observed_at": "2026-10-26T00:03:00Z",
+      "fact": "Synthetic component evidence for software tests only",
+      "source_ref": "fixture://rca/software-only"
+    }
+  ],
+  "evidence_availability": {
+    "checkout-service/anomaly_strength": "2026-10-26T00:04:00Z",
+    "checkout-service/dependency_trace_relevance": "2026-10-26T00:04:00Z",
+    "checkout-service/log_support": "2026-10-26T00:04:00Z",
+    "checkout-service/recent_change_support": "2026-10-26T00:04:00Z",
+    "payment-service/anomaly_strength": "2026-10-26T00:04:00Z",
+    "payment-service/dependency_trace_relevance": "2026-10-26T00:04:00Z",
+    "payment-service/log_support": "2026-10-26T00:04:00Z",
+    "payment-service/recent_change_support": "2026-10-26T00:04:00Z",
+    "inventory-service/anomaly_strength": "2026-10-26T00:04:00Z",
+    "inventory-service/dependency_trace_relevance": "2026-10-26T00:04:00Z",
+    "inventory-service/log_support": "2026-10-26T00:04:00Z",
+    "inventory-service/recent_change_support": "2026-10-26T00:04:00Z",
+    "rds/anomaly_strength": "2026-10-26T00:04:00Z",
+    "rds/dependency_trace_relevance": "2026-10-26T00:04:00Z"
+  },
+  "candidates": [
+    {
+      "service": "payment-service",
+      "components": {
+        "anomaly_strength": {
+          "value": 1.0,
+          "method": "if-normalized-score/v1",
+          "evidence_refs": [
+            "payment-service/anomaly_strength"
+          ],
+          "missing_reason": null
+        },
+        "temporal_precedence": {
+          "value": null,
+          "method": "unavailable/v1",
+          "evidence_refs": [],
+          "missing_reason": "not-observed"
+        },
+        "dependency_trace_relevance": {
+          "value": 1.0,
+          "method": "native-span-duration-share/v1",
+          "evidence_refs": [
+            "payment-service/dependency_trace_relevance"
+          ],
+          "missing_reason": null
+        },
+        "log_support": {
+          "value": 1.0,
+          "method": "business-completion-support/v1",
+          "evidence_refs": [
+            "payment-service/log_support"
+          ],
+          "missing_reason": null
+        },
+        "recent_change_support": {
+          "value": 1.0,
+          "method": "observed-deployment/v1",
+          "evidence_refs": [
+            "payment-service/recent_change_support"
+          ],
+          "missing_reason": null
+        }
+      },
+      "score": 0.8,
+      "coverage": 0.8,
+      "evidence_refs": [
+        "payment-service/anomaly_strength",
+        "payment-service/dependency_trace_relevance",
+        "payment-service/log_support",
+        "payment-service/recent_change_support"
+      ]
+    },
+    {
+      "service": "checkout-service",
+      "components": {
+        "anomaly_strength": {
+          "value": 0.0,
+          "method": "if-normalized-score/v1",
+          "evidence_refs": [
+            "checkout-service/anomaly_strength"
+          ],
+          "missing_reason": null
+        },
+        "temporal_precedence": {
+          "value": null,
+          "method": "unavailable/v1",
+          "evidence_refs": [],
+          "missing_reason": "not-observed"
+        },
+        "dependency_trace_relevance": {
+          "value": 0.0,
+          "method": "native-span-duration-share/v1",
+          "evidence_refs": [
+            "checkout-service/dependency_trace_relevance"
+          ],
+          "missing_reason": null
+        },
+        "log_support": {
+          "value": 0.0,
+          "method": "business-completion-support/v1",
+          "evidence_refs": [
+            "checkout-service/log_support"
+          ],
+          "missing_reason": null
+        },
+        "recent_change_support": {
+          "value": 0.0,
+          "method": "observed-deployment/v1",
+          "evidence_refs": [
+            "checkout-service/recent_change_support"
+          ],
+          "missing_reason": null
+        }
+      },
+      "score": 0.0,
+      "coverage": 0.8,
+      "evidence_refs": [
+        "checkout-service/anomaly_strength",
+        "checkout-service/dependency_trace_relevance",
+        "checkout-service/log_support",
+        "checkout-service/recent_change_support"
+      ]
+    },
+    {
+      "service": "inventory-service",
+      "components": {
+        "anomaly_strength": {
+          "value": 0.0,
+          "method": "if-normalized-score/v1",
+          "evidence_refs": [
+            "inventory-service/anomaly_strength"
+          ],
+          "missing_reason": null
+        },
+        "temporal_precedence": {
+          "value": null,
+          "method": "unavailable/v1",
+          "evidence_refs": [],
+          "missing_reason": "not-observed"
+        },
+        "dependency_trace_relevance": {
+          "value": 0.0,
+          "method": "native-span-duration-share/v1",
+          "evidence_refs": [
+            "inventory-service/dependency_trace_relevance"
+          ],
+          "missing_reason": null
+        },
+        "log_support": {
+          "value": 0.0,
+          "method": "business-completion-support/v1",
+          "evidence_refs": [
+            "inventory-service/log_support"
+          ],
+          "missing_reason": null
+        },
+        "recent_change_support": {
+          "value": 0.0,
+          "method": "observed-deployment/v1",
+          "evidence_refs": [
+            "inventory-service/recent_change_support"
+          ],
+          "missing_reason": null
+        }
+      },
+      "score": 0.0,
+      "coverage": 0.8,
+      "evidence_refs": [
+        "inventory-service/anomaly_strength",
+        "inventory-service/dependency_trace_relevance",
+        "inventory-service/log_support",
+        "inventory-service/recent_change_support"
+      ]
+    },
+    {
+      "service": "rds",
+      "components": {
+        "anomaly_strength": {
+          "value": 0.0,
+          "method": "infra-connection-pressure/v1",
+          "evidence_refs": [
+            "rds/anomaly_strength"
+          ],
+          "missing_reason": null
+        },
+        "temporal_precedence": {
+          "value": null,
+          "method": "unavailable/v1",
+          "evidence_refs": [],
+          "missing_reason": "not-observed"
+        },
+        "dependency_trace_relevance": {
+          "value": 0.0,
+          "method": "native-span-duration-share/v1",
+          "evidence_refs": [
+            "rds/dependency_trace_relevance"
+          ],
+          "missing_reason": null
+        },
+        "log_support": {
+          "value": null,
+          "method": "unavailable/v1",
+          "evidence_refs": [],
+          "missing_reason": "not-observed"
+        },
+        "recent_change_support": {
+          "value": null,
+          "method": "unavailable/v1",
+          "evidence_refs": [],
+          "missing_reason": "not-observed"
+        }
+      },
+      "score": 0.0,
+      "coverage": 0.5,
+      "evidence_refs": [
+        "rds/anomaly_strength",
+        "rds/dependency_trace_relevance"
+      ]
+    }
+  ],
+  "ranking": [
+    "payment-service"
+  ],
+  "margin": 0.8,
+  "abstained": false,
+  "abstention_reasons": [],
+  "actions_allowed": false,
+  "historical_emissions_verified": false,
+  "result_id": "3235005ec384bd297ed9cd82496568b360bc76ceb536c08dd7ae7f5e08df49b2"
+}

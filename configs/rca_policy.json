@@ -1,0 +1,15 @@
+{
+  "policy_version": "rca-evidence/local-v1",
+  "weights": {
+    "anomaly_strength": 0.25,
+    "temporal_precedence": 0.20,
+    "dependency_trace_relevance": 0.25,
+    "log_support": 0.15,
+    "recent_change_support": 0.15
+  },
+  "minimum_score": 0.75,
+  "minimum_margin": 0.15,
+  "minimum_coverage": 0.75,
+  "onset_uncertainty_seconds": 60,
+  "evidence_window_seconds": 300
+}

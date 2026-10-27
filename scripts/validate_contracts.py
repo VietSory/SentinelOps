@@ -9,7 +9,7 @@ from sentinelops.contracts import validate_payload
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts"
 SAMPLES = ROOT / "samples"
-CONFIG_MAP = {"training_data_contract.json": "training-data-policy.schema.json"}
+CONFIG_MAP = {"training_data_contract.json": "training-data-policy.schema.json", "rca_policy.json": "rca-policy.schema.json"}
 
 SAMPLE_MAP = {
     "telemetry.sample.json": "telemetry.schema.json",
@@ -28,6 +28,7 @@ SAMPLE_MAP = {
     "research-interference-label.sample.json": "research-interference-label.schema.json",
     "health-signal.sample.json": "health-signal.schema.json",
     "correlation-result.sample.json": "correlation-result.schema.json",
+    "rca-result.sample.json": "rca-result.schema.json",
 }
 
 

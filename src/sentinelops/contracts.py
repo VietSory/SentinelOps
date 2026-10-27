@@ -61,6 +61,12 @@ def _finite_values(value: Any) -> None:
 
 
 def _semantic_validation(name: str, payload: dict[str, Any]) -> None:
+    if name == "rca-result.schema.json":
+        from sentinelops.incidents.rca import validate_result
+        validate_result(payload)
+    if name == "rca-policy.schema.json":
+        from sentinelops.incidents.rca import validate_policy
+        validate_policy(payload)
     if name == "correlation-result.schema.json":
         from sentinelops.incidents.correlation import validate_result
         validate_result(payload)
