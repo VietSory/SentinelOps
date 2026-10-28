@@ -1,0 +1,191 @@
+{
+  "recorded_at": "2026-10-28T02:08:19.439376+00:00",
+  "scope": "local captured-source analytical RCA and computed IER persistence; not model/RCA accuracy acceptance",
+  "cases": {
+    "s0": {
+      "report_ref": "artifact://manifests/75ef1063c38ee57be6ef378b607eabb5d4ba2edcb489912ba46466648cd769ca.json",
+      "source_commit": "5f39b7a614783eb3724ada3e8301723a31bb40d6",
+      "source_correlation_ref": "artifact://manifests/37920d883127628d7d715ea968d16a22f9f665a4a7b83ecac8431807dbcb1c12.json",
+      "source_health_ref": "artifact://manifests/93528175c8ffb477e112531c5ef0ee114712a2500f5c05c15c82c6529509644a.json",
+      "source_telemetry_manifest_ref": "artifact://manifests/ba77c069e21fb90ffe02627450ff06fe19b4f437f06ed7d306b06293e0d1807b.json",
+      "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+      "as_of": "2026-10-26T03:12:00Z",
+      "groups": 0,
+      "archived_source_objects": 135,
+      "portable_repeat_report_identical": true,
+      "results": []
+    },
+    "s3": {
+      "report_ref": "artifact://manifests/ef702005442d475ccb0c667f2662ed4933abf4c65dccb948ea01dd3854545de9.json",
+      "source_commit": "5f39b7a614783eb3724ada3e8301723a31bb40d6",
+      "source_correlation_ref": "artifact://manifests/f2a5d5898b2438ae6e88ca005d509cf0fa090032f07112ff6f1e4547c55b86c8.json",
+      "source_health_ref": "artifact://manifests/604fa0a5cb1276dc449acc955f2e7ab91a590b7754698b7bb716465fdd5de059.json",
+      "source_telemetry_manifest_ref": "artifact://manifests/bc4c790e504db574892f0d0fb0ba50cb875e9d36961a7c41e6d6a00023202ee7.json",
+      "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+      "as_of": "2026-10-26T03:37:00Z",
+      "groups": 1,
+      "archived_source_objects": 285,
+      "portable_repeat_report_identical": true,
+      "results": [
+        {
+          "group_id": "b3bfd77cd66be204656b4319309643a711bfc0c8e0e5f2607d9d7379807cb557",
+          "rca_ref": "artifact://manifests/f79f2b99b9cce99355b88614b6e31eda93f67592174e12269eb660b110c1da1b.json",
+          "severity": "high",
+          "ranking": [
+            "payment-service",
+            "checkout-service",
+            "rds",
+            "inventory-service"
+          ],
+          "abstained": true,
+          "abstention_reasons": [
+            "insufficient-coverage",
+            "insufficient-score",
+            "source-availability-unverified"
+          ],
+          "source_counts": {
+            "captured-trace-without-observed-violation": 2,
+            "trace-outside-window": 15
+          },
+          "candidates": [
+            {
+              "service": "payment-service",
+              "score": 0.3962432543187603,
+              "coverage": 0.4,
+              "components": {
+                "anomaly_strength": null,
+                "dependency_trace_relevance": 0.9849730172750413,
+                "log_support": 1.0,
+                "recent_change_support": null,
+                "temporal_precedence": null
+              }
+            },
+            {
+              "service": "checkout-service",
+              "score": 0.1512406241438897,
+              "coverage": 0.4,
+              "components": {
+                "anomaly_strength": null,
+                "dependency_trace_relevance": 0.0049624965755588534,
+                "log_support": 1.0,
+                "recent_change_support": null,
+                "temporal_precedence": null
+              }
+            },
+            {
+              "service": "rds",
+              "score": 0.0061604321648899485,
+              "coverage": 0.5,
+              "components": {
+                "anomaly_strength": 0.020618556701030924,
+                "dependency_trace_relevance": 0.004023171958528871,
+                "log_support": null,
+                "recent_change_support": null,
+                "temporal_precedence": null
+              }
+            },
+            {
+              "service": "inventory-service",
+              "score": 0.0001497815516645651,
+              "coverage": 0.4,
+              "components": {
+                "anomaly_strength": null,
+                "dependency_trace_relevance": 0.0005991262066582604,
+                "log_support": 0.0,
+                "recent_change_support": null,
+                "temporal_precedence": null
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "actions_allowed": false,
+  "historical_emissions_verified": false,
+  "persistence": {
+    "status": "PASS",
+    "source_report_ref": "artifact://manifests/ef702005442d475ccb0c667f2662ed4933abf4c65dccb948ea01dd3854545de9.json",
+    "source_commit": "5f39b7a614783eb3724ada3e8301723a31bb40d6",
+    "implementation_sha256": {
+      "/mnt/d/sentinelops/scripts/check_rca_producer.py": "77a37a132e3a54cb54c0a2d26795664fdebde0e8cbc4d60b4445112671acfd1a",
+      "src/sentinelops/incidents/rca_producer.py": "e4eb9a64a20a781785636342c40824401425b34ea07d7c4f119322f72dead6c4",
+      "src/sentinelops/incidents/repository.py": "9bf39f2fc279ad6b5c608f70c6713e9f6828ee46d202a9b1d97cd5e30d0c598b"
+    },
+    "intent_refs": [
+      "artifact://manifests/f7fa128eac1fba7f4edc1588ef670e5de7368152ebb061592c94919ed17ce0d5.json",
+      "artifact://manifests/fc1c429c95f1d1b1d168ebbb676102ef6378ad84e7102f25244d9cebfbbf082e.json"
+    ],
+    "database": "real-PostgreSQL-nonowner-control-writer",
+    "transport": "real-protected-HTTP-uvicorn",
+    "concurrent_retries": 8,
+    "incidents": 2,
+    "immutable_revisions": 6,
+    "outbox_events_acknowledged": 6,
+    "restart_outage_verified": true,
+    "model_outputs_available": false,
+    "actions_allowed": false,
+    "historical_emissions_verified": false,
+    "checks": [
+      "verified-raw-derived-RCA",
+      "stable-intent-emission",
+      "concurrent-idempotent-projection",
+      "changed-retry-conflict",
+      "stale-CAS-conflict",
+      "crash-after-OPEN-resume",
+      "immutable-history",
+      "computed-SLO-provenance",
+      "protected-HTTP-read",
+      "no-model-readiness",
+      "durable-outbox"
+    ]
+  },
+  "persistence_artifact_sha256": "e7d8385937247d1c4c8bb1b51c15e26d02140c32b473b3d09be893ce7070b96b",
+  "s0_zero_write": {
+    "status": "PASS",
+    "intent_ref": "artifact://manifests/74de035cb75fb70535491a2ff834f1ebd04ef4931dc8af83f0c95116e330e3f0.json",
+    "source_report_ref": "artifact://manifests/75ef1063c38ee57be6ef378b607eabb5d4ba2edcb489912ba46466648cd769ca.json",
+    "persisted_incidents": 0,
+    "database_incidents_before": 2,
+    "database_incidents_after": 2,
+    "actions_allowed": false
+  },
+  "first_restart_attempt": {
+    "status": "FAIL",
+    "cause": "Docker automatic host port changed on restart; client retained old port",
+    "resolution": "new exclusive DB with explicit stable port; same checks/timeouts"
+  },
+  "limitations": [
+    "one development SLO incident, not a localization benchmark",
+    "the two persisted incidents are distinct replay intents for the same captured group",
+    "legacy receipt clocks unknown; event-time analysis is not historical online availability",
+    "no IF or XGBoost output; missing components remain null",
+    "no real S5/RCAEval holdout evaluation, continuous worker or action authority"
+  ],
+  "producer_implementation_commit": "2405b801b41a4a63695265ae15f08dac8acca786",
+  "local_checks": {
+    "focused": {
+      "command": ".venv-ml/bin/python -m pytest -q tests/test_rca_producer.py tests/test_rca_replay.py tests/test_rca.py",
+      "exit_code": 0,
+      "passed": 43
+    },
+    "regression": {
+      "command": ".venv-ml/bin/python -m pytest -q",
+      "exit_code": 0,
+      "passed": 368,
+      "limits": "software/API regressions, not source accuracy or production acceptance"
+    },
+    "contracts": {
+      "command": ".venv-ml/bin/python scripts/validate_contracts.py",
+      "exit_code": 0,
+      "schemas": 23,
+      "samples": 17,
+      "actual_configurations": 2
+    },
+    "installed_wheel": {
+      "command": ".venv-ml/bin/python scripts/check_installed_package.py",
+      "exit_code": 0,
+      "scope": "isolated imports/schema/semantic/API outside checkout"
+    }
+  }
+}

@@ -322,7 +322,7 @@ RECOVERING -> INCIDENT nếu verify fail
 
 Persistence đếm bucket/window IDs mới; duplicate replay không cộng lần thứ hai. Dùng hysteresis để thoát trạng thái; không đóng incident chỉ từ một clean sample. Default entry là hai consecutive eligible observations, exit/verification dùng ba buckets theo policy; thresholds cụ thể được version.
 
-Implementation checkpoint: [objective SLO health producer](STEP7_SLO_HEALTH.md) and [real captured-source replay](reports/2026-10-26-slo-health-replay.md) implement this rule-source prerequisite with explicit UNKNOWN, policy/source identity and immutable decisions. This is separate from model outputs and independent unsampled-log evaluation labels. Continuous worker checkpoints, correlated IER writing and action verification remain pending; replay decision clocks are not historical emissions.
+Implementation checkpoint: [objective SLO health producer](STEP7_SLO_HEALTH.md) and [real captured-source replay](reports/2026-10-26-slo-health-replay.md) implement this rule-source prerequisite with explicit UNKNOWN, policy/source identity and immutable decisions. This is separate from model outputs and independent unsampled-log evaluation labels. [Computed analytical IER writing](STEP7_RCA.md) now has a protected local producer; continuous worker checkpoints and action verification remain pending. Replay decision clocks are not historical emissions.
 
 ### 9.3 Incident lifecycle và projection
 
@@ -357,7 +357,7 @@ Topology snapshot có version/hash, edge direction rõ: Checkout depends on Paym
 
 Deduplicate theo signal/window/model identity. Correlation output giữ grouping reasons và alternative grouping/uncertainty. Tạo new incident khi không đủ căn cứ ghép; update active incident bằng expected revision.
 
-Implementation checkpoint: [conservative SLO episode correlation](STEP7_CORRELATION.md) and [actual S0/S3 replay](reports/2026-10-27-slo-correlation.md) provide typed bounded grouping with explicit ambiguous shared consumers, source scopes and dependency support. Output is analytical grouping, not scored RCA or live incident emission. Real multi-fault evaluation, model-signal integration and durable computed IER processing remain pending.
+Implementation checkpoint: [conservative SLO episode correlation](STEP7_CORRELATION.md) and [actual S0/S3 replay](reports/2026-10-27-slo-correlation.md) provide typed bounded grouping with explicit ambiguous shared consumers, source scopes and dependency support. Correlation output is analytical grouping; [the downstream RCA producer](STEP7_RCA.md) separately scores source support and persists computed local IERs. Real multi-fault evaluation, model-signal integration and continuous incident processing remain pending.
 
 ### 10.2 RCA scoring — PROPOSED initial configuration
 
@@ -377,6 +377,8 @@ Temporal precedence dùng observed times và clock/source uncertainty; chênh nh
 Các weights là điểm khởi đầu để ablation/development replay, không phải học thuyết causality hoặc kết quả đã tối ưu. Báo top-1/top-3/MRR trên heldout incidents và so với anomaly-only, topology/time-only ablations.
 
 Default action eligibility đề xuất cần top score ≥0.75, margin với candidate thứ hai ≥0.15, evidence coverage đạt policy và phù hợp runbook. Thấp hơn hoặc mâu thuẫn → `uncertain`/reason trong envelope và escalation. Score threshold không tự là quyền thực thi.
+
+Implementation checkpoint: [versioned RCA policy/results and local producer](STEP7_RCA.md) retain the initial weights, explicit missing coverage and abstention. [Actual S3 replay](reports/2026-10-28-rca-replay.md) supplies bounded trace/log/connection support but abstains; no model or causal-performance acceptance is inferred. Computed IERs use a new immutable actual replay-emission intent, separate from the historical onset/analytical cutoff, with stable retry identities and OPEN/RCA_READY/ESCALATED revisions. Availability stays UNKNOWN and actions stay disabled. Continuous workers, ablations, independent-root/public evaluation and production activation keep their separate gates.
 
 ### 10.3 Evidence model
 
