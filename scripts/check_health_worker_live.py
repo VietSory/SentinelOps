@@ -45,6 +45,24 @@ def require_port(info: dict, internal: str, expected: int):
         raise ValueError("native acceptance endpoint is not owned by the selected running container")
 
 
+async def ledger_snapshot(pool, stream_id: str) -> dict:
+    async with pool.acquire() as conn, conn.transaction(isolation="repeatable_read", readonly=True):
+        stream = await conn.fetchrow("SELECT * FROM sentinel_control.health_streams WHERE stream_id=$1", stream_id)
+        batches = await conn.fetch("SELECT * FROM sentinel_control.health_batches WHERE stream_id=$1 ORDER BY bucket_end", stream_id)
+        signals = await conn.fetch("SELECT * FROM sentinel_control.health_signals WHERE stream_id=$1 ORDER BY bucket_end,service", stream_id)
+    if stream is None:
+        raise ValueError("health stream snapshot has no durable source")
+    def encoded(row):
+        result = {}
+        for key, value in dict(row).items():
+            if isinstance(value, datetime): value = timestamp(value)
+            elif key in ("identity", "payload"): value = json.loads(value)
+            result[key] = value
+        return result
+    return {"snapshot_version": "health-ledger-snapshot/v1", "stream": encoded(stream),
+            "batches": [encoded(row) for row in batches], "signals": [encoded(row) for row in signals]}
+
+
 async def verify(pool, store: ArtifactStore, stream_id: str, worker_logs: list[Path], interventions: list[dict]) -> dict:
     async with pool.acquire() as conn:
         batches = await conn.fetch("SELECT * FROM sentinel_control.health_batches WHERE stream_id=$1 ORDER BY bucket_end", stream_id)
@@ -272,6 +290,8 @@ async def check(args):
             source_outcomes = await extra
         for process in children[1:]: assert await stop_child(process) == 0
         phase = "verification"
+        snapshot = await ledger_snapshot(pool, stream_id)
+        (args.output / "database-snapshot.json").write_text(json.dumps(snapshot, indent=2, allow_nan=False) + "\n")
         result = await verify(pool, store, stream_id, logs, interventions)
         run = json.loads((run_path / "run.json").read_text())
         assert run["status"] == "completed" and run["dirty_worktree"] is False
