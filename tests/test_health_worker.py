@@ -60,3 +60,20 @@ def test_disconnect_during_capture_is_retryable_but_programming_errors_are_not(t
     worker._locked_tick = AsyncMock(side_effect=asyncpg.InterfaceError("closed or misused connection"))
     with pytest.raises(ConnectionError if closed else asyncpg.InterfaceError):
         asyncio.run(worker.tick())
+
+
+def test_processing_budget_includes_returning_the_connection_to_its_pool(tmp_path):
+    class Connection:
+        fetchval = AsyncMock(return_value=True)
+        def is_closed(self): return False
+    conn = Connection()
+    class Acquire:
+        async def __aenter__(self): return conn
+        async def __aexit__(self, *args): await asyncio.sleep(.02)
+    class Pool:
+        def acquire(self): return Acquire()
+    worker = HealthWorker(Pool(), ArtifactStore(tmp_path), POLICY, endpoint="http://localhost:9090",
+                          environment="fixture-budget", configuration_hash="a" * 64)
+    worker._locked_tick = AsyncMock(return_value={"status": "COMMITTED"})
+    result = asyncio.run(worker.tick())
+    assert result["processing_ms"] >= 15

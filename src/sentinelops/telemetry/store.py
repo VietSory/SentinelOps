@@ -22,6 +22,14 @@ class ArtifactStore:
         data = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
         digest = hashlib.sha256(data).hexdigest()
         target = self.root / kind / f"{digest}.json"
+        try:
+            existing = target.read_bytes()
+        except FileNotFoundError:
+            pass
+        else:
+            if existing != data:
+                raise ValueError("immutable artifact is corrupt")
+            return f"artifact://{kind}/{digest}.json"
         target.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
             temporary = Path(stream.name)

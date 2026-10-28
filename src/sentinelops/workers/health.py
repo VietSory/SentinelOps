@@ -95,7 +95,7 @@ class HealthWorker:
             if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", self.lock_id):
                 return {"status": "BUSY", "stream_id": self.stream_id}
             try:
-                return await self._locked_tick(conn, started)
+                result = await self._locked_tick(conn, started)
             except asyncpg.InterfaceError:
                 # A disconnect can arrive while capture runs outside the SQL transaction.
                 # Reclassify only a confirmed closed connection; other API misuse is fatal.
@@ -109,6 +109,9 @@ class HealthWorker:
                     except (asyncpg.InterfaceError, asyncpg.PostgresConnectionError):
                         if not conn.is_closed():
                             raise
+        if result["status"] == "COMMITTED":
+            result["processing_ms"] = round((time.monotonic() - started) * 1000, 3)
+        return result
 
     async def _locked_tick(self, conn, started: float) -> dict:
         current = datetime.now(timezone.utc)
@@ -150,6 +153,7 @@ class HealthWorker:
                 raise ValueError("health feature history belongs to another source/bucket")
             captures.extend(self.store.read(ref) for ref in manifest["current_raw_refs"])
         missed = (current - end).total_seconds() > self.policy["maximum_lag_seconds"]
+        history_done = time.monotonic()
         current_captures = [] if missed else await asyncio.gather(*(
             asyncio.to_thread(native_capture, self.endpoint, service, end) for service in sorted(BUSINESS_ROUTES)))
         if not missed and (len(current_captures) != len(BUSINESS_ROUTES)
@@ -161,6 +165,7 @@ class HealthWorker:
             if (set(capture) != allowed or capture["capture_version"] != "1.0"
                 or capture["source_profile"] != SOURCE_PROFILE or capture["service"] not in BUSINESS_ROUTES):
                 raise ValueError("health worker rejects mixed source/control metadata")
+        capture_done = time.monotonic()
         current_refs = sorted(self.store.write("raw", capture) for capture in current_captures)
         normalized = await asyncio.to_thread(process_captures, captures + current_captures, self.store, environment=self.environment)
         observations = {}
@@ -170,6 +175,7 @@ class HealthWorker:
                 if observation["service"] in observations:
                     raise ValueError("health worker has conflicting current observations")
                 observations[observation["service"]] = observation
+        normalization_done = time.monotonic()
         evaluated = datetime.now(timezone.utc)
         signals, signal_refs = [], []
         for service in sorted(BUSINESS_ROUTES):
@@ -199,4 +205,8 @@ class HealthWorker:
             if updated != "UPDATE 1":
                 raise ValueError("health checkpoint compare-and-set failed")
         return {"status": "COMMITTED", "stream_id": self.stream_id, "bucket_end": timestamp(end),
-                "manifest_ref": ref, "processing_ms": round((time.monotonic() - started) * 1000, 3)}
+                "manifest_ref": ref, "stages_ms": {
+                    "checkpoint_and_history": round((history_done - started) * 1000, 3),
+                    "capture": round((capture_done - history_done) * 1000, 3),
+                    "normalization": round((normalization_done - capture_done) * 1000, 3),
+                    "decision_and_commit": round((time.monotonic() - normalization_done) * 1000, 3)}}
