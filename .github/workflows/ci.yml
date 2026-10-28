@@ -306,3 +306,63 @@ jobs:
       - name: Stop RCA control testbed
         if: always()
         run: docker compose -p sentinelops-rca-ci -f docker-compose.control.yml down --volumes --remove-orphans
+
+  multi-fault-development:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: sentinelops-s5-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: docker compose config --quiet
+      - run: docker compose up --build -d --wait --wait-timeout 120
+      - name: Capture frozen S5 blocking-error development case
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json,os,subprocess,sys
+          protocol=json.loads(Path('configs/s5_development_protocol.json').read_text())
+          case=next(c for c in protocol['cases'] if c['name']=='independent-blocking-errors')
+          args=[sys.executable,'-m','scripts.run_experiment','--output','artifacts/s5/experiments',
+              '--session-id','s5-ci-development']
+          for key,value in case.items():
+              if key!='name':args+=['--'+key.replace('_','-'),str(value)]
+          env=dict(os.environ);env.pop('DATABASE_URL',None)
+          log=Path('artifacts/s5/capture.log');log.parent.mkdir(parents=True,exist_ok=True)
+          with log.open('w') as saved:
+              process=subprocess.Popen(args,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+              for line in process.stdout:
+                  saved.write(line);saved.flush();print(line,end='',flush=True)
+              raise SystemExit(process.wait())
+          PY
+      - name: Verify independent roots and ambiguous shared consumer from raw evidence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from scripts.evaluate_s5 import evaluate
+          runs=list(Path('artifacts/s5/experiments').glob('run-*/run.json'))
+          assert len(runs)==1
+          report=evaluate(runs[0].parent,Path('artifacts/s5/evaluation'),Path('configs/s5_development_protocol.json'))
+          assert report['status']=='PASS' and report['heldout_opened'] is False
+          assert report['full_G4_accepted'] is False and report['actions_allowed'] is False
+          print('REAL S5 INDEPENDENT-ROOT DEVELOPMENT ACCEPTANCE: PASS')
+          PY
+      - name: Preserve S5 development evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s5-development-evidence
+          path: artifacts/s5/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: S5 testbed diagnostics
+        if: failure()
+        run: docker compose logs --no-color --tail 100
+      - name: Stop S5 testbed
+        if: always()
+        run: docker compose down --volumes --remove-orphans
