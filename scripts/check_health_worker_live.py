@@ -263,6 +263,7 @@ async def check(args):
                     interventions.append({"kind": "worker-SIGKILL", "pid": primary.pid, "at": timestamp(datetime.now(timezone.utc))})
                     spawn(); crashed = True
                     spawn()  # Two real processes share the same stream/store after restart.
+                    if metrics: await metrics.restarted()
                 if db_task is None and {p["service"] for p in payloads if p["event"] == "incident_opened"} >= {"checkout-service", "payment-service"}:
                     db_task = asyncio.create_task(database_outage())
             await asyncio.sleep(1)

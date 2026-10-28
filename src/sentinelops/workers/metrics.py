@@ -45,6 +45,8 @@ class WorkerMetrics:
             ("sentinelops_worker_heartbeat_unixtime", "heartbeat", "s"),
             ("sentinelops_worker_bucket_age", "age", "s"),
             ("sentinelops_worker_source_available", "source", ""),
+            ("sentinelops_worker_has_local_decision", "has_decision", ""),
+            ("sentinelops_worker_bucket_end_unixtime", "end", "s"),
         ):
             meter.create_observable_gauge(name, callbacks=[self._callback(kind)], unit=unit)
         self._committed = meter.create_counter("sentinelops_worker_committed_windows")
@@ -52,6 +54,14 @@ class WorkerMetrics:
         self._errors = meter.create_counter("sentinelops_worker_errors")
         self._unknown = meter.create_counter("sentinelops_worker_unknown_decisions")
         self._duration = meter.create_histogram("sentinelops_worker_processing_duration", unit="s")
+        # Explicit known-zero process counters reset a reused Collector slot.
+        # A histogram must not receive a fabricated zero-duration observation.
+        self._committed.add(0, self._attributes)
+        self._busy.add(0, self._attributes)
+        for component in sorted(ERROR_COMPONENTS):
+            self._errors.add(0, {**self._attributes, "component": component})
+        for service in sorted(BUSINESS_ROUTES):
+            self._unknown.add(0, {**self._attributes, "business_service": service})
 
     @staticmethod
     def validate_labels(environment: str, instance: str) -> None:
@@ -78,6 +88,10 @@ class WorkerMetrics:
                     return [Observation(int(self._ready), self._attributes)]
                 if kind == "heartbeat":
                     return [] if self._heartbeat is None else [Observation(self._heartbeat, self._attributes)]
+                if kind == "has_decision":
+                    return [Observation(int(self._bucket_end is not None), self._attributes)]
+                if kind == "end":
+                    return [] if self._bucket_end is None else [Observation(self._bucket_end, self._attributes)]
                 if kind == "source":
                     return [Observation(value, {**self._attributes, "business_service": service})
                             for service, value in sorted(self._source_available.items())]

@@ -47,8 +47,10 @@ def test_missing_decisions_stay_absent_and_export_collection_cannot_refresh_loop
     try:
         values = collect(reader)
         assert values["sentinelops_worker_ready"][0].value == 0
+        assert values["sentinelops_worker_has_local_decision"][0].value == 0
         assert "sentinelops_worker_source_available" not in values
         assert "sentinelops_worker_bucket_age" not in values
+        assert "sentinelops_worker_bucket_end_unixtime" not in values
         assert "sentinelops_worker_heartbeat_unixtime" not in values
         m.heartbeat(ready=True)
         before = collect(reader)["sentinelops_worker_heartbeat_unixtime"][0].value
@@ -74,13 +76,16 @@ def test_accepted_typed_signals_produce_seconds_histogram_and_bounded_source_lab
         m.observe_result({"status": "BUSY", "stream_id": "do-not-export"}, store)
         values = collect(reader)
         assert values["sentinelops_worker_committed_windows"][0].value == 1
+        assert values["sentinelops_worker_has_local_decision"][0].value == 1
+        assert values["sentinelops_worker_bucket_end_unixtime"][0].value == END.timestamp()
         assert values["sentinelops_worker_busy_polls"][0].value == 1
         histogram = values["sentinelops_worker_processing_duration"][0]
         assert histogram.count == 1 and histogram.sum == pytest.approx(.123)
         assert 10. in histogram.explicit_bounds
         available = {p.attributes["business_service"]: p.value for p in values["sentinelops_worker_source_available"]}
         assert available == {"checkout-service": 1, "payment-service": 1, "inventory-service": 0}
-        assert values["sentinelops_worker_unknown_decisions"][0].attributes["business_service"] == "inventory-service"
+        unknown = {p.attributes["business_service"]: p.value for p in values["sentinelops_worker_unknown_decisions"]}
+        assert unknown == {"checkout-service": 0, "payment-service": 0, "inventory-service": 1}
         assert values["sentinelops_worker_bucket_age"][0].value == 30
         now[0] += 15
         assert collect(reader)["sentinelops_worker_bucket_age"][0].value == 45
@@ -114,7 +119,7 @@ def test_bad_artifacts_or_mixed_decisions_cannot_increment_success_metrics(tmp_p
         result["processing_ms"] = float("nan")
     try:
         with pytest.raises(ValueError): m.observe_result(result, store)
-        assert "sentinelops_worker_committed_windows" not in collect(reader)
+        assert collect(reader)["sentinelops_worker_committed_windows"][0].value == 0
         assert "sentinelops_worker_source_available" not in collect(reader)
     finally:
         m.close()

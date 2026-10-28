@@ -72,7 +72,7 @@ Enable explicitly against the local OTel/gRPC receiver; exporting is disabled by
 
 The private SDK provider exports every two seconds with a one-second exporter timeout through Collector→Prometheus. It does not set the global provider. Resource attributes use an explicit service/namespace/environment allowlist; ambient OTel resource attributes and credential headers are not forwarded. A fixed noncredential header avoids the pinned SDK's fallback from empty headers to environment tokens. The endpoint must be credential-free loopback HTTP, with gRPC HTTP proxying disabled. Final flush/shutdown receive one-/two-second budgets; exporter failure does not manufacture a business-health value.
 
-Use a distinct stable `health-0`…`health-15` slot for each concurrent process and reuse its slot after restart. Approved metric environments are `local`, `test`, `staging`, `production`; enabling a production label does not deploy a production worker. Stream/run/incident IDs, file paths and PIDs are not metric attributes. The slot is operator assigned; the exporter does not provide distributed slot leasing. Two processes using the same slot can collide in the Collector; configure them distinctly. Cumulative counters reset on process restart; use `rate`/`increase` for time-window totals and the durable ledger for exact accepted history.
+Use a distinct stable `health-0`…`health-15` slot for each concurrent process and reuse its slot after restart. Approved metric environments are `local`, `test`, `staging`, `production`; enabling a production label does not deploy a production worker. Stream/run/incident IDs, file paths and PIDs are not metric attributes. The slot is operator assigned; the exporter does not provide distributed slot leasing. Two processes using the same slot can collide in the Collector; configure them distinctly. Cumulative counters explicitly initialize to known zero on process restart; use `rate`/`increase` for time-window totals and the durable ledger for exact accepted history. Histograms receive no fabricated zero-duration sample; use the local-decision guard to exclude retained earlier histograms before a new local commit.
 
 | Prometheus series | Meaning |
 | --- | --- |
@@ -80,6 +80,8 @@ Use a distinct stable `health-0`…`health-15` slot for each concurrent process 
 | `sentinelops_worker_heartbeat_unixtime_seconds` | Actual timestamp refreshed by the main loop; SDK exporter collections cannot advance it |
 | `sentinelops_worker_bucket_age_seconds` | Current time minus this process's last committed bucket end; absent before its first commit or when the clock precedes that end. Normal watermark/cadence causes roughly 30–90 seconds, not zero |
 | `sentinelops_worker_source_available{business_service}` | Latest decision committed by this process was ELIGIBLE=1 or UNKNOWN=0. An incident can be ELIGIBLE; this gauge is not healthy/unhealthy. Absent before a local commit |
+| `sentinelops_worker_has_local_decision` | Zero until this process commits its first window; required to exclude source/age series retained by the Collector from an earlier process using the same slot |
+| `sentinelops_worker_bucket_end_unixtime_seconds` | Last local accepted bucket end; use `time() -` this timestamp to recompute age and reject future buckets independently of cached age values |
 | `sentinelops_worker_committed_windows_total` | Accepted windows committed by this process, three typed service decisions per window |
 | `sentinelops_worker_busy_polls_total` | Another database session owns the stream lock |
 | `sentinelops_worker_errors_total{component}` | Fixed component taxonomy: source, database, artifact, configuration, runtime |
@@ -94,6 +96,18 @@ and on(job, environment, worker_instance) (time() - sentinelops_worker_heartbeat
 and on(job, environment, worker_instance) (time() - sentinelops_worker_heartbeat_unixtime_seconds >= 0)
 ```
 
-An empty result means unavailable/unknown; do not fill missing series with healthy zero/one. A SIGKILL can leave the Collector serving the last ready gauge, so readiness alone is insufficient. Plot accepted-window age separately from processing latency. Last source-availability values also need fresh readiness and a suitably bounded accepted-window age; a busy replica may have no local source decisions. Neither gauge is an HTTP SLO denominator or model feature. Metrics and controls remain outside the worker's business evidence store.
+An empty result means unavailable/unknown; do not fill missing series with healthy zero/one. A SIGKILL can leave the Collector serving the last ready gauge, so readiness alone is insufficient. SDK source/age observations are absent before the first local commit, but the Collector can still retain an earlier process's series when a slot is reused. Require `has_local_decision == 1` before using those values. For example, source eligibility with local ownership and a nonfuture accepted-window age of at most ninety seconds is:
+
+```promql
+sentinelops_worker_source_available
+and on(job, environment, worker_instance) (sentinelops_worker_has_local_decision == 1)
+and on(job, environment, worker_instance) (time() - sentinelops_worker_bucket_end_unixtime_seconds >= 0)
+and on(job, environment, worker_instance) (time() - sentinelops_worker_bucket_end_unixtime_seconds <= 90)
+and on(job, environment, worker_instance) (sentinelops_worker_ready == 1)
+and on(job, environment, worker_instance) (time() - sentinelops_worker_heartbeat_unixtime_seconds >= 0)
+and on(job, environment, worker_instance) (time() - sentinelops_worker_heartbeat_unixtime_seconds < 15)
+```
+
+The ninety-second display bound follows the minute cadence plus thirty-second watermark; it does not change SLO eligibility or latency gates. Plot accepted-window age separately from processing latency. A busy replica may have no local source decisions. Neither gauge is an HTTP SLO denominator or model feature. Metrics and controls remain outside the worker's business evidence store.
 
 The optional native acceptance flag `--metrics-otlp-endpoint http://127.0.0.1:4317` verifies the owned collector, actual Prometheus readiness during database outage/recovery, two stable replica slots, and final counters/histogram sums against resumed process logs. It preserves the frozen business/SLO/outage protocol and all existing ten-second gates. SDK tests alone are not transport proof; native results and exact-head CI/artifacts must be inspected before release acceptance. No Grafana dashboard is deployed by enabling this flag.
