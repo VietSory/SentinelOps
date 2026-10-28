@@ -162,3 +162,17 @@ def test_index_bytes_must_match_frozen_identity_not_only_a_self_consistent_manif
                 "publisher_checksum": {"size": index.stat().st_size, "sha256": digest}}]}
     with pytest.raises(ValueError, match="frozen"):
         read_index(save_manifest(tmp_path, data))
+
+
+def test_existing_manifest_reader_cannot_bypass_holdout_guard_by_reading_cached_files(tmp_path):
+    from sentinelops.public_data.audit import load_verified_manifest
+    heldout = next(g["cases"][0] for g in load_partitions()["assignments"] if g["role"] == "sealed-holdout")
+    data = {"manifest_version": "public-download/v1", "dataset": "RCAEval",
+            "revision": load_partitions()["revision"], "activation_allowed": False,
+            "selection": [INSPECTED[0], heldout], "files": [{"path": str(tmp_path / "must-not-be-read.parquet")}]}
+    with pytest.raises(ValueError, match="sealed"):
+        load_verified_manifest(save_manifest(tmp_path, data))
+    data["revision"] = "different"
+    data["selection"] = list(INSPECTED)
+    with pytest.raises(ValueError, match="revision"):
+        load_verified_manifest(save_manifest(tmp_path, data))

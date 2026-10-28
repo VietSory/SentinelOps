@@ -14,6 +14,11 @@ def load_verified_manifest(path: Path) -> tuple[dict,dict[str,Path]]:
     manifest=json.loads(blob)
     if manifest.get("manifest_version")!="public-download/v1" or manifest.get("activation_allowed") is not False:
         raise ValueError("unsupported public dataset manifest")
+    if manifest.get("dataset") == "RCAEval":
+        from sentinelops.public_data.rcaeval_partitions import REVISION, require_cases
+        if manifest.get("revision") != REVISION:
+            raise ValueError("RCAEval manifest differs from the frozen revision")
+        require_cases(manifest.get("selection", []))  # Reject sealed cases before any raw-file/cache read.
     root=path.parent.parent.resolve();files={}
     for record in manifest["files"]:
         target=Path(record["path"]).resolve()
