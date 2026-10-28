@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import replace
+from datetime import datetime,timezone
 import json
 import hashlib
 import os
@@ -19,9 +20,26 @@ import asyncpg
 import httpx
 
 from sentinelops.incidents.domain import IncidentConflict
+from sentinelops.contracts import utc_time
 from sentinelops.incidents.rca_producer import prepare_intent,project_commands,publish_intent,verified_intent
 from sentinelops.incidents.repository import IncidentRepository
 from sentinelops.telemetry.store import ArtifactStore
+
+
+async def wait_for_cutoff(cutoff, *, maximum_wait_seconds=60):
+    """Fresh replay clocks may lead wall time by the health policy's 60s lag.
+
+    Keep prepare_intent's future-emission rejection; only this test driver waits.
+    """
+    started=time.monotonic()
+    while True:
+        remaining=(cutoff-datetime.now(timezone.utc)).total_seconds()
+        if remaining<=0:return time.monotonic()-started
+        if remaining>maximum_wait_seconds or time.monotonic()-started>=maximum_wait_seconds:
+            raise ValueError('analytical cutoff exceeds the bounded acceptance wait')
+        if time.monotonic()-started<.01:
+            print('WAITING FOR ACTUAL CLOCK TO REACH ANALYTICAL CUTOFF',flush=True)
+        await asyncio.sleep(min(remaining,10.))
 
 
 async def check(args):
@@ -40,6 +58,7 @@ async def check(args):
         await repository.check_ready()
         async with pool.acquire() as conn:
             assert await conn.fetchval("SELECT count(*) FROM sentinel_control.incidents")==0,"requires an empty exclusive acceptance DB"
+        waited=await wait_for_cutoff(utc_time(store.read(args.report_ref)['as_of']))
         intent_ref=prepare_intent(store,args.report_ref,policy=policy)
         intent,source=verified_intent(store,intent_ref,policy=policy)
         assert source['group_count']>0,"requires a captured source with actual SLO openings"
@@ -143,6 +162,7 @@ async def check(args):
             'transport':'real-protected-HTTP-uvicorn','concurrent_retries':8,'incidents':len(expected),
             'immutable_revisions':3*len(expected),'outbox_events_acknowledged':len(claimed),
             'restart_outage_verified':bool(args.database_container),'model_outputs_available':False,
+            'waited_for_analytical_cutoff_seconds':waited,
             'actions_allowed':False,'historical_emissions_verified':False,
             'checks':['verified-raw-derived-RCA','stable-intent-emission','concurrent-idempotent-projection',
                 'changed-retry-conflict','stale-CAS-conflict','crash-after-OPEN-resume','immutable-history',
