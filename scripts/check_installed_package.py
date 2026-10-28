@@ -26,6 +26,8 @@ from sentinelops.incidents.correlation_replay import replay_correlation
 from sentinelops.incidents.rca import evaluate_rca
 from sentinelops.incidents.rca_replay import replay_rca
 from sentinelops.incidents.rca_producer import prepare_intent, publish_intent
+from sentinelops.experiments.runner import ExperimentConfig
+from sentinelops.experiments.multifault import grouping_report
 from sentinelops.public_data.downloads import fetch_file
 from sentinelops.public_data.audit import load_verified_manifest
 from sentinelops.public_data.gamma import load_gamma_manifest
@@ -46,6 +48,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result',
              'rca-policy', 'rca-result'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
+assert 'root_causes_ground_truth' in load_schema('experiment-run.schema.json')['properties']
 policy={'policy_version':'slo-health/local-v1','latency_ms':750.,'error_rate':.05,
     'minimum_requests':30,'minimum_coverage':.8,'entry_buckets':2,'recovery_buckets':3,'maximum_lag_seconds':60}
 health=advance_health(None,None,service='payment-service',environment='test',source_profile='wheel/v1',

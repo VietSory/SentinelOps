@@ -22,6 +22,7 @@ import httpx
 from sentinelops.contracts import validate_payload
 from sentinelops.experiments.labels import SLOConfig, measure_slo
 from sentinelops.experiments.diagnostics import failure_context
+from sentinelops.experiments.traffic import server_log_coverage,s5_expected_responses
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.infrastructure import PostgresInfrastructureSource
 from sentinelops.telemetry.pipeline import process_captures
@@ -29,6 +30,7 @@ from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.telemetry.scheduling import capture_ready_bucket,wait_until_utc
 from sentinelops.trace_query import decode_v3_trace
+from sentinelops.trace_evidence import span_tags,validate_trace
 
 CHECKOUT = "http://127.0.0.1:8001"
 PAYMENT = "http://127.0.0.1:8002"
@@ -50,8 +52,10 @@ class ExperimentConfig:
     def validate(self):
         if any(type(value) is not int for value in (self.seed,self.warmup_seconds,self.active_seconds,self.recovery_seconds,self.maximum_delay_ms)):
             raise ValueError("seed, durations and fault delay must be integers")
-        if self.scenario not in ("S0","S1","S3"):
-            raise ValueError("runner supports S0/S1/S3; deployment/DB/multi-fault scenarios require their real adapters")
+        if self.scenario not in ("S0","S1","S3","S5"):
+            raise ValueError("runner supports S0/S1/S3/S5; deployment/DB scenarios require their real adapters")
+        if self.scenario=="S5" and self.split=="train":
+            raise ValueError("S5 is RCA development/heldout evidence, not ML training data")
         if isinstance(self.rps,bool) or not isinstance(self.rps,(int,float)) or not math.isfinite(self.rps):
             raise ValueError("load rate must be finite numeric requests/second")
         if self.split not in ("train","validation","test") or self.seed < 0 or not 1 <= self.rps <= 10:
@@ -93,6 +97,7 @@ def checkout_identity(project: Path) -> tuple[str,bool,dict]:
              if name.startswith("sentinelops") and getattr(module,"__file__",None)}
     paths.update((project/"contracts").glob("*.schema.json"))
     paths.add(project/"scripts"/"run_experiment.py")
+    paths.add(project/"configs"/"s5_development_protocol.json")
     hashes = {str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in paths if path.is_file()}
     return commit,dirty,hashes
 
@@ -134,6 +139,10 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
     commit,dirty,hashes = checkout_identity(project)
     if dirty and not allow_dirty:
         raise ValueError("commit source first; --allow-dirty creates non-training pilot evidence only")
+    protocol_hash=None
+    if config.scenario=="S5":
+        try:protocol_hash=hashlib.sha256((project/"configs"/"s5_development_protocol.json").read_bytes()).hexdigest()
+        except OSError as exc:raise ValueError("S5 development protocol must exist before capture") from exc
     images = image_identity(project)
     identifier = "run-"+uuid4().hex
     root = output/identifier
@@ -142,7 +151,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
     source = PrometheusSource()
     slo = SLOConfig()
     captures,infra_refs,trace_refs,outcomes = [],[],[],[]
-    recent = deque(maxlen=60)
+    recent = deque(maxlen=180 if config.scenario=="S5" else 60)
     counts = Counter()
     ended = None
     originals = {}
@@ -153,14 +162,21 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         "scenario_id":config.scenario,"declared_split":config.split,"environment":"local","source_profile":SOURCE_PROFILE,
         "seed":config.seed,"status":"running","source_commit":commit,"dirty_worktree":dirty,"image_digests":images,
         "started_at":timestamp(datetime.now(timezone.utc)),"ended_at":None,"warmup_end_at":None,"fault_start_at":None,
-        "recovery_start_at":None,"root_cause_ground_truth":None if config.scenario == "S0" else "payment-service",
-        "affected_services_ground_truth":[] if config.scenario == "S0" else ["payment-service","checkout-service"],
-        "fault_method":"none" if config.scenario == "S0" else ("gradual-latency" if config.scenario == "S3" else "sandbox-"+config.fault_mode),
+        "recovery_start_at":None,"root_cause_ground_truth":None if config.scenario in ("S0","S5") else "payment-service",
+        "affected_services_ground_truth":[] if config.scenario == "S0" else sorted(BUSINESS_ROUTES) if config.scenario=="S5" else ["payment-service","checkout-service"],
+        "fault_method":"none" if config.scenario == "S0" else "multi-fault" if config.scenario=="S5" else ("gradual-latency" if config.scenario == "S3" else "sandbox-"+config.fault_mode),
         "slo_config_version":"slo/local-v1","label_protocol_version":"degradation-phase/v1",
         "slo_by_service":{service:{"first_violation_at":None,"confirmed_at":None,"request_count":0} for service in BUSINESS_ROUTES},
         "parameters":{**asdict(config),"slo":asdict(slo),"loaded_source_sha256":hashes},"phase_intervals":[],
         "source_manifest_ref":None,"logs_ref":None,"request_outcomes_ref":None,"infrastructure_refs":[],"failure_reason":None,
     }
+    entries=tuple(BUSINESS_ROUTES) if config.scenario=="S5" else ("checkout-service",)
+    if config.scenario=="S5":
+        run["root_causes_ground_truth"]=["payment-service","inventory-service"]
+        run["parameters"]["s5_protocol_sha256"]=protocol_hash
+        run["parameters"]["traffic_plan"]={service:{"entry_rps":config.rps,"method":BUSINESS_ROUTES[service][0],
+            "route":BUSINESS_ROUTES[service][1]} for service in entries}
+        run["parameters"]["role"]="local-RCA-development-or-heldout-only"
     failure = None
     async with httpx.AsyncClient(timeout=12.,trust_env=False) as client:
         async def set_fault(url,mode,delay=0):
@@ -170,13 +186,18 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         semaphore = asyncio.Semaphore(16)
         rng = random.Random(config.seed)
 
-        async def request(phase):
+        async def request(phase,entry="checkout-service"):
             async with semaphore:
                 trace_id,correlation = uuid4().hex,"exp-"+uuid4().hex
                 began = timestamp(datetime.now(timezone.utc))
                 try:
-                    response = await client.post(CHECKOUT+"/v1/checkout",json={"sku":"sku-001","quantity":1,"amount":9.9},
-                        headers={"x-correlation-id":correlation,"traceparent":f"00-{trace_id}-{uuid4().hex[:16]}-01"})
+                    headers={"x-correlation-id":correlation,"traceparent":f"00-{trace_id}-{uuid4().hex[:16]}-01"}
+                    if entry=="checkout-service":
+                        response = await client.post(CHECKOUT+"/v1/checkout",json={"sku":"sku-001","quantity":1,"amount":9.9},headers=headers)
+                    elif entry=="payment-service":
+                        response = await client.post(PAYMENT+"/v1/payments/charge",json={"order_id":"direct-"+uuid4().hex,"amount":9.9,"currency":"USD"},headers=headers)
+                    else:
+                        response = await client.get(INVENTORY+"/v1/inventory/sku-001",headers=headers)
                     status = response.status_code
                     if response.headers.get("x-correlation-id") != correlation or response.headers.get("x-trace-id") != trace_id:
                         raise ValueError("request correlation/trace propagation failed")
@@ -184,19 +205,27 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                     status = "transport_error"
                 counts[str(status)] += 1
                 outcomes.append({"phase":phase,"started_at":began,"completed_at":timestamp(datetime.now(timezone.utc)),
-                                 "status":status,"trace_id":trace_id,"correlation_id":correlation})
-                recent.append({"trace_id":trace_id,"completed_at":time.time()})
+                                 "status":status,"trace_id":trace_id,"correlation_id":correlation,"request_entry_service":entry})
+                recent.append({"trace_id":trace_id,"completed_at":time.time(),"correlation_id":correlation,"entry_service":entry})
 
-        def capture_trace(trace_id):
+        def capture_trace(probe):
+            trace_id=probe["trace_id"];entry=probe["entry_service"]
             response = source.client.get("http://127.0.0.1:16686/api/v3/traces/"+trace_id)
             response.raise_for_status()
-            decoded = decode_v3_trace(response.text,trace_id)["data"][0]
+            payload=decode_v3_trace(response.text,trace_id);decoded = payload["data"][0]
             services = {decoded["processes"][span["processID"]]["serviceName"] for span in decoded["spans"]
                         if any(tag["key"]=="span.kind" and tag["value"]=="server" for tag in span["tags"])}
-            if not set(BUSINESS_ROUTES) <= services:
+            expected=set(BUSINESS_ROUTES) if entry=="checkout-service" else {entry}
+            if not expected <= services:
                 raise ValueError("incomplete trace snapshot")
-            return serving.write("raw",{"kind":"trace","trace_id":trace_id,"body":response.text,
-                                        "collected_at":timestamp(datetime.now(timezone.utc))})
+            raw={"kind":"trace","trace_id":trace_id,"body":response.text,
+                 "collected_at":timestamp(datetime.now(timezone.utc))}
+            if entry!="checkout-service":
+                statuses={entry:next(span_tags(span)["http.response.status_code"] for span in decoded["spans"]
+                    if span_tags(span).get("span.kind")=="server")}
+                validate_trace(payload,trace_id,probe["correlation_id"],statuses,require_timing=True,root_service=entry)
+                raw["request_entry_service"]=entry
+            return serving.write("raw",raw)
 
         async def collect():
             bucket = int(time.time()//60)*60+60
@@ -210,12 +239,13 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                 if os.getenv("DATABASE_URL"):
                     item = await PostgresInfrastructureSource(os.environ["DATABASE_URL"]).capture()
                     infra_refs.append(await asyncio.to_thread(serving.write,"observations",item))
-                probe = next((item for item in recent if time.time()-item["completed_at"] >= 10),None)
-                if probe:
-                    try:
-                        trace_refs.append(await asyncio.to_thread(capture_trace,probe["trace_id"]))
-                    except (httpx.HTTPError,ValueError):
-                        run["parameters"]["unavailable_trace_snapshots"] = run["parameters"].get("unavailable_trace_snapshots",0)+1
+                for entry in entries:
+                    probe = next((item for item in recent if item["entry_service"]==entry and time.time()-item["completed_at"] >= 10),None)
+                    if probe:
+                        try:
+                            trace_refs.append(await asyncio.to_thread(capture_trace,probe))
+                        except (httpx.HTTPError,ValueError):
+                            run["parameters"]["unavailable_trace_snapshots"] = run["parameters"].get("unavailable_trace_snapshots",0)+1
                 print(f"CAPTURE {identifier} {timestamp(end)} outcomes={dict(counts)}",flush=True)
                 bucket += 60
 
@@ -231,9 +261,10 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                     progress = max(.05,1-(deadline-time.monotonic())/duration)
                     await set_fault(PAYMENT,"latency",max(1,int(config.maximum_delay_ms*progress)))
                     next_ramp += 30
-                if len(active) >= 32:
+                if len(active)+len(entries) > 32:
                     raise RuntimeError("bounded workload queue saturated; lower load or fault delay")
-                task = asyncio.create_task(request(phase));active.add(task);task.add_done_callback(active.discard)
+                for entry in entries:
+                    task = asyncio.create_task(request(phase,entry));active.add(task);task.add_done_callback(active.discard)
                 scheduled += (1+rng.uniform(-.05,.05))/config.rps
                 scheduled = max(scheduled,time.monotonic())
                 await asyncio.sleep(max(0.,scheduled-time.monotonic()))
@@ -259,9 +290,11 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             else:
                 mode = "latency" if config.scenario == "S3" else config.fault_mode
                 await set_fault(PAYMENT,mode,1 if config.scenario == "S3" else config.maximum_delay_ms)
+                if config.scenario=="S5":await set_fault(INVENTORY,mode,config.maximum_delay_ms)
                 run["fault_start_at"] = timestamp(datetime.now(timezone.utc))
                 await load("degrading" if config.scenario == "S3" else "fault",config.active_seconds,config.scenario == "S3")
                 await set_fault(PAYMENT,"healthy")
+                if config.scenario=="S5":await set_fault(INVENTORY,"healthy")
                 run["recovery_start_at"] = timestamp(datetime.now(timezone.utc))
                 await load("recovery",config.recovery_seconds)
             ended = datetime.now(timezone.utc)
@@ -283,17 +316,21 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
     run["ended_at"] = timestamp(ended or datetime.now(timezone.utc))
     try:
         full,admitted = serving_logs(project,run["started_at"])
-        truth.write("raw",{"kind":"full-experiment-logs","records":full})
+        full_logs_ref=truth.write("raw",{"kind":"full-experiment-logs","records":full})
         run["logs_ref"] = serving.write("raw",{"kind":"serving-logs","records":admitted,
                                               "collected_at":timestamp(datetime.now(timezone.utc))})
         run["request_outcomes_ref"] = truth.write("raw",{"outcomes":outcomes})
         correlations = {item["correlation_id"] for item in outcomes}
         if any(item["correlation_id"] not in correlations for item in admitted if item["event"] == "request_completed"):
             failure = failure or "UnexpectedBusinessTraffic"
+        if config.scenario=="S5":
+            coverage=server_log_coverage(full,admitted,outcomes)
+            run["parameters"].update(full_logs_ref=full_logs_ref,server_log_coverage=coverage)
+            if not all(row["complete"] for row in coverage.values()):failure=failure or "IncompleteServerLogs"
         for service in BUSINESS_ROUTES:
             measured = measure_slo(admitted,service,slo,start_at=datetime.fromisoformat(run["started_at"].replace("Z","+00:00")),end_at=ended)
             run["slo_by_service"][service] = {key:measured[key] for key in ("first_violation_at","confirmed_at","request_count")}
-            if measured["request_count"] < .95*len(outcomes): failure = failure or "IncompleteServerLogs"
+            if config.scenario!="S5" and measured["request_count"] < .95*len(outcomes): failure = failure or "IncompleteServerLogs"
         base = process_captures(captures,serving)
         if base["eligible_feature_count"] == 0:
             failure = failure or "NoEligibleFeatureWindows"
@@ -303,7 +340,9 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         run["source_manifest_ref"] = serving.write("manifests",manifest)
         run["infrastructure_refs"] = infra_refs
         run["parameters"]["workload_outcomes"] = dict(counts)
-        if any(key not in ("200","502","504") for key in counts): failure = failure or "UnexpectedWorkloadOutcome"
+        if config.scenario=="S5":
+            if not s5_expected_responses(outcomes,config.fault_mode):failure=failure or "UnexpectedWorkloadOutcome"
+        elif any(key not in ("200","502","504") for key in counts): failure = failure or "UnexpectedWorkloadOutcome"
         if config.scenario == "S0" and any(value["first_violation_at"] for value in run["slo_by_service"].values()): failure = failure or "HealthyRunBreachedSLO"
     except Exception as exc:
         failure = failure or type(exc).__name__

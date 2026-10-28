@@ -1,10 +1,10 @@
 # Step 5 — Experiment truth and dataset protocol
 
-Status: manifest/labeling/dataset-freeze implementation and a bounded local S0/S1/S3 runner. Live acceptance evidence and sufficient independent data are tracked separately. G2 is not PASS merely because these modules or synthetic fixtures exist.
+Status: manifest/labeling/dataset-freeze implementation and a bounded local S0/S1/S3 runner, with new S5 development support. Actual S5 development capture/evaluation is not accepted from implementation or fixture tests alone. Live acceptance evidence and sufficient independent data are tracked separately. G2 is not PASS merely because these modules or synthetic fixtures exist.
 
 ## Training data sources
 
-The primary research/training direction is now [published public datasets](PUBLIC_DATA_PLAN.md), as requested by the repository owner and accepted in ADR-010. RCAEval is the main microservice/RCA corpus and SMD supplies an external anomaly benchmark. The local three-service/PostgreSQL captures below are measured integration/transfer evidence, not the primary research corpus. They are experimental workload measurements, not production-user traffic or hand-authored metrics.
+The frozen [training-data contract](../configs/training_data_contract.json) and [ADR-011](adr/ADR-011-frozen-gamma-rcaeval-contract.md) govern [published public datasets](PUBLIC_DATA_PLAN.md): GAMMA v1 is primary training; pinned RCAEval is RCA validation/holdout only, without ML fitting. At most these two public sources are used, with no row concatenation. SMD is excluded historical research and is not expanded. The local three-service/PostgreSQL captures below are integration/transfer evidence, not the primary training corpus. They are experimental workload measurements, not production-user traffic or hand-authored metrics.
 
 | Source | Training/evaluation use |
 | --- | --- |
@@ -16,7 +16,7 @@ The primary research/training direction is now [published public datasets](PUBLI
 | Out-of-band run truth | Fault/scenario/root-cause timing for labeling/evaluation only; excluded from serving model input |
 | Future AWS CloudWatch/X-Ray captures | Separate environment/source-profile inventory, parity checks and AWS training/recalibration before activation |
 
-Full planned coverage is S0…S5 in the delivery/technical spec. The current CLI implements only S0/S1/S3; real deployment, DB-pressure and independent-multiple-fault adapters remain required. Local model weights cannot be assumed valid for AWS without the source/environment gate. Collected pilot fixtures/phase labels alone do not establish detector accuracy or calibrated risk probabilities.
+Full planned coverage is S0…S5 in the delivery/technical spec. The CLI supports S0/S1/S3 and S5 development capture; real deployment/DB-pressure adapters and final multi-fault heldout evaluation remain required. Local model weights cannot be assumed valid for AWS without the source/environment gate. Collected pilot fixtures/phase labels alone do not establish detector accuracy or calibrated risk probabilities.
 
 ## Separation of truth and serving
 
@@ -72,7 +72,7 @@ python scripts/run_experiment.py --scenario S0 --split train \
 
 Each invocation creates an opaque `artifacts/experiments/run-UUID/` directory. The runner holds a nonblocking file lock for the entire experiment, validates the actual Prometheus 5s scrape configuration, captures image IDs and loaded source/schema hashes, and persists the declared split before generating traffic. Keep the testbed exclusive: do not run Step 2/3/4 smoke tests, another load generator or deployment changes during an experiment. External business traffic causes failure; the lock coordinates this runner only.
 
-S1 applies a bounded Payment latency/error fault. S3 ramps Payment latency every 30s, then observes recovery. Fault experiments require at least 120s recovery; every run requires at least 300s warmup. S2/S4/S5 are rejected until actual deployment/DB/multiple-fault adapters exist. Default load is 3 requests/s with seeded ±5% jitter; queue saturation fails instead of accumulating unlimited pending requests. Requested rate is a generator setting, not a measured throughput claim.
+S1 applies a bounded Payment latency/error fault. S3 ramps Payment latency every 30s, then observes recovery. Fault experiments require at least 120s recovery; every run requires at least 300s warmup. S2/S4 are rejected until actual deployment/DB adapters exist. Default load is 3 requests/s with seeded ±5% jitter; queue saturation fails instead of accumulating unlimited pending requests. Requested rate is a generator setting, not a measured throughput claim.
 
 Prometheus queries run after the 30s watermark and blocking capture I/O runs off the traffic event loop. The runner archives business logs, available full business traces and optional native PostgreSQL observations when `DATABASE_URL` is explicitly provided. Control/configuration logs and phase-tagged client outcomes stay in `truth/`; serving evidence excludes control events. Raw duration logs supply SLO labels independently from histogram features.
 
@@ -81,3 +81,25 @@ UTC readiness is rechecked after bounded monotonic sleeps; waking a timer does n
 The runner restores both original sandbox fault states in `finally`, including preflight failure/cancellation. It persists a failed run and partial evidence when possible; failed/dirty runs cannot enter a dataset. A hard process/host kill cannot execute cleanup: inspect both `/internal/faults` endpoints before reusing the sandbox. `--allow-dirty` is only for diagnostic pilot evidence; it does not bypass the dataset clean-source gate. Editing loaded source/contracts during collection marks the run dirty.
 
 After completion, use `scripts/build_dataset.py` as above. A single 10-minute healthy run must require `--allow-pilot`; it cannot satisfy the independent-run, calibration, gradual-positive or holdout requirements. Do not train or claim G2 from this smoke-sized dataset.
+
+## S5 independent-fault development
+
+[s5_development_protocol.json](../configs/s5_development_protocol.json) predeclares a dual-latency and a blocking-error development case. Both use 300s warmup, 180s active fault and 180s recovery, 3 configured requests/s at each of the three business entry routes, and distinct fixed seeds. Source/config must be committed before capture. Its byte hash is recorded before load and checked again by the evaluator; post-outcome protocol changes cannot be accepted as the original protocol.
+
+Both Payment and Inventory receive the configured fault independently. Direct requests keep Payment observable when Inventory prevents Checkout from calling it. The rate is per request entry, not total service throughput: downstream requests add to actual per-service volume. Server-log completeness uses observed request-start/completion identities plus top-level request provenance, retaining the 95% threshold; it does not assume one Payment call for every Checkout. Full logs and client phase outcomes stay in truth, while admitted business completions and explicitly scoped [native direct traces](TRACE_TIMING.md) remain serving evidence.
+
+The manifest requires two `root_causes_ground_truth` values for S5 and `root_cause_ground_truth=null`; other scenarios retain their legacy scalar contract. Both fault states are restored in `finally`. S5 is rejected as an ML training split and does not create gradual precursor labels. Response controls are fixed before capture: warmup/recovery and the latency profile expect 200; the error phase expects Checkout 502 and direct Payment/Inventory 503. Unexpected statuses/transport failures remain failures. No fault flag is represented as an observed deployment change.
+
+Run a case using the exact parameters from the protocol, for example:
+
+```bash
+python scripts/run_experiment.py --scenario S5 --split validation --seed 5101 \
+  --rps 3 --warmup-seconds 300 --active-seconds 180 --recovery-seconds 180 \
+  --fault-mode latency --maximum-delay-ms 1200
+python -m scripts.evaluate_s5 --run artifacts/experiments/RUN_DIRECTORY \
+  --output artifacts/evaluations/S5_CASE
+```
+
+The evaluator rejects heldout input before opening its raw telemetry, verifies immutable run/source/log coverage and matches the frozen case parameters. Health and correlation retain their fixed virtual clocks. RCA's predeclared forensic cutoff is the maximum of correlation cutoff and operational receipt clocks; fault timing/root truth does not choose diagnostic windows or scores. Evaluation truth is used after diagnostic output to check independent groups and directly observed failure-path support. This post-capture analysis is not an online alert/MTTD claim and does not change the earlier fixed-cutoff RCA reports.
+
+Acceptance requires independent request-log SLO control with at least three full eligible warmup buckets, separate Payment/Inventory groups, an ambiguous shared Checkout group, direct native support for both roots, and preserved RCA abstention/no-action authority. Missing roots, merged groups, bad warmup or absent direct evidence fail with retained artifacts. Model/data gates remain open. At least five heldout multi-fault trials and final evaluation remain reserved for P11; these development cases cannot replace them.

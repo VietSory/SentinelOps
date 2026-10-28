@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import replace
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -16,7 +17,7 @@ from sentinelops.telemetry.store import ArtifactStore
     {"scenario":"S2"}, {"scenario":"S3","fault_mode":"error"}, {"split":"random"},
     {"rps":True}, {"rps":float("nan")}, {"rps":float("inf")}, {"rps":11},
     {"warmup_seconds":299}, {"active_seconds":119}, {"seed":True},
-    {"scenario":"S1","recovery_seconds":0}, {"maximum_delay_ms":4000},
+    {"scenario":"S1","recovery_seconds":0}, {"maximum_delay_ms":4000}, {"scenario":"S5","split":"train"},
 ])
 def test_runner_rejects_unsupported_or_unbounded_experiments(changes):
     with pytest.raises(ValueError):
@@ -66,7 +67,11 @@ def test_log_admission_excludes_controls_and_keeps_business_evidence(monkeypatch
     assert serving == [logs[0],logs[3]]
 
 
-def test_failed_preflight_restores_both_faults_and_saves_failed_evidence(monkeypatch,tmp_path):
+@pytest.mark.parametrize('scenario,split',[('S0','train'),('S5','validation')])
+def test_failed_preflight_restores_both_faults_and_saves_failed_evidence(monkeypatch,tmp_path,scenario,split):
+    if scenario=='S5':
+        (tmp_path/'configs').mkdir()
+        (tmp_path/'configs/s5_development_protocol.json').write_bytes((Path(__file__).resolve().parents[1]/'configs/s5_development_protocol.json').read_bytes())
     monkeypatch.setattr(runner,"checkout_identity",lambda project:("a"*40,False,{}))
     monkeypatch.setattr(runner,"image_identity",lambda project:{service:"sha256:"+"b"*64 for service in BUSINESS_ROUTES})
     monkeypatch.setattr(runner,"serving_logs",lambda *args:([],[]))
@@ -89,13 +94,16 @@ def test_failed_preflight_restores_both_faults_and_saves_failed_evidence(monkeyp
     monkeypatch.setattr(runner.PrometheusSource,"verify_configuration",lambda self:{"scrape_interval":"5s"})
     monkeypatch.setattr(runner.PrometheusSource,"close",lambda self:closed.append(True))
     with pytest.raises(RuntimeError,match="partial evidence saved"):
-        asyncio.run(runner.execute(runner.ExperimentConfig("S0","train"),project=tmp_path,output=tmp_path/"runs"))
+        asyncio.run(runner.execute(runner.ExperimentConfig(scenario,split),project=tmp_path,output=tmp_path/"runs"))
     assert posts[-2:] == list(originals.items())
     assert closed == [True]
     root = next((tmp_path/"runs").iterdir())
     run = json.loads((root/"run.json").read_text())
     assert run["status"] == "failed" and run["failure_reason"] == "HTTPStatusError"
-    assert run["declared_split"] == "train" and run["warmup_end_at"] is None
+    assert run["declared_split"] == split and run["warmup_end_at"] is None
+    if scenario=='S5':
+        assert run['root_cause_ground_truth'] is None and set(run['root_causes_ground_truth'])=={'payment-service','inventory-service'}
+        assert set(run['parameters']['traffic_plan'])==set(BUSINESS_ROUTES)
     assert ArtifactStore(root/"serving").read(run["logs_ref"])["records"] == []
     assert ArtifactStore(root/"truth").read(run["request_outcomes_ref"])["outcomes"] == []
 

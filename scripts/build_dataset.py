@@ -9,6 +9,7 @@ from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.experiments.datasets import assemble_dataset
 from sentinelops.experiments.labels import SLOConfig, measure_slo
 from sentinelops.experiments.verification import verify_source_replay
+from sentinelops.experiments.traffic import server_log_coverage,s5_expected_responses
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 from sentinelops.telemetry.store import ArtifactStore
 
@@ -27,6 +28,14 @@ def load_run(path: Path) -> dict:
     if manifest["source_profile"] != run["source_profile"] or manifest["environment"] != run["environment"]:
         raise ValueError("source manifest does not match its experiment")
     records = source_store.read(run["logs_ref"])["records"]
+    if run["scenario_id"]=="S5":
+        full=truth_store.read(run["parameters"]["full_logs_ref"])["records"]
+        outcomes=truth_store.read(run["request_outcomes_ref"])["outcomes"]
+        if not s5_expected_responses(outcomes,run['parameters']['fault_mode']):
+            raise ValueError('S5 response controls differ from the predeclared fault profile')
+        coverage=server_log_coverage(full,records,outcomes)
+        if coverage!=run["parameters"]["server_log_coverage"] or not all(row["complete"] for row in coverage.values()):
+            raise ValueError("S5 server log coverage differs from observed request identities")
     slo = SLOConfig(**run["parameters"]["slo"])
     for service in BUSINESS_ROUTES:
         measured = measure_slo(records,service,slo,start_at=utc_time(run["started_at"]),end_at=utc_time(run["ended_at"]))

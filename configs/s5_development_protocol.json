@@ -1,0 +1,42 @@
+{
+  "protocol_version": "s5-development/v1",
+  "role": "local-RCA-development-only",
+  "analysis_cutoff": "maximum-operational-receipt-and-correlation-cutoff/v1",
+  "rca_policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+  "cases": [
+    {
+      "name": "independent-latency",
+      "scenario": "S5",
+      "split": "validation",
+      "seed": 5101,
+      "rps": 3,
+      "warmup_seconds": 300,
+      "active_seconds": 180,
+      "recovery_seconds": 180,
+      "fault_mode": "latency",
+      "maximum_delay_ms": 1200
+    },
+    {
+      "name": "independent-blocking-errors",
+      "scenario": "S5",
+      "split": "validation",
+      "seed": 5102,
+      "rps": 3,
+      "warmup_seconds": 300,
+      "active_seconds": 180,
+      "recovery_seconds": 180,
+      "fault_mode": "error",
+      "maximum_delay_ms": 1200
+    }
+  ],
+  "traffic": "configured rps at each request entry; three business routes, actual per-service starts/completions verified",
+  "heldout_policy": "P11 final holdout remains closed; at least five heldout multi-fault runs are still required by the technical spec",
+  "prohibitions": [
+    "no new primary training corpus or ML fitting",
+    "no model/threshold/weight fitting on these cases",
+    "no control or root truth in diagnostic input",
+    "no historical online emission or causal-performance claim"
+  ],
+  "minimum_full_warmup_request_buckets": 3,
+  "response_controls": "warmup/recovery and latency: HTTP 200 at every entry; error phase: Checkout 502, direct Payment/Inventory 503"
+}
