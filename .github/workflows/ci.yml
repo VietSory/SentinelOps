@@ -257,6 +257,22 @@ jobs:
                   if candidate['service']!='rds':
                       assert candidate['components']['anomaly_strength']['value'] is None
           print('REAL CAPTURE EVIDENCE RCA REPLAY: PASS',rca['group_count'])
+          Path('artifacts/step4/rca-report-ref.txt').write_text(rca['report_ref'])
+          PY
+      - name: Start exclusive RCA control database
+        run: docker compose -p sentinelops-rca-ci -f docker-compose.control.yml up -d --wait --wait-timeout 120
+      - name: Verify computed RCA IER persistence and protected HTTP
+        env:
+          CONTROL_DATABASE_URL: postgresql://control_writer:local-control-writer@127.0.0.1:5433/sentinelops_control
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess,sys
+          container=subprocess.check_output(['docker','compose','-p','sentinelops-rca-ci','-f',
+              'docker-compose.control.yml','ps','-q','control-postgres'],text=True).strip()
+          subprocess.run([sys.executable,'scripts/check_rca_producer.py','--bundle','artifacts/step4/rca',
+              '--report-ref',Path('artifacts/step4/rca-report-ref.txt').read_text().strip(),
+              '--database-container',container,'--output','artifacts/step4/rca-producer/acceptance.json'],check=True)
           PY
       - name: Publish checksum-backed telemetry summary
         if: always()
@@ -287,3 +303,6 @@ jobs:
       - name: Stop testbed
         if: always()
         run: docker compose down --volumes --remove-orphans
+      - name: Stop RCA control testbed
+        if: always()
+        run: docker compose -p sentinelops-rca-ci -f docker-compose.control.yml down --volumes --remove-orphans

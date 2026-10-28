@@ -24,6 +24,8 @@ from sentinelops.incidents.health_replay import replay_health_manifest
 from sentinelops.incidents.correlation import correlate_health
 from sentinelops.incidents.correlation_replay import replay_correlation
 from sentinelops.incidents.rca import evaluate_rca
+from sentinelops.incidents.rca_replay import replay_rca
+from sentinelops.incidents.rca_producer import prepare_intent, publish_intent
 from sentinelops.public_data.downloads import fetch_file
 from sentinelops.public_data.audit import load_verified_manifest
 from sentinelops.public_data.gamma import load_gamma_manifest
