@@ -94,6 +94,9 @@ def download_rcaeval(client,config: dict,root: Path,*,cases: list[str] | None = 
     selected=sorted(set(cases or config["default_cases"]))
     if not selected or any(not re.fullmatch(r"re[123](ob|ss|tt)_[a-zA-Z0-9_-]+",case) for case in selected):
         raise ValueError("invalid RCAEval case selection")
+    # Local policy check precedes publisher metadata/network and any case-file/cache access.
+    from sentinelops.public_data.rcaeval_partitions import require_cases, FROZEN_PARTITIONS_SHA256
+    case_roles = require_cases(selected)
     meta=_json(client,f"https://huggingface.co/api/datasets/{repository}/revision/{revision}?blobs=true")
     if meta.get("sha")!=revision or str(meta.get("cardData",{}).get("license","")).lower()!="mit":
         raise ValueError("RCAEval revision/license metadata differs from the audited catalog")
@@ -112,6 +115,7 @@ def download_rcaeval(client,config: dict,root: Path,*,cases: list[str] | None = 
                                   destination/safe_relative(name),expected,max_bytes=max_bytes))
     return _save_manifest(root,{"manifest_version":"public-download/v1","dataset":"RCAEval","revision":revision,
         "homepage":config["homepage"],"declared_license":config["declared_license"],"selection":selected,"files":records,
+        "rcaeval_partition_sha256":FROZEN_PARTITIONS_SHA256,"case_roles":case_roles,
         "serving_compatible":False,"activation_allowed":False})
 
 

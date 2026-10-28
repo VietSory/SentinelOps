@@ -29,7 +29,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -e '.[ml,dev]'
-      - run: pytest -q tests/test_public_data*.py tests/test_gamma*.py tests/test_training_data_policy.py
+      - run: pytest -q tests/test_public_data*.py tests/test_gamma*.py tests/test_training_data_policy.py tests/test_rcaeval_partitions.py
       - name: Verify pinned publisher data and audit real Parquet tables
         run: |
           python - <<'PY'
@@ -38,11 +38,18 @@ jobs:
           import httpx
           from sentinelops.public_data.downloads import download_rcaeval
           from sentinelops.public_data.audit import audit_rcaeval
+          from sentinelops.public_data.rcaeval_partitions import audit_partitions
           catalog=json.loads(Path('configs/public_datasets.json').read_text())
           with httpx.Client(timeout=60,follow_redirects=True,trust_env=False) as client:
               selected=download_rcaeval(client,catalog['rcaeval'],Path('data/raw/public'))
           report=audit_rcaeval(Path(selected['manifest_path']))
           assert report['index_cases']==735 and len(report['downloaded_cases'])==3
+          partitions=audit_partitions(Path(selected['manifest_path']),project=Path.cwd())
+          assert partitions['cases']==735 and partitions['groups']==16 and partitions['holdout_opened'] is False
+          assert partitions['case_telemetry_read'] is False and partitions['independent_sessions_established'] is False
+          partition_output=Path('artifacts/public-data/rcaeval-partitions.json')
+          partition_output.parent.mkdir(parents=True,exist_ok=True)
+          partition_output.write_text(json.dumps(partitions,indent=2)+'\n')
           output=Path('artifacts/public-data/source-audit.json')
           output.parent.mkdir(parents=True,exist_ok=True)
           output.write_text(json.dumps(report,indent=2))
