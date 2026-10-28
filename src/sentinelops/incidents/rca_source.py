@@ -15,7 +15,7 @@ from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.trace_evidence import parent_id, span_tags, validate_trace
 from sentinelops.trace_query import decode_v3_trace
 
-CONTROL_KEYS = {"scenario_id", "root_cause_ground_truth", "affected_services_ground_truth", "fault_mode", "risk_label",
+CONTROL_KEYS = {"scenario_id", "root_cause_ground_truth", "root_causes_ground_truth", "affected_services_ground_truth", "fault_mode", "risk_label",
                 "fault_start_at", "warmup_end_at", "recovery_start_at", "declared_split", "phase", "run_id", "session_id"}
 
 
@@ -152,10 +152,13 @@ def trace_observations(scope: dict, lookup: dict, lower: datetime, upper: dateti
                         raise ValueError("matching completion is after the analysis cutoff")
                     statuses[service]=log["status_code"];correlations.add(log.get("correlation_id"));servers[service]=span
             if len(correlations)!=1 or None in correlations:raise ValueError("trace correlation is incomplete")
-            validate_trace(decoded,trace_id,next(iter(correlations)),statuses,require_timing=True)
+            entry=raw.get("request_entry_service","checkout-service")
+            if entry!="checkout-service" and any(log["service"]!=entry for log in lookup.values() if log["trace_id"]==trace_id):
+                raise ValueError("direct request scope conflicts with captured cascade completion logs")
+            validate_trace(decoded,trace_id,next(iter(correlations)),statuses,require_timing=True,root_service=entry)
             if any(span["timing"]["end_unix_ns"]>epoch_ns(as_of) for span in trace["spans"]):
                 counts["trace-spans-after-cutoff"]+=1;continue
-            root=servers["checkout-service"]
+            root=servers[entry]
             if not lower_ns<=root["timing"]["end_unix_ns"]<=upper_ns:
                 counts["trace-outside-window"]+=1;continue
             if root["timing"]["duration_ns"]<=0:raise ValueError("zero reference span duration")
@@ -168,7 +171,7 @@ def trace_observations(scope: dict, lookup: dict, lower: datetime, upper: dateti
                         if span["processID"]==server["processID"] and parent_id(span)==server["spanID"]:
                             children[service].append(span)
             observed.append({"reference":reference,"received_at":received,"trace_id":trace_id,"servers":servers,
-                "children":children,"statuses":statuses,"root_duration_ns":root["timing"]["duration_ns"]})
+                "children":children,"statuses":statuses,"root_duration_ns":root["timing"]["duration_ns"],"entry_service":entry})
         except (ValueError,KeyError,TypeError,StopIteration,IndexError):
             counts["unsupported-or-incomplete-trace"]+=1
     return observed,counts

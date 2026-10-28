@@ -7,13 +7,15 @@ from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.trace_query import decode_v3_trace
 from sentinelops.trace_evidence import validate_trace
 
-TRUTH_FIELDS = {"scenario_id","root_cause_ground_truth","affected_services_ground_truth","fault_start_at",
+TRUTH_FIELDS = {"scenario_id","root_cause_ground_truth","root_causes_ground_truth","affected_services_ground_truth","fault_start_at",
                 "warmup_end_at","recovery_start_at","declared_split","risk_label","phase","run_id","session_id","fault_mode"}
 
 
 def reject_truth(value):
     if isinstance(value,dict):
-        if TRUTH_FIELDS.intersection(value):
+        names={str(key).rsplit('.',1)[-1] for key in value}
+        if (TRUTH_FIELDS.intersection(names) or
+            isinstance(value.get('key'),str) and value['key'].rsplit('.',1)[-1] in TRUTH_FIELDS):
             raise ValueError("experiment truth/control metadata was found in serving evidence")
         for item in value.values(): reject_truth(item)
     elif isinstance(value,list):
@@ -58,6 +60,8 @@ def verify_source_replay(store,manifest: dict,run: dict) -> list[dict]:
             if raw.get("kind")!="trace" or raw["trace_id"] not in trace_ids:
                 raise ValueError("trace snapshot does not link to the run's serving logs")
             decoded = decode_v3_trace(raw["body"],raw["trace_id"])
+            entry=raw.get("request_entry_service","checkout-service")
+            expected=set(BUSINESS_ROUTES) if entry=="checkout-service" else {entry}
             facts = {}
             for item in logs["records"]:
                 if item.get("trace_id")==raw["trace_id"] and item.get("event")=="request_completed" and item.get("service") in BUSINESS_ROUTES:
@@ -66,9 +70,10 @@ def verify_source_replay(store,manifest: dict,run: dict) -> list[dict]:
                     if service in facts and facts[service]!=fact:
                         raise ValueError("trace has conflicting server completion logs")
                     facts[service]=fact
-            if set(facts)!=set(BUSINESS_ROUTES) or len({fact[0] for fact in facts.values()})!=1:
+            if set(facts)!=expected or len({fact[0] for fact in facts.values()})!=1:
                 raise ValueError("trace snapshot lacks correlated business completion logs")
-            servers=validate_trace(decoded,raw["trace_id"],facts["checkout-service"][0],{service:fact[2] for service,fact in facts.items()})
+            servers=validate_trace(decoded,raw["trace_id"],facts[entry][0],{service:fact[2] for service,fact in facts.items()},
+                                   require_timing=entry!="checkout-service",root_service=entry)
             if any(servers[service]["spanID"]!=fact[1] for service,fact in facts.items()):
                 raise ValueError("trace/log server span identities differ")
             trace = decoded["data"][0]
@@ -81,7 +86,7 @@ def verify_source_replay(store,manifest: dict,run: dict) -> list[dict]:
                     method,route = BUSINESS_ROUTES[service]
                     if tags.get("http.request.method")==method and tags.get("http.route")==route:
                         services.add(service)
-            if services!=set(BUSINESS_ROUTES):
+            if services!=expected:
                 raise ValueError("trace snapshot lacks complete business server routes")
         for ref in evidence["infrastructure"]:
             item = store.read(ref)

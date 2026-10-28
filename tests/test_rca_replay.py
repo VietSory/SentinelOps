@@ -21,7 +21,7 @@ TOPOLOGY=yaml.safe_load((ROOT/'configs/topology.yaml').read_text())
 TRACE='0123456789abcdef0123456789abcdef'
 
 
-def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False):
+def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False,entry=None):
     telemetry=ArtifactStore(tmp_path/'source')
     captured=[capture(0),capture(1)]
     if healthy:
@@ -36,6 +36,8 @@ def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False
         ('inventory-service','6','3',3,2_100_000,3_100_000,'rds'),
         ('payment-service','5','4',2,15_000_000,1_015_000_000,None),
         ('payment-service','7','5',3,1_013_000_000,1_014_000_000,'rds')]
+    if entry=='inventory-service':
+        entries=[(*item[:5],1_002_000_000,item[6]) if item[1]=='3' else item for item in entries]
     resources=[];logs=[]
     for service in BUSINESS_ROUTES:
         spans=[]
@@ -45,6 +47,10 @@ def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False
             if peer:attrs.append({'key':'peer.service','value':{'stringValue':peer}})
             if peer=='rds':attrs.append({'key':'db.system.name','value':{'stringValue':'postgresql'}})
             else:attrs.append({'key':'http.response.status_code','value':{'intValue':'200'}})
+            if entry is not None and kind==2:
+                method,route=BUSINESS_ROUTES[service]
+                attrs.extend([{'key':'http.request.method','value':{'stringValue':method}},
+                              {'key':'http.route','value':{'stringValue':route}}])
             spans.append({'traceId':TRACE,'spanId':identifier.zfill(16),'parentSpanId':parent.zfill(16),'kind':kind,
                 'attributes':attrs,'status':{},'startTimeUnixNano':str(base+start),'endTimeUnixNano':str(base+end)})
             if kind==2:
@@ -55,6 +61,10 @@ def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False
                     'duration_ms':(end-start)/1_000_000,'status_code':200})
         resources.append({'resource':{'attributes':[{'key':'service.name','value':{'stringValue':service}}]},'scopeSpans':[{'spans':spans}]})
     trace={'kind':'trace','trace_id':TRACE,'body':json.dumps({'result':{'resourceSpans':resources}})}
+    if entry is not None:
+        trace['request_entry_service']=entry
+        trace['body']=json.dumps({'result':{'resourceSpans':[r for r in resources if r['resource']['attributes'][0]['value']['stringValue']==entry]}})
+        logs=[row for row in logs if row['service']==entry]
     log_capture={'kind':'serving-logs','records':logs}
     if fresh:
         trace['collected_at']=log_capture['collected_at']=timestamp(END+timedelta(seconds=40 if not future else 180))

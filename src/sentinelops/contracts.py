@@ -161,6 +161,13 @@ def _semantic_validation(name: str, payload: dict[str, Any]) -> None:
         if usable <= 0 or not math.isclose(values["db_connections_pct"], values["db_connections_count"] / usable * 100, abs_tol=1e-9):
             raise ValueError("infrastructure capacity/percentage mismatch")
     if name == "experiment-run.schema.json":
+        if payload["scenario_id"]=="S5":
+            roots=payload.get("root_causes_ground_truth")
+            if (not isinstance(roots,list) or len(roots)!=2 or len(set(roots))!=2
+                or not set(roots)<={"payment-service","inventory-service","checkout-service","rds"}
+                or payload["root_cause_ground_truth"] is not None or payload["fault_method"]!="multi-fault"
+                or not (set(roots)-{"rds"})<=set(payload["affected_services_ground_truth"])):
+                raise ValueError("S5 needs two explicit out-of-band roots, not a scalar diagnosis")
         start = utc_time(payload["started_at"])
         finish = utc_time(payload["ended_at"]) if payload["ended_at"] else None
         if finish and finish <= start:

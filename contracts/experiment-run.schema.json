@@ -346,6 +346,18 @@
     },
     "label_protocol_version": {
       "const": "degradation-phase/v1"
+    },
+    "root_causes_ground_truth": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "checkout-service",
+          "payment-service",
+          "inventory-service",
+          "rds"
+        ]
+      }
     }
   },
   "required": [
@@ -379,5 +391,33 @@
     "infrastructure_refs",
     "failure_reason",
     "label_protocol_version"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "scenario_id": {
+            "const": "S5"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "root_causes_ground_truth"
+        ],
+        "properties": {
+          "root_causes_ground_truth": {
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "root_cause_ground_truth": {
+            "type": "null"
+          },
+          "fault_method": {
+            "const": "multi-fault"
+          }
+        }
+      }
+    }
   ]
 }

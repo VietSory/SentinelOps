@@ -36,6 +36,8 @@ def _trace_support(trace,service):
     """Observed local residual is a lower bound, never a CPU/causality measure."""
     statuses=trace["statuses"];servers=trace["servers"];children=trace["children"]
     errors=any(status>=500 for status in statuses.values())
+    duration_method=("native-direct-span-duration-share/v1" if trace.get("entry_service","checkout-service")!="checkout-service"
+                     else "native-span-duration-share/v1")
     def contained(owner,span):
         parent=servers[owner]["timing"];timing=span["timing"]
         return parent["start_unix_ns"]<=timing["start_unix_ns"]<=timing["end_unix_ns"]<=parent["end_unix_ns"]
@@ -48,7 +50,9 @@ def _trace_support(trace,service):
             value=float(any(span_tags(span).get("error") is True for span in db))
             return value,"native-span-terminal-error/v1",f"observed_postgresql_client_errors={int(value)}"
         value=min(1.,sum(span["timing"]["duration_ns"] for span in db)/trace["root_duration_ns"])
-        return value,"native-span-duration-share/v1",f"postgresql_client_duration_ns={sum(s['timing']['duration_ns'] for s in db)}; reference_server_duration_ns={trace['root_duration_ns']}"
+        detail=f"postgresql_client_duration_ns={sum(s['timing']['duration_ns'] for s in db)}; reference_server_duration_ns={trace['root_duration_ns']}"
+        if duration_method=="native-direct-span-duration-share/v1":detail+="; reference_entry_service="+trace["entry_service"]
+        return value,duration_method,detail
     if service not in servers:return None
     server=servers[service];calls=children[service]
     if any(not contained(service,span) for span in calls):return None
@@ -59,7 +63,7 @@ def _trace_support(trace,service):
         return None
     total=sum(span["timing"]["duration_ns"] for span in calls)
     residual=max(0,server["timing"]["duration_ns"]-total)
-    return min(1.,residual/trace["root_duration_ns"]),"native-span-duration-share/v1",f"server_duration_ns={server['timing']['duration_ns']}; sum_observed_direct_client_duration_ns={total}; observed_residual_lower_bound_ns={residual}; reference_server_duration_ns={trace['root_duration_ns']}"
+    return min(1.,residual/trace["root_duration_ns"]),duration_method,f"server_duration_ns={server['timing']['duration_ns']}; sum_observed_direct_client_duration_ns={total}; observed_residual_lower_bound_ns={residual}; reference_server_duration_ns={trace['root_duration_ns']}"
 
 
 def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts):
@@ -102,6 +106,8 @@ def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts):
     counts.update(trace_counts)
     supports=defaultdict(list)
     for trace in traces:
+        if not set(trace["servers"])&set(services):
+            counts["trace-outside-group-dependency-path"]+=1;continue
         for service in services:
             support=_trace_support(trace,service)
             if support is None:continue
@@ -112,7 +118,8 @@ def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts):
             supports[service].append((value,method,identifier))
     for service,entries in supports.items():
         errors=[entry for entry in entries if entry[1]=="native-span-terminal-error/v1"]
-        chosen=errors or entries
+        direct=[entry for entry in entries if entry[1]=="native-direct-span-duration-share/v1"]
+        chosen=errors or direct or entries
         components[service]["dependency_trace_relevance"]=card(median(entry[0] for entry in chosen),chosen[0][1],[entry[2] for entry in chosen])
     if "rds" in services:
         points=[]
