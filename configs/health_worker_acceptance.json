@@ -1,0 +1,23 @@
+{
+  "protocol_version": "continuous-health-acceptance/v1",
+  "role": "local-integration-only-not-training-or-heldout",
+  "experiment": {
+    "scenario": "S1",
+    "split": "validation",
+    "seed": 7101,
+    "rps": 3.0,
+    "warmup_seconds": 300,
+    "active_seconds": 180,
+    "recovery_seconds": 300,
+    "fault_mode": "latency",
+    "maximum_delay_ms": 1200
+  },
+  "crash_after_healthy_seconds": 120,
+  "database_outage_seconds": 95,
+  "source_outage_seconds": 45,
+  "source_stop_second": 15,
+  "source_outage_load_seconds": 180,
+  "maximum_processing_ms": 10000,
+  "model_outputs_available": false,
+  "actions_allowed": false
+}
