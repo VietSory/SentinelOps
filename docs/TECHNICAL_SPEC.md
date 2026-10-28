@@ -236,6 +236,8 @@ Không forward-fill latency/error qua outage. Optional null được xử lý b�
 
 Sources are frozen by [ADR-011](adr/ADR-011-frozen-gamma-rcaeval-contract.md) and the machine-validated [training-data contract](../configs/training_data_contract.json): GAMMA v1 training, RCAEval RCA validation/heldout evaluation, at most two public sources, no row concatenation. [ADR-010](adr/ADR-010-public-training-data-and-transfer.md) still governs provenance/transfer; [the execution plan](PUBLIC_DATA_PLAN.md) replaces its initial RCAEval/SMD choice. Local inventories describe live integration/transfer acceptance. Public sources retain their feature/label identities and must not be silently coerced into `http-red-5m/v1`. Source selection does not establish precursor labels or live model readiness.
 
+RCAEval [frozen conservative partitions](RCAEVAL_PARTITIONS.md) now group overlapping/nearby captures across systems and native fault-family repetitions before role assignment; previously inspected group closure remains development. [The measured metadata-only audit](reports/2026-10-28-rcaeval-partitions.md) covers all 735 cases, preserves label-clock quarantine and modality gaps, and keeps acquisition/cache access to final holdout sealed. Its small OB-only evaluation subset and unknown session independence do not establish localization quality or full G4. Diagnostic input must exclude all evaluator case/fault/root/schedule metadata.
+
 ### 7.1 Scenario catalog
 
 | ID | Scenario | Root ground truth | Serving evidence được phép | Expectation |

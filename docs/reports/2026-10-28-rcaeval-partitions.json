@@ -1,0 +1,104 @@
+{
+  "measurement": {
+    "audit_version": "rcaeval-partition-audit/v1",
+    "source_revision": "afeacb11bcc94dadfd1c8f483ee4377b2b8b614e",
+    "source_commit": "4dfdb09761218a0ce8750b6440c4b56132ae9b77",
+    "index_sha256": "c49a288920dbba2e8e724679a14636d5c7eb2b45426bba14007ef79a6c0ab1bb",
+    "partition_sha256": "e8267898af1ea52444adfa85fb9bc477ccf450fd9bebc1a99019998035b188ef",
+    "source_manifest_sha256": "565c5b7b3f43d05ef9ba2930e80a65714e3ce4bc1e562fbc91835eefe6a0a0c6",
+    "cases": 735,
+    "groups": 16,
+    "roles": {
+      "development": {
+        "cases": 716,
+        "groups": 12,
+        "systems": {
+          "ob": 226,
+          "ss": 245,
+          "tt": 245
+        },
+        "cases_without_logs": 366,
+        "cases_without_traces": 485,
+        "label_metadata_quarantined": 2
+      },
+      "validation": {
+        "cases": 8,
+        "groups": 2,
+        "systems": {
+          "ob": 8
+        },
+        "cases_without_logs": 5,
+        "cases_without_traces": 5,
+        "label_metadata_quarantined": 0
+      },
+      "sealed-holdout": {
+        "cases": 11,
+        "groups": 2,
+        "systems": {
+          "ob": 11
+        },
+        "cases_without_logs": 5,
+        "cases_without_traces": 5,
+        "label_metadata_quarantined": 0
+      }
+    },
+    "cross_system_overlapping_pairs": {
+      "ob/ss": 73,
+      "ob/tt": 7,
+      "ss/tt": 35
+    },
+    "label_metadata_quarantine": [
+      {
+        "case": "re1ob_currencyservice_loss_1",
+        "role": "development",
+        "reason": "injection-time-outside-capture-range"
+      },
+      {
+        "case": "re1ob_productcatalogservice_cpu_3",
+        "role": "development",
+        "reason": "injection-time-outside-capture-range"
+      }
+    ],
+    "already_inspected_cases": [
+      "re1ob_adservice_cpu_1",
+      "re2ob_checkoutservice_cpu_1",
+      "re3ob_adservice_f3_1"
+    ],
+    "inspected_group_closure_cases": 58,
+    "case_telemetry_read": false,
+    "holdout_opened": false,
+    "ml_fitting_allowed": false,
+    "independent_sessions_established": false,
+    "full_G4_accepted": false,
+    "activation_allowed": false,
+    "limitations": [
+      "Conservative metadata groups are not proven independent capture sessions.",
+      "The full index was inspected for grouping; no additional case telemetry was opened.",
+      "Fault/injection metadata is evaluator-only, not RCA evidence or SLO/precursor truth.",
+      "Missing logs/traces and invalid label clocks remain explicit; no imputation.",
+      "No localization/abstention accuracy, source semantic parity or final holdout acceptance is claimed."
+    ]
+  },
+  "replay": {
+    "status": "PASS",
+    "opened_source_paths": [
+      "cases.parquet"
+    ],
+    "case_telemetry_access_denied": true,
+    "source_commit": "4dfdb09761218a0ce8750b6440c4b56132ae9b77",
+    "canonical_report_sha256": "7bb0aa31b23d3e5fa3ef2194df876aa4b94185194e1f4009d9b08534df2cd7ec"
+  },
+  "software_checks": {
+    "full_regression": {
+      "passed": 422,
+      "exit_code": 0,
+      "scope": "final source including cached manifest guard"
+    },
+    "schemas": 23,
+    "samples": 17,
+    "registered_model_policy_configs": 2,
+    "wheel_outside_checkout": "PASS",
+    "wheel_sha256": "eeb82a3277f55b6a80a1c3c533d2d47305c97a9f37b40288ac2e4ed9b29f9f15"
+  },
+  "public_report_version": "rcaeval-partitions-measured/v1"
+}

@@ -1,0 +1,15 @@
+# RCAEval metadata partition measurement — 2026-10-28
+
+The [frozen source policy](../adr/ADR-011-frozen-gamma-rcaeval-contract.md) is unchanged. [Partition rules and reproduction](../RCAEVAL_PARTITIONS.md) describe the new source-access prerequisite; [machine-readable evidence](2026-10-28-rcaeval-partitions.json) is generated from actual local audit output, not fixture values.
+
+The protocol/config/code was committed at `4dfdb09761218a0ce8750b6440c4b56132ae9b77` before the measured audit. The auditor verified RCAEval revision `afeacb11bcc94dadfd1c8f483ee4377b2b8b614e`, exact index SHA256 `c49a288920dbba2e8e724679a14636d5c7eb2b45426bba14007ef79a6c0ab1bb`, and partition canonical SHA256 `e8267898af1ea52444adfa85fb9bc477ccf450fd9bebc1a99019998035b188ef`. Source manifest SHA256 is `565c5b7b3f43d05ef9ba2930e80a65714e3ce4bc1e562fbc91835eefe6a0a0c6`.
+
+All 735 cases reproduce 16 conservative groups: 716 development, 8 validation, 11 sealed holdout. The three originally inspected cases expand to 58 development cases through group closure. Across native systems, 73 OB/SS, 7 OB/TT and 35 SS/TT capture pairs overlap in the publisher index. Grouping preserves these overlaps rather than assuming different folder/system names establish independence.
+
+Two injection-time defects remain explicitly quarantined for label-dependent evaluation. Development has 366 cases without logs and 485 without traces; validation and holdout each have five cases without logs and five without traces. Missing modalities are not silently excluded or synthesized.
+
+Actual outputs are `artifacts/evaluations/rcaeval-partitions-v1/report.json` and `artifacts/evaluations/rcaeval-partitions-repeat-v1/report.json`. They are byte-identical; canonical report SHA256 is `7bb0aa31b23d3e5fa3ef2194df876aa4b94185194e1f4009d9b08534df2cd7ec`. The repeat instrumented file access to deny every per-case source file. It opened only `cases.parquet`; [the JSON proof](2026-10-28-rcaeval-partitions.json) preserves the read-guard outcome. No additional case telemetry, model fit, holdout opening or RCA performance measurement occurred.
+
+Software acceptance additionally covers transitive/cross-system/family grouping, temporal buffer boundaries, malformed metadata, inspected-group exclusion, insufficient unexposed groups, policy tampering, mixed/unknown source selection, default acquisition compatibility and cached-manifest rejection before raw reads. Final source regression: **422 tests pass**; 23 schemas/17 samples/two model-policy configs validate, and the installed wheel passes outside the checkout. The cached-manifest guard was added in a separate fix after review; it does not change the frozen assignments or metadata audit. The published candidate needs exact-head CI and artifact verification separately.
+
+Validation and holdout are small, OB-only and not proven independent sessions. This is a frozen evaluation partition and access safeguard, not a localization benchmark result. Native source adaptation, receipt-time limitations, uncertainty/abstention denominators, ablations and final evaluation remain open; full G4 and model readiness are not accepted.

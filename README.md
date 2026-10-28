@@ -24,7 +24,9 @@ The [frozen training-data contract](configs/training_data_contract.json) selects
 GAMMA v1 training and RCAEval RCA validation/heldout evaluation, with at most these
 two public sources and no row concatenation. SMD remains historical research.
 See [ADR-011](docs/adr/ADR-011-frozen-gamma-rcaeval-contract.md) and the
-[execution plan](docs/PUBLIC_DATA_PLAN.md). Local captures support integration
+[execution plan](docs/PUBLIC_DATA_PLAN.md).
+[RCAEval partitions and source access](docs/RCAEVAL_PARTITIONS.md) freeze case groups
+and keep the final holdout sealed. Local captures support integration
 and transfer/calibration. Public bundles require measured live feature/source
 compatibility before activation; XGBoost still requires independent pre-SLO
 gradual labels.
