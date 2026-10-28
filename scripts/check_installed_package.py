@@ -63,6 +63,11 @@ assert correlation['groups']==[] and correlation['actions_allowed'] is False
 rca_sample=json.loads(Path(sys.argv[2]).read_text())
 validate_payload('rca-result.schema.json',rca_sample)
 assert rca_sample['actions_allowed'] is False
+from sentinelops.workers.metrics import WorkerMetrics
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+worker_metrics = WorkerMetrics(InMemoryMetricReader(), environment='test', instance='health-0')
+worker_metrics.heartbeat(ready=False)
+worker_metrics.close()
 client = TestClient(app)
 assert client.get('/health').status_code == 200
 payload = {'schema_version':'1.0', 'service':'payment-service',

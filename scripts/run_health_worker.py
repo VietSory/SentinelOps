@@ -15,6 +15,7 @@ import httpx
 from sentinelops.telemetry.prometheus import PrometheusSource
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.health import HealthWorker, local_endpoint
+from sentinelops.workers.metrics import WorkerMetrics
 
 
 async def run(args):
@@ -22,36 +23,73 @@ async def run(args):
     if (parsed.scheme not in ("postgres", "postgresql") or parsed.hostname not in ("127.0.0.1", "localhost")
         or parsed.username != "control_writer" or parsed.path != "/sentinelops_control"):
         raise ValueError("health worker requires the dedicated loopback control_writer database")
+    metrics_endpoint = getattr(args, "metrics_otlp_endpoint", None)
+    if args.status and metrics_endpoint:
+        raise ValueError("read-only worker status cannot start a metrics exporter")
+    metrics = WorkerMetrics.otlp(metrics_endpoint, environment=args.environment,
+                                instance=getattr(args, "metrics_instance", "health-0")) if metrics_endpoint else None
+    try:
+        if metrics: metrics.heartbeat(ready=False)
+        await run_worker(args, metrics)
+    finally:
+        if metrics:
+            try:
+                await asyncio.to_thread(metrics.close)
+            except Exception as exc:
+                print(json.dumps({"status": "METRICS_SHUTDOWN_FAILED", "error_type": type(exc).__name__}), flush=True)
+
+
+async def run_worker(args, metrics):
     endpoint = local_endpoint(args.prometheus)
     source = PrometheusSource(endpoint)
     source.client.timeout = httpx.Timeout(1.)
     try:
-        configuration = await asyncio.to_thread(source.verify_configuration)
+        try:
+            configuration = await asyncio.to_thread(source.verify_configuration)
+        except Exception:
+            if metrics: metrics.error("source")
+            raise
     finally:
         source.close()
-    pool = await asyncpg.create_pool(os.environ["CONTROL_DATABASE_URL"], min_size=1, max_size=4, command_timeout=10)
+    try:
+        pool = await asyncpg.create_pool(os.environ["CONTROL_DATABASE_URL"], min_size=1, max_size=4, command_timeout=10)
+    except Exception:
+        if metrics: metrics.error("database")
+        raise
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for name in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(name, stop.set)
     committed = 0
     try:
+        component = "configuration"
         worker = HealthWorker(pool, ArtifactStore(args.store), json.loads(args.policy.read_text()),
                               endpoint=endpoint, environment=args.environment,
                               configuration_hash=configuration["configuration_hash"])
         await worker.check_ready()
+        ready = True
         if args.status:
             print(json.dumps(await worker.status()), flush=True)
             return
         print(json.dumps({"status": "READY", "stream_id": worker.stream_id, "identity": worker.identity}), flush=True)
         while not stop.is_set() and (args.max_buckets is None or committed < args.max_buckets):
+            result = None
             try:
+                if metrics: metrics.heartbeat(ready=ready)
+                component = "runtime"
                 result = await worker.tick()
+                ready = True
+                if metrics: metrics.heartbeat(ready=True)
                 if result["status"] in ("COMMITTED", "BUSY"):
                     print(json.dumps(result), flush=True)
                 committed += result["status"] == "COMMITTED"
             except (asyncpg.PostgresConnectionError, asyncpg.CannotConnectNowError, ConnectionError, asyncio.TimeoutError) as exc:
+                ready = False
+                if metrics: metrics.error("database")
                 print(json.dumps({"status": "DATABASE_UNAVAILABLE", "error_type": type(exc).__name__}), flush=True)
+            if metrics and result is not None:
+                component = "artifact"
+                await asyncio.to_thread(metrics.observe_result, result, worker.store)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=args.poll_seconds)
             except asyncio.TimeoutError:
@@ -62,7 +100,11 @@ async def run(args):
             durable = {"availability": "UNKNOWN", "reason": "database-unavailable-at-shutdown"}
         print(json.dumps({"status": "STOPPED", "committed_by_process": committed,
                           "durable_status": durable}), flush=True)
+    except Exception:
+        if metrics: metrics.error(component)
+        raise
     finally:
+        if metrics: metrics.heartbeat(ready=False)
         await pool.close()
 
 
@@ -75,6 +117,8 @@ def main():
     parser.add_argument("--max-buckets", type=int)
     parser.add_argument("--status", action="store_true", help="Read the matching durable stream without processing")
     parser.add_argument("--poll-seconds", type=float, default=1.)
+    parser.add_argument("--metrics-otlp-endpoint", help="Optional credential-free loopback OTLP/gRPC endpoint")
+    parser.add_argument("--metrics-instance", default="health-0", help="Stable, distinct health-0..health-15 replica slot")
     args = parser.parse_args()
     if not .25 <= args.poll_seconds <= 5 or (args.max_buckets is not None and not 1 <= args.max_buckets <= 100000):
         parser.error("poll interval or bounded bucket count is outside supported limits")

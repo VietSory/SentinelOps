@@ -48,7 +48,7 @@ For a worker rollback, stop its processes and retain the accepted checkpoint, im
 
 The native check uses actual business traffic, a Payment latency intervention, worker SIGKILL/resume with two processes, a database outage, and an aligned Prometheus outage. It replays every accepted raw→feature→health batch using its recorded decision clock, checks episode/UNKNOWN behavior and the ten-second processing gate. The first measured development attempt failed that gate; the failure remains evidence. Later software checks do not erase a failed runtime attempt. The [measured local report](reports/2026-10-28-continuous-health-worker.md) retains both attempts and their version scopes. Accepted database-ledger snapshots are archived beside immutable objects so replay does not require keeping disposable database volumes.
 
-This local producer does not establish historical alert emission, MTTD, causality, source-transfer/model quality, high availability or final heldout performance. Process/database restart tests do not prove host/power-loss durability, replication or AWS/S3 operation. Continuous correlation/RCA/IER consumers and their checkpoint/lifecycle handling remain separate work. A dedicated worker own-health/lag metrics exporter and dashboard acceptance remain open; structured cycle/stage logs alone do not close NFR-10. Default inference remains unavailable without an approved model.
+This local producer does not establish historical alert emission, MTTD, causality, source-transfer/model quality, high availability or final heldout performance. Process/database restart tests do not prove host/power-loss durability, replication or AWS/S3 operation. Continuous correlation/RCA/IER consumers and their checkpoint/lifecycle handling remain separate work. Optional worker metrics are described below; all-module dashboards and full NFR-10 acceptance remain open. Default inference remains unavailable without an approved model.
 
 Replay an archived accepted ledger and its original immutable worker objects without database/network access:
 
@@ -59,3 +59,41 @@ Replay an archived accepted ledger and its original immutable worker objects wit
 ```
 
 Use `--expected-snapshot-sha256` to bind the input to a trusted measured manifest. Output is exclusive. Replay checks recorded data; it does not establish a new live run or independently authenticate the source's honesty.
+
+## Optional worker operational metrics
+
+Enable explicitly against the local OTel/gRPC receiver; exporting is disabled by default and `--status` cannot start an exporter:
+
+```bash
+.venv-ml/bin/python -m scripts.run_health_worker \
+  --store artifacts/live/local-health --environment local \
+  --metrics-otlp-endpoint http://127.0.0.1:4317 --metrics-instance health-0
+```
+
+The private SDK provider exports every two seconds with a one-second exporter timeout through Collector→Prometheus. It does not set the global provider. Resource attributes use an explicit service/namespace/environment allowlist; ambient OTel resource attributes and credential headers are not forwarded. A fixed noncredential header avoids the pinned SDK's fallback from empty headers to environment tokens. The endpoint must be credential-free loopback HTTP, with gRPC HTTP proxying disabled. Final flush/shutdown receive one-/two-second budgets; exporter failure does not manufacture a business-health value.
+
+Use a distinct stable `health-0`…`health-15` slot for each concurrent process and reuse its slot after restart. Approved metric environments are `local`, `test`, `staging`, `production`; enabling a production label does not deploy a production worker. Stream/run/incident IDs, file paths and PIDs are not metric attributes. The slot is operator assigned; the exporter does not provide distributed slot leasing. Two processes using the same slot can collide in the Collector; configure them distinctly. Cumulative counters reset on process restart; use `rate`/`increase` for time-window totals and the durable ledger for exact accepted history.
+
+| Prometheus series | Meaning |
+| --- | --- |
+| `sentinelops_worker_ready` | Initialization completed and the most recent loop database attempt succeeded; zero before initialization, after a database error and on shutdown. Not business-source health |
+| `sentinelops_worker_heartbeat_unixtime_seconds` | Actual timestamp refreshed by the main loop; SDK exporter collections cannot advance it |
+| `sentinelops_worker_bucket_age_seconds` | Current time minus this process's last committed bucket end; absent before its first commit or when the clock precedes that end. Normal watermark/cadence causes roughly 30–90 seconds, not zero |
+| `sentinelops_worker_source_available{business_service}` | Latest decision committed by this process was ELIGIBLE=1 or UNKNOWN=0. An incident can be ELIGIBLE; this gauge is not healthy/unhealthy. Absent before a local commit |
+| `sentinelops_worker_committed_windows_total` | Accepted windows committed by this process, three typed service decisions per window |
+| `sentinelops_worker_busy_polls_total` | Another database session owns the stream lock |
+| `sentinelops_worker_errors_total{component}` | Fixed component taxonomy: source, database, artifact, configuration, runtime |
+| `sentinelops_worker_unknown_decisions_total{business_service}` | UNKNOWN decisions in this process's accepted windows |
+| `sentinelops_worker_processing_duration_seconds_{bucket,count,sum}` | Full producer cycle duration including lock/pool return, converted from milliseconds. Explicit histogram boundary at ten seconds; excludes optional post-commit metrics observation |
+
+Operational readiness must require a fresh nonfuture main-loop heartbeat, for example:
+
+```promql
+(sentinelops_worker_ready == 1)
+and on(job, environment, worker_instance) (time() - sentinelops_worker_heartbeat_unixtime_seconds < 15)
+and on(job, environment, worker_instance) (time() - sentinelops_worker_heartbeat_unixtime_seconds >= 0)
+```
+
+An empty result means unavailable/unknown; do not fill missing series with healthy zero/one. A SIGKILL can leave the Collector serving the last ready gauge, so readiness alone is insufficient. Plot accepted-window age separately from processing latency. Last source-availability values also need fresh readiness and a suitably bounded accepted-window age; a busy replica may have no local source decisions. Neither gauge is an HTTP SLO denominator or model feature. Metrics and controls remain outside the worker's business evidence store.
+
+The optional native acceptance flag `--metrics-otlp-endpoint http://127.0.0.1:4317` verifies the owned collector, actual Prometheus readiness during database outage/recovery, two stable replica slots, and final counters/histogram sums against resumed process logs. It preserves the frozen business/SLO/outage protocol and all existing ten-second gates. SDK tests alone are not transport proof; native results and exact-head CI/artifacts must be inspected before release acceptance. No Grafana dashboard is deployed by enabling this flag.
