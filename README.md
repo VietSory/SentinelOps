@@ -18,6 +18,8 @@ fixtures require explicit local demo mode. Public source acquisition and local v
 have not closed healthy-reference, precursor-label and live-feature-parity gates.
 A [continuous local SLO worker](docs/STEP7_HEALTH_WORKER.md) now has durable checkpoints and
 [actual crash/outage/recovery evidence](docs/reports/2026-10-28-continuous-health-worker.md).
+Its optional [operational metrics](docs/reports/2026-10-28-health-worker-metrics.md)
+have measured OTLP/Prometheus outage recovery and guards against cached values after restart.
 Real model serving, RCA performance/continuous downstream workers, Bedrock, operator UI, controlled remediation and AWS deployment follow
 their separate gates; local telemetry and software checks do not certify them.
 
