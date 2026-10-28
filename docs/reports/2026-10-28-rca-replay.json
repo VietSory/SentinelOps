@@ -165,14 +165,14 @@
   "producer_implementation_commit": "2405b801b41a4a63695265ae15f08dac8acca786",
   "local_checks": {
     "focused": {
-      "command": ".venv-ml/bin/python -m pytest -q tests/test_rca_producer.py tests/test_rca_replay.py tests/test_rca.py",
+      "command": ".venv-ml/bin/python -m pytest -q tests/test_rca_acceptance_clock.py tests/test_rca_producer.py tests/test_rca_replay.py tests/test_rca.py",
       "exit_code": 0,
-      "passed": 43
+      "passed": 45
     },
     "regression": {
       "command": ".venv-ml/bin/python -m pytest -q",
       "exit_code": 0,
-      "passed": 368,
+      "passed": 370,
       "limits": "software/API regressions, not source accuracy or production acceptance"
     },
     "contracts": {
@@ -187,5 +187,94 @@
       "exit_code": 0,
       "scope": "isolated imports/schema/semantic/API outside checkout"
     }
-  }
+  },
+  "fresh_capture": {
+    "source_commit_at_start": "06cb020e7420e4b81edd444773bbcac541971459",
+    "source_commit_at_report": "06cb020e7420e4b81edd444773bbcac541971459",
+    "dirty_at_start": false,
+    "dirty_at_report": false,
+    "observation_count": 27,
+    "eligible_features": 15,
+    "evidence_manifest_ref": "artifact://manifests/c722e56b99d0f1a69d0760095ea2f6daa80441e0d2d0b3387d800dd526a674bd.json",
+    "chain": {
+      "health_ref": "artifact://manifests/1588e9c99ee8ec2834264e2303a009ee2fdbf456e0d71500f3cf2c504b21e551.json",
+      "correlation_ref": "artifact://manifests/956f3c3071dd40add73895a0d7222d472b1fc9bd4237b16c5d84c6dd6d45fa0f.json",
+      "rca_ref": "artifact://manifests/34c8592381aa61dd82028c44cad283385c998974b2d2f4d454df568185e27797.json",
+      "health_events": {
+        "checkout-service/data_unknown": 2,
+        "inventory-service/data_unknown": 1,
+        "payment-service/data_unknown": 1,
+        "checkout-service/observation": 6,
+        "inventory-service/observation": 8,
+        "payment-service/observation": 7,
+        "checkout-service/incident_opened": 1,
+        "payment-service/incident_opened": 1
+      },
+      "groups": 1,
+      "results": [
+        {
+          "severity": "high",
+          "source_counts": {
+            "checkout-service/log-support-unavailable": 1,
+            "inventory-service/log-support-unavailable": 1,
+            "payment-service/log-support-unavailable": 1,
+            "trace-not-available": 1
+          },
+          "abstention_reasons": [
+            "no-positive-observed-support",
+            "unobserved-dependency-candidates"
+          ]
+        }
+      ]
+    },
+    "as_of": "2026-10-28T02:24:00Z",
+    "receipts": {
+      "logs": "2026-10-28T02:24:31.380084Z",
+      "traces": [
+        "2026-10-28T02:24:31.193429Z"
+      ]
+    },
+    "model_outputs_available": false,
+    "all_candidate_scores_missing": true,
+    "persistence": {
+      "status": "PASS",
+      "source_report_ref": "artifact://manifests/34c8592381aa61dd82028c44cad283385c998974b2d2f4d454df568185e27797.json",
+      "source_commit": "de769f1db400b2efc1534a935539ed1f4aaedd75",
+      "implementation_sha256": {
+        "/mnt/d/sentinelops/scripts/check_rca_producer.py": "ad7bb5e4061fac6fd41ed9d8d163aceaa333922ad446150966509776535e2ae5",
+        "src/sentinelops/incidents/rca_producer.py": "e4eb9a64a20a781785636342c40824401425b34ea07d7c4f119322f72dead6c4",
+        "src/sentinelops/incidents/repository.py": "9bf39f2fc279ad6b5c608f70c6713e9f6828ee46d202a9b1d97cd5e30d0c598b"
+      },
+      "intent_refs": [
+        "artifact://manifests/a887c208ccc6344f709ff1dc7ad871afa7933f0a382a54d636ec6e6770915b45.json",
+        "artifact://manifests/8c7585ff66c470f4b2004a3f184bf60c1b16d0423d169db47505ddf92825d33a.json"
+      ],
+      "database": "real-PostgreSQL-nonowner-control-writer",
+      "transport": "real-protected-HTTP-uvicorn",
+      "concurrent_retries": 8,
+      "incidents": 2,
+      "immutable_revisions": 6,
+      "outbox_events_acknowledged": 6,
+      "restart_outage_verified": true,
+      "model_outputs_available": false,
+      "waited_for_analytical_cutoff_seconds": 1.2078000054316362e-05,
+      "actions_allowed": false,
+      "historical_emissions_verified": false,
+      "checks": [
+        "verified-raw-derived-RCA",
+        "stable-intent-emission",
+        "concurrent-idempotent-projection",
+        "changed-retry-conflict",
+        "stale-CAS-conflict",
+        "crash-after-OPEN-resume",
+        "immutable-history",
+        "computed-SLO-provenance",
+        "protected-HTTP-read",
+        "no-model-readiness",
+        "durable-outbox"
+      ]
+    },
+    "persistence_artifact_sha256": "4fa2e4bb5ad86b1d447174ca6d3802ca407471d48dee96b8f8b56ea18914057f"
+  },
+  "clock_driver_commit": "de769f1db400b2efc1534a935539ed1f4aaedd75"
 }

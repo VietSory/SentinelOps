@@ -29,7 +29,7 @@ Replay covers every 60-second bucket between the **raw capture** bounds, includi
 
 The output store contains immutable `signals/` objects and a content-addressed `manifests/` report. `evaluated_at` is the predeclared virtual decision clock (bucket end +60 seconds); it is **not a historical alert emission timestamp**. Reports explicitly deny historical emission/lead-time, model, RCA accuracy and action claims. A live worker must separately record its actual emission/commit time.
 
-The CLI is a replay consumer; continuous polling, durable worker checkpoints, correlated incident writes, RCA ranking and action execution remain separate deliverables. The existing API continues to return 503 without an activated compatible model.
+The CLI is a replay consumer. [Downstream correlation/RCA and computed analytical IER writing](STEP7_RCA.md) have their own verified path and actual replay-emission clock. Continuous polling, durable worker checkpoints and action execution remain separate deliverables. The existing API continues to return 503 without an activated compatible model.
 
 ## Verification
 

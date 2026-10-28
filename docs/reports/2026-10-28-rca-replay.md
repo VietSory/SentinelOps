@@ -43,7 +43,15 @@ Real acceptance used an exclusive PostgreSQL 16 container/volume and a real Uvic
 
 The first restart attempt failed because Docker's automatically allocated host port changed on stop/start. Its log/evidence was preserved. A new exclusive sandbox with an explicit host port passed the same checks; timeouts/assertions were not relaxed. CI uses an explicit port and verifies that restart preserves the selected mapping.
 
-The producer implementation is committed as `2405b80` with the same source bytes measured by the acceptance report. Local software checks passed: 43 focused tests, 368 regression tests, 23 schemas/17 samples/two actual policies, and installed-wheel imports/schema/semantic/API checks outside the checkout. These are separate from raw-source and real-service acceptance. A new fresh-capture path and exact-head remote CI are still required for the published candidate; older CI is not assigned to these changes.
+The producer implementation is committed as `2405b80` with the same source bytes measured by the initial acceptance report. After the clock-driver fix `de769f1`, final software checks passed: 45 focused tests, 370 regression tests, 23 schemas/17 samples/two actual policies, and installed-wheel imports/schema/semantic/API checks outside the checkout. These are separate from raw-source and real-service acceptance. Exact-head remote CI is still required for the published candidate; older CI is not assigned to these changes.
+
+## Fresh Step 4 integration
+
+A separate local Docker project ran a new healthy/latency/error/recovery workload from clean HEAD `06cb020`, with matching clean start/end identities. Step 4 passed with 27 observations and 15 eligible feature windows. Its new immutable aggregate evidence manifest fed the complete health → correlation → RCA chain, followed by a second exclusive PostgreSQL/protected-HTTP acceptance run. Concurrent retry, crash resume, immutable audit/outbox, DB outage/restart and protected read checks all passed again.
+
+The fresh source's analytical cutoff was `2026-10-28T02:24:00Z`. Trace/log receipts were `02:24:31.193429Z` / `02:24:31.380084Z`, so those modalities were correctly unavailable at that cutoff. The one observed Payment/Checkout group therefore retained missing candidate scores and abstained with `no-positive-observed-support` and `unobserved-dependency-candidates`. It did not acquire a fabricated healthy trace, IF score, root diagnosis or action eligibility. The older S3 scored example above and this late-receipt example test different evidence conditions.
+
+Fresh replay cutoffs can also precede actual publication by being slightly ahead of wall time. The acceptance driver waits in bounded intervals for at most the local health policy's 60-second lag; farther-future input fails. Production intent preparation still rejects a future cutoff. Two clock-driver tests cover waiting without backdating and refusing an unbounded wait. This does not permit source facts received after the declared analytical cutoff.
 
 ## Limits and remaining gates
 
