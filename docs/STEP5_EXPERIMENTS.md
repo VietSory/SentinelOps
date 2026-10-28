@@ -1,6 +1,6 @@
 # Step 5 — Experiment truth and dataset protocol
 
-Status: manifest/labeling/dataset-freeze implementation and a bounded local S0/S1/S3 runner, with new S5 development support. Actual S5 development capture/evaluation is not accepted from implementation or fixture tests alone. Live acceptance evidence and sufficient independent data are tracked separately. G2 is not PASS merely because these modules or synthetic fixtures exist.
+Status: manifest/labeling/dataset-freeze implementation and a bounded local S0/S1/S3/S5 runner. [Two actual S5 development cases](reports/2026-10-28-s5-development.md) passed raw-source grouping/evidence checks; final heldout/model gates remain separate. Live acceptance evidence and sufficient independent data are tracked separately. G2 is not PASS merely because these modules or synthetic fixtures exist.
 
 ## Training data sources
 

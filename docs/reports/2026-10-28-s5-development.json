@@ -1,0 +1,501 @@
+{
+  "recorded_at": "2026-10-28T03:56:06.383206+00:00",
+  "scope": "two local S5 development cases; not final heldout or model/RCA accuracy acceptance",
+  "implementation_commit": "740574ae4df3915d05353f9b7abef0a457cad7dc",
+  "trace_contract_commit": "e23cdc5842db342cc2b20cdeb01bd8a6465a34e7",
+  "protocol_file_sha256": "472de2104b18594bb37770ccf26005df418100f4acf40df34927c507956b5241",
+  "protocol_payload_sha256": "778f948dedff9500333da6ba2203b53c621e02c8c172e061d4885e4a10c90d95",
+  "rca_policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+  "training_contract_file_sha256": "08f2309d206e8c083cfbcb9c85ca07460e1b18674cdb1697d8b8cee2055c3c5b",
+  "cases": [
+    {
+      "name": "latency",
+      "run_id": "run-9169546d46794c2480d0d6fabfa501b7",
+      "source_manifest_ref": "artifact://manifests/536588e15a23831ce90bf73803ed030b6924b3a3e874cdc64f06b0214346b1f5.json",
+      "source_commit": "740574ae4df3915d05353f9b7abef0a457cad7dc",
+      "session_id": "s5-development-20261028",
+      "source_image_digests": {
+        "checkout-service": "sha256:ff452fd5d234f687e8def1a022cbd5a512d0fbd33fb477d769e32cfb5da1bb09",
+        "payment-service": "sha256:07680f12bf9d877619f60a96653f7e547fcb6d7fcf73a7d2f935b013e30705d0",
+        "inventory-service": "sha256:4cb118c4171b4e45104e49ad1e031df272f58e4126bdf1da15ee4e4b0d33e1b6"
+      },
+      "started_at": "2026-10-28T03:17:30.270914Z",
+      "ended_at": "2026-10-28T03:29:25.361932Z",
+      "observation_count": 36,
+      "eligible_features": 24,
+      "retained_trace_scopes": {
+        "checkout-service": 12,
+        "payment-service": 12,
+        "inventory-service": 12
+      },
+      "workload_outcomes": {
+        "200": 5940
+      },
+      "evaluation": {
+        "evaluation_version": "s5-development/v1",
+        "role": "local-RCA-development-only",
+        "protocol_sha256": "778f948dedff9500333da6ba2203b53c621e02c8c172e061d4885e4a10c90d95",
+        "case": "independent-latency",
+        "run_id": "run-9169546d46794c2480d0d6fabfa501b7",
+        "session_id": "s5-development-20261028",
+        "source_commit": "740574ae4df3915d05353f9b7abef0a457cad7dc",
+        "truth_ref": "experiment-truth://run-9169546d46794c2480d0d6fabfa501b7/6fdf6bd22ec8c4155f11bf536180885ae3861229c526197d50e1ddddc32f627d",
+        "health_ref": "artifact://manifests/acba804bfb06bf5b66ecfa8349ac63255dc7e4d1d3fe3bb925c9203e43c56b30.json",
+        "correlation_ref": "artifact://manifests/5dccb0e0fb7601f01bc9a3a1921f6e596b7308f5596235c2e45d2236aa5f9e8e.json",
+        "rca_ref": "artifact://manifests/f0013dad586f7ed4d09889a914c7f1d7d46d353ce81b93f1777e350c2903ce86.json",
+        "analysis_cutoff_strategy": "maximum-operational-receipt-and-correlation-cutoff/v1",
+        "as_of": "2026-10-28T03:30:00Z",
+        "grouping": {
+          "expected_roots": [
+            "inventory-service",
+            "payment-service"
+          ],
+          "root_group_ids": {
+            "inventory-service": [
+              "02a0486a826959ca56b96808fd29a9f9a585f078a8740ec8a00a6eb4a765e181"
+            ],
+            "payment-service": [
+              "3df7eaa17848a4685c1f580d7ddcfb1fe9f88a398c69cd6422fc1e595283e3b6"
+            ]
+          },
+          "missed_roots": [],
+          "false_merge_group_ids": [],
+          "ambiguous_consumer_group_ids": [
+            "37345e3cc279ce6c18fb892f5dfc3dc74bb53e8d19fa70aa52e930a89d56d679"
+          ],
+          "passed": true
+        },
+        "direct_evidence_refs_by_root": {
+          "inventory-service": [
+            "artifact://raw/0d875ded8cdb6f2cc13c746755d55f46a5b68b39e08ea2e76bf9c304667c7176.json",
+            "artifact://raw/1e4f61f8357c5c4f19bd33a683acb25844c91d13d2861309d2b1b7c38a9083ec.json",
+            "artifact://raw/8eebd580b9ad7975b3759fb58f620c404e90b0873ef3702fd4a6480e1c8a9255.json",
+            "artifact://raw/ae87d45162a610aaae3414dc7163d6fa2ae0df3f46948f9a710fcd01d916edd9.json"
+          ],
+          "payment-service": [
+            "artifact://raw/0bae4a1f368ee47ee3508d9af4d59de823a409f6af8a117c9beb9cc6d0c4c8ab.json",
+            "artifact://raw/2fa0784b1adf7d0e82aa1db7e25f59f6d26b6f5d4237b48a32ceb50e43c4aa57.json",
+            "artifact://raw/976b99cb3e0accefe7f4a25a31449f3fd8d3996a6b8ca165102d4f62cc988dbc.json",
+            "artifact://raw/f6113b388843b7bb641a1e0dffc520de5904192bb56fc671d4b7bae7575791a7.json"
+          ]
+        },
+        "server_log_coverage": {
+          "checkout-service": {
+            "observed_starts": 1980,
+            "matched_completions": 1980,
+            "top_level_requests": 1980,
+            "top_level_logged_starts": 1980,
+            "complete": true
+          },
+          "inventory-service": {
+            "observed_starts": 3960,
+            "matched_completions": 3960,
+            "top_level_requests": 1980,
+            "top_level_logged_starts": 1980,
+            "complete": true
+          },
+          "payment-service": {
+            "observed_starts": 3960,
+            "matched_completions": 3960,
+            "top_level_requests": 1980,
+            "top_level_logged_starts": 1980,
+            "complete": true
+          }
+        },
+        "warmup": {
+          "checkout-service": {
+            "eligible_request_buckets": 4,
+            "sustained_breach_at": null,
+            "passed": true
+          },
+          "payment-service": {
+            "eligible_request_buckets": 4,
+            "sustained_breach_at": null,
+            "passed": true
+          },
+          "inventory-service": {
+            "eligible_request_buckets": 4,
+            "sustained_breach_at": null,
+            "passed": true
+          }
+        },
+        "status": "PASS",
+        "models_available": false,
+        "actions_allowed": false,
+        "historical_emissions_verified": false,
+        "full_G4_accepted": false,
+        "heldout_opened": false
+      },
+      "evaluation_artifact_sha256": "60e3794165610ccaa588ae0cf47e4b922d7f7a651ed01c58ca4da7e94319ee0c",
+      "repeated_evaluation_identical": true,
+      "group_results": [
+        {
+          "group_id": "02a0486a826959ca56b96808fd29a9f9a585f078a8740ec8a00a6eb4a765e181",
+          "affected_services": [
+            "inventory-service"
+          ],
+          "structural_candidates": [
+            "inventory-service"
+          ],
+          "grouping_reason": "single-service",
+          "ranking": [
+            "inventory-service",
+            "rds"
+          ],
+          "scores": {
+            "inventory-service": 0.39981110771594486,
+            "rds": 0.0001888922840551677
+          },
+          "coverage": {
+            "inventory-service": 0.4,
+            "rds": 0.25
+          },
+          "abstention_reasons": [
+            "insufficient-coverage",
+            "insufficient-score"
+          ],
+          "rca_result_ref": "artifact://manifests/79c17abcd98617cd8bb2aa415298b4e6d35a2acd233b4016e6403b38e2ddc0bd.json"
+        },
+        {
+          "group_id": "37345e3cc279ce6c18fb892f5dfc3dc74bb53e8d19fa70aa52e930a89d56d679",
+          "affected_services": [
+            "checkout-service"
+          ],
+          "structural_candidates": [
+            "inventory-service",
+            "payment-service"
+          ],
+          "grouping_reason": "ambiguous-shared-consumer",
+          "ranking": [
+            "inventory-service",
+            "payment-service",
+            "checkout-service",
+            "rds"
+          ],
+          "scores": {
+            "inventory-service": 0.39981110771594486,
+            "payment-service": 0.39954573000765525,
+            "checkout-service": 0.15051504253567766,
+            "rds": 0.0003093653290455507
+          },
+          "coverage": {
+            "inventory-service": 0.4,
+            "payment-service": 0.4,
+            "checkout-service": 0.4,
+            "rds": 0.25
+          },
+          "abstention_reasons": [
+            "ambiguous-correlation",
+            "insufficient-coverage",
+            "insufficient-margin",
+            "insufficient-score"
+          ],
+          "rca_result_ref": "artifact://manifests/b02eafa3255de17793afe3ee5c767e9847df5948868ccf3d2e8725ad0e1fee17.json"
+        },
+        {
+          "group_id": "3df7eaa17848a4685c1f580d7ddcfb1fe9f88a398c69cd6422fc1e595283e3b6",
+          "affected_services": [
+            "payment-service"
+          ],
+          "structural_candidates": [
+            "payment-service"
+          ],
+          "grouping_reason": "single-service",
+          "ranking": [
+            "payment-service",
+            "rds"
+          ],
+          "scores": {
+            "payment-service": 0.39954573000765525,
+            "rds": 0.00045426999234474044
+          },
+          "coverage": {
+            "payment-service": 0.4,
+            "rds": 0.25
+          },
+          "abstention_reasons": [
+            "insufficient-coverage",
+            "insufficient-score"
+          ],
+          "rca_result_ref": "artifact://manifests/14bcc272eafc01fd8dbee499c40f7b58ace52f9983e361d8a83530d41c9e2355.json"
+        }
+      ]
+    },
+    {
+      "name": "errors",
+      "run_id": "run-a6af718416ba4f66a5089e77644169e1",
+      "source_manifest_ref": "artifact://manifests/63d67225c620a4012d92fc0333ac7ad8303d8aff0c7c2ef74f9170bfd7fc1595.json",
+      "source_commit": "740574ae4df3915d05353f9b7abef0a457cad7dc",
+      "session_id": "s5-development-20261028",
+      "source_image_digests": {
+        "checkout-service": "sha256:ff452fd5d234f687e8def1a022cbd5a512d0fbd33fb477d769e32cfb5da1bb09",
+        "payment-service": "sha256:07680f12bf9d877619f60a96653f7e547fcb6d7fcf73a7d2f935b013e30705d0",
+        "inventory-service": "sha256:4cb118c4171b4e45104e49ad1e031df272f58e4126bdf1da15ee4e4b0d33e1b6"
+      },
+      "started_at": "2026-10-28T03:32:42.293649Z",
+      "ended_at": "2026-10-28T03:44:34.998150Z",
+      "observation_count": 36,
+      "eligible_features": 27,
+      "retained_trace_scopes": {
+        "checkout-service": 8,
+        "payment-service": 12,
+        "inventory-service": 12
+      },
+      "workload_outcomes": {
+        "200": 4332,
+        "503": 1082,
+        "502": 541
+      },
+      "evaluation": {
+        "evaluation_version": "s5-development/v1",
+        "role": "local-RCA-development-only",
+        "protocol_sha256": "778f948dedff9500333da6ba2203b53c621e02c8c172e061d4885e4a10c90d95",
+        "case": "independent-blocking-errors",
+        "run_id": "run-a6af718416ba4f66a5089e77644169e1",
+        "session_id": "s5-development-20261028",
+        "source_commit": "740574ae4df3915d05353f9b7abef0a457cad7dc",
+        "truth_ref": "experiment-truth://run-a6af718416ba4f66a5089e77644169e1/c03ce2211f532d1c35a6cd64125b141e9da8ba7dc89526cfd5614cb6718ad6f1",
+        "health_ref": "artifact://manifests/75fc7843963aca1992e3202e71cd23bae114968da5834af335f04a05ffa39bbc.json",
+        "correlation_ref": "artifact://manifests/4493d412516df154f6a1db4c58a87a2c00f6a7c6fe902a4582d4d5c2f249c5e5.json",
+        "rca_ref": "artifact://manifests/641a3727c5d6804816bc8f754469f376fbe7d7fff6fbf0cc65a27b3e84375ea4.json",
+        "analysis_cutoff_strategy": "maximum-operational-receipt-and-correlation-cutoff/v1",
+        "as_of": "2026-10-28T03:45:30.507237Z",
+        "grouping": {
+          "expected_roots": [
+            "inventory-service",
+            "payment-service"
+          ],
+          "root_group_ids": {
+            "inventory-service": [
+              "8ac296192cb7dfe694ef649f20dcf13021d3fbeb5e7ee134b64f3011d51218ce"
+            ],
+            "payment-service": [
+              "9873d1bbe3c79882200aa5ce85d02c750d856b6d94aa0b7fe194292ad611308e"
+            ]
+          },
+          "missed_roots": [],
+          "false_merge_group_ids": [],
+          "ambiguous_consumer_group_ids": [
+            "56c05692882b4db6f75a27cf777acf19a9833d7808363ce4abf0f1543bfbde76"
+          ],
+          "passed": true
+        },
+        "direct_evidence_refs_by_root": {
+          "inventory-service": [
+            "artifact://raw/0355a087d0b4359c8153f7e540a601a5734b67a8b6bf954b99bbf829b7b19075.json",
+            "artifact://raw/287b9de52ee2e9b45949ba30ff448d48f0af94a7491242d36a23a51e48066427.json",
+            "artifact://raw/d90eb04e1f1ccbf0502b676055a452af21c679af0b424f153577e6eddea10183.json"
+          ],
+          "payment-service": [
+            "artifact://raw/1e05ec2e64f3a722d0050da4c4ea2a1fb4f11d06090116df024f2cb62f07a1a0.json",
+            "artifact://raw/524e01244b253dbc928e54d719e0f0d41714f63da360b368c1e688c44aad4618.json",
+            "artifact://raw/697a49b4e1f3eb0ed26800d740c06fd55b1f2b4276addac3e59f9344aa1f86d4.json"
+          ]
+        },
+        "server_log_coverage": {
+          "checkout-service": {
+            "observed_starts": 1985,
+            "matched_completions": 1985,
+            "top_level_requests": 1985,
+            "top_level_logged_starts": 1985,
+            "complete": true
+          },
+          "inventory-service": {
+            "observed_starts": 3970,
+            "matched_completions": 3970,
+            "top_level_requests": 1985,
+            "top_level_logged_starts": 1985,
+            "complete": true
+          },
+          "payment-service": {
+            "observed_starts": 3429,
+            "matched_completions": 3429,
+            "top_level_requests": 1985,
+            "top_level_logged_starts": 1985,
+            "complete": true
+          }
+        },
+        "warmup": {
+          "checkout-service": {
+            "eligible_request_buckets": 5,
+            "sustained_breach_at": null,
+            "passed": true
+          },
+          "payment-service": {
+            "eligible_request_buckets": 5,
+            "sustained_breach_at": null,
+            "passed": true
+          },
+          "inventory-service": {
+            "eligible_request_buckets": 5,
+            "sustained_breach_at": null,
+            "passed": true
+          }
+        },
+        "status": "PASS",
+        "models_available": false,
+        "actions_allowed": false,
+        "historical_emissions_verified": false,
+        "full_G4_accepted": false,
+        "heldout_opened": false
+      },
+      "evaluation_artifact_sha256": "c0cfd3f455b712db1a5eb78182116ca1c6c6da9fadf10ec68ff3dbe97abd941c",
+      "repeated_evaluation_identical": true,
+      "group_results": [
+        {
+          "group_id": "56c05692882b4db6f75a27cf777acf19a9833d7808363ce4abf0f1543bfbde76",
+          "affected_services": [
+            "checkout-service"
+          ],
+          "structural_candidates": [
+            "inventory-service",
+            "payment-service"
+          ],
+          "grouping_reason": "ambiguous-shared-consumer",
+          "ranking": [
+            "inventory-service",
+            "payment-service",
+            "checkout-service"
+          ],
+          "scores": {
+            "inventory-service": 0.4,
+            "payment-service": 0.4,
+            "checkout-service": 0.15,
+            "rds": null
+          },
+          "coverage": {
+            "inventory-service": 0.4,
+            "payment-service": 0.4,
+            "checkout-service": 0.15,
+            "rds": 0.0
+          },
+          "abstention_reasons": [
+            "ambiguous-correlation",
+            "insufficient-coverage",
+            "insufficient-margin",
+            "insufficient-score",
+            "unobserved-dependency-candidates"
+          ],
+          "rca_result_ref": "artifact://manifests/ebfb1e108f3a09a5070e9a468efc4c12282dbcd08a334089a74ef118e65bc3de.json"
+        },
+        {
+          "group_id": "8ac296192cb7dfe694ef649f20dcf13021d3fbeb5e7ee134b64f3011d51218ce",
+          "affected_services": [
+            "inventory-service"
+          ],
+          "structural_candidates": [
+            "inventory-service"
+          ],
+          "grouping_reason": "single-service",
+          "ranking": [
+            "inventory-service"
+          ],
+          "scores": {
+            "inventory-service": 0.4,
+            "rds": null
+          },
+          "coverage": {
+            "inventory-service": 0.4,
+            "rds": 0.0
+          },
+          "abstention_reasons": [
+            "insufficient-coverage",
+            "insufficient-margin",
+            "insufficient-score",
+            "unobserved-dependency-candidates"
+          ],
+          "rca_result_ref": "artifact://manifests/87836d264feb04450d6e7d22d52cd1725f7e423defdf7ee971316560961945ab.json"
+        },
+        {
+          "group_id": "9873d1bbe3c79882200aa5ce85d02c750d856b6d94aa0b7fe194292ad611308e",
+          "affected_services": [
+            "payment-service"
+          ],
+          "structural_candidates": [
+            "payment-service"
+          ],
+          "grouping_reason": "single-service",
+          "ranking": [
+            "payment-service"
+          ],
+          "scores": {
+            "payment-service": 0.4,
+            "rds": null
+          },
+          "coverage": {
+            "payment-service": 0.4,
+            "rds": 0.0
+          },
+          "abstention_reasons": [
+            "insufficient-coverage",
+            "insufficient-margin",
+            "insufficient-score",
+            "unobserved-dependency-candidates"
+          ],
+          "rca_result_ref": "artifact://manifests/6687379287d0dc5648f521671ef778900bc523f111fc70b618c018e889e11843.json"
+        }
+      ]
+    }
+  ],
+  "models_available": false,
+  "actions_allowed": false,
+  "historical_emissions_verified": false,
+  "full_G4_accepted": false,
+  "heldout_opened": false,
+  "multigroup_persistence": {
+    "status": "PASS",
+    "source_report_ref": "artifact://manifests/641a3727c5d6804816bc8f754469f376fbe7d7fff6fbf0cc65a27b3e84375ea4.json",
+    "source_commit": "740574ae4df3915d05353f9b7abef0a457cad7dc",
+    "implementation_sha256": {
+      "/mnt/d/sentinelops/scripts/check_rca_producer.py": "ad7bb5e4061fac6fd41ed9d8d163aceaa333922ad446150966509776535e2ae5",
+      "src/sentinelops/incidents/rca_producer.py": "e4eb9a64a20a781785636342c40824401425b34ea07d7c4f119322f72dead6c4",
+      "src/sentinelops/incidents/repository.py": "9bf39f2fc279ad6b5c608f70c6713e9f6828ee46d202a9b1d97cd5e30d0c598b"
+    },
+    "intent_refs": [
+      "artifact://manifests/aad7cb1b86a8bd2824b2ec9dfaf23ba5f5f5fcd103fbebfab921e6d263356847.json",
+      "artifact://manifests/a069b41e44793015ddd67955b0ca58d04ed6295fc3d5d9e9f4509bf0248eaa23.json"
+    ],
+    "database": "real-PostgreSQL-nonowner-control-writer",
+    "transport": "real-protected-HTTP-uvicorn",
+    "concurrent_retries": 8,
+    "incidents": 6,
+    "immutable_revisions": 18,
+    "outbox_events_acknowledged": 18,
+    "restart_outage_verified": true,
+    "model_outputs_available": false,
+    "waited_for_analytical_cutoff_seconds": 1.7734000721247867e-05,
+    "actions_allowed": false,
+    "historical_emissions_verified": false,
+    "checks": [
+      "verified-raw-derived-RCA",
+      "stable-intent-emission",
+      "concurrent-idempotent-projection",
+      "changed-retry-conflict",
+      "stale-CAS-conflict",
+      "crash-after-OPEN-resume",
+      "immutable-history",
+      "computed-SLO-provenance",
+      "protected-HTTP-read",
+      "no-model-readiness",
+      "durable-outbox"
+    ]
+  },
+  "multigroup_persistence_artifact_sha256": "af5775ad7046d1553713532049fbd458c93c3ecf3ed40c5c68e031badcf8f77b",
+  "checks": {
+    "full_regression_tests": 403,
+    "schemas": 23,
+    "samples": 17,
+    "registered_policy_configurations": 2,
+    "installed_wheel_outside_checkout": "PASS",
+    "old_S0_S3_RCA_functional_replay": "unchanged including evidence/result refs; code provenance excluded",
+    "new_CI_YAML_and_embedded_Python": "PASS syntax; exact-head execution pending publish"
+  },
+  "limitations": [
+    "two development profiles in one shared development session, not independent benchmark trials",
+    "at least five final heldout multi-fault trials remain closed until P11",
+    "no RCAEval evaluation/tuning or ML fitting/activation",
+    "no historical alert/MTTD or causal-performance claim",
+    "continuous worker, full G4 and G3/G7 model/source gates remain open",
+    "six persisted incidents are two replay intents for three groups of one source case"
+  ]
+}

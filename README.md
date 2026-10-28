@@ -9,14 +9,16 @@ SentinelOps is the implementation repository for the approved AI4Life 2026 AIOps
 The repository implements a protected incident API, a real
 three-service/PostgreSQL testbed, distributed OpenTelemetry, local Prometheus
 history, immutable metric captures, deterministic feature windows, predeclared
-local experiments and an isolated PostgreSQL incident repository. Dated
+local experiments, objective SLO episodes, conservative correlation, analytical
+RCA with abstention and a computed-IER producer with an isolated incident repository. Dated
 verification reports live under [docs/reports](docs/reports/).
 
 The API detector returns 503 until a real validated model is available; Foundation
-fixtures require explicit local demo mode. The dataset collected so far is a pilot and fails
-the full training-readiness gate. Real model serving, incident
-correlation/RCA, Bedrock, operator UI, controlled remediation and AWS deployment
-follow the delivery gates; local telemetry evidence does not certify them.
+fixtures require explicit local demo mode. Public source acquisition and local validation
+have not closed healthy-reference, precursor-label and live-feature-parity gates.
+Real model serving, RCA performance/continuous
+workers, Bedrock, operator UI, controlled remediation and AWS deployment follow
+their separate gates; local telemetry and software checks do not certify them.
 
 The [frozen training-data contract](configs/training_data_contract.json) selects
 GAMMA v1 training and RCAEval RCA validation/heldout evaluation, with at most these
@@ -96,7 +98,9 @@ python scripts/step3_smoke_test.py
 Jaeger is available at `http://127.0.0.1:16686`; Collector metrics are exposed at
 `http://127.0.0.1:8889/metrics`. See [Step 3 observability](docs/STEP3_OBSERVABILITY.md)
 for the verification gates and troubleshooting. The AIOps API above remains a
-separate control process; this testbed does not yet perform ML, RCA or remediation.
+separate control process. The services generate measurements; host-side analytical
+[RCA replay/incident production](docs/STEP7_RCA.md) consumes captures separately.
+Continuous ML/RCA workers and remediation remain gated.
 
 ## Telemetry history and feature windows
 

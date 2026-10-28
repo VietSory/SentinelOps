@@ -357,7 +357,7 @@ Topology snapshot có version/hash, edge direction rõ: Checkout depends on Paym
 
 Deduplicate theo signal/window/model identity. Correlation output giữ grouping reasons và alternative grouping/uncertainty. Tạo new incident khi không đủ căn cứ ghép; update active incident bằng expected revision.
 
-Implementation checkpoint: [conservative SLO episode correlation](STEP7_CORRELATION.md) and [actual S0/S3 replay](reports/2026-10-27-slo-correlation.md) provide typed bounded grouping with explicit ambiguous shared consumers, source scopes and dependency support. Correlation output is analytical grouping; [the downstream RCA producer](STEP7_RCA.md) separately scores source support and persists computed local IERs. Real multi-fault evaluation, model-signal integration and continuous incident processing remain pending.
+Implementation checkpoint: [conservative SLO episode correlation](STEP7_CORRELATION.md), [actual S0/S3 replay](reports/2026-10-27-slo-correlation.md) and [two S5 development profiles](reports/2026-10-28-s5-development.md) provide typed bounded grouping with explicit ambiguous shared consumers, source scopes and native direct-request support. Correlation output is analytical grouping; [the downstream RCA producer](STEP7_RCA.md) separately scores source support and persists computed local IERs, including multi-group retry/restart acceptance. Final multi-fault holdout, model-signal integration and continuous incident processing remain pending.
 
 ### 10.2 RCA scoring — PROPOSED initial configuration
 
