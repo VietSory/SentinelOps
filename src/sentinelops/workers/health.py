@@ -82,12 +82,13 @@ class HealthWorker:
 
     async def status(self) -> dict:
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM sentinel_control.health_streams WHERE stream_id=$1", self.stream_id)
-            counts = await conn.fetchrow("""SELECT count(*) AS batches,
+            row = await conn.fetchrow("""SELECT s.last_bucket_end,s.last_batch_ref,
+                (SELECT count(*) FROM sentinel_control.health_batches WHERE stream_id=$1) AS batches,
                 (SELECT count(*) FROM sentinel_control.health_signals WHERE stream_id=$1) AS signals
-                FROM sentinel_control.health_batches WHERE stream_id=$1""", self.stream_id)
-        return {"stream_id": self.stream_id, "last_bucket_end": timestamp(row["last_bucket_end"]) if row and row["last_bucket_end"] else None,
-                "last_batch_ref": row["last_batch_ref"] if row else None, **dict(counts)}
+                FROM (SELECT $1::text AS stream_id) requested
+                LEFT JOIN sentinel_control.health_streams s USING (stream_id)""", self.stream_id)
+        return {"stream_id": self.stream_id, "last_bucket_end": timestamp(row["last_bucket_end"]) if row["last_bucket_end"] else None,
+                "last_batch_ref": row["last_batch_ref"], "batches": row["batches"], "signals": row["signals"]}
 
     async def tick(self) -> dict:
         started = time.monotonic()

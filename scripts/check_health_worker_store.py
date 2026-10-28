@@ -102,7 +102,15 @@ async def check(args):
         await abandoned.close()
         assert (await worker.tick())["status"] == "COMMITTED"
         checks.append("disconnected worker session releases lock and resumes persisted checkpoint")
-        concurrent = await asyncio.gather(*(worker.tick() for _ in range(8)))
+        status_samples = []
+        async def observe_status():
+            for _ in range(100):
+                status = await worker.status()
+                assert status["signals"] == status["batches"] * 3
+                assert datetime.fromisoformat(status["last_bucket_end"].replace("Z", "+00:00")) == initial + timedelta(minutes=status["batches"] - 1)
+                status_samples.append(status["batches"])
+                await asyncio.sleep(.001)
+        concurrent, _ = await asyncio.gather(asyncio.gather(*(worker.tick() for _ in range(8))), observe_status())
         assert all(result["status"] in ("COMMITTED", "WAIT", "BUSY") for result in concurrent)
         async with pool.acquire() as conn:
             rows = await conn.fetch("SELECT bucket_end,count(*) AS n FROM sentinel_control.health_signals WHERE stream_id=$1 GROUP BY bucket_end ORDER BY bucket_end", worker.stream_id)
@@ -112,6 +120,7 @@ async def check(args):
             assert all(json.loads(row["payload"])["availability"] == "UNKNOWN" for row in payloads)
             assert all(json.loads(row["payload"])["health"] is None for row in payloads)
         checks.append("eight concurrent attempts keep one three-service decision per ordered bucket; missing stays UNKNOWN")
+        checks.append("100 concurrent status snapshots keep pointer, batch and signal counts consistent")
         before = await worker.status()
         docker("stop", args.container)
         try:
@@ -133,6 +142,7 @@ async def check(args):
         report = {"status": "PASS", "fixture_only": True, "live_health_verified": False,
                   "database_project": args.project, "container": args.container,
                   "stream_id": worker.stream_id, "durable_status": before, "concurrent_results": concurrent,
+                  "status_snapshot_samples": len(status_samples), "observed_batch_counts": sorted(set(status_samples)),
                   "checks": checks, "actions_allowed": False, "model_outputs_available": False}
         args.output.parent.mkdir(parents=True, exist_ok=True)
         with args.output.open("x") as stream:

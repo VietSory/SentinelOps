@@ -111,11 +111,13 @@ async def verify(pool, store: ArtifactStore, stream_id: str, worker_logs: list[P
             if line.startswith("{"):
                 item = json.loads(line)
                 if item.get("status") == "COMMITTED": commits.append(item)
+    assert len(commits) == len(batches) and {item["manifest_ref"] for item in commits} == {row["manifest_ref"] for row in batches}
     assert commits and max(item["processing_ms"] for item in commits) <= 10000
     return {"batches": len(batches), "signals": len(records), "event_counts": dict(events),
             "availability_counts": dict(availability), "unknown_active_counts": dict(unknown_active),
             "missed_deadline_buckets": deadline_misses, "eligible_feature_outputs": eligible_features,
             "source_outage_unknown_counts": dict(source_unknown),
+            "timed_batches": len(commits), "timing_coverage": "all-accepted-batches",
             "maximum_processing_ms": max(item["processing_ms"] for item in commits),
             "raw_to_feature_and_health_replay": True, "final_batch_ref": batches[-1]["manifest_ref"]}
 
