@@ -414,6 +414,7 @@ jobs:
                    '--control-container','sentinelops-health-control-ci-control-postgres-1',
                    '--control-project','sentinelops-health-control-ci','--native-project','sentinelops-health-ci',
                    '--prometheus-container','sentinelops-health-ci-prometheus-1','--output','artifacts/workers/live']
+          command+=['--metrics-otlp-endpoint','http://127.0.0.1:4317']
           with output.open('x') as stream:
               result=subprocess.run(command,env=env,stdout=stream,stderr=subprocess.STDOUT)
           raise SystemExit(result.returncode)

@@ -25,6 +25,8 @@ from sentinelops.incidents.health import advance_health
 from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp, stable_id
 from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.workers.health import local_endpoint
+from scripts.worker_metrics_evidence import WorkerMetricEvidence
 
 
 def docker(*args):
@@ -158,15 +160,23 @@ async def check(args):
     if os.environ.get("COMPOSE_PROJECT_NAME") != args.native_project:
         raise ValueError("native workload project differs from the explicit acceptance scope")
     require_port(target(args.prometheus_container, args.native_project, "prometheus"), "9090/tcp", 9090)
+    metrics_endpoint = getattr(args, "metrics_otlp_endpoint", None)
+    if metrics_endpoint:
+        if local_endpoint(metrics_endpoint) != "http://127.0.0.1:4317":
+            raise ValueError("native acceptance metrics must target the owned loopback collector")
+        collector = docker("compose", "ps", "-q", "otel-collector").decode().strip()
+        require_port(target(collector, args.native_project, "otel-collector"), "4317/tcp", 4317)
     for service, port in (("checkout-service", 8001), ("payment-service", 8002), ("inventory-service", 8003)):
         container = docker("compose", "ps", "-q", service).decode().strip()
         require_port(target(container, args.native_project, service), "8000/tcp", port)
     images = image_identity(root)
     source_paths = [*root.glob("src/sentinelops/**/*.py"), *root.glob("contracts/*.schema.json"),
                     root / "scripts/run_health_worker.py", Path(__file__).resolve(),
+                    root / "scripts/worker_metrics_evidence.py",
                     root / "infra/control/003-health-worker.sql", root / "configs/slo_health_policy.json"]
     source_hashes = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths}
     args.output.mkdir(parents=True, exist_ok=False)
+    metrics = WorkerMetricEvidence(args.output / "own-metrics") if metrics_endpoint else None
     store = ArtifactStore(args.output / "worker")
     children, logs, streams, interventions = [], [], [], []
     pool = await asyncpg.create_pool(os.environ["CONTROL_DATABASE_URL"], min_size=1, max_size=4, command_timeout=10)
@@ -187,8 +197,11 @@ async def check(args):
     def spawn():
         path = args.output / ("worker-" + str(len(children)) + ".log")
         stream = path.open("x")
-        process = subprocess.Popen([sys.executable,
-            "-m", "scripts.run_health_worker", "--store", str(store.root), "--max-buckets", "100"],
+        command = [sys.executable, "-m", "scripts.run_health_worker", "--store", str(store.root), "--max-buckets", "100"]
+        if metrics_endpoint:
+            command += ["--metrics-otlp-endpoint", metrics_endpoint,
+                        "--metrics-instance", "health-0" if len(children) < 2 else "health-1"]
+        process = subprocess.Popen(command,
             stdout=stream, stderr=subprocess.STDOUT, env=os.environ.copy())
         children.append(process); logs.append(path); streams.append(stream); save_running()
         return process
@@ -203,7 +216,10 @@ async def check(args):
         db_down = True
         interventions.append({"kind": "database-stop", "at": timestamp(datetime.now(timezone.utc))}); save_running()
         await asyncio.to_thread(docker, "stop", args.control_container)
-        await asyncio.sleep(protocol["database_outage_seconds"])
+        stopped = time.monotonic()
+        if metrics:
+            await metrics.ready("database-unavailable", instances={"health-0", "health-1"}, value=0)
+        await asyncio.sleep(max(0, protocol["database_outage_seconds"] - (time.monotonic() - stopped)))
         await asyncio.to_thread(docker, "start", args.control_container)
         for _ in range(90):
             try:
@@ -213,6 +229,8 @@ async def check(args):
         else: raise AssertionError("control database did not recover")
         db_down = False
         interventions.append({"kind": "database-start", "at": timestamp(datetime.now(timezone.utc))}); save_running()
+        if metrics:
+            await metrics.ready("database-recovered", instances={"health-0", "health-1"}, value=1)
 
     try:
         primary = spawn()
@@ -224,6 +242,8 @@ async def check(args):
             await asyncio.sleep(.5)
         assert stream_id
         save_running()
+        if metrics:
+            await metrics.ready("primary-ready", instances={"health-0"}, value=1)
         phase = "native-workload-and-database-outage"
         workload = asyncio.create_task(execute(ExperimentConfig(**protocol["experiment"]), project=root,
             output=args.output / "experiments", session_id="worker-integration-" + uuid4().hex))
@@ -288,10 +308,14 @@ async def check(args):
             source_down = False
             interventions.append({"kind": "prometheus-start", "at": timestamp(datetime.now(timezone.utc))}); save_running()
             source_outcomes = await extra
+        if metrics:
+            await metrics.ready("both-running", instances={"health-0", "health-1"}, value=1)
         for process in children[1:]: assert await stop_child(process) == 0
-        phase = "verification"
         snapshot = await ledger_snapshot(pool, stream_id)
         (args.output / "database-snapshot.json").write_text(json.dumps(snapshot, indent=2, allow_nan=False) + "\n")
+        phase = "metrics-verification"
+        metrics_result = await metrics.final(logs) if metrics else None
+        phase = "verification"
         result = await verify(pool, store, stream_id, logs, interventions)
         run = json.loads((run_path / "run.json").read_text())
         assert run["status"] == "completed" and run["dirty_worktree"] is False
@@ -304,6 +328,8 @@ async def check(args):
                   "source_outage_traffic": source_outcomes, "implementation_sha256": source_hashes,
                   "independent_trials": False, "training_corpus": False, "model_outputs_available": False,
                   "actions_allowed": False, "full_G4_accepted": False}
+        if metrics_result is not None:
+            report["own_metrics_verification"] = metrics_result
         (args.output / "acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
         print("NATIVE HEALTH WORKER ACCEPTANCE: PASS " + str(args.output), flush=True)
     except Exception as exc:
@@ -339,6 +365,7 @@ def main():
     parser.add_argument("--native-project", required=True)
     parser.add_argument("--prometheus-container", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--metrics-otlp-endpoint", help="Also verify the owned local worker metrics pipeline")
     args = parser.parse_args()
     try: asyncio.run(check(args))
     except Exception as exc: raise SystemExit("native worker acceptance failed: " + type(exc).__name__) from None
