@@ -16,8 +16,9 @@ verification reports live under [docs/reports](docs/reports/).
 The API detector returns 503 until a real validated model is available; Foundation
 fixtures require explicit local demo mode. Public source acquisition and local validation
 have not closed healthy-reference, precursor-label and live-feature-parity gates.
-Real model serving, RCA performance/continuous
-workers, Bedrock, operator UI, controlled remediation and AWS deployment follow
+A [continuous local SLO worker](docs/STEP7_HEALTH_WORKER.md) now has durable checkpoints and
+[actual crash/outage/recovery evidence](docs/reports/2026-10-28-continuous-health-worker.md).
+Real model serving, RCA performance/continuous downstream workers, Bedrock, operator UI, controlled remediation and AWS deployment follow
 their separate gates; local telemetry and software checks do not certify them.
 
 The [frozen training-data contract](configs/training_data_contract.json) selects

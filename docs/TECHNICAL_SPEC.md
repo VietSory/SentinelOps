@@ -324,7 +324,7 @@ RECOVERING -> INCIDENT nếu verify fail
 
 Persistence đếm bucket/window IDs mới; duplicate replay không cộng lần thứ hai. Dùng hysteresis để thoát trạng thái; không đóng incident chỉ từ một clean sample. Default entry là hai consecutive eligible observations, exit/verification dùng ba buckets theo policy; thresholds cụ thể được version.
 
-Implementation checkpoint: [objective SLO health producer](STEP7_SLO_HEALTH.md) and [real captured-source replay](reports/2026-10-26-slo-health-replay.md) implement this rule-source prerequisite with explicit UNKNOWN, policy/source identity and immutable decisions. This is separate from model outputs and independent unsampled-log evaluation labels. [Computed analytical IER writing](STEP7_RCA.md) now has a protected local producer; continuous worker checkpoints and action verification remain pending. Replay decision clocks are not historical emissions.
+Implementation checkpoint: [objective SLO health producer](STEP7_SLO_HEALTH.md) and [real captured-source replay](reports/2026-10-26-slo-health-replay.md) implement this rule-source prerequisite with explicit UNKNOWN, policy/source identity and immutable decisions. This is separate from model outputs and independent unsampled-log evaluation labels. [Computed analytical IER writing](STEP7_RCA.md) now has a protected local producer; [continuous local SLO checkpoints](STEP7_HEALTH_WORKER.md) now have [actual crash/outage/replay evidence](reports/2026-10-28-continuous-health-worker.md); downstream continuous correlation/RCA/IER, own-health metrics and action verification remain pending. Replay decision clocks are not historical emissions.
 
 ### 9.3 Incident lifecycle và projection
 
@@ -403,6 +403,8 @@ IER authoritative chứa kết quả được tính/validate. Generated explanat
 | `tasks_outbox` | Task ID + dedup key, status/lease/attempt | At-least-once workers |
 | `model_activations` | Environment/service/current bundle + revision | Controlled model routing |
 | `change_events` | Event ID, target, immutable version refs | Real deployment context |
+
+The [continuous local health producer](STEP7_HEALTH_WORKER.md) now uses additive schema-v2 health_streams/health_batches/health_signals tables for atomic three-service bucket decisions and a source-bound checkpoint. Its append-only health ledger is a prerequisite for downstream consumers; it does not enqueue or implement continuous RCA/IER itself.
 
 Update current pointer, append version/event và enqueue downstream tasks trong cùng transaction. Dùng compare-and-set revision; crash/retry không tạo hai current versions. Large raw evidence nằm trong object store; DB giữ refs/checksums.
 
