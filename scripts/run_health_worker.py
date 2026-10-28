@@ -50,7 +50,7 @@ async def run(args):
                 if result["status"] in ("COMMITTED", "BUSY"):
                     print(json.dumps(result), flush=True)
                 committed += result["status"] == "COMMITTED"
-            except (asyncpg.PostgresConnectionError, asyncpg.CannotConnectNowError, OSError, asyncio.TimeoutError) as exc:
+            except (asyncpg.PostgresConnectionError, asyncpg.CannotConnectNowError, ConnectionError, asyncio.TimeoutError) as exc:
                 print(json.dumps({"status": "DATABASE_UNAVAILABLE", "error_type": type(exc).__name__}), flush=True)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=args.poll_seconds)
