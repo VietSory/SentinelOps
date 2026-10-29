@@ -1,0 +1,20 @@
+{
+  "protocol_version": "continuous-incident-acceptance/v1",
+  "role": "local-integration-development-only",
+  "s1_protocol": "configs/health_worker_acceptance.json",
+  "s5_protocol": "configs/s5_development_protocol.json",
+  "s5_cases": ["independent-latency", "independent-blocking-errors"],
+  "s5_post_scenario_healthy_observation_seconds": 180,
+  "s5_post_scenario_rps_at_each_entry": 3,
+  "consumer_restart": "SIGKILL after first durable IER, then two competing processes with identical source/profile/store",
+  "required_lifecycle": ["OPEN", "RCA_READY", "ESCALATED", "CLOSED"],
+  "required_final_state": "recovered",
+  "s1_group_members": [["checkout-service", "payment-service"]],
+  "s5_group_members": [["checkout-service"], ["inventory-service"], ["payment-service"]],
+  "current_unknown_must_not_close": true,
+  "natural_recovery_requires_all_matching_episodes": true,
+  "full_G4_accepted": false,
+  "training_corpus": false,
+  "heldout_evaluation": false,
+  "actions_allowed": false
+}
