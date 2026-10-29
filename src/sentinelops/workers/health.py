@@ -71,7 +71,7 @@ class HealthWorker:
         await IncidentRepository(self.pool).check_ready()
         async with self.pool.acquire() as conn:
             versions = await conn.fetchval("SELECT array_agg(version ORDER BY version) FROM sentinel_control.schema_migrations")
-            if versions != [1, 2]:
+            if versions not in ([1, 2], [1, 2, 3]):
                 raise ValueError("health worker requires explicit additive control migration 2")
             unsafe = await conn.fetchval("""SELECT
                 has_table_privilege('sentinel_control.health_batches','UPDATE,DELETE,TRUNCATE')

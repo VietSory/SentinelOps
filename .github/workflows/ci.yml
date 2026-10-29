@@ -395,7 +395,7 @@ jobs:
           source=yaml.safe_load(Path('docker-compose.control.yml').read_text())
           service=source['services']['control-postgres']
           service['volumes']=[str(Path(v.split(':')[0]).resolve())+':'+':'.join(v.split(':')[1:]) if v.startswith('./') else v
-                              for v in service['volumes'] if '003-health-worker.sql' not in v]
+                              for v in service['volumes'] if not any(name in v for name in ('003-health-worker.sql','004-incident-consumer.sql'))]
           Path('/tmp/sentinelops-health-v1.yml').write_text(yaml.safe_dump(source,sort_keys=False))
           PY
           docker compose -p sentinelops-health-control-ci -f /tmp/sentinelops-health-v1.yml up -d --wait --wait-timeout 90

@@ -22,7 +22,7 @@ The three signals, accepted batch and checkpoint advance share one SQL transacti
 
 Stream identity binds environment, source/profile/policy, observed Prometheus configuration, endpoint and local artifact-root identity. Both processes must use the same root and settings to share a stream. Changing the root/config creates another stream; moving files is not a checkpoint migration. Read-back verifies typed payloads, object hashes, prior batch/service coverage and source identity.
 
-The runtime role can append health history and update only checkpoint fields. It cannot update/delete history, change identity or create schema objects. Incident API readiness accepts schema 1 or 2; the worker requires the explicit complete 1→2 migration. Deployment/bootstrap credentials are separate from `control_writer`.
+The runtime role can append health history and update only checkpoint fields. It cannot update/delete history, change identity or create schema objects. Incident API readiness accepts schema 1, 2 or compatible 3; the health worker requires the explicit complete 1→2 migration and also accepts the additive incident-consumer version 3. Deployment/bootstrap credentials are separate from `control_writer`.
 
 ## Run and inspect
 

@@ -37,7 +37,7 @@ class IncidentRepository:
 
     async def check_ready(self) -> None:
         async with self.pool.acquire() as conn:
-            if await conn.fetchval("SELECT max(version) FROM sentinel_control.schema_migrations") not in (1, 2):
+            if await conn.fetchval("SELECT max(version) FROM sentinel_control.schema_migrations") not in (1, 2, 3):
                 raise RuntimeError("unsupported incident database migration version")
             unsafe = await conn.fetchval("""SELECT rolsuper OR rolcreaterole OR rolcreatedb
                 OR has_schema_privilege('sentinel_control','CREATE')
