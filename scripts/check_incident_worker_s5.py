@@ -89,7 +89,8 @@ async def check(args):
     images = image_identity(root)
     paths = [*root.glob("src/sentinelops/**/*.py"), *root.glob("contracts/*.schema.json"),
              *[root/p for p in ("scripts/check_incident_worker_s5.py", "scripts/incident_worker_evidence.py",
-                "scripts/run_incident_worker.py", "scripts/run_health_worker.py", "configs/rca_policy.json",
+                "scripts/run_incident_worker.py", "scripts/run_health_worker.py", "scripts/replay_incident_worker.py",
+                "scripts/check_incident_replay_integrity.py", "scripts/check_native_incident_api.py", "configs/rca_policy.json",
                 "configs/slo_health_policy.json", "configs/topology.yaml", "infra/control/004-incident-consumer.sql",
                 "configs/incident_worker_acceptance.json", "configs/s5_development_protocol.json")]]
     hashes = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}

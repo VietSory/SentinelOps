@@ -175,6 +175,8 @@ async def check(args):
                     root / "scripts/run_health_worker.py", Path(__file__).resolve(),
                     root / "scripts/worker_metrics_evidence.py", root / "scripts/incident_worker_evidence.py",
                     root / "scripts/run_incident_worker.py",
+                    root / "scripts/replay_incident_worker.py", root / "scripts/check_incident_replay_integrity.py",
+                    root / "scripts/check_native_incident_api.py",
                     root / "configs/incident_worker_acceptance.json",
                     root / "infra/control/003-health-worker.sql", root / "infra/control/004-incident-consumer.sql",
                     root / "configs/slo_health_policy.json", root / "configs/rca_policy.json", root / "configs/topology.yaml"]

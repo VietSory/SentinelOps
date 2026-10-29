@@ -46,6 +46,7 @@ from sentinelops.workers.incident_evidence import NativeIncidentEvidence, comple
 from sentinelops.workers.incident_rca import derive_continuous
 from sentinelops.workers.incident_journal import IncidentJournal
 from sentinelops.workers.incident import IncidentWorker
+from sentinelops.workers.incident_replay import replay as replay_incident_ledger
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',

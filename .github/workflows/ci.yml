@@ -423,6 +423,12 @@ jobs:
           PY
       - name: Revalidate the exported health ledger without a live database
         run: python -m scripts.replay_health_worker --run artifacts/workers/live --output artifacts/workers/offline-ledger-replay.json
+      - name: Recompute transported native incident history and reject isolated corruptions
+        run: |
+          python -m scripts.replay_incident_worker --run artifacts/workers/live --output artifacts/workers/offline-incident-replay.json
+          python -m scripts.check_incident_replay_integrity --run artifacts/workers/live --output artifacts/workers/offline-incident-negative.json
+      - name: Verify actual protected HTTP for the source-derived native incident
+        run: python -m scripts.check_native_incident_api --run artifacts/workers/live --output artifacts/workers/native-api
       - name: Preserve continuous worker evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -479,6 +485,12 @@ jobs:
               result=subprocess.run(command,env=env,stdout=stream,stderr=subprocess.STDOUT)
           raise SystemExit(result.returncode)
           PY
+      - name: Recompute transported S5 incident history and reject isolated corruptions
+        run: |
+          python -m scripts.replay_incident_worker --run artifacts/incident-native/live --output artifacts/incident-native/offline-incident-replay.json
+          python -m scripts.check_incident_replay_integrity --run artifacts/incident-native/live --output artifacts/incident-native/offline-incident-negative.json
+      - name: Verify actual protected HTTP for all native S5 incident groups
+        run: python -m scripts.check_native_incident_api --run artifacts/incident-native/live --output artifacts/incident-native/native-api
       - name: Preserve continuous independent-root incident evidence
         if: always()
         uses: actions/upload-artifact@v4
