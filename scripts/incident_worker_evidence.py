@@ -24,6 +24,26 @@ from sentinelops.workers.incident_journal import IncidentJournal
 from sentinelops.workers.incident_state import advance_groups
 
 
+def verify_scenario_group(scenario: str, group: dict, result: dict) -> None:
+    """Require the declared S5 ambiguity, including when a wrong label hides it."""
+    if scenario not in ("S1", "S5"):
+        raise ValueError("continuous incident acceptance requires its declared S1/S5 scenario")
+    if group["grouping_reason"] == "ambiguous-shared-consumer" and "ambiguous-correlation" not in result["abstention_reasons"]:
+        raise ValueError("ambiguous source group must retain RCA ambiguity abstention")
+    if scenario == "S5":
+        members = group["affected_services"]
+        if members == ["checkout-service"]:
+            if (group["grouping_reason"] != "ambiguous-shared-consumer"
+                or group["structural_candidates"] != ["inventory-service", "payment-service"]
+                or "ambiguous-correlation" not in result["abstention_reasons"]):
+                raise ValueError("S5 Checkout must preserve both independent roots and shared-consumer ambiguity")
+        elif members in (["inventory-service"], ["payment-service"]):
+            if group["grouping_reason"] != "single-service" or group["structural_candidates"] != members:
+                raise ValueError("S5 independent root must remain a separate single-service candidate")
+        else:
+            raise ValueError("S5 continuous acceptance must retain three separate source groups")
+
+
 class IncidentWorkerEvidence:
     def __init__(self, output: Path, source_store: ArtifactStore, stream_id: str, project: str):
         self.output, self.source_store, self.stream_id, self.project = output, source_store, stream_id, project
@@ -185,8 +205,7 @@ class IncidentWorkerEvidence:
             capture = self.store.read(evidence["capture_ref"])
             logs = self.store.read(capture["evidence_refs"]["logs"])
             assert logs["records"] and capture["evidence_refs"]["traces"]
-            if group["grouping_reason"] == "ambiguous-shared-consumer":
-                assert "ambiguous-correlation" in result["abstention_reasons"]
+            verify_scenario_group(scenario, group, result)
             async with pool.acquire() as conn:
                 tables = {}
                 for table in ("incident_job_evidence", "incident_commands"):
@@ -200,6 +219,8 @@ class IncidentWorkerEvidence:
             snapshot[job["job_id"]] = tables
             summaries.append({"job_id": job["job_id"], "incident_id": job["incident_id"], "members": group["affected_services"],
                 "capture_ref": evidence["capture_ref"], "result_ref": evidence["result_ref"], "rca_abstained": True,
+                "grouping_reason": group["grouping_reason"], "structural_candidates": group["structural_candidates"],
+                "abstention_reasons": result["abstention_reasons"],
                 "source_log_completions": len(logs["records"]), "captured_traces": len(capture["evidence_refs"]["traces"]),
                 "natural_recovery_verified": True, "versions": 4})
         if scenario not in ("S1", "S5"):

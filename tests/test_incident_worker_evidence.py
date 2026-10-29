@@ -1,8 +1,34 @@
 import asyncio
 import json
+from copy import deepcopy
 
-from scripts.incident_worker_evidence import IncidentWorkerEvidence
+import pytest
+
+from scripts.incident_worker_evidence import IncidentWorkerEvidence, verify_scenario_group
 from sentinelops.telemetry.store import ArtifactStore
+
+
+def test_s5_shared_checkout_requires_ambiguity_even_if_result_is_mislabeled():
+    group = {"affected_services": ["checkout-service"], "grouping_reason": "ambiguous-shared-consumer",
+             "structural_candidates": ["inventory-service", "payment-service"]}
+    result = {"abstention_reasons": ["ambiguous-correlation"]}
+    verify_scenario_group("S5", group, result)
+    for key, value in (("grouping_reason", "single-service"), ("structural_candidates", ["payment-service"])):
+        changed = deepcopy(group)
+        changed[key] = value
+        with pytest.raises(ValueError, match="Checkout"):
+            verify_scenario_group("S5", changed, result)
+    with pytest.raises(ValueError, match="ambiguity"):
+        verify_scenario_group("S5", group, {"abstention_reasons": []})
+
+
+@pytest.mark.parametrize("service", ["inventory-service", "payment-service"])
+def test_s5_independent_roots_cannot_be_replaced_by_shared_candidates(service):
+    group = {"affected_services": [service], "grouping_reason": "single-service", "structural_candidates": [service]}
+    verify_scenario_group("S5", group, {"abstention_reasons": []})
+    group["structural_candidates"] = ["inventory-service", "payment-service"]
+    with pytest.raises(ValueError, match="independent root"):
+        verify_scenario_group("S5", group, {"abstention_reasons": []})
 
 
 def test_restart_uses_same_original_roots_and_no_experiment_controls_in_consumer_arguments(tmp_path, monkeypatch):
