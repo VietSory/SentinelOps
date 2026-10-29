@@ -38,16 +38,20 @@ def topology_paths(topology: dict) -> dict[str, dict[str, list[str]]]:
     return paths
 
 
-def _group_openings(openings: list[dict], paths: dict, topology_sha: str, source_scope_sha256: str) -> list[dict]:
-    openings.sort(key=lambda s: (utc_time(s["episode_start_at"]), s["service"], s["signal_id"]))
+def opening_clusters(openings: list[dict]) -> list[list[dict]]:
+    """Partition already validated opening facts without mutating caller order."""
     clusters = []
-    for signal in openings:
+    for signal in sorted(openings, key=lambda s: (utc_time(s["episode_start_at"]), s["service"], s["signal_id"])):
         if (not clusters or (utc_time(signal["episode_start_at"]) - utc_time(clusters[-1][0]["episode_start_at"])).total_seconds() > 120
             or signal["service"] in {s["service"] for s in clusters[-1]}):
             clusters.append([])
         clusters[-1].append(signal)
+    return clusters
+
+
+def _group_openings(openings: list[dict], paths: dict, topology_sha: str, source_scope_sha256: str) -> list[dict]:
     groups = []
-    for cluster in clusters:
+    for cluster in opening_clusters(openings):
         by_service = {s["service"]: s for s in cluster}
         services = set(by_service)
         roots = {service for service in services if not (services - {service}) & paths[service].keys()}
