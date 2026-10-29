@@ -28,7 +28,7 @@ Existing RCAEval acquisition/audit:
   --output artifacts/research/public-datasets/rcaeval-audit.json
 ```
 
-The three acquired RCAEval cases and full 735-case index are a capability audit only. The pinned release has no traces for RE2/RE3 Sock Shop and no logs for one RE2 Train Ticket case. Missing modalities cannot become fabricated evidence.
+The initial three-case/735-index acquisition remains capability evidence. The same three admitted development cases now also have [native source-to-policy execution](RCAEVAL_NATIVE.md) and a [measured abstention report](reports/2026-10-29-rcaeval-native-development.md); no additional telemetry case was opened and no qualified RCA accuracy is established. The pinned release has no traces for RE2/RE3 Sock Shop and no logs for one RE2 Train Ticket case. Missing modalities cannot become fabricated evidence.
 
 GAMMA's first capability scope is the first preselected CPU/200-RPS experiment, not a training/holdout selection. It includes all three published processed request types, graph-path metadata, args, four selected raw resource metrics and placement/RPC maps. Reproduce the exact 139-file scope using project-frozen hashes:
 

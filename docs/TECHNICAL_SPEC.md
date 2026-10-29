@@ -238,6 +238,8 @@ Sources are frozen by [ADR-011](adr/ADR-011-frozen-gamma-rcaeval-contract.md) an
 
 RCAEval [frozen conservative partitions](RCAEVAL_PARTITIONS.md) now group overlapping/nearby captures across systems and native fault-family repetitions before role assignment; previously inspected group closure remains development. [The measured metadata-only audit](reports/2026-10-28-rcaeval-partitions.md) covers all 735 cases, preserves label-clock quarantine and modality gaps, and keeps acquisition/cache access to final holdout sealed. Its small OB-only evaluation subset and unknown session independence do not establish localization quality or full G4. Diagnostic input must exclude all evaluator case/fault/root/schedule metadata.
 
+The [native development adapter/evaluator](RCAEVAL_NATIVE.md), governed by [ADR-013](adr/ADR-013-native-rcaeval-evaluation.md), now executes only the original three admitted cases. The source-native result is separate from local SLO/correlation/IER contracts: exact event clocks and native entities, no aliases or receipt reconstruction, and no label-selected windows. Fixed generic exception markers and recorded-span-duration fractions use an isolated method allowlist with the unchanged RCA policy; model/onset/deployment components remain unavailable. [Measured execution](reports/2026-10-29-rcaeval-native-development.md) evaluates all three cases and abstains on all three; its 0.40 support ceiling cannot meet 0.75 coverage. This does not accept full G4, public-to-live transfer, independent trials or model/action activation.
+
 ### 7.1 Scenario catalog
 
 | ID | Scenario | Root ground truth | Serving evidence được phép | Expectation |

@@ -1,6 +1,7 @@
 # ADR-013 — Native RCAEval adaptation and guarded evidence-policy evaluation
 
-**Status:** Proposed; profile fixed before diagnostic output is measured.
+**Status:** Accepted 2026-10-29 for the measured native development software scope;
+profile/code committed before diagnostic measurement. No operational/quality G4 acceptance.
 **Scope:** The three previously inspected development cases at the frozen RCAEval
 revision. No validation/holdout telemetry, ML fitting, local IER writes or action
 permissions are introduced.
@@ -70,3 +71,7 @@ all-quarantine run does not prove the complete consumer path. Preserve earlier
 local consumers, sealed partitions, training sources and thresholds; stop the new
 offline evaluator on incompatible input without rewriting raw data. Every published
 candidate needs its own completed CI and transported evidence.
+
+[Measured three-case execution](../reports/2026-10-29-rcaeval-native-development.md)
+accounts for all selected cases without quarantine: three abstentions, zero
+qualified predictions and identical repeated business results.
