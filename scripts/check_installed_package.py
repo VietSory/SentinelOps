@@ -40,6 +40,12 @@ from sentinelops.public_data.admission import admit_case, session_groups
 from sentinelops.public_data.dataset import build_grouped_dataset
 from sentinelops.public_data.rcaeval_partitions import group_metadata, require_cases
 from sentinelops.workers.health import HealthWorker, latest_bucket
+from sentinelops.workers.health_source import HealthLedgerReader
+from sentinelops.workers.incident_state import advance_groups
+from sentinelops.workers.incident_evidence import NativeIncidentEvidence, completion_records
+from sentinelops.workers.incident_rca import derive_continuous
+from sentinelops.workers.incident_journal import IncidentJournal
+from sentinelops.workers.incident import IncidentWorker
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',
