@@ -10,6 +10,7 @@ import asyncpg
 import pytest
 import yaml
 
+from sentinelops.contracts import utc_time
 from sentinelops.incidents.health import advance_health
 from sentinelops.incidents.rca import validate_result
 from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
@@ -19,6 +20,8 @@ from sentinelops.workers.health import HealthWorker
 from sentinelops.workers.health_source import verify_health_batch
 from sentinelops.workers.incident_state import advance_groups
 from sentinelops.workers.incidents import IncidentWorker, evaluate_cluster, incident_commands
+from sentinelops.workers.incident_replay import replay_incident_history
+from sentinelops.telemetry.core import stable_id
 from test_health_source import capture
 
 HEALTH = json.loads(Path("configs/slo_health_policy.json").read_text())
@@ -104,6 +107,33 @@ def test_missing_after_opening_retains_active_episode_and_analytical_abstention(
     assert len(results) == 1
     assert state["service_states"][PAY]["availability"] == "UNKNOWN"
     assert state["service_states"][PAY]["incident_active"] is True
+
+
+def test_offline_continuous_history_reproduces_and_rejects_rehashed_results(tmp_path):
+    store, stream, batches, records = source_fixture(tmp_path, [{PAY}] * 5)
+    worker = IncidentWorker(None, store, stream["stream_id"], TOPOLOGY, HEALTH, RCA)
+    state, prior, refs = None, None, []
+    for row in batches:
+        batch = store.read(row["manifest_ref"])
+        signals = [(r["signal_ref"], json.loads(r["payload"])) for r in records if r["bucket_end"] == row["bucket_end"]]
+        state, closed = advance_groups(state, batch, signals, TOPOLOGY, HEALTH)
+        as_of = timestamp(datetime.now(timezone.utc))
+        results, commands = [], []
+        for item in closed:
+            output = evaluate_cluster(store, item, policy=RCA, as_of=utc_time(as_of), health_policy=HEALTH)
+            results.extend(output)
+            commands.extend(incident_commands(worker.consumer_id, item, output, as_of))
+        commit = {"consumer_id": worker.consumer_id, "previous_commit_ref": prior, "state": state,
+                  "closed_clusters": closed, "processed_at": as_of, "modalities": [None] * len(closed),
+                  "results": results, "commands": [c.__dict__ for c in commands]}
+        prior = store.write("manifests", commit); refs.append(prior)
+    snapshot = {"stream": stream, "batches": batches, "signals": records, "consumer_identity": worker.identity, "consumer_commit_refs": refs}
+    result = replay_incident_history(store, snapshot, TOPOLOGY, HEALTH, RCA)
+    assert result["incidents"] == 1 and result["remaining_accepted_buckets"] == 0
+    corrupt = store.read(refs[-1]); corrupt["commands"] = [{"fabricated": True}]
+    changed = deepcopy(snapshot); changed["consumer_commit_refs"][-1] = store.write("manifests", corrupt)
+    with pytest.raises(ValueError, match="projection"):
+        replay_incident_history(store, changed, TOPOLOGY, HEALTH, RCA)
 
 
 @pytest.mark.skipif(not os.environ.get("SENTINELOPS_TEST_DATABASE_URL"), reason="requires explicit isolated local PostgreSQL")

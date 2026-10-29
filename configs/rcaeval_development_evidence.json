@@ -1,0 +1,11 @@
+{
+  "adapter_version": "rcaeval-native-logs/v1",
+  "cases": ["re1ob_adservice_cpu_1", "re2ob_checkoutservice_cpu_1", "re3ob_adservice_f3_1"],
+  "log_pattern_version": "native-error-tokens/v1",
+  "error_tokens": ["error", "exception", "failed", "failure", "panic", "fatal"],
+  "selection": "all-native-records-at-or-before-last-metric-time",
+  "duration_units_verified": false,
+  "arrival_times_verified": false,
+  "model_outputs_available": false,
+  "holdout_opened": false
+}

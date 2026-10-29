@@ -14,7 +14,7 @@ METHODS = {
     "anomaly_strength": {"if-normalized-score/v1", "infra-connection-pressure/v1"},
     "temporal_precedence": {"disjoint-onset-intervals/v1"},
     "dependency_trace_relevance": {"native-span-duration-share/v1", "native-direct-span-duration-share/v1", "native-span-terminal-error/v1"},
-    "log_support": {"business-completion-support/v1"},
+    "log_support": {"business-completion-support/v1", "native-log-pattern-presence/v1"},
     "recent_change_support": {"observed-deployment/v1"},
 }
 FACT_TYPES = {"metric", "log", "trace", "topology", "change", "model", "timeline"}
@@ -213,3 +213,29 @@ def validate_result(result: dict) -> None:
         source_refs=result["source_refs"])
     if result != expected:
         raise ValueError("RCA scores/coverage/ranking/abstention differ from their scoped evidence and policy")
+
+
+def rank_native_support(services: list[str], evidence: list[dict], cards: list[dict], policy: dict):
+    """Source-neutral scoring kernel for supplementary native development reports.
+
+No synthetic SLO health/correlation is constructed for foreign native services.
+The local RCA wire contract remains unchanged. Native receipt clocks are unknown.
+"""
+    validate_policy(policy)
+    facts = {fact["id"]: fact for fact in evidence}
+    if len(facts) != len(evidence) or len(set(services)) != len(services) or not services:
+        raise ValueError("native candidate/fact identities must be unique")
+    support = {c["service"]: c["components"] for c in cards}
+    if len(support) != len(cards) or set(support) != set(services):
+        raise ValueError("native support must match observed native service scope")
+    candidates = []
+    for service in sorted(services):
+        score, coverage, refs = _score(support[service], facts, service, policy)
+        candidates.append({"service": service, "score": score, "coverage": coverage,
+                           "evidence_refs": refs, "components": deepcopy(support[service])})
+    ordered, ranking, margin, reasons = _summarize(candidates, policy, {"grouping_reason": "native-observation-scope"},
+                                                  {key: None for key in facts})
+    return {"native_result_version": "native-rca-development/v1", "policy_sha256": stable_id(policy),
+            "candidates": ordered, "ranking": ranking, "margin": margin, "abstained": bool(reasons),
+            "abstention_reasons": reasons, "evidence": deepcopy(evidence), "actions_allowed": False,
+            "historical_emissions_verified": False}
