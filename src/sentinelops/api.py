@@ -21,6 +21,8 @@ from sentinelops.demo import demo_incident
 from sentinelops.incidents.domain import IncidentConflict,IncidentNotFound,IncidentWrite
 from sentinelops.incidents.repository import IncidentRepository,RepositoryIntegrityError
 from sentinelops.telemetry.core import stable_id
+from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, IncompatibleFeatures
+from sentinelops.telemetry.store import ArtifactStore
 
 logger = logging.getLogger("sentinelops-api")
 STATES = {"degrading","incident","recovering","recovered","escalated"}
@@ -81,8 +83,11 @@ def revision_headers(response: Response,snapshot: dict) -> None:
     response.headers["X-Incident-Revision"] = str(snapshot["revision"])
 
 
-def create_app(settings: Settings | None = None,*,repository=None) -> FastAPI:
+def create_app(settings: Settings | None = None,*,repository=None,model_registry=None) -> FastAPI:
     settings = settings or Settings.from_env()
+    registry = model_registry if model_registry is not None else ModelRegistry()
+    if model_registry is None and settings.model_store:
+        registry = ModelRegistry.load(ArtifactStore(settings.model_store), settings.model_release_ref)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -170,27 +175,53 @@ def create_app(settings: Settings | None = None,*,repository=None) -> FastAPI:
             storage = True
         except ApiError:
             pass
-        return JSONResponse({"status":"not_ready","dependencies":{"incident_store":storage,
-            "authentication":bool(settings.api_token) and settings.environment in ("local","test"),
-            "model":False},"demo_mode":settings.demo_mode},status_code=503)
+        dependencies = {"incident_store": storage,
+            "authentication": bool(settings.api_token) and settings.environment in ("local","test"), "model": registry.available}
+        ready = all(dependencies.values())
+        return JSONResponse({"status":"ready" if ready else "not_ready","dependencies":dependencies,
+            "demo_mode":settings.demo_mode},status_code=200 if ready else 503)
 
     @app.get("/ready/incidents")
     async def incidents_ready(identity=Depends(authorize),repo=Depends(require_repository)):
         return {"status":"ready","component":"incident-store"}
 
     @app.post("/v1/detect")
-    async def detect(feature_window: dict,response: Response):
+    async def detect(feature_window: dict,response: Response,request: Request):
         try:
             validate_payload("feature-window.schema.json",feature_window)
         except ValueError as exc:
             raise ApiError(422,"invalid_payload",str(exc)[:500]) from exc
         if not settings.demo_mode:
-            raise ApiError(503,"model_unavailable","No validated model bundle is activated")
+            try:
+                result = registry.infer(feature_window, source_profile=request.headers.get("x-sentinelops-source-profile"))
+            except ModelUnavailable:
+                raise ApiError(503,"model_unavailable","No validated model bundle is activated") from None
+            except (IncompatibleFeatures, ValueError):
+                raise ApiError(422,"incompatible_feature_set","Feature schema, source or availability is incompatible") from None
+            response.headers["X-SentinelOps-Model-Version"] = result["model_version"]
+            return result["detection"]
         response.headers["X-SentinelOps-Mode"] = "demo"
         result = {"schema_version":"1.0","service":feature_window["service"],"observed_at":feature_window["window_end"],
             "anomaly_score":.5,"is_anomalous":False,"model_name":"isolation-forest","model_version":"skeleton-v0"}
         validate_payload("detection-result.schema.json",result)
         return result
+
+    @app.post("/v1/risk")
+    async def risk(feature_window: dict,response: Response,request: Request):
+        try:
+            validate_payload("feature-window.schema.json", feature_window)
+        except ValueError as exc:
+            raise ApiError(422,"invalid_payload",str(exc)[:500]) from exc
+        try:
+            result = registry.infer(feature_window, source_profile=request.headers.get("x-sentinelops-source-profile"))
+        except ModelUnavailable:
+            raise ApiError(503,"model_unavailable","No validated model bundle is activated") from None
+        except (IncompatibleFeatures, ValueError):
+            raise ApiError(422,"incompatible_feature_set","Feature schema, source or availability is incompatible") from None
+        if result["risk"] is None:
+            raise ApiError(503,"risk_model_unavailable","No validated degradation-risk model is activated")
+        response.headers["X-SentinelOps-Model-Version"] = result["model_version"]
+        return result["risk"]
 
     @app.post("/v1/incidents/demo")
     async def demo(response: Response):

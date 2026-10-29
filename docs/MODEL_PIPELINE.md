@@ -1,0 +1,66 @@
+# Guarded offline model software
+
+GAMMA v1 remains the only primary training source; RCAEval cannot fit models,
+preprocessors or thresholds. No new accepted training dataset/model is produced
+while healthy-reference, independent precursor and feature/source gates remain
+blocked. The measured resource report is not an admission certificate.
+
+`scripts.audit_model_readiness` recomputes exact accounting from the committed
+grouped report, identifies its historical scope, and records zero certified live
+business-service health/precursor support. It never opens raw or final data.
+
+`scripts.train_models` rejects an unready report **before estimator construction,
+table access or output creation**. The supplementary internal
+`gamma-verified-training/v1` admission interface requires the frozen source policy,
+source-audit refs, established independent groups, health certificates and actual
+pre-SLO labels. It is not minted by the existing interference dataset builder.
+Each `gamma-verified-training-rows/v1` entry references a separately validated
+resource feature and health/precursor label. Labels require evidence refs and an
+independently observed future breach for positives. Run/group/split metadata never
+becomes a numeric feature. Training accepts train/calibration entries only, checks
+whole-group disjointness and chronology, 300/100 healthy windows and 3/2 independent
+healthy and gradual groups per modeled native service. Test refs remain unopened.
+No current source satisfies that interface; the reader cannot cure absent evidence.
+
+Numerical primitives implement actual train-only RobustScaler/IsolationForest,
+median/MAD control and XGBoost binary risk. Per-service matrices preserve native
+identities. Calibration ECDFs and higher-quantile thresholds use the designated
+healthy calibration distribution with the same false-alert budget for IF/MAD.
+Contamination stays `auto`; seed/config is saved. XGBoost uses train-only class
+weighting, with fixed recorded watch/degrading thresholds and no test early stopping.
+Required missing features reject inference; optional CPU/memory/DB observations are
+never invented. Existing causal features retain their source-specific schemas.
+
+Fixture tests fit estimators on explicitly synthetic matrices, serialize genuine
+temporary artifacts and compare loaded inference. These artifacts cannot activate;
+they are not trained SentinelOps models, data acceptance or performance evidence.
+
+Bundles contain exact ordered features, train/calibration identities, source and
+feature versions, preprocessing/model bytes, hashes, ECDF identity, thresholds,
+seed/config and library versions. Loading verifies every checksum and library
+version before loading trusted local joblib. Do not load API uploads/untrusted
+pickle. Training writes `activation_allowed=false`, never the serving release ledger.
+
+`ModelRegistry.load` consumes a separate operator-controlled content-addressed
+`validated-model-release/v1` with bundle directory/hash and validation ref per route.
+The validation must bind the same model and separately accepted G2/G3, live source
+parity and evaluation refs. Fixture origin is rejected even with forged PASS flags.
+No endpoint writes approvals. Environment configuration uses both
+`SENTINELOPS_MODEL_STORE` and `SENTINELOPS_MODEL_RELEASE_REF`; absent configuration
+leaves the registry empty and `/v1/detect` returns 503. Invalid configured artifacts
+fail initialization. Each request pins its loaded bundle; process restart selects a
+new immutable release. Distributed hot activation/CAS and production registry audit
+are not claimed by this local loader.
+
+The existing `/v1/detect` wire shape is preserved. Real inference requires the
+matching `X-SentinelOps-Source-Profile`, exact finite feature schema and a nonfuture,
+fresh window. The model version is also returned in a header. Supplemental worker
+inference retains risk, provenance and availability; unavailable risk stays null.
+The explicit legacy demo remains separately marked. No fallback supplies fake scores.
+
+Event evaluation matches actual alert emissions one-to-one to independent evaluator
+events, keeps duplicate/missed alerts, reports measured delay/lead time and denominators,
+and refuses to invent uncertainty or timing for missing/instantaneous precursors.
+No numerical fixture score is reported as benchmark accuracy. Independent session
+evidence, sealed final evaluation and a bootstrap protocol remain prerequisites for
+generalization/uncertainty claims.
