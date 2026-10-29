@@ -194,6 +194,10 @@ jobs:
       - run: docker compose -p sentinelops-control -f docker-compose.control.yml up -d --wait --wait-timeout 60
       - run: python scripts/check_incident_store.py --verify-report artifacts/incidents/store-acceptance.json
       - run: python scripts/check_incident_api.py --restart-database
+      - name: Verify continuous consumer atomic rollback, retry and competition on PostgreSQL
+        env:
+          SENTINELOPS_TEST_DATABASE_URL: postgresql://control_writer:local-control-writer@127.0.0.1:5433/sentinelops_control
+        run: pytest -q tests/test_incident_worker.py
       - name: Preserve incident storage evidence
         uses: actions/upload-artifact@v4
         with:
@@ -395,7 +399,7 @@ jobs:
           source=yaml.safe_load(Path('docker-compose.control.yml').read_text())
           service=source['services']['control-postgres']
           service['volumes']=[str(Path(v.split(':')[0]).resolve())+':'+':'.join(v.split(':')[1:]) if v.startswith('./') else v
-                              for v in service['volumes'] if '003-health-worker.sql' not in v]
+                              for v in service['volumes'] if not any(name in v for name in ('003-health-worker.sql','004-incident-worker.sql'))]
           Path('/tmp/sentinelops-health-v1.yml').write_text(yaml.safe_dump(source,sort_keys=False))
           PY
           docker compose -p sentinelops-health-control-ci -f /tmp/sentinelops-health-v1.yml up -d --wait --wait-timeout 90

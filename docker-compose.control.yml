@@ -12,6 +12,7 @@ services:
       - ./infra/control/001-local-roles.sql:/docker-entrypoint-initdb.d/001-roles.sql:ro
       - ./infra/control/002-incident-store.sql:/docker-entrypoint-initdb.d/002-incident-store.sql:ro
       - ./infra/control/003-health-worker.sql:/docker-entrypoint-initdb.d/003-health-worker.sql:ro
+      - ./infra/control/004-incident-worker.sql:/docker-entrypoint-initdb.d/004-incident-worker.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U control_bootstrap -d sentinelops_control"]
       interval: 3s

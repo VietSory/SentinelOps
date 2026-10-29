@@ -37,7 +37,7 @@ class IncidentRepository:
 
     async def check_ready(self) -> None:
         async with self.pool.acquire() as conn:
-            if await conn.fetchval("SELECT max(version) FROM sentinel_control.schema_migrations") not in (1, 2):
+            if await conn.fetchval("SELECT max(version) FROM sentinel_control.schema_migrations") not in (1, 2, 3):
                 raise RuntimeError("unsupported incident database migration version")
             unsafe = await conn.fetchval("""SELECT rolsuper OR rolcreaterole OR rolcreatedb
                 OR has_schema_privilege('sentinel_control','CREATE')
@@ -49,52 +49,64 @@ class IncidentRepository:
                 raise RuntimeError("incident runtime must use a nonowner role without administrative/history-mutation privileges")
 
     async def write(self,command: IncidentWrite) -> dict:
-        # Freeze a caller-owned mutable dict before waiting for locks/network I/O.
-        command = IncidentWrite(**json.loads(json.dumps(command.__dict__,allow_nan=False)))
-        fingerprint = command.fingerprint()
-        identifier = command.payload["incident_id"]
+        # Pin caller-owned mutable input before waiting for a pooled connection.
+        command = IncidentWrite(**json.loads(json.dumps(command.__dict__, allow_nan=False)))
+        command.validate()
         try:
             async with self.pool.acquire() as conn, conn.transaction():
-                if command.expected_revision == 0:
-                    check_transition(None,command)
-                    await conn.execute("""INSERT INTO sentinel_control.incidents(incident_id,current_revision,lifecycle_stage)
-                        VALUES ($1,1,'OPEN') ON CONFLICT (incident_id) DO NOTHING""",identifier)
-                current = await conn.fetchrow("SELECT * FROM sentinel_control.incidents WHERE incident_id=$1 FOR UPDATE",identifier)
-                if current is None:
-                    raise IncidentNotFound(identifier)
-                prior = await conn.fetchrow("SELECT * FROM sentinel_control.incident_versions WHERE idempotency_key=$1",command.idempotency_key)
-                if prior:
-                    if prior["request_hash"] != fingerprint:
-                        raise IncidentConflict("idempotency key was already used for different contents")
-                    return snapshot(prior)
-                previous = await conn.fetchrow("SELECT * FROM sentinel_control.incident_versions WHERE incident_id=$1 AND revision=$2",
-                                               identifier,current["current_revision"])
-                if previous:
-                    if current["current_revision"] != command.expected_revision:
-                        raise IncidentConflict("expected incident revision is stale")
-                    check_transition(current["lifecycle_stage"],command,json.loads(previous["payload"]))
-                    revision = current["current_revision"]+1
-                else:
-                    if command.expected_revision != 0:
-                        raise IncidentConflict("incident has no matching initial revision")
-                    revision = 1
-                context = {**command.context,"lifecycle_stage":command.lifecycle_stage}
-                row = await conn.fetchrow("""INSERT INTO sentinel_control.incident_versions
-                    (incident_id,revision,idempotency_key,request_hash,payload,context,actor,reason)
-                    VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8) RETURNING *""",
-                    identifier,revision,command.idempotency_key,fingerprint,json.dumps(command.payload),json.dumps(context),command.actor,command.reason)
-                await conn.execute("""UPDATE sentinel_control.incidents SET current_revision=$2,lifecycle_stage=$3,
-                    updated_at=clock_timestamp() WHERE incident_id=$1""",identifier,revision,command.lifecycle_stage)
-                event = uuid4()
-                await conn.execute("""INSERT INTO sentinel_control.incident_events
-                    (event_id,incident_id,revision,event_type,lifecycle_stage,actor,reason)
-                    VALUES ($1,$2,$3,'incident.revised',$4,$5,$6)""",event,identifier,revision,command.lifecycle_stage,command.actor,command.reason)
-                await conn.execute("""INSERT INTO sentinel_control.outbox(event_id,topic,body)
-                    VALUES ($1,'incident.revised',$2::jsonb)""",event,json.dumps({"incident_id":identifier,"revision":revision,
-                        "lifecycle_stage":command.lifecycle_stage,"request_hash":fingerprint}))
-                return snapshot(row)
+                return await self.write_in_transaction(conn, command)
         except asyncpg.UniqueViolationError as exc:
             raise IncidentConflict("incident/idempotency identity conflicts with a concurrent write") from exc
+
+    async def write_in_transaction(self, conn, command: IncidentWrite) -> dict:
+        """Join a caller's transaction so source checkpoint and IER commit together.
+
+        This internal trusted-producer interface requires an active transaction;
+        ordinary API writers continue to use write(). No commit occurs here.
+        """
+        if not conn.is_in_transaction():
+            raise ValueError("incident write requires an active transaction")
+        command = IncidentWrite(**json.loads(json.dumps(command.__dict__, allow_nan=False)))
+        fingerprint = command.fingerprint()
+        identifier = command.payload["incident_id"]
+        if command.expected_revision == 0:
+            check_transition(None,command)
+            await conn.execute("""INSERT INTO sentinel_control.incidents(incident_id,current_revision,lifecycle_stage)
+                VALUES ($1,1,'OPEN') ON CONFLICT (incident_id) DO NOTHING""",identifier)
+        current = await conn.fetchrow("SELECT * FROM sentinel_control.incidents WHERE incident_id=$1 FOR UPDATE",identifier)
+        if current is None:
+            raise IncidentNotFound(identifier)
+        prior = await conn.fetchrow("SELECT * FROM sentinel_control.incident_versions WHERE idempotency_key=$1",command.idempotency_key)
+        if prior:
+            if prior["request_hash"] != fingerprint:
+                raise IncidentConflict("idempotency key was already used for different contents")
+            return snapshot(prior)
+        previous = await conn.fetchrow("SELECT * FROM sentinel_control.incident_versions WHERE incident_id=$1 AND revision=$2",
+                                       identifier,current["current_revision"])
+        if previous:
+            if current["current_revision"] != command.expected_revision:
+                raise IncidentConflict("expected incident revision is stale")
+            check_transition(current["lifecycle_stage"],command,json.loads(previous["payload"]))
+            revision = current["current_revision"]+1
+        else:
+            if command.expected_revision != 0:
+                raise IncidentConflict("incident has no matching initial revision")
+            revision = 1
+        context = {**command.context,"lifecycle_stage":command.lifecycle_stage}
+        row = await conn.fetchrow("""INSERT INTO sentinel_control.incident_versions
+            (incident_id,revision,idempotency_key,request_hash,payload,context,actor,reason)
+            VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8) RETURNING *""",
+            identifier,revision,command.idempotency_key,fingerprint,json.dumps(command.payload),json.dumps(context),command.actor,command.reason)
+        await conn.execute("""UPDATE sentinel_control.incidents SET current_revision=$2,lifecycle_stage=$3,
+            updated_at=clock_timestamp() WHERE incident_id=$1""",identifier,revision,command.lifecycle_stage)
+        event = uuid4()
+        await conn.execute("""INSERT INTO sentinel_control.incident_events
+            (event_id,incident_id,revision,event_type,lifecycle_stage,actor,reason)
+            VALUES ($1,$2,$3,'incident.revised',$4,$5,$6)""",event,identifier,revision,command.lifecycle_stage,command.actor,command.reason)
+        await conn.execute("""INSERT INTO sentinel_control.outbox(event_id,topic,body)
+            VALUES ($1,'incident.revised',$2::jsonb)""",event,json.dumps({"incident_id":identifier,"revision":revision,
+                "lifecycle_stage":command.lifecycle_stage,"request_hash":fingerprint}))
+        return snapshot(row)
 
     async def get(self,identifier: str,revision: int | None = None) -> dict:
         if revision is not None and (type(revision) is not int or not 1<=revision<=2**63-1):
