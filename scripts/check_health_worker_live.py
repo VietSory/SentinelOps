@@ -176,7 +176,8 @@ async def check(args):
                     root / "scripts/worker_metrics_evidence.py", root / "scripts/incident_worker_evidence.py",
                     root / "scripts/run_incident_worker.py",
                     root / "configs/incident_worker_acceptance.json",
-                    root / "infra/control/003-health-worker.sql", root / "configs/slo_health_policy.json"]
+                    root / "infra/control/003-health-worker.sql", root / "infra/control/004-incident-consumer.sql",
+                    root / "configs/slo_health_policy.json", root / "configs/rca_policy.json", root / "configs/topology.yaml"]
     source_hashes = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths}
     args.output.mkdir(parents=True, exist_ok=False)
     metrics = WorkerMetricEvidence(args.output / "own-metrics") if metrics_endpoint else None
