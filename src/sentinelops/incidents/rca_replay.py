@@ -66,7 +66,20 @@ def _trace_support(trace,service):
     return min(1.,residual/trace["root_duration_ns"]),duration_method,f"server_duration_ns={server['timing']['duration_ns']}; sum_observed_direct_client_duration_ns={total}; observed_residual_lower_bound_ns={residual}; reference_server_duration_ns={trace['root_duration_ns']}"
 
 
-def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts):
+def group_severity(telemetry, group, signals):
+    critical=False
+    for signal_id in group["signal_ids"]:
+        _,signal=signals[signal_id]
+        if signal["service"]!="checkout-service":continue
+        observed=sorted((telemetry.read(ref) for ref in signal["evidence_refs"]),key=lambda item:item["bucket_end"])
+        critical=(len(observed)>=2 and all(item["quality"]["eligible_for_inference"] and item["payload"]["error_rate"]>=.20 for item in observed[-2:])
+                  and utc_time(observed[-1]["bucket_end"])-utc_time(observed[-2]["bucket_end"])==timedelta(seconds=60))
+    return "critical" if critical else "high" if "checkout-service" in group["affected_services"] or len(group["affected_services"])>=2 else "medium"
+
+
+def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts,*,clock_mode="replay"):
+    if clock_mode not in ("replay", "actual-health-decision"):
+        raise ValueError("unsupported RCA health clock provenance")
     correlation=scope["correlation"];paths=topology_paths(correlation["topology_snapshot"])
     services=sorted(set().union(*(paths[service].keys() for service in group["affected_services"])))
     lower=utc_time(group["first_onset_at"]);upper=min(as_of,lower+timedelta(seconds=policy["evidence_window_seconds"]))
@@ -84,8 +97,11 @@ def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts):
         ref,signal=scope["signals"][signal_id]
         observations=[telemetry.read(value) for value in signal["evidence_refs"]]
         available=max((observation[key] for observation in observations for key in ("available_at","ingested_at")),key=utc_time) if observations else None
+        clock=(f"confirmation evaluated at replay clock {signal['episode_confirmed_at']}, not historical emission"
+               if clock_mode=="replay" else
+               f"confirmation evaluated at actual health decision clock {signal['episode_confirmed_at']}; not a historical alert-notification time")
         identifier=evidence.add("timeline",signal["service"],signal["episode_start_at"],ref,
-            f"Observed SLO episode bucket onset {signal['episode_start_at']}; confirmation evaluated at replay clock {signal['episode_confirmed_at']}, not historical emission",available)
+            f"Observed SLO episode bucket onset {signal['episode_start_at']}; {clock}",available)
         onsets[signal["service"]]=identifier
     for service in services:
         value=temporal_precedence(correlation,group,service,policy)
@@ -138,14 +154,7 @@ def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts):
     result=evaluate_rca(correlation,group["group_id"],list(evidence.facts.values()),
         [{"service":service,"components":value} for service,value in components.items()],policy,as_of=as_of,
         evidence_availability=evidence.available,source_refs=scope["allowed_refs"])
-    critical=False
-    for signal_id in group["signal_ids"]:
-        _,signal=scope["signals"][signal_id]
-        if signal["service"]!="checkout-service":continue
-        observed=sorted((telemetry.read(ref) for ref in signal["evidence_refs"]),key=lambda item:item["bucket_end"])
-        critical=(len(observed)>=2 and all(item["quality"]["eligible_for_inference"] and item["payload"]["error_rate"]>=.20 for item in observed[-2:])
-                  and utc_time(observed[-1]["bucket_end"])-utc_time(observed[-2]["bucket_end"])==timedelta(seconds=60))
-    severity="critical" if critical else "high" if "checkout-service" in group["affected_services"] or len(group["affected_services"])>=2 else "medium"
+    severity=group_severity(telemetry,group,scope["signals"])
     return {"group_id":group["group_id"],"rca":result,"severity":severity,"source_counts":dict(counts)}
 
 
