@@ -176,3 +176,49 @@ def test_existing_manifest_reader_cannot_bypass_holdout_guard_by_reading_cached_
     data["selection"] = list(INSPECTED)
     with pytest.raises(ValueError, match="revision"):
         load_verified_manifest(save_manifest(tmp_path, data))
+
+
+@pytest.mark.parametrize("hidden", ["sealed", "unselected-development", "different-revision", "outside-layout", "wrong-dataset-label", "duplicate"])
+def test_declared_development_selection_cannot_hide_a_later_unadmitted_file(tmp_path, monkeypatch, hidden):
+    from sentinelops.public_data.audit import load_verified_manifest
+    config = load_partitions()
+    revision = config["revision"]
+    base = tmp_path / "rcaeval" / revision
+    if hidden == "sealed":
+        case = next(g["cases"][0] for g in config["assignments"] if g["role"] == "sealed-holdout")
+        bad = base / case / "traces.parquet"
+    elif hidden == "unselected-development":
+        case = next(c for g in config["assignments"] if g["role"] == "development" for c in g["cases"] if c not in INSPECTED)
+        bad = base / case / "metrics.parquet"
+    elif hidden == "different-revision":
+        bad = tmp_path / "rcaeval" / "other-revision" / INSPECTED[0] / "metrics.parquet"
+    elif hidden == "outside-layout":
+        bad = base / INSPECTED[0] / "unlisted.bin"
+    else:
+        bad = base / INSPECTED[0] / "metrics.parquet"
+    data = {"manifest_version": "public-download/v1", "dataset": "RCAEval", "revision": revision,
+            "activation_allowed": False, "selection": [INSPECTED[0]],
+            "files": [{"path": str(base / "README.md")}, {"path": str(bad)}]}
+    if hidden == "wrong-dataset-label": data["dataset"] = "SMD"
+    if hidden == "duplicate": data["files"].append(deepcopy(data["files"][-1]))
+    selected = save_manifest(tmp_path, data)
+    original = Path.read_bytes
+    def deny_cache(path):
+        if path.resolve().is_relative_to(tmp_path / "rcaeval"):
+            pytest.fail("raw/cache bytes were touched before the entire manifest was admitted")
+        return original(path)
+    monkeypatch.setattr(Path, "read_bytes", deny_cache)
+    with pytest.raises(ValueError):
+        load_verified_manifest(selected)
+
+
+def test_revision_symlink_cannot_move_the_admitted_cache_outside_public_root(tmp_path):
+    from sentinelops.public_data.rcaeval_partitions import REVISION, require_manifest_files
+    public = tmp_path / "public"
+    (public / "rcaeval").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (public / "rcaeval" / REVISION).symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="escapes"):
+        require_manifest_files({"selection": list(INSPECTED), "files": [
+            {"path": str(public / "rcaeval" / REVISION / "README.md")}]}, public)

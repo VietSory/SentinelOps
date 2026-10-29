@@ -14,15 +14,24 @@ def load_verified_manifest(path: Path) -> tuple[dict,dict[str,Path]]:
     manifest=json.loads(blob)
     if manifest.get("manifest_version")!="public-download/v1" or manifest.get("activation_allowed") is not False:
         raise ValueError("unsupported public dataset manifest")
+    root=path.parent.parent.resolve()
     if manifest.get("dataset") == "RCAEval":
-        from sentinelops.public_data.rcaeval_partitions import REVISION, require_cases
+        from sentinelops.public_data.rcaeval_partitions import REVISION, require_manifest_files
         if manifest.get("revision") != REVISION:
             raise ValueError("RCAEval manifest differs from the frozen revision")
-        require_cases(manifest.get("selection", []))  # Reject sealed cases before any raw-file/cache read.
-    root=path.parent.parent.resolve();files={}
-    for record in manifest["files"]:
-        target=Path(record["path"]).resolve()
-        if not target.is_relative_to(root): raise ValueError("manifest file escapes its public-data root")
+        targets=require_manifest_files(manifest, root)
+    else:
+        records=manifest.get("files")
+        if not isinstance(records,list) or any(not isinstance(r,dict) or not isinstance(r.get("path"),str) for r in records):
+            raise ValueError("invalid public dataset file inventory")
+        targets=[Path(record["path"]).resolve() for record in records]
+        for target in targets:
+            if not target.is_relative_to(root): raise ValueError("manifest file escapes its public-data root")
+            if target.is_relative_to(root/"rcaeval"):
+                raise ValueError("RCAEval cache requires its explicit dataset identity and case admission")
+        if len(set(targets))!=len(targets): raise ValueError("duplicate public dataset path")
+    files={}
+    for record,target in zip(manifest["files"],targets):
         data=target.read_bytes()
         digest=verify_bytes(data,record["publisher_checksum"])
         if digest!=record["sha256"]: raise ValueError("download manifest/file checksum differs")
