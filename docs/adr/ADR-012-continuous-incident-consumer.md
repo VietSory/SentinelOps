@@ -1,13 +1,13 @@
 # ADR-012 — Continuous incident input, grouping and publication ownership
 
-**Status:** Proposed; implementation and acceptance in progress.
+**Status:** Accepted for the local continuous consumer; [native development evidence](../reports/2026-10-29-continuous-incident-local.md) and per-release CI remain separate from full G4.
 **Scope:** Local continuous health → correlation/RCA → persisted IER within ADR-006/007/008 boundaries. This does not accept G3/G4, authorize actions or change training sources.
 
 ## Context
 
 Continuous health has ordered accepted three-service PostgreSQL batches, immutable source objects and actual decision clocks. Existing correlation/RCA replay adapters require a virtual replay clock and cannot authenticate this ledger by changing a mode label. Recomputing correlation over every growing prefix also changes source-bound group IDs and can prematurely assign Checkout to Payment before a second independent root opens.
 
-## Proposed implementation decision
+## Decision
 
 - Verify each selected accepted batch against a consistent read of its stream checkpoint, three signal rows and preceding four source batches. Recompute normalization and health from immutable raw objects using the original recorded decision clock. Do not reinterpret UNKNOWN, quarantined or missed-deadline data as healthy.
 - Consume every accepted bucket in order. A cluster admits onsets through `first_onset + 120s` inclusive. With common source entry persistence `k`, those onsets can open through `first_onset + 120s + k*60s`. Only an accepted input watermark through that bucket completes membership; wall-clock quiet does not. Report the grouping wait separately from computation time.
@@ -26,6 +26,6 @@ No SQL transaction spans source HTTP or Docker reads. Source file verification a
 
 Rollback normally disables the new consumer and retains additive data plus a compatible reader. Restoring a pre-upgrade database requires a rehearsed restore and accounting for every later accepted write; code revert alone is not data recovery. No volume deletion is an upgrade procedure.
 
-## Acceptance still required
+## Verification and remaining gates
 
-Temporal boundary, late independent-root, corruption and retry tests are prerequisites. Complete acceptance also requires real PostgreSQL upgrade/permissions/atomicity/restart, API history/outbox, real operational source capture and live S1/S5 development health→IER evidence, followed by exact-head CI/artifact inspection. Captured-ledger source-reader integration alone does not prove a running continuous incident worker. Final S5/RCAEval holdouts remain sealed.
+Temporal boundary, late independent-root, corruption and retry tests, real PostgreSQL upgrade/permissions/atomicity/restart, protected API history/outbox, and actual S1 plus both S5 development health→IER captures are recorded in the [measured report](../reports/2026-10-29-continuous-incident-local.md). Captured-ledger source-reader integration alone does not prove a running continuous incident worker. Portable reconstruction and mutation probes verify transported ledgers without replacing the live captures. Every published candidate requires successful exact-head CI/artifact inspection. Final S5/RCAEval holdouts, full G4/model integration and production acceptance remain separate and unaccepted.

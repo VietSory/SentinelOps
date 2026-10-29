@@ -1,6 +1,6 @@
-# Continuous local incident consumer — acceptance in progress
+# Continuous local incident consumer
 
-The separate local consumer reads the selected accepted health ledger, verifies raw lineage, closes conservative onset groups, captures bounded operational evidence and journals IER revisions. The current implementation is under development: source acquisition, captured-source PostgreSQL and negative UNKNOWN/lock/API checks are separate evidence from the required live S1/S5 acceptance. [ADR-012](adr/ADR-012-continuous-incident-consumer.md) remains Proposed. This does not activate a model/action or accept full G4.
+The separate local consumer reads the selected accepted health ledger, verifies raw lineage, closes conservative onset groups, captures bounded operational evidence and journals IER revisions. [Actual S1 and both S5 development captures](reports/2026-10-29-continuous-incident-local.md) now verify seven complete incident lifecycles, restart/competition, source-derived recovery, portable integrity replay and protected HTTP history. [ADR-012](adr/ADR-012-continuous-incident-consumer.md) is accepted for this local implementation. Each published revision still requires its own CI/artifact verification. This does not activate a model/action or accept full G4.
 
 ## Identity and source boundary
 
@@ -39,5 +39,29 @@ Use the same arguments plus `--status` for a read-only checkpoint lookup; status
 [The acceptance protocol](../configs/incident_worker_acceptance.json) retains the original S1 and both S5 development protocols. The extra S5 phase provides 180 seconds of explicitly declared healthy traffic at each entry after the original case; it observes the source's existing three-clear-bucket recovery rule without changing thresholds, active faults or the original case configuration. Final S5/RCAEval holdouts remain sealed.
 
 The native S1 health checker accepts `--incident-consumer` to add a real consumer crash/restart, competing processes, bounded source RCA, complete lifecycle and transported journal/IER/audit/outbox snapshots. A PASS of the health producer alone does not prove this consumer. Live natural closure, multi-root ambiguity, failure/restart, package/regression and exact-head CI/artifact evidence are required before accepting the complete item. Source acquisition probes or a captured-source OPEN/RCA_READY/ESCALATED fixture do not replace them.
+
+The S5 checker explicitly requires separate Inventory/Payment candidates and ambiguous Checkout, including its two structural candidates and RCA abstention. A conditional assertion that only inspects already-ambiguous labels is insufficient.
+
+For a completed native run or safely extracted CI bundle, verify the source graph without a database or Docker. The optional expected checksums must come from the selected trusted capture/transport record; calculating them from an untrusted replacement does not authenticate it.
+
+```bash
+.venv-ml/bin/python -m scripts.replay_incident_worker \
+  --run <completed-native-run> --output <new-replay-report.json> \
+  --expected-health-snapshot-sha256 <trusted-health-export-sha256> \
+  --expected-incident-snapshot-sha256 <trusted-incident-export-sha256>
+.venv-ml/bin/python -m scripts.check_incident_replay_integrity \
+  --run <completed-native-run> --output <new-negative-report.json>
+```
+
+The negative probe changes only isolated copies and checks original files afterward. Every JSON object is bounded to 16 MiB, artifact references are hash-verified, duplicate/nonfinite JSON is rejected, and optimized Python cannot silently disable acceptance. Replay preserves clocks and reconstructs raw RCA; it is not a new live measurement or accuracy trial. This verifier targets completed native S1/S5 acceptance captures with all four lifecycle revisions, not an actively growing/unclosed journal.
+
+With the selected owned loopback `CONTROL_DATABASE_URL` already configured, verify actual API reads against one or more native runs:
+
+```bash
+.venv-ml/bin/python -m scripts.check_native_incident_api \
+  --run <completed-native-run> --output <new-api-evidence-directory>
+```
+
+Repeat `--run` to select multiple captures in the same control database. The checker starts a temporary loopback API with an ephemeral environment-only token, checks current/history/auth/readiness/ETag/pagination against selected immutable snapshots, checks selected revision/outbox counts unchanged, then stops its API process. It does not write incidents or enable demo/model output. CI performs these native API and offline checks before uploading S1 and each S5 bundle.
 
 Rollback normally stops the consumer while retaining the health producer, immutable objects, accepted journal and compatible schema-3 readers. Restore requires a rehearsed backup and accounting for later writes; code revert does not recover data. Keep project/container/DB identities and export evidence before cleaning only the task's disposable resources. No production/on-call/HA or host-power-loss durability claim is made by local integration.
