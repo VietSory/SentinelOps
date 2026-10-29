@@ -406,6 +406,8 @@ IER authoritative chứa kết quả được tính/validate. Generated explanat
 
 The [continuous local health producer](STEP7_HEALTH_WORKER.md) now uses additive schema-v2 health_streams/health_batches/health_signals tables for atomic three-service bucket decisions and a source-bound checkpoint. Its append-only health ledger is a prerequisite for downstream consumers; it does not enqueue or implement continuous RCA/IER itself.
 
+The separately implemented [continuous incident consumer](STEP8_INCIDENT_WORKER.md), under [Proposed ADR-012](adr/ADR-012-continuous-incident-consumer.md), adds schema-v3 consumer identity/steps/checkpoint, frozen group jobs, episode recoveries, evidence and publication command/receipt tables. Its lock and every mutation in one iteration use a dedicated nonpooled writer connection, with separate source reads and no transaction across Docker/HTTP. Current UNKNOWN availability prevents natural closure even when older recovery decisions exist. IER `detected_at` is the immutable actual local intent clock; original source onset/evaluation clocks remain explicit facts. This implementation remains subject to native S1/S5 lifecycle and release acceptance; the additive schema or source-reader tests alone do not accept it or full G4.
+
 Update current pointer, append version/event và enqueue downstream tasks trong cùng transaction. Dùng compare-and-set revision; crash/retry không tạo hai current versions. Large raw evidence nằm trong object store; DB giữ refs/checksums.
 
 ### 11.2 API behavior đích
