@@ -212,11 +212,12 @@ def test_declared_development_selection_cannot_hide_a_later_unadmitted_file(tmp_
         load_verified_manifest(selected)
 
 
-def test_revision_symlink_cannot_move_the_admitted_cache_outside_public_root(tmp_path):
+@pytest.mark.parametrize("inside", [False, True])
+def test_revision_symlink_cannot_move_the_admitted_cache_outside_canonical_revision(tmp_path, inside):
     from sentinelops.public_data.rcaeval_partitions import REVISION, require_manifest_files
     public = tmp_path / "public"
     (public / "rcaeval").mkdir(parents=True)
-    outside = tmp_path / "outside"
+    outside = public / "rcaeval" / "other-revision" if inside else tmp_path / "outside"
     outside.mkdir()
     (public / "rcaeval" / REVISION).symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="escapes"):

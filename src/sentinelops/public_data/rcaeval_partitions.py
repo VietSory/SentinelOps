@@ -125,9 +125,9 @@ def require_manifest_files(manifest: dict, public_root: Path) -> list[Path]:
     records = manifest.get("files")
     if not isinstance(records, list) or not records:
         raise ValueError("RCAEval manifest requires its selected file inventory")
-    base = (public_root / "rcaeval" / REVISION).resolve()
-    if not base.is_relative_to(public_root.resolve()):
-        raise ValueError("RCAEval revision escapes its public-data root")
+    base = public_root.resolve() / "rcaeval" / REVISION
+    if base.resolve() != base:
+        raise ValueError("RCAEval revision escapes its canonical public-data path")
     seen, file_cases, targets = set(), [], []
     for record in records:
         if not isinstance(record, dict) or not isinstance(record.get("path"), str):
