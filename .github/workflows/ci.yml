@@ -401,6 +401,8 @@ jobs:
           docker compose -p sentinelops-health-control-ci -f /tmp/sentinelops-health-v1.yml up -d --wait --wait-timeout 90
       - name: Verify explicit migration, atomic checkpoints, role, concurrency and database restart
         run: python -m scripts.check_health_worker_store --container sentinelops-health-control-ci-control-postgres-1 --project sentinelops-health-control-ci --output artifacts/workers/storage/acceptance.json
+      - name: Apply additive incident-consumer migration to the preserved v2 fixture
+        run: docker exec -i sentinelops-health-control-ci-control-postgres-1 psql -U control_bootstrap -d sentinelops_control -v ON_ERROR_STOP=1 < infra/control/004-incident-consumer.sql
       - run: docker compose config --quiet
       - run: docker compose up --build -d --wait --wait-timeout 120
       - name: Verify the frozen native worker protocol through actual process and source outages
@@ -414,7 +416,7 @@ jobs:
                    '--control-container','sentinelops-health-control-ci-control-postgres-1',
                    '--control-project','sentinelops-health-control-ci','--native-project','sentinelops-health-ci',
                    '--prometheus-container','sentinelops-health-ci-prometheus-1','--output','artifacts/workers/live']
-          command+=['--metrics-otlp-endpoint','http://127.0.0.1:4317']
+          command+=['--metrics-otlp-endpoint','http://127.0.0.1:4317','--incident-consumer']
           with output.open('x') as stream:
               result=subprocess.run(command,env=env,stdout=stream,stderr=subprocess.STDOUT)
           raise SystemExit(result.returncode)
@@ -439,3 +441,59 @@ jobs:
       - name: Stop worker control testbed
         if: always()
         run: docker compose -p sentinelops-health-control-ci -f /tmp/sentinelops-health-v1.yml down --volumes --remove-orphans
+
+  incident-worker-s5:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [independent-latency, independent-blocking-errors]
+    env:
+      COMPOSE_PROJECT_NAME: sentinelops-incident-ci
+      CONTROL_DATABASE_URL: postgresql://control_writer:local-control-writer@127.0.0.1:5433/sentinelops_control
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: docker compose -p sentinelops-incident-control-ci -f docker-compose.control.yml config --quiet
+      - run: docker compose -p sentinelops-incident-control-ci -f docker-compose.control.yml up -d --wait --wait-timeout 90
+      - run: docker compose config --quiet
+      - run: docker compose up --build -d --wait --wait-timeout 120
+      - name: Verify original S5 case and declared natural-recovery observation
+        run: |
+          python - <<'PY'
+          import os,subprocess,sys
+          from pathlib import Path
+          env=os.environ.copy();env.pop('DATABASE_URL',None)
+          output=Path('artifacts/incident-native/native.log');output.parent.mkdir(parents=True,exist_ok=True)
+          command=[sys.executable,'-m','scripts.check_incident_worker_s5',
+                   '--case','${{ matrix.case }}',
+                   '--control-container','sentinelops-incident-control-ci-control-postgres-1',
+                   '--control-project','sentinelops-incident-control-ci','--native-project','sentinelops-incident-ci',
+                   '--prometheus-container','sentinelops-incident-ci-prometheus-1','--output','artifacts/incident-native/live']
+          with output.open('x') as stream:
+              result=subprocess.run(command,env=env,stdout=stream,stderr=subprocess.STDOUT)
+          raise SystemExit(result.returncode)
+          PY
+      - name: Preserve continuous independent-root incident evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incident-s5-${{ matrix.case }}-evidence
+          path: artifacts/incident-native/
+          retention-days: 7
+      - name: Incident testbed diagnostics
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose -p sentinelops-incident-control-ci -f docker-compose.control.yml ps
+      - name: Stop incident native testbed
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+      - name: Stop incident control testbed
+        if: always()
+        run: docker compose -p sentinelops-incident-control-ci -f docker-compose.control.yml down --volumes --remove-orphans
