@@ -27,6 +27,7 @@ from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.health import local_endpoint
 from scripts.worker_metrics_evidence import WorkerMetricEvidence
+from scripts.incident_worker_evidence import IncidentWorkerEvidence
 
 
 def docker(*args):
@@ -172,8 +173,13 @@ async def check(args):
     images = image_identity(root)
     source_paths = [*root.glob("src/sentinelops/**/*.py"), *root.glob("contracts/*.schema.json"),
                     root / "scripts/run_health_worker.py", Path(__file__).resolve(),
-                    root / "scripts/worker_metrics_evidence.py",
-                    root / "infra/control/003-health-worker.sql", root / "configs/slo_health_policy.json"]
+                    root / "scripts/worker_metrics_evidence.py", root / "scripts/incident_worker_evidence.py",
+                    root / "scripts/run_incident_worker.py",
+                    root / "scripts/replay_incident_worker.py", root / "scripts/check_incident_replay_integrity.py",
+                    root / "scripts/check_native_incident_api.py",
+                    root / "configs/incident_worker_acceptance.json",
+                    root / "infra/control/003-health-worker.sql", root / "infra/control/004-incident-consumer.sql",
+                    root / "configs/slo_health_policy.json", root / "configs/rca_policy.json", root / "configs/topology.yaml"]
     source_hashes = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths}
     args.output.mkdir(parents=True, exist_ok=False)
     metrics = WorkerMetricEvidence(args.output / "own-metrics") if metrics_endpoint else None
@@ -186,6 +192,7 @@ async def check(args):
     stream_id = None
     extra = None
     phase = "startup"
+    incident = None
     started = time.monotonic()
 
     def save_running():
@@ -242,6 +249,9 @@ async def check(args):
             await asyncio.sleep(.5)
         assert stream_id
         save_running()
+        if getattr(args, "incident_consumer", False):
+            incident = IncidentWorkerEvidence(args.output / "incident-consumer", store, stream_id, args.native_project)
+            incident.spawn()
         if metrics:
             await metrics.ready("primary-ready", instances={"health-0"}, value=1)
         phase = "native-workload-and-database-outage"
@@ -253,6 +263,7 @@ async def check(args):
             if any(p.poll() is not None for p in children[1:] if p.returncode != -9): raise AssertionError("resumed worker exited early")
             if not crashed and primary.poll() is not None: raise AssertionError("primary worker exited early")
             if db_task and db_task.done(): db_task.result()
+            if incident and not db_down: await incident.observe(pool)
             if not db_down:
                 async with pool.acquire() as conn:
                     payloads = [json.loads(r["payload"]) for r in await conn.fetch("SELECT payload FROM sentinel_control.health_signals WHERE stream_id=$1", stream_id)]
@@ -270,6 +281,7 @@ async def check(args):
         run_path = workload.result()
         if db_task: await db_task
         assert crashed and db_task is not None
+        if incident: await incident.require_closed(pool)
         phase = "source-outage"
         async with httpx.AsyncClient(timeout=12., trust_env=False) as client:
             async def source_load():
@@ -312,6 +324,11 @@ async def check(args):
         if metrics:
             await metrics.ready("both-running", instances={"health-0", "health-1"}, value=1)
         for process in children[1:]: assert await stop_child(process) == 0
+        incident_result = None
+        if incident:
+            await incident.catch_up(pool)
+            await incident.stop()
+            incident_result = await incident.verify(pool, scenario="S1")
         snapshot = await ledger_snapshot(pool, stream_id)
         (args.output / "database-snapshot.json").write_text(json.dumps(snapshot, indent=2, allow_nan=False) + "\n")
         phase = "metrics-verification"
@@ -331,6 +348,8 @@ async def check(args):
                   "actions_allowed": False, "full_G4_accepted": False}
         if metrics_result is not None:
             report["own_metrics_verification"] = metrics_result
+        if incident_result is not None:
+            report["continuous_incident_verification"] = incident_result
         (args.output / "acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
         print("NATIVE HEALTH WORKER ACCEPTANCE: PASS " + str(args.output), flush=True)
     except Exception as exc:
@@ -356,6 +375,7 @@ async def check(args):
         for process in children:
             if process.poll() is None: await stop_child(process)
         for stream in streams: stream.close()
+        if incident: await incident.stop()
         await pool.close()
 
 
@@ -367,6 +387,7 @@ def main():
     parser.add_argument("--prometheus-container", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--metrics-otlp-endpoint", help="Also verify the owned local worker metrics pipeline")
+    parser.add_argument("--incident-consumer", action="store_true", help="Also verify continuous operational RCA/IER lifecycle and process restart")
     args = parser.parse_args()
     try: asyncio.run(check(args))
     except Exception as exc: raise SystemExit("native worker acceptance failed: " + type(exc).__name__) from None

@@ -202,10 +202,6 @@ jobs:
       - run: docker compose -p sentinelops-control -f docker-compose.control.yml up -d --wait --wait-timeout 60
       - run: python scripts/check_incident_store.py --verify-report artifacts/incidents/store-acceptance.json
       - run: python scripts/check_incident_api.py --restart-database
-      - name: Verify continuous consumer atomic rollback, retry and competition on PostgreSQL
-        env:
-          SENTINELOPS_TEST_DATABASE_URL: postgresql://control_writer:local-control-writer@127.0.0.1:5433/sentinelops_control
-        run: pytest -q tests/test_incident_worker.py
       - name: Preserve incident storage evidence
         uses: actions/upload-artifact@v4
         with:
@@ -407,12 +403,14 @@ jobs:
           source=yaml.safe_load(Path('docker-compose.control.yml').read_text())
           service=source['services']['control-postgres']
           service['volumes']=[str(Path(v.split(':')[0]).resolve())+':'+':'.join(v.split(':')[1:]) if v.startswith('./') else v
-                              for v in service['volumes'] if not any(name in v for name in ('003-health-worker.sql','004-incident-worker.sql'))]
+                              for v in service['volumes'] if not any(name in v for name in ('003-health-worker.sql','004-incident-consumer.sql'))]
           Path('/tmp/sentinelops-health-v1.yml').write_text(yaml.safe_dump(source,sort_keys=False))
           PY
           docker compose -p sentinelops-health-control-ci -f /tmp/sentinelops-health-v1.yml up -d --wait --wait-timeout 90
       - name: Verify explicit migration, atomic checkpoints, role, concurrency and database restart
         run: python -m scripts.check_health_worker_store --container sentinelops-health-control-ci-control-postgres-1 --project sentinelops-health-control-ci --output artifacts/workers/storage/acceptance.json
+      - name: Apply additive incident-consumer migration to the preserved v2 fixture
+        run: docker exec -i sentinelops-health-control-ci-control-postgres-1 psql -U control_bootstrap -d sentinelops_control -v ON_ERROR_STOP=1 < infra/control/004-incident-consumer.sql
       - run: docker compose config --quiet
       - run: docker compose up --build -d --wait --wait-timeout 120
       - name: Verify the frozen native worker protocol through actual process and source outages
@@ -426,13 +424,19 @@ jobs:
                    '--control-container','sentinelops-health-control-ci-control-postgres-1',
                    '--control-project','sentinelops-health-control-ci','--native-project','sentinelops-health-ci',
                    '--prometheus-container','sentinelops-health-ci-prometheus-1','--output','artifacts/workers/live']
-          command+=['--metrics-otlp-endpoint','http://127.0.0.1:4317']
+          command+=['--metrics-otlp-endpoint','http://127.0.0.1:4317','--incident-consumer']
           with output.open('x') as stream:
               result=subprocess.run(command,env=env,stdout=stream,stderr=subprocess.STDOUT)
           raise SystemExit(result.returncode)
           PY
       - name: Revalidate the exported health ledger without a live database
         run: python -m scripts.replay_health_worker --run artifacts/workers/live --output artifacts/workers/offline-ledger-replay.json
+      - name: Recompute transported native incident history and reject isolated corruptions
+        run: |
+          python -m scripts.replay_incident_worker --run artifacts/workers/live --output artifacts/workers/offline-incident-replay.json
+          python -m scripts.check_incident_replay_integrity --run artifacts/workers/live --output artifacts/workers/offline-incident-negative.json
+      - name: Verify actual protected HTTP for the source-derived native incident
+        run: python -m scripts.check_native_incident_api --run artifacts/workers/live --output artifacts/workers/native-api
       - name: Preserve continuous worker evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -452,11 +456,15 @@ jobs:
         if: always()
         run: docker compose -p sentinelops-health-control-ci -f /tmp/sentinelops-health-v1.yml down --volumes --remove-orphans
 
-  continuous-incident-integration:
+  incident-worker-s5:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [independent-latency, independent-blocking-errors]
     env:
-      COMPOSE_PROJECT_NAME: sentinelops-continuous-ci
+      COMPOSE_PROJECT_NAME: sentinelops-incident-ci
       CONTROL_DATABASE_URL: postgresql://control_writer:local-control-writer@127.0.0.1:5433/sentinelops_control
     steps:
       - uses: actions/checkout@v4
@@ -465,42 +473,47 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -e '.[dev]'
-      - run: docker compose -p sentinelops-continuous-control-ci -f docker-compose.control.yml up -d --wait --wait-timeout 120
+      - run: docker compose -p sentinelops-incident-control-ci -f docker-compose.control.yml config --quiet
+      - run: docker compose -p sentinelops-incident-control-ci -f docker-compose.control.yml up -d --wait --wait-timeout 90
+      - run: docker compose config --quiet
       - run: docker compose up --build -d --wait --wait-timeout 120
-      - name: Verify actual continuous workload, correlation, IER/HTTP, outages and restart
-        run: >-
-          python -m scripts.check_continuous_incidents
-          --control-container sentinelops-continuous-control-ci-control-postgres-1
-          --control-project sentinelops-continuous-control-ci
-          --native-project sentinelops-continuous-ci
-          --prometheus-container sentinelops-continuous-ci-prometheus-1
-          --metrics-otlp-endpoint http://127.0.0.1:4317
-          --output artifacts/continuous-incidents/native
-      - name: Reproduce every accepted continuous decision from archived raw evidence
+      - name: Verify original S5 case and declared natural-recovery observation
         run: |
           python - <<'PY'
-          import hashlib,subprocess,sys
+          import os,subprocess,sys
           from pathlib import Path
-          root=Path('artifacts/continuous-incidents/native')
-          digest=hashlib.sha256((root/'database-snapshot.json').read_bytes()).hexdigest()
-          print('ACCEPTED CONTINUOUS LEDGER SHA256',digest,flush=True)
-          subprocess.run([sys.executable,'-m','scripts.replay_incident_worker','--run',str(root),
-              '--expected-snapshot-sha256',digest,'--output',str(root/'offline-replay.json')],check=True)
+          env=os.environ.copy();env.pop('DATABASE_URL',None)
+          output=Path('artifacts/incident-native/native.log');output.parent.mkdir(parents=True,exist_ok=True)
+          command=[sys.executable,'-m','scripts.check_incident_worker_s5',
+                   '--case','${{ matrix.case }}',
+                   '--control-container','sentinelops-incident-control-ci-control-postgres-1',
+                   '--control-project','sentinelops-incident-control-ci','--native-project','sentinelops-incident-ci',
+                   '--prometheus-container','sentinelops-incident-ci-prometheus-1','--output','artifacts/incident-native/live']
+          with output.open('x') as stream:
+              result=subprocess.run(command,env=env,stdout=stream,stderr=subprocess.STDOUT)
+          raise SystemExit(result.returncode)
           PY
-      - name: Preserve actual continuous incident evidence
+      - name: Recompute transported S5 incident history and reject isolated corruptions
+        run: |
+          python -m scripts.replay_incident_worker --run artifacts/incident-native/live --output artifacts/incident-native/offline-incident-replay.json
+          python -m scripts.check_incident_replay_integrity --run artifacts/incident-native/live --output artifacts/incident-native/offline-incident-negative.json
+      - name: Verify actual protected HTTP for all native S5 incident groups
+        run: python -m scripts.check_native_incident_api --run artifacts/incident-native/live --output artifacts/incident-native/native-api
+      - name: Preserve continuous independent-root incident evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: continuous-incident-evidence
-          path: artifacts/continuous-incidents/
+          name: incident-s5-${{ matrix.case }}-evidence
+          path: artifacts/incident-native/
           retention-days: 7
-      - name: Native continuous testbed diagnostics
+      - name: Incident testbed diagnostics
         if: failure()
         run: |
-          docker compose logs --no-color --tail 100
-          docker compose -p sentinelops-continuous-control-ci -f docker-compose.control.yml logs --no-color --tail 50
-      - name: Stop owned continuous testbeds
+          docker compose ps
+          docker compose -p sentinelops-incident-control-ci -f docker-compose.control.yml ps
+      - name: Stop incident native testbed
         if: always()
-        run: |
-          docker compose down --volumes --remove-orphans
-          docker compose -p sentinelops-continuous-control-ci -f docker-compose.control.yml down --volumes --remove-orphans
+        run: docker compose down --volumes --remove-orphans
+      - name: Stop incident control testbed
+        if: always()
+        run: docker compose -p sentinelops-incident-control-ci -f docker-compose.control.yml down --volumes --remove-orphans

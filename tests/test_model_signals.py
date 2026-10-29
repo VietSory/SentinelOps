@@ -6,11 +6,11 @@ import pytest
 from sentinelops.contracts import utc_time
 from sentinelops.ml.registry import ModelRegistry
 from sentinelops.telemetry.core import stable_id
-from sentinelops.workers.model_signals import collect_model_signals, add_model_support
+from sentinelops.workers.model_signals import collect_model_signals, add_model_support, verify_model_evidence
 from sentinelops.workers.incident_state import advance_groups
-from sentinelops.workers.incidents import evaluate_cluster
-from test_incident_worker import source_fixture, HEALTH, RCA, TOPOLOGY, PAY
-from sentinelops.workers.incidents import incident_commands
+from sentinelops.workers.legacy_incident_projection import evaluate_cluster
+from test_phase_incident_projection import source_fixture, HEALTH, RCA, TOPOLOGY, PAY
+from sentinelops.workers.legacy_incident_projection import incident_commands
 from sentinelops.telemetry.core import FEATURE_KEYS
 
 
@@ -68,3 +68,16 @@ def test_real_fixture_inference_attaches_exact_window_and_preserves_policy_abste
     assert commands[-1].payload["service_signals"][0]["degradation_risk"] is None
     with pytest.raises(ValueError, match="duplicate"):
         add_model_support(store, row, signals + signals, policy=RCA, as_of=now)
+    state_ref = store.write("manifests", {"last_batch_ref": batches[-1]["manifest_ref"]})
+    capture = {"profile": {"model_release_ref": registry.identity}, "window_start": closed[0]["scope"]["first_onset_at"],
+        "window_end": batch["bucket_end"], "analyzed_at": batch["evaluated_at"], "model_evidence": {"release_ref": registry.identity,
+            "source_state_ref": state_ref, "feature_batch_ref": batches[-1]["manifest_ref"], "signals": signals}}
+    assert verify_model_evidence(store, capture, registry) == signals
+    from copy import deepcopy
+    tampered = deepcopy(capture)
+    selected = next(item for item in tampered["model_evidence"]["signals"] if item[1]["service"] == PAY)
+    selected[1]["inference"]["detection"]["anomaly_score"] = .123456
+    index = tampered["model_evidence"]["signals"].index(selected)
+    tampered["model_evidence"]["signals"][index] = (store.write("signals", selected[1]), selected[1])
+    with pytest.raises(ValueError, match="estimator"):
+        verify_model_evidence(store, tampered, registry)

@@ -21,5 +21,6 @@ Breaking changes require a new ADR before code is merged.
 | [009](ADR-009-payment-rollback-runbook.md) | Accepted 2026-10-26 | Known-good Payment image rollback |
 | [010](ADR-010-public-training-data-and-transfer.md) | Accepted; source choice superseded by 011 | Public provenance, local integration and source-transfer gates |
 | [011](ADR-011-frozen-gamma-rcaeval-contract.md) | Accepted 2026-10-26 | Frozen GAMMA v1 training / RCAEval RCA validation and evaluation; at most two sources |
+| [012](ADR-012-continuous-incident-consumer.md) | Accepted for local implementation | Accepted continuous-health lineage, stable delayed grouping and durable incident publication; full G4 remains separate |
 
 ADR-001…005 remain current. ADR-007 supersedes the contradictory unknown-field rule and example wire formats in historical PRODUCT_SPEC v1.0; that source is archived. Numeric thresholds/performance targets are not automatically accepted or measured by these ADRs.

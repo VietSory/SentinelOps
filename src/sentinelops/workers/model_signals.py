@@ -10,6 +10,75 @@ from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, Incompatibl
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 
 
+class ModelIncidentEvidence:
+    """Add a pinned model release to the canonical bounded evidence collector."""
+    def __init__(self, collector, registry):
+        self.collector, self.model_registry = collector, registry
+        self.profile = {**collector.profile, "model_release_ref": registry.identity}
+
+    async def verify_source(self, identity):
+        return await self.collector.verify_source(identity)
+
+    async def close(self):
+        await self.collector.close()
+
+    async def capture(self, store, *, source_state_ref, **kwargs):
+        reference = await self.collector.capture(store, **kwargs)
+        capture = store.read(reference)
+        state = store.read(source_state_ref)
+        batch = store.read(state["last_batch_ref"])
+        normalization = store.read(batch["normalization_manifest_ref"])
+        selected = {**normalization, "feature_refs": [ref for ref in normalization["feature_refs"]
+            if capture["window_start"] <= store.read(ref)["window_end"] <= capture["window_end"]]}
+        import asyncio
+        signals = await asyncio.to_thread(collect_model_signals, store, selected,
+            bucket_end=batch["bucket_end"], registry=self.model_registry)
+        capture.update(capture_version="continuous-incident-evidence/v2", profile=self.profile,
+            analyzed_at=timestamp(datetime.now(timezone.utc)), model_evidence={"release_ref": self.model_registry.identity,
+                "source_state_ref": source_state_ref, "feature_batch_ref": state["last_batch_ref"], "signals": signals})
+        return store.write("manifests", capture)
+
+
+def verify_model_evidence(store, capture, registry):
+    pack = capture["model_evidence"]
+    if registry is None or registry.identity != pack["release_ref"] or capture["profile"]["model_release_ref"] != registry.identity:
+        raise ValueError("model evidence requires the exact separately validated release")
+    state = store.read(pack["source_state_ref"])
+    if state["last_batch_ref"] != pack["feature_batch_ref"]:
+        raise ValueError("model evidence changed its accepted feature batch")
+    batch = store.read(pack["feature_batch_ref"])
+    normalization = store.read(batch["normalization_manifest_ref"])
+    expected_refs = {ref for ref in normalization["feature_refs"] if
+        store.read(ref)["window_end"] == batch["bucket_end"] and
+        capture["window_start"] <= store.read(ref)["window_end"] <= capture["window_end"]}
+    if {s["feature_ref"] for _, s in pack["signals"]} != expected_refs or len(pack["signals"]) != len(expected_refs):
+        raise ValueError("model evidence omits/duplicates or changes source feature windows")
+    for reference, signal in pack["signals"]:
+        envelope = store.read(signal["feature_ref"])
+        if (store.read(reference) != signal or signal["service"] != envelope["service"]
+            or signal["window_end"] != envelope["window_end"] or utc_time(signal["evaluated_at"]) > utc_time(capture["analyzed_at"])
+            or signal["signal_id"] != stable_id({"feature_ref": signal["feature_ref"], "release_identity": registry.identity})):
+            raise ValueError("model signal differs from its frozen feature/source clock")
+        expected, reason = None, None
+        decision = signal["inference"]["inferred_at"] if signal["inference"] is not None else signal["evaluated_at"]
+        try:
+            expected = registry.infer_envelope(envelope, now=utc_time(decision))
+        except ModelUnavailable:
+            reason = "no-validated-compatible-model"
+        except IncompatibleFeatures:
+            reason = "ineligible-incompatible-or-stale-feature"
+        if expected != signal["inference"] or reason != signal["missing_reason"]:
+            raise ValueError("model signal does not reproduce with the pinned actual estimator")
+    return pack["signals"]
+
+
+def project_model_signals(derived):
+    group = next(g for g in derived["rca"]["correlation"]["groups"] if g["group_id"] == derived["group_id"])
+    return [{"service": s["service"], "anomaly_score": s["inference"]["detection"]["anomaly_score"],
+             "degradation_risk": s["inference"]["risk"]["risk_score"] if s["inference"]["risk"] is not None else None}
+            for _, s in derived.get("model_signals", []) if s["status"] == "AVAILABLE" and s["service"] in group["affected_services"]]
+
+
 def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRegistry, now=None):
     signals, seen = [], set()
     for reference in normalization["feature_refs"]:

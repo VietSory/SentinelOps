@@ -186,6 +186,30 @@ class IncidentWorkerMetrics(WorkerMetrics):
         if result["status"] == "BUSY":
             self._busy.add(1, self._attributes)
             return
+        if result["status"] == "PROGRESS":
+            events = result["events"]
+            accepted = [e for e in events if e["status"] == "INGESTED"]
+            duration = result["processing_ms"]
+            if type(duration) not in (int, float) or not math.isfinite(duration) or duration < 0:
+                raise ValueError("consumer cycle time must be measured finite duration")
+            self._duration.record(duration / 1000, self._attributes)
+            self._committed.add(len(accepted), self._attributes)
+            self._incidents.add(sum(len(e["created_jobs"]) for e in accepted), self._attributes)
+            enriched = [e for e in events if e["status"] == "ENRICHED"]
+            self._abstentions.add(sum(store.read(e["result_ref"])["abstained"] for e in enriched), self._attributes)
+            if accepted:
+                state = store.read(accepted[-1]["state_ref"])
+                if state["source"]["health_identity"]["environment"] != self._environment:
+                    raise ValueError("consumer metric source environment differs")
+                available = {s: int(v["availability"] == "ELIGIBLE") for s, v in state["service_states"].items()}
+                if set(available) != set(BUSINESS_ROUTES):
+                    raise ValueError("consumer metric source service coverage differs")
+                with self._lock:
+                    self._bucket_end = utc_time(state["last_bucket_end"]).timestamp()
+                    self._source_available = available
+                for service, value in available.items():
+                    if not value: self._unknown.add(1, {**self._attributes, "business_service": service})
+            return
         if result["status"] != "COMMITTED":
             return
         commit = store.read(result["commit_ref"])
