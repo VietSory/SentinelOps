@@ -90,8 +90,9 @@ class ModelRegistry:
                     "risk_score": value, "state": "degrading" if value >= degrading else "watch" if value >= watch else "normal",
                     "model_name": "xgboost", "model_version": manifest["model_version"]}
             validate_payload("degradation-risk.schema.json", risk)
+        completed = now or datetime.now(timezone.utc)
         return {"detection": detection, "risk": risk, "model_version": manifest["model_version"], "validation_ref": validation_ref,
-                "feature_sha256": stable_id(feature), "source_profile": source_profile, "inferred_at": current.isoformat().replace("+00:00", "Z")}
+                "feature_sha256": stable_id(feature), "source_profile": source_profile, "inferred_at": completed.isoformat().replace("+00:00", "Z")}
 
     def infer_envelope(self, envelope, *, now=None):
         validate_payload("feature-envelope.schema.json", envelope)
@@ -100,4 +101,4 @@ class ModelRegistry:
         current = now or datetime.now(timezone.utc)
         if utc_time(envelope["as_of"]) > current:
             raise IncompatibleFeatures("feature was not available at inference cutoff")
-        return self.infer(envelope["payload"], source_profile=envelope["source_profile"], now=current)
+        return self.infer(envelope["payload"], source_profile=envelope["source_profile"], now=now)

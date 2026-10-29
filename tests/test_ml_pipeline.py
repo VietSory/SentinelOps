@@ -120,6 +120,24 @@ def test_registry_checks_source_window_and_finite_feature_before_real_inference(
             registry.infer(changed, source_profile="wrong" if problem == "source" else "fixture", now=now)
 
 
+def test_real_fixture_xgboost_risk_uses_existing_contract_and_api(fitted):
+    detector, train, _ = fitted
+    risk_model = fit_risk(train, (train[:, 0] > 0).astype(int), FEATURE_KEYS)
+    now = datetime.now(timezone.utc)
+    registry = ModelRegistry()
+    registry._models["payment-service"] = ({"model_version": "fixture-only", "ordered_features": list(FEATURE_KEYS),
+        "provenance": {"source_profile": "fixture"}, "risk_thresholds": {"watch": .5, "degrading": .8}},
+        detector, risk_model, "fixture://not-approved")
+    feature = {"schema_version": "1.0", "service": "payment-service", "window_start": timestamp(now - timedelta(minutes=5)),
+        "window_end": timestamp(now), "features": dict(zip(FEATURE_KEYS, train[0].tolist()))}
+    result = registry.infer(feature, source_profile="fixture", now=now)
+    assert result["risk"]["risk_score"] == float(risk_model.predict_proba([train[0]])[0, 1])
+    with TestClient(create_app(model_registry=registry)) as client:
+        response = client.post("/v1/risk", json=feature, headers={"X-SentinelOps-Source-Profile": "fixture"})
+        assert response.status_code == 200
+        assert response.json()["model_name"] == "xgboost" and response.json()["model_version"] == "fixture-only"
+
+
 def test_event_metrics_keep_duplicates_misses_and_real_emission_delays():
     runs = [{"run_id": "a", "eligible_healthy_service_seconds": 3600, "events": [{"service": "payment", "onset_at": "2026-01-01T00:02:00Z",
               "deadline_at": "2026-01-01T00:05:00Z", "gradual_precursor_verified": True, "precursor_start_at": "2026-01-01T00:01:00Z"}],

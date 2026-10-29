@@ -40,6 +40,12 @@ from sentinelops.public_data.admission import admit_case, session_groups
 from sentinelops.public_data.dataset import build_grouped_dataset
 from sentinelops.public_data.rcaeval_partitions import group_metadata, require_cases
 from sentinelops.workers.health import HealthWorker, latest_bucket
+from sentinelops.workers.incidents import IncidentWorker
+from sentinelops.workers.incident_replay import replay_incident_history
+from sentinelops.workers.model_signals import collect_model_signals
+from sentinelops.ml.registry import ModelRegistry
+from sentinelops.ml.readiness import audit_readiness
+from sentinelops.public_data.rcaeval_evaluation import diagnose_native
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',
@@ -74,6 +80,7 @@ payload = {'schema_version':'1.0', 'service':'payment-service',
     'window_start':'2026-10-25T00:00:00Z', 'window_end':'2026-10-25T00:05:00Z',
     'features':{'latency': 100}}
 assert client.post('/v1/detect', json=payload).status_code == 503
+assert client.post('/v1/risk', json=payload).status_code == 503
 assert client.post('/v1/detect', json={}).status_code == 422
 assert client.post('/v1/incidents/demo').status_code == 404
 demo = TestClient(create_app(Settings(demo_mode=True)))

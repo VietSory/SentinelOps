@@ -6,9 +6,11 @@ from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.workers.health_source import verify_health_batch
 from sentinelops.workers.incident_state import advance_groups
 from sentinelops.workers.incidents import evaluate_cluster, incident_commands
+from sentinelops.workers.model_signals import add_model_support
+from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, IncompatibleFeatures
 
 
-def replay_incident_history(store, snapshot, topology, health_policy, rca_policy):
+def replay_incident_history(store, snapshot, topology, health_policy, rca_policy, *, model_registry=None):
     identity = snapshot["consumer_identity"]
     consumer_id = stable_id(identity)
     if (identity["worker_version"] != "continuous-incidents/v1" or identity["topology_sha256"] != stable_id(topology)
@@ -34,11 +36,36 @@ def replay_incident_history(store, snapshot, topology, health_policy, rca_policy
         if state != recorded["state"] or closed != recorded["closed_clusters"] or len(recorded["modalities"]) != len(closed):
             raise ValueError("continuous grouping/state does not reproduce from accepted raw source")
         rows, commands = [], []
+        model_signals = recorded.get("model_signals", [])
+        registry = model_registry or ModelRegistry()
+        if model_signals and identity.get("model_release_ref") != registry.identity:
+            raise ValueError("replay requires the exact trusted model release")
+        seen = set()
+        for ref, signal in model_signals:
+            if (store.read(ref) != signal or signal["feature_ref"] not in source["normalization"]["feature_refs"]
+                or signal["window_end"] != state["last_bucket_end"] or signal["service"] in seen
+                or signal["signal_id"] != stable_id({"feature_ref": signal["feature_ref"], "release_identity": registry.identity})):
+                raise ValueError("recorded model signal differs from accepted source/version/window")
+            seen.add(signal["service"])
+            feature = store.read(signal["feature_ref"])
+            decision = signal["inference"]["inferred_at"] if signal["inference"] is not None else signal["evaluated_at"]
+            expected, reason = None, None
+            try:
+                expected = registry.infer_envelope(feature, now=utc_time(decision))
+            except ModelUnavailable:
+                reason = "no-validated-compatible-model"
+            except IncompatibleFeatures:
+                reason = "ineligible-incompatible-or-stale-feature"
+            if expected != signal["inference"] or reason != signal["missing_reason"]:
+                raise ValueError("recorded model inference does not reproduce with the pinned bundle")
         for item, modalities in zip(closed, recorded["modalities"]):
             results = evaluate_cluster(store, item, policy=rca_policy, as_of=utc_time(recorded["processed_at"]),
-                                       health_policy=health_policy, modalities=modalities)
+                health_policy=health_policy, modalities=modalities,
+                include_slo_values=recorded.get("projection_version") == "continuous-ier/v2")
+            if model_signals:
+                results = [add_model_support(store, row, model_signals, policy=rca_policy, as_of=utc_time(recorded["processed_at"])) for row in results]
             rows.extend(results)
-            commands.extend(incident_commands(consumer_id, item, results, recorded["processed_at"]))
+            commands.extend(incident_commands(consumer_id, item, results, recorded["processed_at"], model_signals))
         if rows != recorded["results"] or [c.__dict__ for c in commands] != recorded["commands"]:
             raise ValueError("continuous RCA/IER projection does not reproduce at its actual processing clock")
         ids.update(c.payload["incident_id"] for c in commands)

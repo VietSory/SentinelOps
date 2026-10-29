@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.incidents.rca import COMPONENTS, evaluate_rca
@@ -9,7 +10,7 @@ from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, Incompatibl
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 
 
-def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRegistry, now):
+def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRegistry, now=None):
     signals, seen = [], set()
     for reference in normalization["feature_refs"]:
         envelope = store.read(reference)
@@ -27,6 +28,7 @@ def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRe
             reason, status = "no-validated-compatible-model", "UNAVAILABLE"
         except IncompatibleFeatures:
             reason, status = "ineligible-incompatible-or-stale-feature", "UNAVAILABLE"
+        completed = now or datetime.now(timezone.utc)
         if output is not None:
             validate_payload("detection-result.schema.json", output["detection"])
             if output["risk"] is not None:
@@ -36,11 +38,11 @@ def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRe
                     or payload["model_version"] != output["model_version"]):
                     raise ValueError("model result identity differs from exact feature window/version")
             if (output["feature_sha256"] != stable_id(envelope["payload"])
-                or output["source_profile"] != envelope["source_profile"] or utc_time(output["inferred_at"]) > now):
+                or output["source_profile"] != envelope["source_profile"] or utc_time(output["inferred_at"]) > completed):
                 raise ValueError("model inference source/clock differs from feature provenance")
         body = {"signal_version": "validated-window-model/v1", "service": service, "window_end": bucket_end,
                 "feature_ref": reference, "status": status, "missing_reason": reason, "inference": output,
-                "evaluated_at": timestamp(now)}
+                "evaluated_at": timestamp(completed)}
         body["signal_id"] = stable_id({"feature_ref": reference, "release_identity": registry.identity})
         ref = store.write("signals", body)
         signals.append((ref, body))

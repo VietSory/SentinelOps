@@ -10,6 +10,8 @@ from sentinelops.workers.model_signals import collect_model_signals, add_model_s
 from sentinelops.workers.incident_state import advance_groups
 from sentinelops.workers.incidents import evaluate_cluster
 from test_incident_worker import source_fixture, HEALTH, RCA, TOPOLOGY, PAY
+from sentinelops.workers.incidents import incident_commands
+from sentinelops.telemetry.core import FEATURE_KEYS
 
 
 def test_absent_models_leave_null_inference_and_stable_signal_ids(tmp_path):
@@ -35,3 +37,34 @@ def test_invalid_model_output_is_rejected_instead_of_attached_to_rca(tmp_path):
             return {"detection": {"anomaly_score": float("nan")}, "risk": None}
     with pytest.raises(ValueError):
         collect_model_signals(store, normal, bucket_end=batch["bucket_end"], registry=InvalidRegistry(), now=utc_time(batch["evaluated_at"]))
+
+
+def test_real_fixture_inference_attaches_exact_window_and_preserves_policy_abstention(tmp_path):
+    np = pytest.importorskip("numpy")
+    from sentinelops.ml.models import fit_detector
+    store, stream, batches, records = source_fixture(tmp_path, [{PAY}] * 4)
+    state, closed = None, []
+    for row in batches:
+        batch = store.read(row["manifest_ref"])
+        objects = [(r["signal_ref"], json.loads(r["payload"])) for r in records if r["bucket_end"] == row["bucket_end"]]
+        state, emitted = advance_groups(state, batch, objects, TOPOLOGY, HEALTH)
+        closed.extend(emitted)
+    assert len(closed) == 1
+    rng = np.random.default_rng(42)
+    detector = fit_detector(rng.normal(size=(300, 5)), rng.normal(size=(100, 5)), FEATURE_KEYS)
+    registry = ModelRegistry(); registry.identity = "fixture-numerical-only"
+    registry._models[PAY] = ({"model_version": "fixture-not-approved", "ordered_features": list(FEATURE_KEYS),
+        "provenance": {"source_profile": stream and json.loads(stream["identity"])["source_profile"]}}, detector, None, "fixture://not-validation")
+    now = utc_time(batch["evaluated_at"])
+    signals = collect_model_signals(store, store.read(batch["normalization_manifest_ref"]), bucket_end=batch["bucket_end"], registry=registry, now=now)
+    available = next(s for _, s in signals if s["service"] == PAY)
+    assert available["status"] == "AVAILABLE" and available["inference"]["risk"] is None
+    row = evaluate_cluster(store, closed[0], policy=RCA, as_of=now, health_policy=HEALTH)[0]
+    enriched = add_model_support(store, row, signals, policy=RCA, as_of=now)
+    payment = next(c for c in enriched["rca"]["candidates"] if c["service"] == PAY)
+    assert payment["components"]["anomaly_strength"]["value"] == available["inference"]["detection"]["anomaly_score"]
+    assert enriched["rca"]["abstained"] and enriched["rca"]["actions_allowed"] is False
+    commands = incident_commands("a" * 64, closed[0], [enriched], batch["evaluated_at"], signals)
+    assert commands[-1].payload["service_signals"][0]["degradation_risk"] is None
+    with pytest.raises(ValueError, match="duplicate"):
+        add_model_support(store, row, signals + signals, policy=RCA, as_of=now)

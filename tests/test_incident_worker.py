@@ -109,7 +109,8 @@ def test_missing_after_opening_retains_active_episode_and_analytical_abstention(
     assert state["service_states"][PAY]["incident_active"] is True
 
 
-def test_offline_continuous_history_reproduces_and_rejects_rehashed_results(tmp_path):
+@pytest.mark.parametrize("include_slo_values", [False, True])
+def test_offline_continuous_history_reproduces_and_rejects_rehashed_results(tmp_path, include_slo_values):
     store, stream, batches, records = source_fixture(tmp_path, [{PAY}] * 5)
     worker = IncidentWorker(None, store, stream["stream_id"], TOPOLOGY, HEALTH, RCA)
     state, prior, refs = None, None, []
@@ -120,10 +121,11 @@ def test_offline_continuous_history_reproduces_and_rejects_rehashed_results(tmp_
         as_of = timestamp(datetime.now(timezone.utc))
         results, commands = [], []
         for item in closed:
-            output = evaluate_cluster(store, item, policy=RCA, as_of=utc_time(as_of), health_policy=HEALTH)
+            output = evaluate_cluster(store, item, policy=RCA, as_of=utc_time(as_of), health_policy=HEALTH, include_slo_values=include_slo_values)
             results.extend(output)
             commands.extend(incident_commands(worker.consumer_id, item, output, as_of))
         commit = {"consumer_id": worker.consumer_id, "previous_commit_ref": prior, "state": state,
+                  "projection_version": "continuous-ier/v2" if include_slo_values else "continuous-ier/v1",
                   "closed_clusters": closed, "processed_at": as_of, "modalities": [None] * len(closed),
                   "results": results, "commands": [c.__dict__ for c in commands]}
         prior = store.write("manifests", commit); refs.append(prior)

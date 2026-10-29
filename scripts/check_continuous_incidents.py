@@ -102,7 +102,9 @@ async def run(args):
                 if stream_id: break
             if stream_id is None: raise RuntimeError("health worker not ready")
             incident_cmd = ["-m", "scripts.run_incident_worker", "--store", str(store.root), "--stream-id", stream_id, "--native-project", native]
-            consumer = start("incidents", incident_cmd)
+            if args.metrics_otlp_endpoint:
+                incident_cmd += ["--metrics-otlp-endpoint", args.metrics_otlp_endpoint]
+            consumer = start("incidents", [*incident_cmd, "--metrics-instance", "incidents-0"])
             env = {**os.environ, "SENTINELOPS_API_TOKEN": token}
             start("api", ["-m", "uvicorn", "sentinelops.main:app", "--host", "127.0.0.1", "--port", str(args.api_port)], env)
             event("healthy-start")
@@ -117,8 +119,8 @@ async def run(args):
             response.raise_for_status(); event("payment-latency-start")
             await period(160)
             consumer.kill(); consumer.wait(timeout=10); event("consumer-sigkill")
-            consumer = start("incidents-resumed", incident_cmd)
-            start("incidents-competing", incident_cmd)
+            consumer = start("incidents-resumed", [*incident_cmd, "--metrics-instance", "incidents-1"])
+            start("incidents-competing", [*incident_cmd, "--metrics-instance", "incidents-2"])
             await period(140)
             response = await client.post("http://127.0.0.1:8002/internal/faults", json=original[8002]); response.raise_for_status()
             event("payment-clear")
@@ -165,11 +167,29 @@ async def run(args):
             response = await client.post(f"http://127.0.0.1:{args.api_port}/v1/detect", json={"schema_version": "1.0", "service": "payment-service",
                 "window_start": "2026-10-29T00:00:00Z", "window_end": "2026-10-29T00:05:00Z", "features": {"latency": 1}})
             assert response.status_code == 503
+            timings = []
+            for log in args.output.glob("incidents*.log"):
+                for line in log.read_text().splitlines():
+                    item = json.loads(line)
+                    if item.get("status") == "COMMITTED": timings.append(item["processing_ms"])
+            assert timings and max(timings) <= 10000, timings
+            metric_groups = None
+            if args.metrics_otlp_endpoint:
+                for _ in range(20):
+                    response = await client.get("http://127.0.0.1:9090/api/v1/query", params={"query": 'sum(sentinelops_incident_groups_total{environment="local"})'})
+                    response.raise_for_status()
+                    values = response.json()["data"]["result"]
+                    if values:
+                        metric_groups = float(values[0]["value"][1])
+                        if metric_groups == len(ids): break
+                    await asyncio.sleep(1)
+                assert metric_groups == len(ids), (metric_groups, len(ids))
             report = {"status": "PASS", "source_commit": commit, "mode": "actual-continuous-local-runtime", "started_at": started_at,
                 "completed_at": timestamp(datetime.now(timezone.utc)), "stream_id": stream_id, "consumer_id": worker.consumer_id,
                 "incidents": snapshots, "accepted_consumer_buckets": len(batches), "health_signals": len(signals),
                 "unknown_decisions": sum(s["availability"] == "UNKNOWN" for s in signals), "affected_groups": affected,
                 "request_outcomes": outcomes, "interventions": interventions, "commit_refs": [r["commit_ref"] for r in batches],
+                "maximum_consumer_processing_ms": max(timings), "prometheus_incident_groups": metric_groups,
                 "model_outputs_available": False, "actions_allowed": False, "holdout_opened": False}
             snapshot = await ledger_snapshot(pool, stream_id)
             snapshot["consumer_identity"] = worker.identity
@@ -205,6 +225,7 @@ def main():
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--api-port", type=int, default=8008)
+    parser.add_argument("--metrics-otlp-endpoint")
     asyncio.run(run(parser.parse_args()))
 
 

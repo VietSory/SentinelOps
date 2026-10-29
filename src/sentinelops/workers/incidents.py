@@ -16,16 +16,17 @@ import asyncpg
 from sentinelops.contracts import utc_time
 from sentinelops.incidents.correlation import topology_paths
 from sentinelops.incidents.domain import IncidentWrite
-from sentinelops.incidents.rca import validate_policy
+from sentinelops.incidents.rca import validate_policy, evaluate_rca
 from sentinelops.incidents.rca_replay import business_logs, derive_group
 from sentinelops.incidents.repository import IncidentRepository
 from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.health_source import HealthLedgerReader
 from sentinelops.workers.incident_state import advance_groups
+from sentinelops.workers.model_signals import collect_model_signals, add_model_support
 
 
-def evaluate_cluster(store, closed, *, policy, as_of, health_policy, modalities=None):
+def evaluate_cluster(store, closed, *, policy, as_of, health_policy, modalities=None, include_slo_values=False):
     """Reuse native evidence derivation; no experiment truth or invented scores."""
     correlation = closed["correlation"]
     correlation_ref = store.write("manifests", correlation)
@@ -58,12 +59,31 @@ def evaluate_cluster(store, closed, *, policy, as_of, health_policy, modalities=
     results = []
     for group in correlation["groups"]:
         row = derive_group(store, scope, group, policy, as_of, rows, lookup, counts)
+        if include_slo_values:
+            result = row["rca"]
+            facts, availability = deepcopy(result["evidence"]), deepcopy(result["evidence_availability"])
+            for signal_id in group["signal_ids"]:
+                _, signal = signals[signal_id]
+                for ref in signal["evidence_refs"]:
+                    observation = store.read(ref)
+                    values = observation["payload"]
+                    if values is None:
+                        continue
+                    fact = {"type": "metric", "service": signal["service"], "observed_at": observation["bucket_end"],
+                            "source_ref": ref, "fact": f"Accepted SLO observation: p95_latency_ms={values['p95_latency_ms']}; error_rate={values['error_rate']}; latency_limit_ms={health_policy['latency_ms']}; error_rate_limit={health_policy['error_rate']}; SLO rule, not model inference"}
+                    fact["id"] = stable_id({"group_id": group["group_id"], **fact})
+                    if fact["id"] not in availability:
+                        facts.append(fact)
+                        availability[fact["id"]] = max(observation["available_at"], observation["ingested_at"], key=utc_time)
+            row["rca"] = evaluate_rca(correlation, group["group_id"], facts,
+                [{"service": c["service"], "components": c["components"]} for c in result["candidates"]], policy,
+                as_of=as_of, evidence_availability=availability, source_refs=scope["allowed_refs"])
         row["rca_ref"] = store.write("manifests", row["rca"])
         results.append(row)
     return results
 
 
-def incident_commands(consumer_id, closed, results, detected_at):
+def incident_commands(consumer_id, closed, results, detected_at, model_signals=()):
     commands = []
     for row in results:
         result = row["rca"]
@@ -73,6 +93,10 @@ def incident_commands(consumer_id, closed, results, detected_at):
                   "source_ref": row["rca_ref"], "fact": "Continuous SLO consumer; analytical RCA hypotheses; actions_allowed=false; "
                   "IF/XGBoost unavailable; abstention=" + ",".join(result["abstention_reasons"])}
         detail["id"] = stable_id(detail)
+        available_models = [(ref, s) for ref, s in model_signals if s["status"] == "AVAILABLE" and s["service"] in group["affected_services"]]
+        if available_models:
+            detail["fact"] = "Continuous SLO consumer; analytical RCA hypotheses; actions_allowed=false; validated model versions=" + ",".join(sorted({s["inference"]["model_version"] for _, s in available_models}))
+            detail["id"] = stable_id({k: v for k, v in detail.items() if k != "id"})
         evidence = [*deepcopy(result["evidence"]), detail]
         candidates = {c["service"]: c for c in result["candidates"]}
         ranking = [{k: candidates[s][k] for k in ("service", "score", "evidence_refs")} for s in result["ranking"]]
@@ -85,7 +109,10 @@ def incident_commands(consumer_id, closed, results, detected_at):
         for revision, stage in enumerate(("OPEN", "RCA_READY", "ESCALATED")):
             payload = {"schema_version": "1.0", "incident_id": identifier, "detected_at": detected_at,
                        "state": "escalated" if stage == "ESCALATED" else "incident", "severity": row["severity"],
-                       "affected_services": group["affected_services"], "service_signals": [],
+                       "affected_services": group["affected_services"], "service_signals": [
+                           {"service": s["service"], "anomaly_score": s["inference"]["detection"]["anomaly_score"],
+                            "degradation_risk": s["inference"]["risk"]["risk_score"] if s["inference"]["risk"] is not None else None}
+                           for _, s in available_models],
                        "root_cause_ranking": ranking if revision else [], "evidence": evidence}
             command = IncidentWrite(payload, stage, revision, identifier + ":" + stage,
                 "continuous-incident-worker", "verified SLO source; analytical RCA; operator review required", deepcopy(context))
@@ -96,7 +123,7 @@ def incident_commands(consumer_id, closed, results, detected_at):
 
 class IncidentWorker:
     def __init__(self, pool, store: ArtifactStore, stream_id: str, topology: dict,
-                 health_policy: dict, rca_policy: dict, *, evidence_source=None):
+                 health_policy: dict, rca_policy: dict, *, evidence_source=None, model_registry=None):
         validate_policy(rca_policy)
         topology_paths(topology)
         self.pool, self.store = pool, store
@@ -107,10 +134,13 @@ class IncidentWorker:
                          "topology_sha256": stable_id(topology), "health_policy_sha256": stable_id(health_policy),
                          "rca_policy_sha256": stable_id(rca_policy),
                          "evidence_profile": evidence_source.profile if evidence_source else "slo-only/v1"}
+        if model_registry is not None:
+            self.identity["model_release_ref"] = model_registry.identity
         self.consumer_id = stable_id(self.identity)
         lock = int(self.consumer_id[:16], 16)
         self.lock_id = lock if lock < 2**63 else lock - 2**64
         self.evidence_source = evidence_source
+        self.model_registry = model_registry
 
     async def check_ready(self):
         await self.repository.check_ready()
@@ -163,6 +193,8 @@ class IncidentWorker:
         state, closed = await asyncio.to_thread(advance_groups, checkpoint, source["batch"],
             source["signal_objects"], self.topology, self.health_policy)
         modalities = [await asyncio.to_thread(self.evidence_source.capture, self.store, item) if self.evidence_source else None for item in closed]
+        model_signals = await asyncio.to_thread(collect_model_signals, self.store, source["normalization"],
+            bucket_end=state["last_bucket_end"], registry=self.model_registry) if self.model_registry is not None else []
         now = await conn.fetchval("SELECT clock_timestamp()")
         if now < utc_time(source["source_read_at"]):
             raise ValueError("processing clock precedes accepted source read")
@@ -170,15 +202,20 @@ class IncidentWorker:
         results, commands = [], []
         for item, evidence in zip(closed, modalities):
             rows = await asyncio.to_thread(evaluate_cluster, self.store, item, policy=self.rca_policy,
-                as_of=now, health_policy=self.health_policy, modalities=evidence)
+                as_of=now, health_policy=self.health_policy, modalities=evidence, include_slo_values=True)
+            if model_signals:
+                rows = [add_model_support(self.store, row, model_signals, policy=self.rca_policy, as_of=now) for row in rows]
             results.extend(rows)
-            commands.extend(incident_commands(self.consumer_id, item, rows, detected_at))
+            commands.extend(incident_commands(self.consumer_id, item, rows, detected_at, model_signals))
         commit = {"commit_version": "continuous-incidents/v1", "consumer_id": self.consumer_id,
+                  "projection_version": "continuous-ier/v2",
                   "previous_commit_ref": prior_ref, "state": state, "source_batch_ref": state["last_batch_ref"],
                   "processed_at": detected_at, "closed_clusters": closed, "results": results,
                   "modalities": modalities,
                   "commands": [c.__dict__ for c in commands], "raw_health_lineage_verified": True,
-                  "actions_allowed": False, "model_outputs_available": False}
+                  "actions_allowed": False, "model_outputs_available": any(s["status"] == "AVAILABLE" for _, s in model_signals)}
+        if self.model_registry is not None:
+            commit["model_signals"] = model_signals
         commit_ref = self.store.write("manifests", commit)
         async with conn.transaction():
             await conn.execute("""INSERT INTO sentinel_control.incident_consumers(consumer_id,stream_id,identity)

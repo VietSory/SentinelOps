@@ -26,6 +26,10 @@ ERROR_COMPONENTS = frozenset({"source", "database", "artifact", "configuration",
 class WorkerMetrics:
     """A private provider and fixed-cardinality state for one stable replica slot."""
 
+    service_name = "sentinelops-health-worker"
+    meter_name = "sentinelops.workers.health"
+    component_name = "health-worker"
+
     def __init__(self, reader, *, environment: str, instance: str, clock=time.time):
         self.validate_labels(environment, instance)
         self._clock, self._lock = clock, threading.Lock()
@@ -35,11 +39,11 @@ class WorkerMetrics:
         self._source_available: dict[str, int] = {}
         self._closed = False
         self.provider = MeterProvider(metric_readers=[reader], shutdown_on_exit=False,
-            resource=Resource({"service.name": "sentinelops-health-worker",
+            resource=Resource({"service.name": self.service_name,
                                "service.namespace": "sentinelops-control", "deployment.environment": environment}),
             views=[View(instrument_name="sentinelops_worker_processing_duration",
                         aggregation=ExplicitBucketHistogramAggregation(boundaries=(.01, .05, .1, .25, .5, 1., 2., 5., 10., 20.)))])
-        meter = self.provider.get_meter("sentinelops.workers.health", "1")
+        meter = self.provider.get_meter(self.meter_name, "1")
         for name, kind, unit in (
             ("sentinelops_worker_ready", "ready", ""),
             ("sentinelops_worker_heartbeat_unixtime", "heartbeat", "s"),
@@ -75,7 +79,7 @@ class WorkerMetrics:
         exporter = OTLPMetricExporter(endpoint=endpoint, insecure=True, timeout=1.,
             # Empty headers fall back to OTEL_*_HEADERS in the pinned SDK.
             # A truthy noncredential allowlist prevents ambient token forwarding.
-            headers={"x-sentinelops-component": "health-worker"}, compression=Compression.NoCompression,
+            headers={"x-sentinelops-component": cls.component_name}, compression=Compression.NoCompression,
             channel_options=(("grpc.enable_http_proxy", 0),),
             meter_provider=NoOpMeterProvider())
         reader = PeriodicExportingMetricReader(exporter, export_interval_millis=2000, export_timeout_millis=1000)
@@ -156,3 +160,52 @@ class WorkerMetrics:
             self.provider.force_flush(timeout_millis=1000)
         finally:
             self.provider.shutdown(timeout_millis=2000)
+
+
+class IncidentWorkerMetrics(WorkerMetrics):
+    """Same guarded liveness/source gauges, separate service and replica slots."""
+
+    service_name = "sentinelops-incident-worker"
+    meter_name = "sentinelops.workers.incidents"
+    component_name = "incident-worker"
+
+    def __init__(self, reader, **kwargs):
+        super().__init__(reader, **kwargs)
+        meter = self.provider.get_meter(self.meter_name, "1")
+        self._incidents = meter.create_counter("sentinelops_incident_groups")
+        self._abstentions = meter.create_counter("sentinelops_rca_abstentions")
+        self._incidents.add(0, self._attributes)
+        self._abstentions.add(0, self._attributes)
+
+    @staticmethod
+    def validate_labels(environment, instance):
+        if environment not in ENVIRONMENTS or not re.fullmatch(r"incidents-(?:[0-9]|1[0-5])", instance):
+            raise ValueError("incident metrics need an approved environment and incidents-0..incidents-15 slot")
+
+    def observe_result(self, result, store):
+        if result["status"] == "BUSY":
+            self._busy.add(1, self._attributes)
+            return
+        if result["status"] != "COMMITTED":
+            return
+        commit = store.read(result["commit_ref"])
+        state = commit["state"]
+        if (commit["consumer_id"] != result["consumer_id"] or state["last_bucket_end"] != result["bucket_end"]
+            or state["source"]["health_identity"]["environment"] != self._environment):
+            raise ValueError("incident metric input differs from the accepted consumer commit")
+        duration = result["processing_ms"]
+        if type(duration) not in (float, int) or not math.isfinite(duration) or duration < 0:
+            raise ValueError("incident processing duration must be measured finite time")
+        available = {service: int(signal["availability"] == "ELIGIBLE") for service, signal in state["service_states"].items()}
+        if set(available) != set(BUSINESS_ROUTES):
+            raise ValueError("incident metrics lack complete source availability")
+        with self._lock:
+            self._bucket_end = utc_time(result["bucket_end"]).timestamp()
+            self._source_available = available
+        self._committed.add(1, self._attributes)
+        self._duration.record(duration / 1000, self._attributes)
+        self._incidents.add(len(commit["results"]), self._attributes)
+        self._abstentions.add(sum(row["rca"]["abstained"] for row in commit["results"]), self._attributes)
+        for service, value in available.items():
+            if not value:
+                self._unknown.add(1, {**self._attributes, "business_service": service})
