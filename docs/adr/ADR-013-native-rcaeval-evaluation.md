@@ -28,7 +28,10 @@ same integer-second capture interval as metrics. No receipt clock is inferred.
 1. Preflight the entire manifest inventory before any raw/cache bytes. Canonical
    revision paths must match declared case selection and frozen roles. A declared
    development selection cannot conceal another case in a later file, nor can a
-   different dataset label bypass the RCAEval cache guard.
+   different dataset label bypass the RCAEval cache guard. The native consumer
+   additionally requires the exact original selected file set and trusted
+   publisher-verified size/SHA256 inventory; a self-consistent caller manifest
+   cannot authorize replacement bytes.
 2. Stream only the existing three admitted development cases, under the
    [versioned native profile](../../configs/rcaeval_native_profile.json). Preserve
    null/NaN distinctions, integer clocks and string trace/span IDs. Retain raw bytes
@@ -75,3 +78,7 @@ candidate needs its own completed CI and transported evidence.
 [Measured three-case execution](../reports/2026-10-29-rcaeval-native-development.md)
 accounts for all selected cases without quarantine: three abstentions, zero
 qualified predictions and identical repeated business results.
+
+The [source-admission correction](../reports/2026-10-30-rcaeval-source-admission.md)
+locks that inventory without changing the numerical profile, policy or selected
+cases; repeated business outputs remain identical.

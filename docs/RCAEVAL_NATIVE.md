@@ -9,8 +9,12 @@ the GAMMA/RCAEval source contract and the sealed holdout remain unchanged.
 
 `load_native_inputs` admits the complete canonical manifest inventory and frozen
 roles before any source bytes; it also rejects revision symlinks outside the public
-root, undeclared cases and a disguised dataset label. Each file is bounded and
-checked against publisher size/checksum and acquisition SHA256. Parquet is decoded
+root, undeclared cases and a disguised dataset label. The complete selected file set, including shared metadata, must also match the
+[trusted 12-file inventory](../src/sentinelops/public_data/rcaeval_native_inventory.py)
+of the original publisher-verified acquisition. Caller-declared hashes alone cannot
+authorize bytes: additions, omissions, size or SHA drift are rejected before reading
+the first cache file. Each admitted file is bounded and checked against publisher
+size/checksum, acquisition SHA256 and the trusted inventory. Parquet is decoded
 from those retained verified bytes, avoiding a second path read after verification.
 
 `adapt_native_case` accepts only metrics/logs/traces byte buffers. It has no argument
