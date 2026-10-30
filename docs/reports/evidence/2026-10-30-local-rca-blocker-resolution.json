@@ -1,0 +1,1346 @@
+{
+  "capture_source_commit": "1b87950f86eb081a2261a6be374345968f13249b",
+  "verification_code_commit": "d72e654",
+  "mode": "verified raw-source replay of prior real captures, not new live measurement",
+  "replay": [
+    {
+      "artifact": "health-worker-evidence",
+      "capture_source_commit": "1b87950f86eb081a2261a6be374345968f13249b",
+      "result": {
+        "status": "PASS",
+        "verifier_version": "continuous-incident-offline/v1",
+        "mode": "offline-transported-continuous-incident-integrity-replay-not-new-live-evidence",
+        "data_source_commit": "1b87950f86eb081a2261a6be374345968f13249b",
+        "batches": 18,
+        "signals": 54,
+        "jobs": [
+          {
+            "incident_id": "INC-b04284c8f83d18f57fc26a4c34ae45735d9aadab64c261383ffb330a6bfc9492",
+            "group_id": "b04284c8f83d18f57fc26a4c34ae45735d9aadab64c261383ffb330a6bfc9492",
+            "members": [
+              "checkout-service",
+              "payment-service"
+            ],
+            "grouping_reason": "dependency-path",
+            "structural_candidates": [
+              "payment-service"
+            ],
+            "abstention_reasons": [
+              "insufficient-coverage",
+              "insufficient-score"
+            ],
+            "stages": [
+              "OPEN",
+              "RCA_READY",
+              "ESCALATED",
+              "CLOSED"
+            ],
+            "rca_result_ref": "artifact://manifests/3bafb55b5607f73cb78af74161b5c5ff8324cee6983ea729844c668adc7182ae.json"
+          }
+        ],
+        "health_snapshot_sha256": "bcf87dcdb4c2c91e51060dbe230ff5fd35284e4bc3305f5a8ff06010384b4aeb",
+        "incident_snapshot_sha256": "c9bc191887868f975ea95b31bd679303cc926fe2bc835b3ec3943873198fb96c",
+        "actual_receipt_clocks_preserved": true,
+        "externally_bound_health_snapshot": true,
+        "externally_bound_incident_snapshot": true,
+        "new_historical_alert_or_causality_claim": false,
+        "actions_allowed": false
+      }
+    },
+    {
+      "artifact": "incident-s5-independent-latency-evidence",
+      "capture_source_commit": "1b87950f86eb081a2261a6be374345968f13249b",
+      "result": {
+        "status": "PASS",
+        "verifier_version": "continuous-incident-offline/v1",
+        "mode": "offline-transported-continuous-incident-integrity-replay-not-new-live-evidence",
+        "data_source_commit": "1b87950f86eb081a2261a6be374345968f13249b",
+        "batches": 16,
+        "signals": 48,
+        "jobs": [
+          {
+            "incident_id": "INC-c37bd6970964d387af63bb0e574f96c9d2a82d6209d15403084bab6028190ede",
+            "group_id": "c37bd6970964d387af63bb0e574f96c9d2a82d6209d15403084bab6028190ede",
+            "members": [
+              "payment-service"
+            ],
+            "grouping_reason": "single-service",
+            "structural_candidates": [
+              "payment-service"
+            ],
+            "abstention_reasons": [
+              "insufficient-coverage",
+              "insufficient-score"
+            ],
+            "stages": [
+              "OPEN",
+              "RCA_READY",
+              "ESCALATED",
+              "CLOSED"
+            ],
+            "rca_result_ref": "artifact://manifests/4c9185de779846976f6f58961f2d6e5f8af6ed1d4279ff2d4c2140e71b0a1c30.json"
+          },
+          {
+            "incident_id": "INC-35c71da9fa6758f7594bb24c3ec1818a3ab176a486f58e39583253d054323e64",
+            "group_id": "35c71da9fa6758f7594bb24c3ec1818a3ab176a486f58e39583253d054323e64",
+            "members": [
+              "inventory-service"
+            ],
+            "grouping_reason": "single-service",
+            "structural_candidates": [
+              "inventory-service"
+            ],
+            "abstention_reasons": [
+              "insufficient-coverage",
+              "insufficient-score"
+            ],
+            "stages": [
+              "OPEN",
+              "RCA_READY",
+              "ESCALATED",
+              "CLOSED"
+            ],
+            "rca_result_ref": "artifact://manifests/5af2362675390c573a7867be88d26c79c0b7499c2c6e51deefd53fc1df462a89.json"
+          },
+          {
+            "incident_id": "INC-f943d6142c5de573a45547caabfa0efa4973a3076c41d238cdb8a3b79f6d6937",
+            "group_id": "f943d6142c5de573a45547caabfa0efa4973a3076c41d238cdb8a3b79f6d6937",
+            "members": [
+              "checkout-service"
+            ],
+            "grouping_reason": "ambiguous-shared-consumer",
+            "structural_candidates": [
+              "inventory-service",
+              "payment-service"
+            ],
+            "abstention_reasons": [
+              "ambiguous-correlation",
+              "insufficient-coverage",
+              "insufficient-margin",
+              "insufficient-score"
+            ],
+            "stages": [
+              "OPEN",
+              "RCA_READY",
+              "ESCALATED",
+              "CLOSED"
+            ],
+            "rca_result_ref": "artifact://manifests/98695c521ab26d8755080ead46bd9c06cb19ca48881aad166eed3099f3bd7ca2.json"
+          }
+        ],
+        "health_snapshot_sha256": "3f91a1474c3e6468d333f023bc77310b5d3985db214debc16c4b1acaca242d88",
+        "incident_snapshot_sha256": "a3e6c581e0b8bcffdd9aef2f43b387a95e6360e36a77d53771c2c904529aee60",
+        "actual_receipt_clocks_preserved": true,
+        "externally_bound_health_snapshot": true,
+        "externally_bound_incident_snapshot": true,
+        "new_historical_alert_or_causality_claim": false,
+        "actions_allowed": false
+      }
+    },
+    {
+      "artifact": "incident-s5-independent-blocking-errors-evidence",
+      "capture_source_commit": "1b87950f86eb081a2261a6be374345968f13249b",
+      "result": {
+        "status": "PASS",
+        "verifier_version": "continuous-incident-offline/v1",
+        "mode": "offline-transported-continuous-incident-integrity-replay-not-new-live-evidence",
+        "data_source_commit": "1b87950f86eb081a2261a6be374345968f13249b",
+        "batches": 16,
+        "signals": 48,
+        "jobs": [
+          {
+            "incident_id": "INC-bbde7dfb7484f039d6f2d0e7c730fe01eb60608b03bd6cecab57fd8f0685a975",
+            "group_id": "bbde7dfb7484f039d6f2d0e7c730fe01eb60608b03bd6cecab57fd8f0685a975",
+            "members": [
+              "payment-service"
+            ],
+            "grouping_reason": "single-service",
+            "structural_candidates": [
+              "payment-service"
+            ],
+            "abstention_reasons": [
+              "insufficient-coverage",
+              "insufficient-margin",
+              "insufficient-score",
+              "unobserved-dependency-candidates"
+            ],
+            "stages": [
+              "OPEN",
+              "RCA_READY",
+              "ESCALATED",
+              "CLOSED"
+            ],
+            "rca_result_ref": "artifact://manifests/e40290cc8775c5228eb9f42b702d0a8a38a2f57d18791dc953b51cc37d076f95.json"
+          },
+          {
+            "incident_id": "INC-9d9fdc46450d3d9ee02826f0fd0c1c1ee802434c852a875b2e822ea2772a55d1",
+            "group_id": "9d9fdc46450d3d9ee02826f0fd0c1c1ee802434c852a875b2e822ea2772a55d1",
+            "members": [
+              "inventory-service"
+            ],
+            "grouping_reason": "single-service",
+            "structural_candidates": [
+              "inventory-service"
+            ],
+            "abstention_reasons": [
+              "insufficient-coverage",
+              "insufficient-margin",
+              "insufficient-score",
+              "unobserved-dependency-candidates"
+            ],
+            "stages": [
+              "OPEN",
+              "RCA_READY",
+              "ESCALATED",
+              "CLOSED"
+            ],
+            "rca_result_ref": "artifact://manifests/f3aefd34649030ea20233a04bca6c35acd9e78a281193360def83430aae05561.json"
+          },
+          {
+            "incident_id": "INC-ddc8bbc90d5de97a3b8daa65d9717a1659ff0f72a3f2929c26cf2d34974c8aab",
+            "group_id": "ddc8bbc90d5de97a3b8daa65d9717a1659ff0f72a3f2929c26cf2d34974c8aab",
+            "members": [
+              "checkout-service"
+            ],
+            "grouping_reason": "ambiguous-shared-consumer",
+            "structural_candidates": [
+              "inventory-service",
+              "payment-service"
+            ],
+            "abstention_reasons": [
+              "ambiguous-correlation",
+              "insufficient-coverage",
+              "insufficient-margin",
+              "insufficient-score",
+              "unobserved-dependency-candidates"
+            ],
+            "stages": [
+              "OPEN",
+              "RCA_READY",
+              "ESCALATED",
+              "CLOSED"
+            ],
+            "rca_result_ref": "artifact://manifests/c806b8200c591f497c26af4ea71a25b8162a4ddc8dced3cdf9f7d58756a92d29.json"
+          }
+        ],
+        "health_snapshot_sha256": "59cd7a2e8b22017a636a860264f77c2e90fe9aab0a1be77144ecaffd18133aa7",
+        "incident_snapshot_sha256": "52eb4f80c35a16be2bfebbf3c5e7ca0ca88f397860609ea35d896a02a29e4d8d",
+        "actual_receipt_clocks_preserved": true,
+        "externally_bound_health_snapshot": true,
+        "externally_bound_incident_snapshot": true,
+        "new_historical_alert_or_causality_claim": false,
+        "actions_allowed": false
+      }
+    }
+  ],
+  "incidents": [
+    {
+      "capture": "health-worker-evidence",
+      "incident_id": "INC-b04284c8f83d18f57fc26a4c34ae45735d9aadab64c261383ffb330a6bfc9492",
+      "members": [
+        "checkout-service",
+        "payment-service"
+      ],
+      "result": {
+        "abstained": true,
+        "abstention_reasons": [
+          "insufficient-coverage",
+          "insufficient-score"
+        ],
+        "actions_allowed": false,
+        "candidates": [
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "1c3e16fdcca4fb89ec2c30e0a0c4d0ee478fd0442806f0d51572feab738f6ba1",
+                  "57b4577cc48ec75c215c4910920531170e1997a451032454d061497b3fafd69f",
+                  "f29f7e467d04520d987d50e026ec20acce745bb917e759b52a60787d7c399cba"
+                ],
+                "method": "native-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.9896545975205122
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "735ab494b861d189f582359d54098ebe7435e37f1559db8f9193aba89d769d94"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "1c3e16fdcca4fb89ec2c30e0a0c4d0ee478fd0442806f0d51572feab738f6ba1",
+              "57b4577cc48ec75c215c4910920531170e1997a451032454d061497b3fafd69f",
+              "735ab494b861d189f582359d54098ebe7435e37f1559db8f9193aba89d769d94",
+              "f29f7e467d04520d987d50e026ec20acce745bb917e759b52a60787d7c399cba"
+            ],
+            "score": 0.397413649380128,
+            "service": "payment-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "b4c4f9c5bab955b6f71bcd3735b1cd1d296ee477d95bd00f7b86f88ac51dc19f",
+                  "becb088bf4067c74843f1f7119ff588dbb681f9bd5583f4d28d7c389d63d4030",
+                  "e7dc7563fa6892d1e1dcb284c10f9c369aefd8b60e2c89a787429e20a8fa5a79"
+                ],
+                "method": "native-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.004443728160233657
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "3deca982c744dc94d1a61f541615cf1578d0343a562a3d1e8a10f123005ab75a"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "3deca982c744dc94d1a61f541615cf1578d0343a562a3d1e8a10f123005ab75a",
+              "b4c4f9c5bab955b6f71bcd3735b1cd1d296ee477d95bd00f7b86f88ac51dc19f",
+              "becb088bf4067c74843f1f7119ff588dbb681f9bd5583f4d28d7c389d63d4030",
+              "e7dc7563fa6892d1e1dcb284c10f9c369aefd8b60e2c89a787429e20a8fa5a79"
+            ],
+            "score": 0.1511109320400584,
+            "service": "checkout-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "4da9b17772575e9f3db94279519877785ea4593ad9f2cfb89b45420446d94b60",
+                  "5be954c2d920b8c9785608a078ca3e4fe28e0e667a242ec1e1d6ae1a69bf2a6d",
+                  "70e9113386388f9a379e4d9b5ffb85a747ea12fc2e123645a09eabcac96b1590"
+                ],
+                "method": "native-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.0011377568518892297
+              },
+              "log_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no eligible captured business completion evidence",
+                "value": null
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.25,
+            "evidence_refs": [
+              "4da9b17772575e9f3db94279519877785ea4593ad9f2cfb89b45420446d94b60",
+              "5be954c2d920b8c9785608a078ca3e4fe28e0e667a242ec1e1d6ae1a69bf2a6d",
+              "70e9113386388f9a379e4d9b5ffb85a747ea12fc2e123645a09eabcac96b1590"
+            ],
+            "score": 0.0002844392129723074,
+            "service": "rds"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "b07d3ef5f64d57a8c4de2973949b134bda4a844a10421eb706fd1697067cd994",
+                  "bff8448c1151189af2e5b8a6bf8be5736478eb47475f920917889ecf44c37723",
+                  "e26a6a4fc03903e6580fd9c816e8b7b4c5eb838033239b2bfc4a288f09bb4a20"
+                ],
+                "method": "native-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.0004929090371704415
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "80d89d696092a41480e1e42cae52ad529ac8f5da02f0a7827535d777136a5dc6"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 0.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "80d89d696092a41480e1e42cae52ad529ac8f5da02f0a7827535d777136a5dc6",
+              "b07d3ef5f64d57a8c4de2973949b134bda4a844a10421eb706fd1697067cd994",
+              "bff8448c1151189af2e5b8a6bf8be5736478eb47475f920917889ecf44c37723",
+              "e26a6a4fc03903e6580fd9c816e8b7b4c5eb838033239b2bfc4a288f09bb4a20"
+            ],
+            "score": 0.00012322725929261036,
+            "service": "inventory-service"
+          }
+        ],
+        "margin": 0.24630271734006962,
+        "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+        "ranking": [
+          "payment-service",
+          "checkout-service",
+          "rds",
+          "inventory-service"
+        ]
+      }
+    },
+    {
+      "capture": "incident-s5-independent-latency-evidence",
+      "incident_id": "INC-c37bd6970964d387af63bb0e574f96c9d2a82d6209d15403084bab6028190ede",
+      "members": [
+        "payment-service"
+      ],
+      "result": {
+        "abstained": true,
+        "abstention_reasons": [
+          "insufficient-coverage",
+          "insufficient-score"
+        ],
+        "actions_allowed": false,
+        "candidates": [
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "0d04100c973d8a52855ce81e1ac5c0f12f0e966548d4c240216dfee73731e70f",
+                  "56d9f2675926347c23225fd76a58500d8a9f9eb5044aa3ffe254092b3deed8ca",
+                  "b84f2488c787f8897db785e27d3fdc0edd4e825a8877d6e14cd8678ff735de8f"
+                ],
+                "method": "native-direct-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.9991885925342231
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "3172ee713a85fcba980e811aeb0829ed589661aaf0d1fa27fec7f11cc7914592"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "0d04100c973d8a52855ce81e1ac5c0f12f0e966548d4c240216dfee73731e70f",
+              "3172ee713a85fcba980e811aeb0829ed589661aaf0d1fa27fec7f11cc7914592",
+              "56d9f2675926347c23225fd76a58500d8a9f9eb5044aa3ffe254092b3deed8ca",
+              "b84f2488c787f8897db785e27d3fdc0edd4e825a8877d6e14cd8678ff735de8f"
+            ],
+            "score": 0.39979714813355577,
+            "service": "payment-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "00a6f5c5a31a06afa0f709259c9d64a1b403c1a7522a4b6786e9bad0fc26880c",
+                  "81447f93ffe692fb57eb0d039f70ca9c5e8f1226cc3c63d79e0f822775d9277d",
+                  "e514ee562adaa7acb8f85a4cda1db7016a7422e8a4d3cc2d75d40ef2ba236cc2"
+                ],
+                "method": "native-direct-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.0008114074657768477
+              },
+              "log_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no eligible captured business completion evidence",
+                "value": null
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.25,
+            "evidence_refs": [
+              "00a6f5c5a31a06afa0f709259c9d64a1b403c1a7522a4b6786e9bad0fc26880c",
+              "81447f93ffe692fb57eb0d039f70ca9c5e8f1226cc3c63d79e0f822775d9277d",
+              "e514ee562adaa7acb8f85a4cda1db7016a7422e8a4d3cc2d75d40ef2ba236cc2"
+            ],
+            "score": 0.00020285186644421194,
+            "service": "rds"
+          }
+        ],
+        "margin": 0.39959429626711157,
+        "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+        "ranking": [
+          "payment-service",
+          "rds"
+        ]
+      }
+    },
+    {
+      "capture": "incident-s5-independent-latency-evidence",
+      "incident_id": "INC-35c71da9fa6758f7594bb24c3ec1818a3ab176a486f58e39583253d054323e64",
+      "members": [
+        "inventory-service"
+      ],
+      "result": {
+        "abstained": true,
+        "abstention_reasons": [
+          "insufficient-coverage",
+          "insufficient-score"
+        ],
+        "actions_allowed": false,
+        "candidates": [
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "63cdb2d9360270e1754d422c95ffa81f42d9651a3142343b68f5086ec45845ed",
+                  "7939352c7e5e04d6534aacf09aea6de49e38218ad0ef59120d5b465d2c8a0092",
+                  "fd363c0b1535f01ab5825533d85d1ccbba2cb127a87714ceeaa7dad862dd1136"
+                ],
+                "method": "native-direct-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.9994369514410313
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "e69624031c033a0215c2272713715532cd45b5c963a9bb120d99a6ee55ce74c1"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "63cdb2d9360270e1754d422c95ffa81f42d9651a3142343b68f5086ec45845ed",
+              "7939352c7e5e04d6534aacf09aea6de49e38218ad0ef59120d5b465d2c8a0092",
+              "e69624031c033a0215c2272713715532cd45b5c963a9bb120d99a6ee55ce74c1",
+              "fd363c0b1535f01ab5825533d85d1ccbba2cb127a87714ceeaa7dad862dd1136"
+            ],
+            "score": 0.3998592378602578,
+            "service": "inventory-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "96be3e99019767a06acb14840ccb045fb85d7318fe70aa6e7f8faa99224cd2a7",
+                  "be8bde991bfe2910e2976641c3d1540710780a86c4efffd1ff8ec784f8fe94ef",
+                  "d6e249f569a623f42370c2e59f7e31aa3ccfa94b1cac92a5a7d2026bb1b36e8b"
+                ],
+                "method": "native-direct-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.0005630485589687509
+              },
+              "log_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no eligible captured business completion evidence",
+                "value": null
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.25,
+            "evidence_refs": [
+              "96be3e99019767a06acb14840ccb045fb85d7318fe70aa6e7f8faa99224cd2a7",
+              "be8bde991bfe2910e2976641c3d1540710780a86c4efffd1ff8ec784f8fe94ef",
+              "d6e249f569a623f42370c2e59f7e31aa3ccfa94b1cac92a5a7d2026bb1b36e8b"
+            ],
+            "score": 0.00014076213974218772,
+            "service": "rds"
+          }
+        ],
+        "margin": 0.3997184757205156,
+        "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+        "ranking": [
+          "inventory-service",
+          "rds"
+        ]
+      }
+    },
+    {
+      "capture": "incident-s5-independent-latency-evidence",
+      "incident_id": "INC-f943d6142c5de573a45547caabfa0efa4973a3076c41d238cdb8a3b79f6d6937",
+      "members": [
+        "checkout-service"
+      ],
+      "result": {
+        "abstained": true,
+        "abstention_reasons": [
+          "ambiguous-correlation",
+          "insufficient-coverage",
+          "insufficient-margin",
+          "insufficient-score"
+        ],
+        "actions_allowed": false,
+        "candidates": [
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "95fb56541a6786936df57d8d04bc7d6cebdea9c046b0d643eb9f114a6f6323b3",
+                  "bc63742c0e18915c72137e49d2b967bb88e7feb59766597c320b04c23cafe183",
+                  "f07e79c4e1c519975c957ef776dc18ae86f501edb7ee09ebdb9b4c64543a7ae6"
+                ],
+                "method": "native-direct-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.9994369514410313
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "a40953b35d85939a1761517925d2e630c75334de9a64d8d9bb0cfef1f100ba23"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "95fb56541a6786936df57d8d04bc7d6cebdea9c046b0d643eb9f114a6f6323b3",
+              "a40953b35d85939a1761517925d2e630c75334de9a64d8d9bb0cfef1f100ba23",
+              "bc63742c0e18915c72137e49d2b967bb88e7feb59766597c320b04c23cafe183",
+              "f07e79c4e1c519975c957ef776dc18ae86f501edb7ee09ebdb9b4c64543a7ae6"
+            ],
+            "score": 0.3998592378602578,
+            "service": "inventory-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "1dd06085bbc354dd8655d08a166dbf8a5fddd8970a87d7f04b8c75175d16d3af",
+                  "68b637c5d64aa09d5f78bce0558c2a69a2173cb1cd5f2cee1004c116399c10ad",
+                  "75977154a2b139065ac630152964a6a2859eadd459d7787ac1ddf56230fae3d1"
+                ],
+                "method": "native-direct-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.9991885925342231
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "d15ec52db1ed6f9b2ff0e4426fb5c02f1648cb31842bb1b43123f5cbaf78ef70"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "1dd06085bbc354dd8655d08a166dbf8a5fddd8970a87d7f04b8c75175d16d3af",
+              "68b637c5d64aa09d5f78bce0558c2a69a2173cb1cd5f2cee1004c116399c10ad",
+              "75977154a2b139065ac630152964a6a2859eadd459d7787ac1ddf56230fae3d1",
+              "d15ec52db1ed6f9b2ff0e4426fb5c02f1648cb31842bb1b43123f5cbaf78ef70"
+            ],
+            "score": 0.39979714813355577,
+            "service": "payment-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "285b0ee30546c510cd3d3cb572cc0b276412d56b36851499f62f7739a796eb21",
+                  "a73e30f05247a053186707e4bbb14065103417d9ed31b32ba43c921f78fb85ca",
+                  "d0c45a9f01a4ca4540c9a35442d3a0e2c18e6cf2c79ff3ce2e80ee976c9077f4"
+                ],
+                "method": "native-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.0033851489842608865
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "e274644253b2df515ac93710ea4174e516c4c439fb7dd9d0d17e655e32853587"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "285b0ee30546c510cd3d3cb572cc0b276412d56b36851499f62f7739a796eb21",
+              "a73e30f05247a053186707e4bbb14065103417d9ed31b32ba43c921f78fb85ca",
+              "d0c45a9f01a4ca4540c9a35442d3a0e2c18e6cf2c79ff3ce2e80ee976c9077f4",
+              "e274644253b2df515ac93710ea4174e516c4c439fb7dd9d0d17e655e32853587"
+            ],
+            "score": 0.15084628724606522,
+            "service": "checkout-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "5e1f4ca60fcd7bb94d1378fe58e74d7f3981f11c831ccdbc03216fb266966410",
+                  "6075e0fa7e87f6793d1d6807b431100fac3cda0ce8b9a5f18bf5f1fe198cf209",
+                  "66e503f436725f4f14dd46f1f8c0e00519f38ca44689125f32c3aeda27ca4717",
+                  "c812ccb2e730ff8bd053835ba89b8da276f6ccd4a9ac30fd89f8f631bbdd233a",
+                  "ea02bc4775f552786084078d19385453a67482bd7bdd5cf7546e60bf96a6b602",
+                  "ee58fb775f467d043ffd75a044ce6c7f4f9770422eb7f36955a0e6032db4c0f0"
+                ],
+                "method": "native-direct-span-duration-share/v1",
+                "missing_reason": null,
+                "value": 0.000671377685480493
+              },
+              "log_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no eligible captured business completion evidence",
+                "value": null
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.25,
+            "evidence_refs": [
+              "5e1f4ca60fcd7bb94d1378fe58e74d7f3981f11c831ccdbc03216fb266966410",
+              "6075e0fa7e87f6793d1d6807b431100fac3cda0ce8b9a5f18bf5f1fe198cf209",
+              "66e503f436725f4f14dd46f1f8c0e00519f38ca44689125f32c3aeda27ca4717",
+              "c812ccb2e730ff8bd053835ba89b8da276f6ccd4a9ac30fd89f8f631bbdd233a",
+              "ea02bc4775f552786084078d19385453a67482bd7bdd5cf7546e60bf96a6b602",
+              "ee58fb775f467d043ffd75a044ce6c7f4f9770422eb7f36955a0e6032db4c0f0"
+            ],
+            "score": 0.00016784442137012326,
+            "service": "rds"
+          }
+        ],
+        "margin": 6.208972670201929e-05,
+        "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+        "ranking": [
+          "inventory-service",
+          "payment-service",
+          "checkout-service",
+          "rds"
+        ]
+      }
+    },
+    {
+      "capture": "incident-s5-independent-blocking-errors-evidence",
+      "incident_id": "INC-bbde7dfb7484f039d6f2d0e7c730fe01eb60608b03bd6cecab57fd8f0685a975",
+      "members": [
+        "payment-service"
+      ],
+      "result": {
+        "abstained": true,
+        "abstention_reasons": [
+          "insufficient-coverage",
+          "insufficient-margin",
+          "insufficient-score",
+          "unobserved-dependency-candidates"
+        ],
+        "actions_allowed": false,
+        "candidates": [
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "0b63099e48999d7a59e096f0210f333b73e8d6f6e0ea1c98c7a07c5544665609",
+                  "4dc7e6de519fe70d0c9d5d29f3b476afaedbebc23f346806308de0393f027514",
+                  "f13ff41f051df0054e025e26d1f2a4b13c1d678f7dfc2f5f658f2b039cf59960"
+                ],
+                "method": "native-span-terminal-error/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "bad2607085fea6a182d0d05241f60b81b2caca0554ccfcb7eb577b65d350ff02"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "0b63099e48999d7a59e096f0210f333b73e8d6f6e0ea1c98c7a07c5544665609",
+              "4dc7e6de519fe70d0c9d5d29f3b476afaedbebc23f346806308de0393f027514",
+              "bad2607085fea6a182d0d05241f60b81b2caca0554ccfcb7eb577b65d350ff02",
+              "f13ff41f051df0054e025e26d1f2a4b13c1d678f7dfc2f5f658f2b039cf59960"
+            ],
+            "score": 0.4,
+            "service": "payment-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no usable in-window timing-verified failing trace",
+                "value": null
+              },
+              "log_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no eligible captured business completion evidence",
+                "value": null
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.0,
+            "evidence_refs": [],
+            "score": null,
+            "service": "rds"
+          }
+        ],
+        "margin": null,
+        "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+        "ranking": [
+          "payment-service"
+        ]
+      }
+    },
+    {
+      "capture": "incident-s5-independent-blocking-errors-evidence",
+      "incident_id": "INC-9d9fdc46450d3d9ee02826f0fd0c1c1ee802434c852a875b2e822ea2772a55d1",
+      "members": [
+        "inventory-service"
+      ],
+      "result": {
+        "abstained": true,
+        "abstention_reasons": [
+          "insufficient-coverage",
+          "insufficient-margin",
+          "insufficient-score",
+          "unobserved-dependency-candidates"
+        ],
+        "actions_allowed": false,
+        "candidates": [
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "333210d5807120740c8444978edcfdc23cfa9bf94983d3b55e0ae0480b9bf996",
+                  "3cf7af90876db1d7babb052f9d5b57f18900e6d009087d1a02060fa688c7e98f",
+                  "7c4c135c9d4ef2a0e22ca292039c72f329b1f0357bc1a7fab978b0946b690519"
+                ],
+                "method": "native-span-terminal-error/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "d1af254b129d97977689056999fef641c3bfe1ec05c3e8b2135e4d2024bb5af2"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "333210d5807120740c8444978edcfdc23cfa9bf94983d3b55e0ae0480b9bf996",
+              "3cf7af90876db1d7babb052f9d5b57f18900e6d009087d1a02060fa688c7e98f",
+              "7c4c135c9d4ef2a0e22ca292039c72f329b1f0357bc1a7fab978b0946b690519",
+              "d1af254b129d97977689056999fef641c3bfe1ec05c3e8b2135e4d2024bb5af2"
+            ],
+            "score": 0.4,
+            "service": "inventory-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no usable in-window timing-verified failing trace",
+                "value": null
+              },
+              "log_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no eligible captured business completion evidence",
+                "value": null
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.0,
+            "evidence_refs": [],
+            "score": null,
+            "service": "rds"
+          }
+        ],
+        "margin": null,
+        "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+        "ranking": [
+          "inventory-service"
+        ]
+      }
+    },
+    {
+      "capture": "incident-s5-independent-blocking-errors-evidence",
+      "incident_id": "INC-ddc8bbc90d5de97a3b8daa65d9717a1659ff0f72a3f2929c26cf2d34974c8aab",
+      "members": [
+        "checkout-service"
+      ],
+      "result": {
+        "abstained": true,
+        "abstention_reasons": [
+          "ambiguous-correlation",
+          "insufficient-coverage",
+          "insufficient-margin",
+          "insufficient-score",
+          "unobserved-dependency-candidates"
+        ],
+        "actions_allowed": false,
+        "candidates": [
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "434b76ae06e6524dea3417805cf39ad427f095ff38a3a1119335568c4527f9de",
+                  "4f7cc622293b83ab991798a18433f2387aa4475b4ea81b9606c4bc9f247c0c46",
+                  "d5135fa349a648a6c82125d20a3edd84d4a3f56a51451d9a5a380ec599daf86e"
+                ],
+                "method": "native-span-terminal-error/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "08fe9c9a939034aea2a27dcd34cd120f8adf983f5699ae9a4b60e75249ea62ff"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "08fe9c9a939034aea2a27dcd34cd120f8adf983f5699ae9a4b60e75249ea62ff",
+              "434b76ae06e6524dea3417805cf39ad427f095ff38a3a1119335568c4527f9de",
+              "4f7cc622293b83ab991798a18433f2387aa4475b4ea81b9606c4bc9f247c0c46",
+              "d5135fa349a648a6c82125d20a3edd84d4a3f56a51451d9a5a380ec599daf86e"
+            ],
+            "score": 0.4,
+            "service": "inventory-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [
+                  "063d4a1b1362708902dc3726ecf6321ad5c6e8752fc5ad673378d8a3769b6d7f",
+                  "60816feb43cc4c97adc112b271eb17fcb1c903f9d3c67930f0eca6f43e18ba48",
+                  "9426415f29babe06b1e4e5a4575747a824867f50f01ea2099a56ce15144bf384"
+                ],
+                "method": "native-span-terminal-error/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "164f66fcb9da30a99b68cbfa1e3e7619fd56eef253a220764fdc4c626ddbfce4"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.4,
+            "evidence_refs": [
+              "063d4a1b1362708902dc3726ecf6321ad5c6e8752fc5ad673378d8a3769b6d7f",
+              "164f66fcb9da30a99b68cbfa1e3e7619fd56eef253a220764fdc4c626ddbfce4",
+              "60816feb43cc4c97adc112b271eb17fcb1c903f9d3c67930f0eca6f43e18ba48",
+              "9426415f29babe06b1e4e5a4575747a824867f50f01ea2099a56ce15144bf384"
+            ],
+            "score": 0.4,
+            "service": "payment-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no usable in-window timing-verified failing trace",
+                "value": null
+              },
+              "log_support": {
+                "evidence_refs": [
+                  "a5aebe5769b2be6bf3a14425fc4fe30ab96a986872e803f7a50fa126605164d4"
+                ],
+                "method": "business-completion-support/v1",
+                "missing_reason": null,
+                "value": 1.0
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.15,
+            "evidence_refs": [
+              "a5aebe5769b2be6bf3a14425fc4fe30ab96a986872e803f7a50fa126605164d4"
+            ],
+            "score": 0.15,
+            "service": "checkout-service"
+          },
+          {
+            "components": {
+              "anomaly_strength": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no compatible IF/infra observation in this source scope",
+                "value": null
+              },
+              "dependency_trace_relevance": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no usable in-window timing-verified failing trace",
+                "value": null
+              },
+              "log_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no eligible captured business completion evidence",
+                "value": null
+              },
+              "recent_change_support": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "no observed deployment/config event; controls are not change evidence",
+                "value": null
+              },
+              "temporal_precedence": {
+                "evidence_refs": [],
+                "method": "unavailable/v1",
+                "missing_reason": "overlapping onset intervals or no observed onset",
+                "value": null
+              }
+            },
+            "coverage": 0.0,
+            "evidence_refs": [],
+            "score": null,
+            "service": "rds"
+          }
+        ],
+        "margin": 0.0,
+        "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+        "ranking": [
+          "inventory-service",
+          "payment-service",
+          "checkout-service"
+        ]
+      }
+    }
+  ]
+}
