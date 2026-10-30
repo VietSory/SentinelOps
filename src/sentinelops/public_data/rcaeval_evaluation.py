@@ -1,20 +1,137 @@
-"""Native RCAEval development only; truth never enters diagnostic scoring."""
+"""Execute telemetry-only diagnostics before joining any evaluator labels."""
 from __future__ import annotations
 
+import json
 from collections import Counter
 from copy import deepcopy
 from datetime import datetime, timezone
-import hashlib
-import json
-from pathlib import Path
 import re
-
 from sentinelops.incidents.rca import COMPONENTS, rank_native_support, unavailable
-from sentinelops.public_data.audit import load_verified_manifest, require_verified_file
-from sentinelops.public_data.rcaeval_partitions import require_cases, read_index
 from sentinelops.telemetry.core import stable_id, timestamp
+from pathlib import Path
+
+from sentinelops.incidents.native_rca import evaluate_native
+from sentinelops.public_data.rcaeval_native import NativeSourceError, adapt_native_case, digest, load_native_inputs
+from sentinelops.public_data.rcaeval_partitions import INSPECTED, REVISION, canonical, read_index
 
 
+def evaluate_manifest(manifest_path: Path, profile: dict, policy: dict, *, source_commit: str,
+                      include_ablations: bool = False) -> dict:
+    manifest, inputs = load_native_inputs(manifest_path, profile)
+    if set(inputs) != set(INSPECTED):
+        raise ValueError("measured native evaluation must account for all three predeclared cases")
+    business = {}
+    quarantined = {}
+    for case, tables in sorted(inputs.items()):
+        try:
+            scope = adapt_native_case(tables, profile)
+            business[case] = {"observations": scope, "diagnosis": evaluate_native(scope, policy)}
+        except NativeSourceError as exc:
+            # Adapter reasons are fixed strings; arbitrary parser exceptions fail the run.
+            quarantined[case] = str(exc)
+    # Supplemental comparisons reuse the same admitted source and fixed interval.
+    # Compute them before any ground-truth metadata can enter this evaluator.
+    ablations = {case: diagnose_ablations(value["observations"], policy)
+                 for case, value in business.items()} if include_ablations else {}
+    frozen = canonical(business)
+    frozen_ablations = canonical(ablations)
+    # The label reader cannot participate in selecting windows, candidates or scoring.
+    rows, _ = read_index(manifest_path)
+    labels = {row["case"]: row for row in rows if row["case"] in inputs}
+    if set(labels) != set(inputs):
+        raise ValueError("evaluator labels do not account for every selected case")
+    results, qualified, correct = [], 0, 0
+    for case in sorted(inputs):
+        row = labels[case]
+        detail = {"case": case, "role": "development", "ground_truth_service": row["root_cause_service"],
+                  "label_clock_in_capture": row["time_start"] <= row["inject_time"] <= row["time_end"]}
+        if case in quarantined:
+            detail.update({"status": "QUARANTINED", "reason": quarantined[case]})
+        else:
+            value = business[case]
+            diagnosis = value["diagnosis"]
+            prediction = diagnosis["qualified_root"]
+            qualified += prediction is not None
+            correct += prediction is not None and prediction == row["root_cause_service"]
+            detail.update({"status": "EVALUATED", **value,
+                           "ground_truth_in_native_entities": row["root_cause_service"] in value["observations"]["entities"],
+                           "qualified_correct": prediction == row["root_cause_service"] if prediction is not None else None})
+        results.append(detail)
+    if frozen != canonical(business) or frozen_ablations != canonical(ablations):
+        raise ValueError("business result changed during evaluator label join")
+    evaluated = len(business)
+    abstained = sum(value["diagnosis"]["abstained"] for value in business.values())
+    report = {"evaluation_version": "rcaeval-native-development/v1", "source_commit": source_commit,
+            "source_revision": REVISION, "source_manifest_sha256": manifest_path.stem,
+            "profile_sha256": digest(profile), "policy_sha256": digest(policy),
+            "business_results_sha256": digest(json.loads(frozen)),
+            "status": "PASS" if evaluated == len(inputs) else "INCOMPLETE",
+            "denominators": {"selected": len(inputs), "evaluated": evaluated, "quarantined": len(quarantined),
+                             "abstained": abstained, "qualified": qualified, "qualified_correct": correct},
+            "conditional_qualified_accuracy": correct / qualified if qualified else None,
+            "abstention_rate": abstained / evaluated if evaluated else None,
+            "cases": results, "holdout_opened": False, "ml_fitting_allowed": False,
+            "independent_sessions_established": False, "full_G4_accepted": False, "actions_allowed": False,
+            "limitations": ["Three previously inspected OB development cases; no independent heldout quality estimate.",
+                            "PASS describes source-to-policy execution, not RCA accuracy or operational readiness.",
+                            "Event-time windows have no verified source receipt clocks or SLO opening/onset evidence.",
+                            "Native span work fractions and lexical exception markers are research-only support.",
+                            "Recorded parent links are observations, not a complete topology or causal graph.",
+                            "No healthy inference, HTTP RED mapping, approved anomaly model or precursor labels."]}
+    if include_ablations:
+        report["ablations"] = ablations
+        report["metrics"] = summarize_ablations(ablations, labels)
+    return report
+
+
+def diagnose_ablations(scope: dict, policy: dict) -> dict:
+    """Remove actually observed support; never introduce unavailable modalities."""
+    results = {"native-traces-and-logs": evaluate_native(scope, policy)}
+    for name, field in (("without-native-logs", "log_support"),
+                        ("without-native-traces", "trace_support")):
+        ablated = deepcopy(scope)
+        ablated[field] = {}
+        ablated["scope_sha256"] = digest({k: v for k, v in ablated.items() if k != "scope_sha256"})
+        results[name] = evaluate_native(ablated, policy)
+    return results
+
+
+def summarize_ablations(ablations: dict, labels: dict) -> dict:
+    metrics = {}
+    for name in ("native-traces-and-logs", "without-native-logs", "without-native-traces"):
+        ranks, coverage, abstained, qualified = [], [], 0, 0
+        for case in sorted(labels):
+            result = ablations.get(case, {}).get(name)
+            ranking = result["diagnostic_ranking"] if result else []
+            root = labels[case]["root_cause_service"]
+            ranks.append(ranking.index(root) + 1 if root in ranking else None)
+            coverage.append(max((c["coverage"] for c in result["candidates"]), default=0) if result else None)
+            abstained += bool(result and result["abstained"])
+            qualified += bool(result and result["qualified_root"] is not None)
+        n = len(labels)
+        metrics[name] = {"selected_cases": n, "evaluated_cases": len(ablations),
+            "top1": sum(r == 1 for r in ranks) / n if n else None,
+            "top3": sum(r is not None and r <= 3 for r in ranks) / n if n else None,
+            "mrr": sum(1 / r for r in ranks if r) / n if n else None,
+            "abstentions": abstained, "abstention_rate": abstained / n if n else None,
+            "qualified_predictions": qualified, "maximum_candidate_coverage_per_case": coverage,
+            "ranking_metrics_include_abstained_hypotheses": True,
+            "independent_sessions_established": False, "confidence_interval": None}
+    return metrics
+
+
+def evaluate_development(manifest_path: Path, profile: dict, policy: dict) -> dict:
+    """Supplemental ablations of the ADR-013 canonical admitted development path."""
+    from sentinelops.public_data.rcaeval_partitions import require_cases
+    roles = require_cases(profile.get("cases", INSPECTED))
+    if any(role != "development" for role in roles.values()):
+        raise ValueError("native development evaluator rejects validation and sealed holdout before raw access")
+    return evaluate_manifest(manifest_path, profile, policy, source_commit="recorded-by-caller",
+                             include_ablations=True)
+
+
+# Pure compatibility helper for the pre-ADR-013 recorded log-only experiment.
+# Current manifest execution uses the canonical bounded native adapter above.
 def diagnose_native(metric_times, metric_columns, log_rows, trace_rows, config, policy, source_refs):
     """Only telemetry and declared source config; no case/fault/root/injection input."""
     cutoff = max(metric_times)
@@ -75,53 +192,3 @@ def diagnose_native(metric_times, metric_columns, log_rows, trace_rows, config, 
         "missing_evidence": ["compatible IF/risk model", "verified SLO episode onset", "native duration/span-kind semantics",
                              "original receipt clocks", "observed deployment events", "native infrastructure capacity semantics"],
         "metric_values_not_used_as_IF": True, "trace_edges_not_scored_as_causal": True, "actions_allowed": False}
-
-
-def evaluate_development(manifest_path: Path, config: dict, policy: dict):
-    import pyarrow.parquet as pq
-    roles = require_cases(config["cases"])
-    if any(role != "development" for role in roles.values()) or config.get("holdout_opened") is not False:
-        raise ValueError("native development evaluator rejects validation and sealed holdout before raw access")
-    index, _ = read_index(manifest_path)
-    manifest, files = load_verified_manifest(manifest_path)
-    if set(manifest["selection"]) != set(config["cases"]):
-        raise ValueError("native evaluation source scope differs from predeclared development cases")
-    root = manifest_path.parent.parent / "rcaeval" / manifest["revision"]
-    diagnostics = []
-    for name in config["cases"]:
-        directory = root / name
-        metric = pq.read_table(require_verified_file(files, directory / "metrics.parquet"))
-        log_path, trace_path = directory / "logs.parquet", directory / "traces.parquet"
-        logs = pq.read_table(require_verified_file(files, log_path)).to_pylist() if log_path.resolve() in files.values() else []
-        traces = pq.read_table(require_verified_file(files, trace_path)).to_pylist() if trace_path.resolve() in files.values() else []
-        refs = {key: "public-file-sha256://" + hashlib.sha256(path.read_bytes()).hexdigest() for key, path in
-                (("metrics", directory / "metrics.parquet"), ("logs", log_path), ("traces", trace_path)) if path.resolve() in files.values()}
-        diagnostic = diagnose_native(metric["time"].to_pylist(), [c for c in metric.column_names if c != "time"], logs, traces, config, policy, refs)
-        diagnostics.append({"case": name, "diagnostic": diagnostic})
-    # Scoring is finished before evaluator-only metadata is joined.
-    truth = {row["case"]: row for row in index}
-    results = {}
-    for ablation in ("native-error-log-support", "without-native-log-support"):
-        correct1, correct3, reciprocal, abstentions, coverage = 0, 0, 0., 0, []
-        for row in diagnostics:
-            result = row["diagnostic"]["ablations"][ablation]
-            ranking = result["ranking"]
-            root_service = truth[row["case"]]["root_cause_service"]
-            rank = ranking.index(root_service) + 1 if root_service in ranking else None
-            correct1 += rank == 1; correct3 += rank is not None and rank <= 3
-            reciprocal += 1 / rank if rank else 0
-            abstentions += result["abstained"]
-            coverage.append(max((c["coverage"] for c in result["candidates"]), default=0))
-        n = len(diagnostics)
-        results[ablation] = {"cases": n, "top1": correct1 / n, "top3": correct3 / n, "mrr": reciprocal / n,
-            "abstentions": abstentions, "abstention_rate": abstentions / n, "maximum_candidate_coverage_per_case": coverage,
-            "independent_sessions_established": False, "confidence_interval": None}
-    return {"evaluation_version": "rcaeval-native-development/v1", "source_manifest_sha256": manifest_path.stem,
-            "config_sha256": stable_id(config), "policy_sha256": stable_id(policy), "cases": diagnostics, "metrics": results,
-            "holdout_opened": False, "model_outputs_available": False, "full_G4_accepted": False, "actions_allowed": False,
-            "limitations": ["Three previously inspected development cases, not independent or final accuracy trials.",
-                "Rankings are weak native error-log presence hypotheses, including abstentions in every denominator.",
-                "Metrics are read for timestamps/service scope; no numeric channel is mislabelled IF inference.",
-                "Native parent edges are retained but unsupported duration/span-kind semantics receive no trace weight.",
-                "Topology-only/all-ML comparisons unavailable; only actual log evidence is ablated.",
-                "Cascade/independent-failure accuracy is not established by these three single-root development cases."]}

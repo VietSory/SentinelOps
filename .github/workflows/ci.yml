@@ -29,11 +29,11 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -e '.[ml,dev]'
-      - run: pytest -q tests/test_public_data*.py tests/test_gamma*.py tests/test_training_data_policy.py tests/test_rcaeval_partitions.py tests/test_ml_pipeline.py tests/test_model_signals.py tests/test_rcaeval_evaluation.py
+      - run: pytest -q tests/test_public_data*.py tests/test_gamma*.py tests/test_training_data_policy.py tests/test_rcaeval*.py tests/test_ml_pipeline.py tests/test_model_signals.py
       - name: Verify pinned publisher data and audit real Parquet tables
         run: |
           python - <<'PY'
-          import json
+          import json, subprocess, sys
           from pathlib import Path
           import httpx
           from sentinelops.public_data.downloads import download_rcaeval
@@ -53,13 +53,20 @@ jobs:
           output=Path('artifacts/public-data/source-audit.json')
           output.parent.mkdir(parents=True,exist_ok=True)
           output.write_text(json.dumps(report,indent=2))
+          subprocess.run([sys.executable,'-m','scripts.evaluate_rcaeval_native',
+              '--manifest',selected['manifest_path'],
+              '--output','artifacts/public-data/rcaeval-native.json'],check=True)
+          native=json.loads(Path('artifacts/public-data/rcaeval-native.json').read_text())
+          assert native['denominators']=={'selected':3,'evaluated':3,'quarantined':0,'abstained':3,'qualified':0,'qualified_correct':0}
+          assert native['repeat_identical'] and native['conditional_qualified_accuracy'] is None
+          assert native['holdout_opened'] is False and native['full_G4_accepted'] is False
           print('PINNED PUBLIC DATA SOURCE AUDIT: PASS')
           from sentinelops.public_data.rcaeval_evaluation import evaluate_development
           native=evaluate_development(Path(selected['manifest_path']),
-              json.loads(Path('configs/rcaeval_development_evidence.json').read_text()),
+              json.loads(Path('configs/rcaeval_native_profile.json').read_text()),
               json.loads(Path('configs/rca_policy.json').read_text()))
           assert native['holdout_opened'] is False and native['full_G4_accepted'] is False
-          assert native['metrics']['native-error-log-support']['abstentions']==3
+          assert native['metrics']['native-traces-and-logs']['abstentions']==3
           Path('artifacts/public-data/rcaeval-native-development.json').write_text(json.dumps(native,indent=2)+'\n')
           print('NATIVE DEVELOPMENT EVIDENCE EVALUATED; NO DIAGNOSTIC QUALITY GATE ACCEPTED')
           PY

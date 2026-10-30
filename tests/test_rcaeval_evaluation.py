@@ -38,3 +38,36 @@ def test_native_development_rejects_other_roles_before_any_raw_access(tmp_path, 
     config["cases"] = next(g["cases"][:1] for g in load_partitions()["assignments"] if g["role"] == role)
     with pytest.raises(ValueError):
         evaluate_development(tmp_path / "nonexistent-manifest.json", config, POLICY)
+
+
+def test_canonical_ablations_remove_only_observed_support_and_preserve_policy():
+    pa = pytest.importorskip("pyarrow")
+    import pyarrow.parquet as pq
+    from sentinelops.public_data.rcaeval_native import adapt_native_case
+    from sentinelops.public_data.rcaeval_evaluation import diagnose_ablations, summarize_ablations
+
+    def parquet(table):
+        sink = pa.BufferOutputStream()
+        pq.write_table(table, sink)
+        return sink.getvalue().to_pybytes()
+
+    profile = json.loads(Path("configs/rcaeval_native_profile.json").read_text())
+    scope = adapt_native_case({
+        "metrics": parquet(pa.table({"time": pa.array([1000, 1001], type=pa.int64()),
+                                    "native_cpu": pa.array([1., 2.], type=pa.float64())})),
+        "logs": parquet(pa.table({"timestamp": pa.array([1001], type=pa.int64()),
+                                  "container_name": pa.array(["native"], type=pa.large_string()),
+                                  "message": pa.array(["RuntimeException"], type=pa.large_string())}))}, profile)
+    before = deepcopy(scope)
+    results = diagnose_ablations(scope, POLICY)
+    assert scope == before
+    full = results["native-traces-and-logs"]
+    assert full["candidates"][0]["score"] == .15 and full["abstained"]
+    assert results["without-native-logs"]["diagnostic_ranking"] == []
+    assert results["without-native-traces"]["candidates"] == full["candidates"]
+    assert all(value["qualified_root"] is None for value in results.values())
+    metrics = summarize_ablations({"fixture": results}, {"fixture": {"root_cause_service": "native"},
+        "quarantined": {"root_cause_service": "absent"}})
+    assert metrics["native-traces-and-logs"]["top1"] == .5
+    assert metrics["native-traces-and-logs"]["qualified_predictions"] == 0
+    assert metrics["native-traces-and-logs"]["maximum_candidate_coverage_per_case"] == [.15, None]

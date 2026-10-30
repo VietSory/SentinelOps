@@ -43,7 +43,8 @@ def unavailable(reason="not-observed") -> dict:
     return {"value": None, "method": "unavailable/v1", "evidence_refs": [], "missing_reason": reason}
 
 
-def _score(components: dict, facts: dict, service: str, policy: dict) -> tuple[float | None, float, list[str]]:
+def _score(components: dict, facts: dict, service: str, policy: dict, *, methods: dict | None = None) -> tuple[float | None, float, list[str]]:
+    methods = METHODS if methods is None else methods
     if not isinstance(components, dict) or set(components) != set(COMPONENTS):
         raise ValueError("RCA candidate requires all component slots, including explicit missing values")
     score, coverage, support = 0., 0., set()
@@ -60,7 +61,7 @@ def _score(components: dict, facts: dict, service: str, policy: dict) -> tuple[f
             continue
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1 or not math.isfinite(value):
             raise ValueError("RCA component values must be finite numbers in [0,1]")
-        if not isinstance(card["method"], str) or card["method"] not in METHODS[name] or card["missing_reason"] is not None or not refs or not set(refs) <= facts.keys():
+        if not isinstance(card["method"], str) or card["method"] not in methods[name] or card["missing_reason"] is not None or not refs or not set(refs) <= facts.keys():
             raise ValueError("RCA component method/evidence does not resolve")
         types = {facts[ref]["type"] for ref in refs}
         required = {"anomaly_strength": "model" if card["method"] == "if-normalized-score/v1" else "metric",

@@ -39,6 +39,9 @@ from sentinelops.public_data.cohort import load_cohort_manifest
 from sentinelops.public_data.admission import admit_case, session_groups
 from sentinelops.public_data.dataset import build_grouped_dataset
 from sentinelops.public_data.rcaeval_partitions import group_metadata, require_cases
+from sentinelops.public_data.rcaeval_native import adapt_native_case, load_native_inputs, validate_profile
+from sentinelops.public_data.rcaeval_evaluation import evaluate_manifest
+from sentinelops.incidents.native_rca import evaluate_native
 from sentinelops.workers.health import HealthWorker, latest_bucket
 from sentinelops.workers.health_source import HealthLedgerReader
 from sentinelops.workers.incident_state import advance_groups

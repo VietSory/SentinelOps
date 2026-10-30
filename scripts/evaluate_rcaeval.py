@@ -10,7 +10,7 @@ from sentinelops.public_data.rcaeval_evaluation import evaluate_development
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--config", type=Path, default=Path("configs/rcaeval_development_evidence.json"))
+    parser.add_argument("--config", type=Path, default=Path("configs/rcaeval_native_profile.json"))
     parser.add_argument("--policy", type=Path, default=Path("configs/rca_policy.json"))
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()

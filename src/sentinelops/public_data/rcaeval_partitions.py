@@ -111,6 +111,48 @@ def require_cases(cases: list[str], partition: dict | None = None) -> dict[str, 
     return {name: roles[name] for name in cases}
 
 
+def require_manifest_files(manifest: dict, public_root: Path) -> list[Path]:
+    """Preflight the entire cache inventory before opening even its first file.
+
+    A development selection cannot hide a different case in a later record.
+    Source paths remain bound to the canonical pinned revision and case names.
+    """
+    selection = manifest.get("selection", [])
+    if (not isinstance(selection, list) or not selection or any(not isinstance(c, str) for c in selection)
+        or len(set(selection)) != len(selection)):
+        raise ValueError("RCAEval manifest selection requires unique case names")
+    require_cases(selection)
+    records = manifest.get("files")
+    if not isinstance(records, list) or not records:
+        raise ValueError("RCAEval manifest requires its selected file inventory")
+    base = public_root.resolve() / "rcaeval" / REVISION
+    if base.resolve() != base:
+        raise ValueError("RCAEval revision escapes its canonical public-data path")
+    seen, file_cases, targets = set(), [], []
+    for record in records:
+        if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+            raise ValueError("invalid RCAEval manifest file record")
+        target = Path(record["path"]).resolve()
+        if not target.is_relative_to(base):
+            raise ValueError("RCAEval file path differs from its pinned source revision")
+        relative = target.relative_to(base)
+        if relative in seen:
+            raise ValueError("duplicate RCAEval manifest file path")
+        seen.add(relative)
+        targets.append(target)
+        parts = relative.parts
+        if len(parts) == 1 and parts[0] in ("README.md", "cases.parquet"):
+            continue
+        if len(parts) != 2 or parts[1] not in ("metrics.parquet", "logs.parquet", "traces.parquet", "inject_time.txt", "root_cause.txt"):
+            raise ValueError("RCAEval manifest file is outside the native source layout")
+        file_cases.append(parts[0])
+    if file_cases:
+        require_cases(file_cases)  # Reject concealed sealed/unknown cases before any bytes are read.
+    if not set(file_cases) <= set(selection):
+        raise ValueError("RCAEval manifest contains case files outside its declared selection")
+    return targets
+
+
 def read_index(manifest_path: Path) -> tuple[list[dict], dict]:
     """Read only the verified index. Do not touch telemetry files listed beside it."""
     blob = manifest_path.read_bytes()

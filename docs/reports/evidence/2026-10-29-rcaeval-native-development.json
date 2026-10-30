@@ -1,0 +1,197 @@
+{
+  "evaluation_version": "rcaeval-native-development/v1",
+  "source_commit": "6af0ae16b4430b126e4a03eec48a0a372bad75ab",
+  "source_revision": "afeacb11bcc94dadfd1c8f483ee4377b2b8b614e",
+  "source_manifest_sha256": "565c5b7b3f43d05ef9ba2930e80a65714e3ce4bc1e562fbc91835eefe6a0a0c6",
+  "profile_sha256": "4e9e5e2e57d01d0c59ac0de450612c90fb9d39d2a0f47370559a6568a991f3a1",
+  "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+  "business_results_sha256": "4d1ab2e228e559abc9e9a0d6bd66f9748573db05c20ebf68f4591bde09257101",
+  "status": "PASS",
+  "denominators": {
+    "selected": 3,
+    "evaluated": 3,
+    "quarantined": 0,
+    "abstained": 3,
+    "qualified": 0,
+    "qualified_correct": 0
+  },
+  "conditional_qualified_accuracy": null,
+  "abstention_rate": 1.0,
+  "holdout_opened": false,
+  "ml_fitting_allowed": false,
+  "independent_sessions_established": false,
+  "full_G4_accepted": false,
+  "actions_allowed": false,
+  "repeat_identical": true,
+  "report_sha256": "aa7022c17d8ddfb5549c193ec5b45f3c406ac258cf392b4b94390927a21a4880",
+  "cases": [
+    {
+      "case": "re1ob_adservice_cpu_1",
+      "status": "EVALUATED",
+      "ground_truth_service": "adservice",
+      "label_clock_in_capture": true,
+      "entities": 14,
+      "window_start_ns": 1685204489000000000,
+      "window_end_ns": 1685204789000000000,
+      "modality_rows": {
+        "metrics": 4201,
+        "logs": 0,
+        "traces": 0
+      },
+      "eligible": {
+        "metrics": null,
+        "logs": null,
+        "traces": null
+      },
+      "max_coverage": 0.0,
+      "abstained": true,
+      "reasons": [
+        "no-positive-observed-support",
+        "unobserved-dependency-candidates"
+      ],
+      "qualified_root": null,
+      "observed_parent_edges": 0,
+      "unresolved_parent_links": 0,
+      "trace_backwards": null,
+      "source_telemetry_sha256": {
+        "metrics": "464dcc215afe145d37f8b107ea291df7ffc0691756d375c54ddc1c09d0a2ac74"
+      }
+    },
+    {
+      "case": "re2ob_checkoutservice_cpu_1",
+      "status": "EVALUATED",
+      "ground_truth_service": "checkoutservice",
+      "label_clock_in_capture": true,
+      "entities": 13,
+      "window_start_ns": 1705354987000000000,
+      "window_end_ns": 1705355287000000000,
+      "modality_rows": {
+        "metrics": 1441,
+        "logs": 171322,
+        "traces": 391997
+      },
+      "eligible": {
+        "metrics": null,
+        "logs": 35016,
+        "traces": 80295
+      },
+      "max_coverage": 0.4,
+      "abstained": true,
+      "reasons": [
+        "insufficient-coverage",
+        "insufficient-score",
+        "source-availability-unverified",
+        "unobserved-dependency-candidates"
+      ],
+      "qualified_root": null,
+      "observed_parent_edges": 12,
+      "unresolved_parent_links": 0,
+      "trace_backwards": 67134,
+      "source_telemetry_sha256": {
+        "logs": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+        "metrics": "f46b3d354b234e37c424f54a005329b61aac83d15dcdd46b5642e55f390ab25a",
+        "traces": "56ca8f6dbeb76fab2d33faeca54bce8f40e9c5491ebd76404ebb2dfd83409367"
+      }
+    },
+    {
+      "case": "re3ob_adservice_f3_1",
+      "status": "EVALUATED",
+      "ground_truth_service": "adservice",
+      "label_clock_in_capture": true,
+      "entities": 12,
+      "window_start_ns": 1731904381000000000,
+      "window_end_ns": 1731904681000000000,
+      "modality_rows": {
+        "metrics": 1441,
+        "logs": 70558,
+        "traces": 165302
+      },
+      "eligible": {
+        "metrics": null,
+        "logs": 14576,
+        "traces": 34532
+      },
+      "max_coverage": 0.4,
+      "abstained": true,
+      "reasons": [
+        "insufficient-coverage",
+        "insufficient-score",
+        "source-availability-unverified",
+        "unobserved-dependency-candidates"
+      ],
+      "qualified_root": null,
+      "observed_parent_edges": 12,
+      "unresolved_parent_links": 0,
+      "trace_backwards": 22540,
+      "source_telemetry_sha256": {
+        "logs": "d8fb490a359db7cda3ce618ce51251ceec89b90026839f90a891391e3d51b197",
+        "metrics": "79548b07b082297d85b061ff8a9269e85f7522bd721c167274eb748b36d4b084",
+        "traces": "6ec516a79bbd427766b02d0d87f06ea9ec15d0b990f4d65f74283e341e70eda7"
+      }
+    }
+  ],
+  "post_run_publisher_files_verified": 12,
+  "raw_reference_verification": {
+    "status": "PASS",
+    "method": "independent Arrow-to-Pandas masks/groupby and direct fixed-weight arithmetic; no native adapter/scorer invoked",
+    "source_commit": "6af0ae16b4430b126e4a03eec48a0a372bad75ab",
+    "report_file_sha256": "fb08af310536d93a5f89fbeaaac7ed240fa750392c964f7128e370a6668d88bc",
+    "observed_at": "2026-10-29T16:36:00.075091+00:00",
+    "cases": [
+      {
+        "case": "re1ob_adservice_cpu_1",
+        "raw_table_rows": {
+          "metrics": 4201
+        },
+        "window_counts_and_aggregates_match": true,
+        "unrenormalized_scores_and_coverage_match": true
+      },
+      {
+        "case": "re2ob_checkoutservice_cpu_1",
+        "raw_table_rows": {
+          "logs": 171322,
+          "metrics": 1441,
+          "traces": 391997
+        },
+        "window_counts_and_aggregates_match": true,
+        "unrenormalized_scores_and_coverage_match": true
+      },
+      {
+        "case": "re3ob_adservice_f3_1",
+        "raw_table_rows": {
+          "logs": 70558,
+          "metrics": 1441,
+          "traces": 165302
+        },
+        "window_counts_and_aggregates_match": true,
+        "unrenormalized_scores_and_coverage_match": true
+      }
+    ]
+  },
+  "software_checks": {
+    "focused_tests": 84,
+    "ml_dev_regression_tests": 563,
+    "contracts": {
+      "schemas": 23,
+      "samples": 17,
+      "configurations": 2
+    },
+    "installed_wheel_outside_checkout": "PASS",
+    "remote_ci": "not part of this local measurement; verify exact published head separately"
+  },
+  "source_code_sha256": {
+    ".github/workflows/ci.yml": "de54d176759a61fb7860a455af6284eb9ee801a20def17754970c455cca6a6d4",
+    "scripts/check_installed_package.py": "0e613d9e67f41a2973f972fffbf474f12acb9aaa2e5196a7619694a0430b2a74",
+    "src/sentinelops/incidents/rca.py": "bf88ccb8601f7feadc091d4280c137198692508e82bdd1f28ad88de5e1bd7c59",
+    "src/sentinelops/public_data/rcaeval_partitions.py": "c814dda204cb40c8ac987841561ae7a7107708c0cbea7f1b27c238cf2269f53e",
+    "tests/test_rcaeval_partitions.py": "bcc0b269760a298077773fc31f26d0cb4d4ff9ca9ff592d1c4f9059740a101fd",
+    "configs/rcaeval_native_profile.json": "7b49b909311c8db651c0e6f8fc982abbacd7360aabeed0eb5b0d3fae73b2f394",
+    "scripts/evaluate_rcaeval_native.py": "4a801ce429cadcbc1ac1d627cf4632a203058513c594d1cd1a51817ea38874ed",
+    "src/sentinelops/incidents/native_rca.py": "e098ab4400c4982839d97c9e8dcef292817a60bd13bf9cf3fdbaa7e1cb8e77f0",
+    "src/sentinelops/public_data/rcaeval_evaluation.py": "2d85e960f7490f3e8d41096c34ff1951addcfa30fff68c1a14f31f81047ae893",
+    "src/sentinelops/public_data/rcaeval_native.py": "e2274e084323417faeaf109f4a3d1d1a87e13dd96c5ece64c14c45e0f5a69f7a",
+    "tests/test_rcaeval_native.py": "e497ec58d5c0144c2e2d0bccd366d96f3e487b3cc144f2a047d155212e561716"
+  },
+  "source_report_file_sha256": "fb08af310536d93a5f89fbeaaac7ed240fa750392c964f7128e370a6668d88bc",
+  "scope": "Three previously inspected development cases; source-to-policy software execution only; not RCA quality, live health, precursor or independent-trial evidence."
+}
