@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +23,8 @@ from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.health_source import HealthLedgerReader
 from sentinelops.workers.incident_journal import IncidentJournal
 from sentinelops.workers.incident_state import advance_groups
+from sentinelops.workers.health import local_endpoint
+from scripts.incident_metrics_evidence import IncidentMetricEvidence, validate_protocol
 
 
 def verify_scenario_group(scenario: str, group: dict, result: dict) -> None:
@@ -45,7 +48,9 @@ def verify_scenario_group(scenario: str, group: dict, result: dict) -> None:
 
 
 class IncidentWorkerEvidence:
-    def __init__(self, output: Path, source_store: ArtifactStore, stream_id: str, project: str):
+    def __init__(self, output: Path, source_store: ArtifactStore, stream_id: str, project: str, *, metrics_endpoint=None):
+        if metrics_endpoint and local_endpoint(metrics_endpoint) != 'http://127.0.0.1:4317':
+            raise ValueError('native incident metrics require the owned loopback Collector')
         self.output, self.source_store, self.stream_id, self.project = output, source_store, stream_id, project
         self.output.mkdir(parents=True, exist_ok=False)
         self.store = ArtifactStore(output / "objects")
@@ -53,6 +58,14 @@ class IncidentWorkerEvidence:
         self.consumer_id = None
         self.crashed = False
         self.created = time.monotonic()
+        self.metrics_endpoint = metrics_endpoint
+        self.metrics = IncidentMetricEvidence(output / 'own-metrics') if metrics_endpoint else None
+        self.metrics_initialized = False
+        self.paused = []
+        self.metrics_probe = None
+        if self.metrics:
+            self.metrics_protocol = json.loads(Path('configs/incident_metrics_acceptance.json').read_text())
+            validate_protocol(self.metrics_protocol)
         self.protocol = json.loads(Path("configs/incident_worker_acceptance.json").read_text())
         if (self.protocol["protocol_version"] != "continuous-incident-acceptance/v1"
             or self.protocol["s1_protocol"] != "configs/health_worker_acceptance.json"
@@ -72,8 +85,13 @@ class IncidentWorkerEvidence:
     def spawn(self):
         path = self.output / ("consumer-" + str(len(self.children)) + ".log")
         handle = path.open("x")
-        process = subprocess.Popen([sys.executable, "-m", "scripts.run_incident_worker", "--health-stream", self.stream_id,
-            "--source-store", str(self.source_store.root), "--store", str(self.store.root), "--project", self.project],
+        command = [sys.executable, "-m", "scripts.run_incident_worker", "--health-stream", self.stream_id,
+            "--source-store", str(self.source_store.root), "--store", str(self.store.root), "--project", self.project]
+        if self.metrics:
+            assert len(self.children) < 3
+            command += ['--metrics-otlp-endpoint', self.metrics_endpoint,
+                        '--metrics-instance', 'incidents-0' if len(self.children) < 2 else 'incidents-1']
+        process = subprocess.Popen(command,
             stdout=handle, stderr=subprocess.STDOUT, env=os.environ.copy())
         self.children.append(process); self.logs.append(path); self.handles.append(handle); self._save()
         return process
@@ -94,6 +112,9 @@ class IncidentWorkerEvidence:
             if time.monotonic() - self.created > 30:
                 raise AssertionError("continuous incident process did not initialize within its startup bound")
             return
+        if self.metrics and not self.metrics_initialized:
+            await self.metrics.ready('primary-ready', instances={'incidents-0'}, value=1)
+            self.metrics_initialized = True
         async with pool.acquire() as conn:
             count = await conn.fetchval("""SELECT count(*) FROM sentinel_control.incident_jobs j
                 JOIN sentinel_control.incidents i USING(incident_id) WHERE j.consumer_id=$1""", self.consumer_id)
@@ -106,7 +127,80 @@ class IncidentWorkerEvidence:
             self.interventions.append({"kind": "incident-consumer-SIGKILL-after-durable-IER", "pid": primary.pid,
                                        "at": timestamp(datetime.now(timezone.utc))})
             self.spawn(); self.spawn()
+            if self.metrics:
+                await self.metrics.restarted()
         self._save()
+
+    def live_metric_slots(self):
+        return {'incidents-0' if i < 2 else 'incidents-1' for i, p in enumerate(self.children) if p.poll() is None}
+
+    async def metrics_outage(self, pool, collector):
+        """Task-owned control probe, after natural closure, outside worker inputs."""
+        import asyncio
+        if not self.metrics:
+            return
+        info = json.loads(await asyncio.to_thread(subprocess.check_output, ['docker', 'inspect', collector],
+                                                  stderr=subprocess.DEVNULL, timeout=30))[0]
+        labels = info['Config']['Labels']
+        assert labels.get('com.docker.compose.project') == self.project
+        assert labels.get('com.docker.compose.service') == 'otel-collector' and info['State']['Running']
+        assert any(p['HostIp'] == '127.0.0.1' and p['HostPort'] == '4317'
+                   for p in (info['NetworkSettings']['Ports'].get('4317/tcp') or []))
+
+        async def counts():
+            async with pool.acquire() as conn:
+                health = await conn.fetchval('SELECT count(*) FROM sentinel_control.health_batches WHERE stream_id=$1', self.stream_id)
+                steps = await conn.fetchval('SELECT count(*) FROM sentinel_control.incident_consumer_steps WHERE consumer_id=$1', self.consumer_id)
+            return {'health': health, 'steps': steps}
+
+        async def docker(action):
+            result = await asyncio.to_thread(subprocess.run, ['docker', action, collector],
+                                            capture_output=True, timeout=60)
+            assert result.returncode == 0, 'owned Collector control failed'
+
+        await self.catch_up(pool)
+        down = False
+        try:
+            for process in self.children:
+                if process.poll() is None:
+                    process.send_signal(signal.SIGSTOP)
+                    self.paused.append(process)
+            self.interventions.append({'kind': 'metrics-consumers-SIGSTOP', 'at': timestamp(datetime.now(timezone.utc))})
+            self._save()
+            baseline = await counts()
+            await asyncio.sleep(self.metrics_protocol['backlog_pause_seconds'])
+            backlog = await counts()
+            assert backlog['steps'] == baseline['steps']
+            assert backlog['health'] - baseline['health'] >= self.metrics_protocol['minimum_backlog_steps']
+            # Resume while export is unavailable: source/journal progress must
+            # not depend on a successful metrics RPC.
+            down = True
+            await docker('stop')
+            self.interventions.append({'kind': 'metrics-collector-stopped', 'at': timestamp(datetime.now(timezone.utc))})
+            for process in self.paused:
+                assert process.poll() is None
+                process.send_signal(signal.SIGCONT)
+            self.paused.clear()
+            self._save()
+            await asyncio.sleep(self.metrics_protocol['collector_outage_seconds'])
+            during = await counts()
+            assert during['steps'] - backlog['steps'] >= self.metrics_protocol['minimum_backlog_steps']
+            assert all(p.poll() is None for p in self.children[1:])
+            await docker('start')
+            down = False
+            self.interventions.append({'kind': 'metrics-collector-started', 'at': timestamp(datetime.now(timezone.utc))})
+            self._save()
+            await self.metrics.ready('collector-recovered', instances=self.live_metric_slots(), value=1)
+            self.metrics_probe = {'status': 'PASS', 'baseline': baseline, 'paused_backlog': backlog,
+                                  'while_export_unavailable': during, 'source_progress_without_export': True}
+            (self.output / 'own-metrics/backlog-exporter-probe.json').write_text(json.dumps(self.metrics_probe, indent=2) + '\n')
+        finally:
+            for process in self.paused:
+                if process.poll() is None:
+                    process.send_signal(signal.SIGCONT)
+            self.paused.clear()
+            if down:
+                await docker('start')
 
     async def require_closed(self, pool, *, timeout=45.):
         import asyncio
@@ -126,11 +220,15 @@ class IncidentWorkerEvidence:
 
     async def stop(self):
         import asyncio
-        for process in self.children:
+        for process in self.paused:
             if process.poll() is None:
-                process.terminate()
-                code = await asyncio.to_thread(process.wait, timeout=50)
-                assert code == 0
+                process.send_signal(signal.SIGCONT)
+        self.paused.clear()
+        running = [process for process in self.children if process.poll() is None]
+        for process in running:
+            process.terminate()
+        codes = await asyncio.gather(*(asyncio.to_thread(process.wait, timeout=50) for process in running))
+        assert all(code == 0 for code in codes)
         for handle in self.handles:
             handle.close()
         self._save()
@@ -157,6 +255,15 @@ class IncidentWorkerEvidence:
     async def verify(self, pool, *, scenario: str) -> dict:
         if not self.consumer_id or not self.crashed:
             raise AssertionError("native incident process restart was not exercised")
+        metrics_result = None
+        metric_refs = None
+        if self.metrics:
+            # Collect the final fresh shutdown sample before the potentially
+            # expensive immutable raw replay; stopped processes cannot refresh it.
+            async with pool.acquire() as conn:
+                rows = await conn.fetch('SELECT state_ref FROM sentinel_control.incident_consumer_steps WHERE consumer_id=$1', self.consumer_id)
+            metric_refs = {r['state_ref'] for r in rows}
+            metrics_result = await self.metrics.final(self.logs, self.store, accepted_refs=metric_refs)
         async with pool.acquire() as conn:
             consumer = await conn.fetchrow("SELECT * FROM sentinel_control.incident_consumers WHERE consumer_id=$1", self.consumer_id)
             source = await conn.fetchrow("SELECT * FROM sentinel_control.health_streams WHERE stream_id=$1", self.stream_id)
@@ -238,5 +345,15 @@ class IncidentWorkerEvidence:
             "database_snapshot_sha256": hashlib.sha256(blob.encode()).hexdigest(), "actions_allowed": False,
             "raw_health_and_group_prefix_recomputed": True, "source_batches": source_batches,
             "full_G4_accepted": False, "training_corpus": False, "heldout_evaluation": False}
+        if self.metrics:
+            assert self.metrics_probe and self.metrics_probe['status'] == 'PASS'
+            counts = [sum(e['status'] == 'INGESTED' for e in row.get('events', []))
+                      for path in self.logs for line in path.read_text().splitlines()
+                      if line.startswith('{') and (row := json.loads(line)).get('status') == 'PROGRESS']
+            assert max(counts) >= self.metrics_protocol['minimum_backlog_steps'], 'actual catch-up cycle was not exercised'
+            assert metric_refs == {row['state_ref'] for row in snapshot['incident_consumer_steps']}
+            report['own_metrics_verification'] = metrics_result
+            report['own_metrics_verification']['maximum_actual_ingested_per_cycle'] = max(counts)
+            report['own_metrics_verification']['protocol_sha256'] = hashlib.sha256(Path('configs/incident_metrics_acceptance.json').read_bytes()).hexdigest()
         (self.output / "acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
         return report
