@@ -1,0 +1,13 @@
+{
+  "protocol_version": "incident-metrics-acceptance/v2",
+  "require_completed_progress_before_crash": true,
+  "instances": ["incidents-0", "incidents-1"],
+  "backlog_pause_seconds": 130,
+  "collector_outage_seconds": 75,
+  "minimum_backlog_steps": 2,
+  "metrics_observation_seconds": 35,
+  "heartbeat_fresh_seconds": 15,
+  "training_corpus": false,
+  "actions_allowed": false,
+  "full_NFR10_accepted": false
+}

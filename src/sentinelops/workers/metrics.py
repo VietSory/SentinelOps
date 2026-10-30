@@ -1,6 +1,7 @@
 """Bounded worker telemetry; observed source availability is not business health."""
 from __future__ import annotations
 
+from collections import Counter
 import math
 import re
 import threading
@@ -171,11 +172,17 @@ class IncidentWorkerMetrics(WorkerMetrics):
 
     def __init__(self, reader, **kwargs):
         super().__init__(reader, **kwargs)
+        self._progress = False
         meter = self.provider.get_meter(self.meter_name, "1")
+        meter.create_observable_gauge("sentinelops_incident_has_local_progress", callbacks=[self._progress_observation])
         self._incidents = meter.create_counter("sentinelops_incident_groups")
         self._abstentions = meter.create_counter("sentinelops_rca_abstentions")
         self._incidents.add(0, self._attributes)
         self._abstentions.add(0, self._attributes)
+
+    def _progress_observation(self, _options):
+        with self._lock:
+            return [Observation(int(self._progress), self._attributes)]
 
     @staticmethod
     def validate_labels(environment, instance):
@@ -188,27 +195,60 @@ class IncidentWorkerMetrics(WorkerMetrics):
             return
         if result["status"] == "PROGRESS":
             events = result["events"]
+            if not isinstance(events, list) or not events:
+                raise ValueError("consumer progress requires observed nonempty events")
             accepted = [e for e in events if e["status"] == "INGESTED"]
             duration = result["processing_ms"]
             if type(duration) not in (int, float) or not math.isfinite(duration) or duration < 0:
                 raise ValueError("consumer cycle time must be measured finite duration")
-            self._duration.record(duration / 1000, self._attributes)
-            self._committed.add(len(accepted), self._attributes)
-            self._incidents.add(sum(len(e["created_jobs"]) for e in accepted), self._attributes)
-            enriched = [e for e in events if e["status"] == "ENRICHED"]
-            self._abstentions.add(sum(store.read(e["result_ref"])["abstained"] for e in enriched), self._attributes)
-            if accepted:
-                state = store.read(accepted[-1]["state_ref"])
-                if state["source"]["health_identity"]["environment"] != self._environment:
-                    raise ValueError("consumer metric source environment differs")
-                available = {s: int(v["availability"] == "ELIGIBLE") for s, v in state["service_states"].items()}
+            # A cycle can accept up to 64 source steps. Validate all immutable
+            # inputs first; a rejected last step must not partially count earlier ones.
+            available_steps, ends = [], []
+            unknown = Counter()
+            group_count = 0
+            for event in accepted:
+                state = store.read(event["state_ref"])
+                if (state["source"]["health_identity"]["environment"] != self._environment
+                    or event["consumer_id"] != result["consumer_id"]
+                    or state["last_bucket_end"] != event["bucket_end"]):
+                    raise ValueError("consumer metric source scope differs")
+                end = utc_time(state["last_bucket_end"]).timestamp()
+                if ends and end <= ends[-1]:
+                    raise ValueError("consumer metric source steps must be strictly ordered")
+                available = {}
+                for service, signal in state["service_states"].items():
+                    validate_payload("health-signal.schema.json", signal)
+                    if (signal["service"] != service or signal["environment"] != self._environment
+                        or signal["bucket_end"] != state["last_bucket_end"]):
+                        raise ValueError("consumer metric signal differs from its accepted step")
+                    available[service] = int(signal["availability"] == "ELIGIBLE")
+                    unknown[service] += int(not available[service])
                 if set(available) != set(BUSINESS_ROUTES):
                     raise ValueError("consumer metric source service coverage differs")
-                with self._lock:
-                    self._bucket_end = utc_time(state["last_bucket_end"]).timestamp()
-                    self._source_available = available
-                for service, value in available.items():
-                    if not value: self._unknown.add(1, {**self._attributes, "business_service": service})
+                jobs = event["created_jobs"]
+                if not isinstance(jobs, list) or any(not isinstance(j, str) for j in jobs) or len(set(jobs)) != len(jobs):
+                    raise ValueError("consumer metric created jobs must be unique identifiers")
+                group_count += len(jobs)
+                ends.append(end)
+                available_steps.append(available)
+            abstentions = 0
+            for event in events:
+                if event["status"] == "ENRICHED":
+                    result_payload = store.read(event["result_ref"])
+                    validate_payload("rca-result.schema.json", result_payload)
+                    abstentions += int(result_payload["abstained"])
+            with self._lock:
+                self._progress = True
+                if accepted:
+                    self._bucket_end = ends[-1]
+                    self._source_available = available_steps[-1]
+            self._duration.record(duration / 1000, self._attributes)
+            self._committed.add(len(accepted), self._attributes)
+            self._incidents.add(group_count, self._attributes)
+            self._abstentions.add(abstentions, self._attributes)
+            for service, count in unknown.items():
+                if count:
+                    self._unknown.add(count, {**self._attributes, "business_service": service})
             return
         if result["status"] != "COMMITTED":
             return
@@ -224,6 +264,7 @@ class IncidentWorkerMetrics(WorkerMetrics):
         if set(available) != set(BUSINESS_ROUTES):
             raise ValueError("incident metrics lack complete source availability")
         with self._lock:
+            self._progress = True
             self._bucket_end = utc_time(result["bucket_end"]).timestamp()
             self._source_available = available
         self._committed.add(1, self._attributes)

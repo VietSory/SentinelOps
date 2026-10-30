@@ -1,0 +1,497 @@
+{
+  "scope_version": "gamma-client-captures/v1",
+  "catalog_sha256": "69934c78fb790eeaa12931f25669770b50e44c70b647fd98c8a6d63698b4caf8",
+  "training_data_policy_hash": "ef0eb1b1c95a67faf424501e657c5e6530d49a1d18af7cbf59f9c07740afa21f",
+  "group_snapshot_sha256": "1c6cad58ca0e41541ae29c2d05eedf82cd934ee8334974dec8f8313ae395172c",
+  "split_snapshot_sha256": "b6ab07014084eb79f88538765acffb39e49cb602b6a51fa24a7ab1c3e5980c9b",
+  "experiments": [
+    "cpu_july27_60min_800_0",
+    "cpu_july28_800_0",
+    "cpu_july29_800_0",
+    "cpu_test_july24_800_0"
+  ],
+  "files": [
+    {
+      "compressed_size": 1972,
+      "compression": 8,
+      "crc32": "6e56d69f",
+      "directory": false,
+      "header_offset": 4787207554,
+      "name": "raw_dataset/cpu_july27_60min_800_0/compose.log",
+      "sha256": "a8a45ff13bbd8885f1a9876468bd5dcbbde0056ff3e67c7117fb549a2f7b8dfe",
+      "size": 6553
+    },
+    {
+      "compressed_size": 1803,
+      "compression": 8,
+      "crc32": "fdb35ec8",
+      "directory": false,
+      "header_offset": 4787209622,
+      "name": "raw_dataset/cpu_july27_60min_800_0/compose.warm_up",
+      "sha256": "7a70213c7230b4f0443f6e4fae9e4d779d48c393cd7dc9e340f3069520ae90ac",
+      "size": 6001
+    },
+    {
+      "compressed_size": 17636,
+      "compression": 8,
+      "crc32": "2ef669dd",
+      "directory": false,
+      "header_offset": 4787211525,
+      "name": "raw_dataset/cpu_july27_60min_800_0/compose_latencies.txt",
+      "sha256": "88587c5f1494424c14b94ad05ba2c60ba9ac53375cb70c76e0ddddebb50b5337",
+      "size": 37309
+    },
+    {
+      "compressed_size": 4210,
+      "compression": 8,
+      "crc32": "ee822e1a",
+      "directory": false,
+      "header_offset": 4787229267,
+      "name": "raw_dataset/cpu_july27_60min_800_0/compose_latencies.warm_up",
+      "sha256": "5fc3a329225d27494c73a34486b5d82c42593fc092ada8d96ea4f93563c66ae2",
+      "size": 9086
+    },
+    {
+      "compressed_size": 2115,
+      "compression": 8,
+      "crc32": "defddc5a",
+      "directory": false,
+      "header_offset": 4857842709,
+      "name": "raw_dataset/cpu_july27_60min_800_0/home.log",
+      "sha256": "a214ff697c72023cbb32abd5efaeb844c4dba88ba1bf319f9667eb6946efdd1d",
+      "size": 6763
+    },
+    {
+      "compressed_size": 1770,
+      "compression": 8,
+      "crc32": "506251cc",
+      "directory": false,
+      "header_offset": 4857844917,
+      "name": "raw_dataset/cpu_july27_60min_800_0/home.warm_up",
+      "sha256": "e62b3ee6f46baf05c3c308be17896e704128bc1a088d673bfd21f5c9123bcbe2",
+      "size": 5998
+    },
+    {
+      "compressed_size": 114545,
+      "compression": 8,
+      "crc32": "c95f9cf9",
+      "directory": false,
+      "header_offset": 4857846784,
+      "name": "raw_dataset/cpu_july27_60min_800_0/home_latencies.txt",
+      "sha256": "4e3b07a6a54ba2151a3827e8cf0fc7c89766ed50910dc3ab425ea5e9ff3c19b3",
+      "size": 248726
+    },
+    {
+      "compressed_size": 4096,
+      "compression": 8,
+      "crc32": "bb3d044b",
+      "directory": false,
+      "header_offset": 4857961432,
+      "name": "raw_dataset/cpu_july27_60min_800_0/home_latencies.warm_up",
+      "sha256": "71af76441da9b484c7dbbe679211a4b484d581535dc54029ffa2b9f33ed50bb4",
+      "size": 8792
+    },
+    {
+      "compressed_size": 2079,
+      "compression": 8,
+      "crc32": "15055f73",
+      "directory": false,
+      "header_offset": 5040581569,
+      "name": "raw_dataset/cpu_july27_60min_800_0/user.log",
+      "sha256": "d7bca7093cd61981a60b7ae32e2e204d2592a29da22cabe2ff97985f41259fc1",
+      "size": 6881
+    },
+    {
+      "compressed_size": 1807,
+      "compression": 8,
+      "crc32": "a804d264",
+      "directory": false,
+      "header_offset": 5040583741,
+      "name": "raw_dataset/cpu_july27_60min_800_0/user.warm_up",
+      "sha256": "aa81401d372a1bea4deec21fe5f7fab3dbf2a4d3d098c51069cc877e0b2e6f00",
+      "size": 6031
+    },
+    {
+      "compressed_size": 51862,
+      "compression": 8,
+      "crc32": "77ada017",
+      "directory": false,
+      "header_offset": 5040585645,
+      "name": "raw_dataset/cpu_july27_60min_800_0/user_latencies.txt",
+      "sha256": "57572b7eb00fd59b48e78fd03cfcf9865e1bca044ea8287208c489ce5bbd9878",
+      "size": 110969
+    },
+    {
+      "compressed_size": 4065,
+      "compression": 8,
+      "crc32": "bf537453",
+      "directory": false,
+      "header_offset": 5040637610,
+      "name": "raw_dataset/cpu_july27_60min_800_0/user_latencies.warm_up",
+      "sha256": "33e6271c0eb17313e8871e7021da30b2a884ce254d3ed5f2a6b3c2540956af6b",
+      "size": 8686
+    },
+    {
+      "compressed_size": 2052,
+      "compression": 8,
+      "crc32": "4fa2222d",
+      "directory": false,
+      "header_offset": 5101115158,
+      "name": "raw_dataset/cpu_july28_800_0/compose.log",
+      "sha256": "9c7bcccec7cc28225513321c9a213882dbe24140e242ef7a18ba08aa8ab1615a",
+      "size": 6538
+    },
+    {
+      "compressed_size": 1787,
+      "compression": 8,
+      "crc32": "1aed9ef5",
+      "directory": false,
+      "header_offset": 5101117300,
+      "name": "raw_dataset/cpu_july28_800_0/compose.warm_up",
+      "sha256": "af1bc66f5a81938a8ffecc6c6659a06531aa478f34f4a0e0b73babc7e271fd18",
+      "size": 5979
+    },
+    {
+      "compressed_size": 20706,
+      "compression": 8,
+      "crc32": "952f7d2d",
+      "directory": false,
+      "header_offset": 5101119181,
+      "name": "raw_dataset/cpu_july28_800_0/compose_latencies.txt",
+      "sha256": "e53a74ee14cb29ce38c6af86815799cf8398fe26a38ddb521802bb2a53247f83",
+      "size": 42538
+    },
+    {
+      "compressed_size": 4091,
+      "compression": 8,
+      "crc32": "560db199",
+      "directory": false,
+      "header_offset": 5101139987,
+      "name": "raw_dataset/cpu_july28_800_0/compose_latencies.warm_up",
+      "sha256": "0e59beb0078e9260c77f359f26f4f7e053ca8e4eb99d199d75ea3d3df3edbda0",
+      "size": 8949
+    },
+    {
+      "compressed_size": 2266,
+      "compression": 8,
+      "crc32": "f76e0d14",
+      "directory": false,
+      "header_offset": 5156918326,
+      "name": "raw_dataset/cpu_july28_800_0/home.log",
+      "sha256": "618c316b3a6998c8c76cff24a453892e08cabe025c2a4949cfbaed3356c423fe",
+      "size": 7122
+    },
+    {
+      "compressed_size": 1760,
+      "compression": 8,
+      "crc32": "c66398a9",
+      "directory": false,
+      "header_offset": 5156920679,
+      "name": "raw_dataset/cpu_july28_800_0/home.warm_up",
+      "sha256": "d8501356d88dae49e2c63e7971f500647624f2b2ada09fd6b2404214466990d8",
+      "size": 5975
+    },
+    {
+      "compressed_size": 87907,
+      "compression": 8,
+      "crc32": "0f2f911e",
+      "directory": false,
+      "header_offset": 5156922530,
+      "name": "raw_dataset/cpu_july28_800_0/home_latencies.txt",
+      "sha256": "9c69d9114cba504c4c7cf1a8f8ad60d7941bd0c749587dbc9fb146672b32945d",
+      "size": 195811
+    },
+    {
+      "compressed_size": 4199,
+      "compression": 8,
+      "crc32": "71daee00",
+      "directory": false,
+      "header_offset": 5157010534,
+      "name": "raw_dataset/cpu_july28_800_0/home_latencies.warm_up",
+      "sha256": "61f9a4d7bdd476e670f102a5a3efb4012a9b49cd435c163e65f123e991d7fe1a",
+      "size": 9023
+    },
+    {
+      "compressed_size": 2117,
+      "compression": 8,
+      "crc32": "e3cb4be1",
+      "directory": false,
+      "header_offset": 5266029090,
+      "name": "raw_dataset/cpu_july28_800_0/user.log",
+      "sha256": "15c512d57830d3a252acd8cd3443324ff30a41e02301a37ae6ee198987f3f86f",
+      "size": 6553
+    },
+    {
+      "compressed_size": 1792,
+      "compression": 8,
+      "crc32": "0ed16188",
+      "directory": false,
+      "header_offset": 5266031294,
+      "name": "raw_dataset/cpu_july28_800_0/user.warm_up",
+      "sha256": "4b7aa0b55f24ada5154f43375727d56faddba39c3205b0dd26dd56a648b6cd6c",
+      "size": 6017
+    },
+    {
+      "compressed_size": 61258,
+      "compression": 8,
+      "crc32": "b64d0147",
+      "directory": false,
+      "header_offset": 5266033177,
+      "name": "raw_dataset/cpu_july28_800_0/user_latencies.txt",
+      "sha256": "7f8f475ab1fc9673865b2150df32daa366db714dc58d2ee87b4120b8fdc3756c",
+      "size": 129526
+    },
+    {
+      "compressed_size": 4262,
+      "compression": 8,
+      "crc32": "24abc7a9",
+      "directory": false,
+      "header_offset": 5266094532,
+      "name": "raw_dataset/cpu_july28_800_0/user_latencies.warm_up",
+      "sha256": "33a4c301c4df835fcd19a1f93ebcb1dfa8033c678cd8ea9e0c15f056371b0de8",
+      "size": 9087
+    },
+    {
+      "compressed_size": 2079,
+      "compression": 8,
+      "crc32": "7658fa0a",
+      "directory": false,
+      "header_offset": 5444932420,
+      "name": "raw_dataset/cpu_july29_800_0/compose.log",
+      "sha256": "42eed4ea2260379c0e1a630af0dfeebd47756a2630fc81d454eb529b324a4dfb",
+      "size": 6816
+    },
+    {
+      "compressed_size": 1757,
+      "compression": 8,
+      "crc32": "ac610fa4",
+      "directory": false,
+      "header_offset": 5444934589,
+      "name": "raw_dataset/cpu_july29_800_0/compose.warm_up",
+      "sha256": "5c103727a66c46d265bc282102c60e89da04d7bb16637af6b0fb5836bb4033c6",
+      "size": 5981
+    },
+    {
+      "compressed_size": 35424,
+      "compression": 8,
+      "crc32": "89d310ed",
+      "directory": false,
+      "header_offset": 5444936440,
+      "name": "raw_dataset/cpu_july29_800_0/compose_latencies.txt",
+      "sha256": "a6e42cb7fe38ae0411044a1a395478e354d301bfc936affde39d3ceac65e2d7a",
+      "size": 76042
+    },
+    {
+      "compressed_size": 4060,
+      "compression": 8,
+      "crc32": "a027b5e3",
+      "directory": false,
+      "header_offset": 5444971964,
+      "name": "raw_dataset/cpu_july29_800_0/compose_latencies.warm_up",
+      "sha256": "cc6d1e83b612661703ba1eb20b3ceaf416f3a298f9982f013dedefe483da7a89",
+      "size": 8780
+    },
+    {
+      "compressed_size": 2120,
+      "compression": 8,
+      "crc32": "d89530f0",
+      "directory": false,
+      "header_offset": 5570346647,
+      "name": "raw_dataset/cpu_july29_800_0/home.log",
+      "sha256": "6f0908c241c36252af6bdbc9efab6b4cf5c4142c36638d98a63ae4b2628f025a",
+      "size": 6905
+    },
+    {
+      "compressed_size": 1727,
+      "compression": 8,
+      "crc32": "e4577b31",
+      "directory": false,
+      "header_offset": 5570348854,
+      "name": "raw_dataset/cpu_july29_800_0/home.warm_up",
+      "sha256": "bd799a7ee73af72c09a38f93adc4ba23471621f79134fae11939ea9085c582c8",
+      "size": 5974
+    },
+    {
+      "compressed_size": 224565,
+      "compression": 8,
+      "crc32": "960c5ef3",
+      "directory": false,
+      "header_offset": 5570350672,
+      "name": "raw_dataset/cpu_july29_800_0/home_latencies.txt",
+      "sha256": "07c7d7ca3bc5c6b55a41f59b451c4ca9c53c42d2309a34c8dfc8da0a5e8d8d2e",
+      "size": 488301
+    },
+    {
+      "compressed_size": 3970,
+      "compression": 8,
+      "crc32": "e80c9501",
+      "directory": false,
+      "header_offset": 5570575334,
+      "name": "raw_dataset/cpu_july29_800_0/home_latencies.warm_up",
+      "sha256": "74138bbef7812695a8a22a3551d5d150cf2bde9b046ce4f45743ae19861d21c5",
+      "size": 8520
+    },
+    {
+      "compressed_size": 2174,
+      "compression": 8,
+      "crc32": "751b72a6",
+      "directory": false,
+      "header_offset": 5611013324,
+      "name": "raw_dataset/cpu_july29_800_0/user.log",
+      "sha256": "f43b720bfcc5a5f9f181dcfbca2681647503a7e1ed739680216d927ace6c93fc",
+      "size": 7139
+    },
+    {
+      "compressed_size": 1741,
+      "compression": 8,
+      "crc32": "e4bc2196",
+      "directory": false,
+      "header_offset": 5611015585,
+      "name": "raw_dataset/cpu_july29_800_0/user.warm_up",
+      "sha256": "0dd787f658dc429871020c0dae0403c39dacd4b2ec988268a08876b38b035678",
+      "size": 5988
+    },
+    {
+      "compressed_size": 100728,
+      "compression": 8,
+      "crc32": "3c2877f3",
+      "directory": false,
+      "header_offset": 5611017417,
+      "name": "raw_dataset/cpu_july29_800_0/user_latencies.txt",
+      "sha256": "667912989b7a11793ca3a459feb1c58bb6b24071be379adbba54f91f7391d735",
+      "size": 219531
+    },
+    {
+      "compressed_size": 4052,
+      "compression": 8,
+      "crc32": "0ea6c891",
+      "directory": false,
+      "header_offset": 5611118242,
+      "name": "raw_dataset/cpu_july29_800_0/user_latencies.warm_up",
+      "sha256": "55a96adb10e2219dcc3b4c26f1ea885af46b7c41a4cc284c8f527e91024f24f0",
+      "size": 8623
+    },
+    {
+      "compressed_size": 1945,
+      "compression": 8,
+      "crc32": "0e939864",
+      "directory": false,
+      "header_offset": 8416942894,
+      "name": "raw_dataset/cpu_test_july24_800_0/compose.log",
+      "sha256": "06fb2148d528742efedfe5cdd6b0e4f09ff1d37196676e02b95c1d91850ed482",
+      "size": 6555
+    },
+    {
+      "compressed_size": 1784,
+      "compression": 8,
+      "crc32": "f74a64fe",
+      "directory": false,
+      "header_offset": 8416944934,
+      "name": "raw_dataset/cpu_test_july24_800_0/compose.warm_up",
+      "sha256": "bfb21a0c2132131251cff91cc1dbccddf63871b4a904c358da0761b969d43008",
+      "size": 6012
+    },
+    {
+      "compressed_size": 16153,
+      "compression": 8,
+      "crc32": "184cff96",
+      "directory": false,
+      "header_offset": 8416946817,
+      "name": "raw_dataset/cpu_test_july24_800_0/compose_latencies.txt",
+      "sha256": "382791f7e77f76b98c1873e9c9fa593c41dc650b3b41a2057aa97015c596b0af",
+      "size": 35686
+    },
+    {
+      "compressed_size": 4006,
+      "compression": 8,
+      "crc32": "03dfaa5d",
+      "directory": false,
+      "header_offset": 8416963075,
+      "name": "raw_dataset/cpu_test_july24_800_0/compose_latencies.warm_up",
+      "sha256": "0f9acee6c67ff67f2ddf0f4060ab505ede6362e744538d4de2a95598200316f1",
+      "size": 8941
+    },
+    {
+      "compressed_size": 2134,
+      "compression": 8,
+      "crc32": "3d0cbcb5",
+      "directory": false,
+      "header_offset": 8478984082,
+      "name": "raw_dataset/cpu_test_july24_800_0/home.log",
+      "sha256": "2ed78f8cd9d7ee42d89471a66ee1c09c342a4f940ba55f3712730cc72aa80d82",
+      "size": 7128
+    },
+    {
+      "compressed_size": 1755,
+      "compression": 8,
+      "crc32": "3d7b0784",
+      "directory": false,
+      "header_offset": 8478986308,
+      "name": "raw_dataset/cpu_test_july24_800_0/home.warm_up",
+      "sha256": "279da6ca0470c52aba32954943d51f8bc144dacd9169fdce6b98fa18c4eb7703",
+      "size": 5993
+    },
+    {
+      "compressed_size": 97132,
+      "compression": 8,
+      "crc32": "02a07cad",
+      "directory": false,
+      "header_offset": 8478988159,
+      "name": "raw_dataset/cpu_test_july24_800_0/home_latencies.txt",
+      "sha256": "4267587ff052c52071930e64044ef2b67b971bbda48c903cbf7e00d3367d958d",
+      "size": 215738
+    },
+    {
+      "compressed_size": 4036,
+      "compression": 8,
+      "crc32": "00990655",
+      "directory": false,
+      "header_offset": 8479085393,
+      "name": "raw_dataset/cpu_test_july24_800_0/home_latencies.warm_up",
+      "sha256": "94c4f11874ab77b4f800db547cfaafa2fb0fca0e129655a84aed7cec1dfd7f82",
+      "size": 8785
+    },
+    {
+      "compressed_size": 2051,
+      "compression": 8,
+      "crc32": "5910af9d",
+      "directory": false,
+      "header_offset": 8650391168,
+      "name": "raw_dataset/cpu_test_july24_800_0/user.log",
+      "sha256": "d512e6a9616fd6104ba0caa3d6d1d698b67eee9c5fdaf5fd9e91ea82b76ed944",
+      "size": 6871
+    },
+    {
+      "compressed_size": 1773,
+      "compression": 8,
+      "crc32": "32a48ed2",
+      "directory": false,
+      "header_offset": 8650393311,
+      "name": "raw_dataset/cpu_test_july24_800_0/user.warm_up",
+      "sha256": "d05183ffe6de5bbce380ae36d0b0e5304828a90b7024ed327486401ac98a77f9",
+      "size": 6004
+    },
+    {
+      "compressed_size": 49790,
+      "compression": 8,
+      "crc32": "467cf22e",
+      "directory": false,
+      "header_offset": 8650395180,
+      "name": "raw_dataset/cpu_test_july24_800_0/user_latencies.txt",
+      "sha256": "7db30cc546e41eae3e0c8c8f98d3071a54108bc2197aa61bde024144bb73754d",
+      "size": 108840
+    },
+    {
+      "compressed_size": 4307,
+      "compression": 8,
+      "crc32": "15bbbf2d",
+      "directory": false,
+      "header_offset": 8650445072,
+      "name": "raw_dataset/cpu_test_july24_800_0/user_latencies.warm_up",
+      "sha256": "bc6c4bc364740203d0f9dbd3ff7be84c774385b52ff16655ff582dd893ef0881",
+      "size": 9345
+    }
+  ],
+  "training_ready": false,
+  "activation_allowed": false
+}

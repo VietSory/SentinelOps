@@ -5,6 +5,14 @@
 .aws
 .codex
 .agents
+AGENTS.md
+agent.md
+AGENTS.override.md
+.local-ops
+**/AGENTS.md
+**/agent.md
+**/AGENTS.override.md
+**/.local-ops
 artifacts
 data
 models

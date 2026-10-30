@@ -34,6 +34,64 @@ Start the existing health producer first. Use an already configured loopback `CO
 
 Use the same arguments plus `--status` for a read-only checkpoint lookup; status cannot initialize or capture/publish. `--max-ticks` bounds a run. SIGTERM/SIGINT request graceful shutdown; allow an active bounded capture to finish. Transport/database outages are reported without credentials and retried by the process. Integrity/configuration/role/schema failures stop the worker. Readiness/model availability, source availability, incident lifecycle and the process being alive are distinct.
 
+### Optional operational metrics
+
+Add `--metrics-otlp-endpoint http://127.0.0.1:4317 --metrics-instance incidents-0`
+to export through a private provider. Concurrent replicas need distinct stable
+slots `incidents-0` through `incidents-15`; reuse a slot only after its prior
+process has stopped. Resource service name is `sentinelops-incident-worker`.
+Only the fixed environment/slot, business-service and error-component labels
+are used. Incident IDs, source references and paths are not labels. Read-only
+`--status` cannot export metrics. Invalid exporter/slot configuration is rejected
+before opening the database pool; a DB startup failure exports not-ready/error
+when the configured exporter is available, then closes the private provider.
+
+These are **process-local** counters, which restart at known zero:
+
+| Metric | Meaning |
+| --- | --- |
+| `sentinelops_worker_committed_windows_total` | Number of `INGESTED` source steps observed by this process; a catch-up cycle can contain up to 64 |
+| `sentinelops_worker_unknown_decisions_total` | UNKNOWN service observations across every accepted step, including intermediate backlog steps |
+| `sentinelops_incident_groups_total` | New jobs in those observed INGESTED events; not a global durable incident count |
+| `sentinelops_rca_abstentions_total` | Abstained results in newly observed ENRICHED events; retries already enriched are not new results |
+| `sentinelops_worker_processing_duration_seconds` | Measured duration of valid PROGRESS cycles, including enrichment-only cycles; WAIT/BUSY do not add a sample |
+| `sentinelops_worker_busy_polls_total` | Polls that did not acquire the shared consumer lock |
+
+The loop refreshes heartbeat while a dependency retry remains not-ready. Export
+collection cannot refresh it. `ready=1` indicates a successful process cycle,
+including a follower's BUSY poll; it does not certify business health or leadership.
+Source/end/age gauges remain unavailable until this process observes its own
+accepted source step. Source age is event age, not online incident latency.
+
+On slot reuse, the Collector can retain older source/histogram series. Guard
+source/age/end queries with `sentinelops_worker_has_local_decision == 1`.
+Guard latency with the separate `sentinelops_incident_has_local_progress == 1`:
+an enrichment-only cycle can have a real duration without a new source decision.
+Neither guard invents a zero-duration sample. For example:
+
+```promql
+sentinelops_worker_source_available{environment="local",worker_instance=~"incidents-[01]"}
+  and on(job,environment,worker_instance) (sentinelops_worker_has_local_decision == 1)
+
+sentinelops_worker_processing_duration_seconds_count{environment="local",worker_instance=~"incidents-[01]"}
+  and on(job,environment,worker_instance) (sentinelops_incident_has_local_progress == 1)
+```
+
+Unit and captured-state checks cover backlog accounting, rejected-input atomicity,
+progress/source separation and startup/retry cleanup. The [measured native S1
+integration](reports/2026-10-30-incident-worker-metrics.md) additionally verifies
+actual incident OTLP/Collector/Prometheus export, positive group/abstention counters
+before crash, reused/distinct slots, follower BUSY, database/source/exporter outages
+and exact process-log/durable-journal accounting. The [metrics acceptance
+profile](../configs/incident_metrics_acceptance.json) requires a 130-second backlog
+pause and 75-second Collector outage without shortening business SLO windows.
+For the existing native health checker, `--incident-consumer` plus
+`--metrics-otlp-endpoint http://127.0.0.1:4317` enables this additional observer;
+scenario truth remains outside worker inputs. Preserve the generated
+`incident-consumer/own-metrics/` snapshots and the source/profile hashes with the
+native replay/HTTP evidence. Each published SHA needs its own CI and transported
+artifact checks. Other module metrics, Grafana and full NFR-10 remain unaccepted.
+
 ## Verification and rollback
 
 [The acceptance protocol](../configs/incident_worker_acceptance.json) retains the original S1 and both S5 development protocols. The extra S5 phase provides 180 seconds of explicitly declared healthy traffic at each entry after the original case; it observes the source's existing three-clear-bucket recovery rule without changing thresholds, active faults or the original case configuration. Final S5/RCAEval holdouts remain sealed.

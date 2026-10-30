@@ -174,6 +174,7 @@ async def check(args):
     source_paths = [*root.glob("src/sentinelops/**/*.py"), *root.glob("contracts/*.schema.json"),
                     root / "scripts/run_health_worker.py", Path(__file__).resolve(),
                     root / "scripts/worker_metrics_evidence.py", root / "scripts/incident_worker_evidence.py",
+                    root / "scripts/incident_metrics_evidence.py", root / "configs/incident_metrics_acceptance.json",
                     root / "scripts/run_incident_worker.py",
                     root / "scripts/replay_incident_worker.py", root / "scripts/check_incident_replay_integrity.py",
                     root / "scripts/check_native_incident_api.py",
@@ -226,6 +227,8 @@ async def check(args):
         stopped = time.monotonic()
         if metrics:
             await metrics.ready("database-unavailable", instances={"health-0", "health-1"}, value=0)
+        if incident and incident.metrics:
+            await incident.metrics.database_unavailable(incident.live_metric_slots())
         await asyncio.sleep(max(0, protocol["database_outage_seconds"] - (time.monotonic() - stopped)))
         await asyncio.to_thread(docker, "start", args.control_container)
         for _ in range(90):
@@ -238,6 +241,8 @@ async def check(args):
         interventions.append({"kind": "database-start", "at": timestamp(datetime.now(timezone.utc))}); save_running()
         if metrics:
             await metrics.ready("database-recovered", instances={"health-0", "health-1"}, value=1)
+        if incident and incident.metrics:
+            await incident.metrics.ready('database-recovered', instances=incident.live_metric_slots(), value=1)
 
     try:
         primary = spawn()
@@ -250,7 +255,8 @@ async def check(args):
         assert stream_id
         save_running()
         if getattr(args, "incident_consumer", False):
-            incident = IncidentWorkerEvidence(args.output / "incident-consumer", store, stream_id, args.native_project)
+            incident = IncidentWorkerEvidence(args.output / "incident-consumer", store, stream_id, args.native_project,
+                                              metrics_endpoint=metrics_endpoint)
             incident.spawn()
         if metrics:
             await metrics.ready("primary-ready", instances={"health-0"}, value=1)
@@ -282,6 +288,9 @@ async def check(args):
         if db_task: await db_task
         assert crashed and db_task is not None
         if incident: await incident.require_closed(pool)
+        if incident and incident.metrics:
+            phase = 'incident-metrics-backlog-exporter-outage'
+            await incident.metrics_outage(pool, collector)
         phase = "source-outage"
         async with httpx.AsyncClient(timeout=12., trust_env=False) as client:
             async def source_load():
