@@ -28,15 +28,20 @@ NAMES = {
 
 
 class WorkerMetricEvidence:
+    names = NAMES
+    instance_pattern = "health-[01]"
+    duration_guard = "sentinelops_worker_has_local_decision"
+
     def __init__(self, output: Path):
         self.output = output
         self.output.mkdir(parents=True, exist_ok=False)
 
     async def snapshot(self) -> dict:
         evaluated = time.time()
-        queries = {key: name + '{environment="local",worker_instance=~"health-[01]"}' for key, name in NAMES.items()}
+        queries = {key: name + '{environment="local",worker_instance=~"' + self.instance_pattern + '"}'
+                   for key, name in self.names.items()}
         for key in ("duration_count", "duration_sum", "duration_bucket"):
-            queries[key] += ' and on(job,environment,worker_instance) (sentinelops_worker_has_local_decision == 1)'
+            queries[key] += ' and on(job,environment,worker_instance) (' + self.duration_guard + ' == 1)'
         async with httpx.AsyncClient(base_url="http://127.0.0.1:9090", timeout=3., trust_env=False) as client:
             async def query(key, expression):
                 response = await client.get("/api/v1/query", params={"query": expression, "time": evaluated})

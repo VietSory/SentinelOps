@@ -33,15 +33,25 @@ async def run(args):
         or selected.username != "control_writer" or selected.path != "/sentinelops_control"
         or not selected.port or selected.query or selected.fragment):
         raise ValueError("continuous incident worker requires the explicit loopback control_writer database")
-    pool = await asyncpg.create_pool(dsn, min_size=2, max_size=4, command_timeout=10)
-    collector = None
-    metrics = IncidentWorkerMetrics.otlp(args.metrics_otlp_endpoint, environment="local", instance=args.metrics_instance) if args.metrics_otlp_endpoint else None
-    stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for name in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(name, stop.set)
+    endpoint = getattr(args, "metrics_otlp_endpoint", None)
+    if args.status and endpoint:
+        raise ValueError("read-only incident status cannot start a metrics exporter")
+    pool = collector = metrics = None
+    component = "configuration"
     try:
+        # Reject invalid telemetry configuration before opening a database pool.
+        # Start the private provider before DB initialization so startup failures
+        # are observable and every allocated resource belongs to this cleanup.
+        if endpoint:
+            metrics = IncidentWorkerMetrics.otlp(endpoint, environment="local", instance=args.metrics_instance)
         if metrics: metrics.heartbeat(ready=False)
+        component = "database"
+        pool = await asyncpg.create_pool(dsn, min_size=2, max_size=4, command_timeout=10)
+        component = "configuration"
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for name in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(name, stop.set)
         health_policy = json.loads(args.health_policy.read_text())
         source = HealthLedgerReader(pool, ArtifactStore(args.source_store), args.health_stream, health_policy)
         collector = NativeIncidentEvidence(args.project, jaeger_endpoint=args.jaeger,
@@ -52,32 +62,48 @@ async def run(args):
         journal = IncidentJournal(pool, source, ArtifactStore(args.store), yaml.safe_load(args.topology.read_text()),
                                   json.loads(args.rca_policy.read_text()), collector.profile, model_registry=registry)
         if args.status:
+            component = "database"
             await journal.repository.check_ready()
             reference, state = await journal.checkpoint()
             print(json.dumps({"status": "DURABLE_STATUS", "consumer_id": journal.consumer_id,
                               "state_ref": reference, "last_bucket_end": state["last_bucket_end"] if state else None}), flush=True)
             return
+        component = "database"
         async with pool.acquire() as conn:
             stream = await conn.fetchrow("SELECT * FROM sentinel_control.health_streams WHERE stream_id=$1", source.stream_id)
         if stream is None:
+            component = "configuration"
             raise ValueError("start the explicitly selected accepted health stream before its incident consumer")
+        component = "source"
         await collector.verify_source(validate_stream(stream, health_policy))
+        component = "database"
         await journal.initialize()
+        component = "configuration"
         worker = IncidentWorker(journal, collector, connect=lambda: asyncpg.connect(dsn, timeout=5., command_timeout=10))
         print(json.dumps({"status": "READY", "consumer_id": journal.consumer_id,
                           "health_stream_id": source.stream_id, "project": args.project, "actions_allowed": False}), flush=True)
         ticks = 0
+        ready = False
         while not stop.is_set() and (args.max_ticks is None or ticks < args.max_ticks):
+            component = "runtime"
+            if metrics: metrics.heartbeat(ready=ready)
             try:
                 result = await worker.tick()
+            except (asyncpg.PostgresConnectionError, asyncpg.CannotConnectNowError, ConnectionError, TimeoutError) as exc:
+                ready = False
                 if metrics:
-                    metrics.heartbeat(ready=True)
+                    metrics.error("database")
+                    metrics.heartbeat(ready=False)
+                print(json.dumps({"status": "DEPENDENCY_UNAVAILABLE", "error_type": type(exc).__name__}), flush=True)
+            else:
+                component = "artifact"
+                if metrics:
                     await asyncio.to_thread(metrics.observe_result, result, journal.store)
+                ready = True
+                if metrics: metrics.heartbeat(ready=True)
+                component = "runtime"
                 if result["status"] != "WAIT":
                     print(json.dumps(result), flush=True)
-            except (asyncpg.PostgresConnectionError, asyncpg.CannotConnectNowError, ConnectionError, TimeoutError) as exc:
-                if metrics: metrics.error("database")
-                print(json.dumps({"status": "DEPENDENCY_UNAVAILABLE", "error_type": type(exc).__name__}), flush=True)
             ticks += 1
             if args.max_ticks is None or ticks < args.max_ticks:
                 try:
@@ -85,11 +111,23 @@ async def run(args):
                 except TimeoutError:
                     pass
         print(json.dumps({"status": "STOPPED", "consumer_id": journal.consumer_id, "ticks_by_process": ticks}), flush=True)
+    except Exception:
+        if metrics: metrics.error(component)
+        raise
     finally:
-        if metrics: await asyncio.to_thread(metrics.close)
-        if collector is not None:
-            await collector.close()
-        await pool.close()
+        try:
+            if metrics:
+                try:
+                    metrics.heartbeat(ready=False)
+                finally:
+                    await asyncio.to_thread(metrics.close)
+        finally:
+            try:
+                if collector is not None:
+                    await collector.close()
+            finally:
+                if pool is not None:
+                    await pool.close()
 
 
 def main():
