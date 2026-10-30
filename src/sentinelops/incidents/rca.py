@@ -14,9 +14,11 @@ METHODS = {
     "anomaly_strength": {"if-normalized-score/v1", "infra-connection-pressure/v1"},
     "temporal_precedence": {"disjoint-onset-intervals/v1"},
     "dependency_trace_relevance": {"native-span-duration-share/v1", "native-direct-span-duration-share/v1", "native-span-terminal-error/v1"},
-    "log_support": {"business-completion-support/v1", "native-log-pattern-presence/v1"},
+    "log_support": {"business-completion-support/v1"},
     "recent_change_support": {"observed-deployment/v1"},
 }
+LEGACY_NATIVE_METHODS = {name: set() for name in COMPONENTS}
+LEGACY_NATIVE_METHODS["log_support"] = {"native-log-pattern-presence/v1"}
 FACT_TYPES = {"metric", "log", "trace", "topology", "change", "model", "timeline"}
 
 
@@ -217,7 +219,7 @@ def validate_result(result: dict) -> None:
 
 
 def rank_native_support(services: list[str], evidence: list[dict], cards: list[dict], policy: dict):
-    """Source-neutral scoring kernel for supplementary native development reports.
+    """Isolated scoring kernel for the legacy log-only native experiment.
 
 No synthetic SLO health/correlation is constructed for foreign native services.
 The local RCA wire contract remains unchanged. Native receipt clocks are unknown.
@@ -231,7 +233,7 @@ The local RCA wire contract remains unchanged. Native receipt clocks are unknown
         raise ValueError("native support must match observed native service scope")
     candidates = []
     for service in sorted(services):
-        score, coverage, refs = _score(support[service], facts, service, policy)
+        score, coverage, refs = _score(support[service], facts, service, policy, methods=LEGACY_NATIVE_METHODS)
         candidates.append({"service": service, "score": score, "coverage": coverage,
                            "evidence_refs": refs, "components": deepcopy(support[service])})
     ordered, ranking, margin, reasons = _summarize(candidates, policy, {"grouping_reason": "native-observation-scope"},
