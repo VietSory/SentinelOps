@@ -3,8 +3,8 @@
 | Thuộc tính | Giá trị |
 | --- | --- |
 | Phiên bản | 1.1 — Accepted architecture, provisional numerical targets |
-| Ngày | 2026-10-25 |
-| Baseline | Source `main@20edcae`, PRODUCT_SPEC v1.1, ADR-001…009 |
+| Ngày | 2026-10-25; đối chiếu implementation 2026-10-30 |
+| Baseline | Kiến trúc gốc `main@20edcae`, PRODUCT_SPEC v1.1; trạng thái implementation đối chiếu `07c57c7`, ADR-001…013 |
 | Phạm vi | Single environment/cluster, ba business services, một database dependency, một automatic rollback runbook |
 | Trạng thái | Kiến trúc được chấp nhận qua ADR-006…009 ngày 2026-10-26; trạng thái implementation theo báo cáo thực thi; thresholds/targets mới vẫn provisional |
 
@@ -101,7 +101,7 @@ infra/                  local, Terraform, Kubernetes/Helm
 | Raw/normalized/features/model bundles | Filesystem object-store adapter | S3 | Versioned prefixes + SHA-256; không overwrite dataset/model ID |
 | IER revisions, tasks, actions, audit | PostgreSQL control database/schema | RDS PostgreSQL control database/schema | Tách credentials và quyền khỏi commerce |
 
-Có thể dùng chung database instance trong sandbox để tiết kiệm; commerce role không được đọc/ghi control tables và controller không được sửa commerce data. Đây là thiết kế storage đề xuất, không coi placeholder DynamoDB trong `.env.example` là quyết định đã Accepted. Nếu chọn DynamoDB, review lại transaction/CAS/outbox semantics trước implementation.
+Có thể dùng chung database instance trong sandbox để tiết kiệm; commerce role không được đọc/ghi control tables và controller không được sửa commerce data. Boundary storage theo ADR-006 đã được chấp nhận. Local PostgreSQL control store đã có immutable revisions, CAS, audit/outbox và health/incident checkpoints; AWS RDS/S3 deployment vẫn có gate riêng. Placeholder DynamoDB trong `.env.example` không thay quyết định này. Thay storage backend phải review transaction/CAS/outbox semantics và có migration/ADR tương ứng.
 
 ## 4. Contract strategy
 
@@ -119,23 +119,23 @@ Có thể dùng chung database instance trong sandbox để tiết kiệm; comme
 
 Schemas có `additionalProperties:false`. Không thêm trực tiếp `run_id`, `timeline`, `validation`, `model_provider`, `lifecycle` hoặc fields mới vào các payload đó. Một wrapper mới không được làm thay đổi response shape của endpoint cũ âm thầm.
 
-### 4.2 Các hợp đồng bổ sung cần tạo ở P0–P7
+### 4.2 Hợp đồng bổ sung: trạng thái implementation và phần còn thiếu
 
-Các cấu trúc dưới đây là thiết kế, chưa phải các schema file đã tồn tại.
+Bảng dưới đây phân biệt schema đã tồn tại với các hợp đồng còn thiếu; nguồn wire format hiện hành là file schema được liên kết, không phải danh sách field thiết kế ban đầu. Schema, producer và quality gate là ba phạm vi khác nhau: schema hợp lệ không chứng minh G2/G3 hoặc production readiness.
 
-| Hợp đồng mới | Fields tối thiểu | Lý do |
+| Hợp đồng | Fields/ý nghĩa chính hiện có | Trạng thái và nguồn kiểm chứng |
 | --- | --- | --- |
-| ObservationEnvelope | Version, payload kind/schema, payload, environment, source profile, observed/available/ingested times, quality, provenance refs | Metadata không lọt vào feature vector |
-| InfrastructureObservation | Component, metric, value/unit, period, source ref, timestamps, quality | RDS có CPU/connections; không cần giả HTTP latency/error để hợp TelemetryPoint |
-| FeatureEnvelope | FeatureWindow payload, feature-set version, input IDs, cutoff, quality, config hash | Reproduce input và enforce train/serve parity |
-| ExperimentRunManifest | Run/scenario IDs, seed, target, traffic, phase boundaries, fault method, truth, versions, raw refs | Ground truth tách biệt serving |
-| DatasetManifest | Dataset ID, run/split lists, hashes, feature/label/source/SLO versions | Dataset freeze |
-| ModelManifest | Model/artifact identity, service, preprocessing, ordered features, source/feature versions, train/calibration hashes, metrics, thresholds | Compatibility/activation |
-| IncidentEnvelope | Exact IER payload, revision, lifecycle stage, health context, evidence snapshot refs, timeline, explanation/action refs | Giữ nguyên IER schema và mở rộng lifecycle |
-| ChangeEvent | Event ID, actual target, before/after image/config versions, observed time, deployment reference | Evidence operational, tách khỏi fault truth |
-| ActionExecution/AuditEvent | Action/revision/runbook version, policy decision, actor, attempt, request/result timestamps, outcome/reason, verify samples | Approval bool không đủ audit/authorization |
+| ObservationEnvelope | Envelope/record ID, environment/source/service, payload, bucket/available/ingested clocks, measurements/quality/provenance | [Schema](../contracts/observation-envelope.schema.json), [telemetry path](STEP4_TELEMETRY.md) đã triển khai |
+| InfrastructureObservation | Component/environment, observed/available clocks, metrics, source ref và measurement scope | [Schema](../contracts/infrastructure-observation.schema.json) đã có; PostgreSQL/RDS observation tách khỏi HTTP RED theo ADR-007 |
+| FeatureEnvelope | Payload, feature-set/source identity, window/as-of, quality/provenance | [Schema](../contracts/feature-envelope.schema.json), batch/online transform dùng chung trong telemetry path |
+| ExperimentRunManifest | Run/session/scenario/split, truth/phase intervals, source commit/images/clocks và raw refs | [Schema](../contracts/experiment-run.schema.json), local experiment runner đã có; truth nằm ngoài predictor/diagnostic inputs |
+| DatasetManifest | Source/feature/SLO/label versions, run refs, counts/exclusions và training readiness/blockers | [Schema](../contracts/dataset-manifest.schema.json) và builder đã có; approved-source G2 vẫn BLOCKED |
+| ModelManifest / release ledger | Artifact/calibration checksums, ordered features, provenance, runtime versions/config/seed/thresholds; approval/route refs tách riêng | [Bundle/registry software](MODEL_PIPELINE.md): `sentinelops-model/v1` và `validated-model-release/v1` kiểm bằng code; chưa có JSON Schema riêng, chưa có approved model/G3 acceptance |
+| IncidentEnvelope | Exact IER payload, revision/recorded clock, context/actor/reason/timeline | [Schema](../contracts/incident-envelope.schema.json), [persistent API](STEP7_INCIDENT_API.md) và [continuous consumer](STEP8_INCIDENT_WORKER.md) đã có; không tự cấp action/explanation permissions |
+| ChangeEvent | Target, before/after version/config, observed clock, deployment ref | Chưa có wire contract/ledger deployment tổng quát; bounded operational change evidence không thay thế hợp đồng đích này |
+| ActionExecution/AuditEvent | Runbook/target, actor/policy decision, idempotency/attempt/result/verify/audit | Chưa có execution/audit contract và controller; schema RemediationAction hiện có không chứng minh action đã được thực thi |
 
-Ví dụ wire-format được validate nằm tại [feature-envelope sample](../samples/feature-envelope.sample.json) và [observation-envelope sample](../samples/observation-envelope.sample.json). Sau implementation phần contracts/transforms, các schema tương ứng và `STEP4_TELEMETRY.md` xác định format v1 thực tế; các manifest/lifecycle contracts khác trong bảng vẫn là phần sẽ triển khai.
+[Feature-envelope sample](../samples/feature-envelope.sample.json) và [observation-envelope sample](../samples/observation-envelope.sample.json) được validator kiểm tra. Runtime/schema/package checks và các báo cáo source/runtime được ghi riêng trong [PROJECT_STATUS.md](PROJECT_STATUS.md). Không gọi các contract đã có là chưa triển khai, cũng không biến model fixture hoặc schema request thành bằng chứng approved model, action execution hay quality acceptance.
 
 Model wrapper chỉ nhận numeric vector theo registry. `environment`, IDs, timestamps, source strings, run/scenario IDs và quality reasons không được tự biến thành model feature. Training label loader là thành phần duy nhất được đọc fault truth store.
 
@@ -328,7 +328,7 @@ RECOVERING -> INCIDENT nếu verify fail
 
 Persistence đếm bucket/window IDs mới; duplicate replay không cộng lần thứ hai. Dùng hysteresis để thoát trạng thái; không đóng incident chỉ từ một clean sample. Default entry là hai consecutive eligible observations, exit/verification dùng ba buckets theo policy; thresholds cụ thể được version.
 
-Implementation checkpoint: [objective SLO health producer](STEP7_SLO_HEALTH.md) and [real captured-source replay](reports/2026-10-26-slo-health-replay.md) implement this rule-source prerequisite with explicit UNKNOWN, policy/source identity and immutable decisions. This is separate from model outputs and independent unsampled-log evaluation labels. [Computed analytical IER writing](STEP7_RCA.md) now has a protected local producer; [continuous local SLO checkpoints](STEP7_HEALTH_WORKER.md) now have [actual crash/outage/replay evidence](reports/2026-10-28-continuous-health-worker.md) and [operational metrics/restart guards](reports/2026-10-28-health-worker-metrics.md). The [continuous incident consumer](STEP8_INCIDENT_WORKER.md) now implements downstream local correlation/RCA/IER publication with [measured S1/S5 development evidence](reports/2026-10-29-continuous-incident-local.md); remaining module metrics, full quality gates and action verification remain open. Replay decision clocks are not historical emissions.
+Implementation checkpoint: [objective SLO health producer](STEP7_SLO_HEALTH.md) and [real captured-source replay](reports/2026-10-26-slo-health-replay.md) implement this rule-source prerequisite with explicit UNKNOWN, policy/source identity and immutable decisions. This is separate from model outputs and independent unsampled-log evaluation labels. [Computed analytical IER writing](STEP7_RCA.md) now has a protected local producer; [continuous local SLO checkpoints](STEP7_HEALTH_WORKER.md) now have [actual crash/outage/replay evidence](reports/2026-10-28-continuous-health-worker.md) and [operational metrics/restart guards](reports/2026-10-28-health-worker-metrics.md). The [continuous incident consumer](STEP8_INCIDENT_WORKER.md) now implements downstream local correlation/RCA/IER publication with [measured S1/S5 development evidence](reports/2026-10-29-continuous-incident-local.md); the incident consumer additionally has [measured private operational metrics](reports/2026-10-30-incident-worker-metrics.md). Other module metrics, full quality gates and action verification remain open. Replay decision clocks are not historical emissions.
 
 ### 9.3 Incident lifecycle và projection
 
@@ -394,19 +394,24 @@ IER authoritative chứa kết quả được tính/validate. Generated explanat
 
 ## 11. Incident persistence và API
 
-### 11.1 Logical tables — PROPOSED
+### 11.1 Local tables đã có và logical tables còn dự kiến
 
-| Table | Keys/constraints | Purpose |
+Nguồn DDL local hiện hành là [schema v1](../infra/control/002-incident-store.sql), [health ledger v2](../infra/control/003-health-worker.sql) và [incident journal v3](../infra/control/004-incident-consumer.sql). Các bảng đã có dưới đây không phải kế hoạch chưa triển khai; acceptance runtime và migration vẫn được ghi riêng theo commit.
+
+| Table / store | Keys/constraints | Trạng thái / purpose |
 | --- | --- | --- |
-| `incidents` | Incident ID unique, current revision, lifecycle, timestamps | Current pointer và list index |
-| `incident_versions` | `(incident_id,revision)` unique; IER payload + source/config refs | Append-only authoritative revisions |
-| `incident_events` | Event ID unique, incident/revision link | Timeline/transitions |
-| `explanations` | Incident/revision/provider/prompt identity | Validated generated projection/fallback |
-| `actions` | Action ID; idempotency key unique; incident/target/runbook | Durable remediation intent/result |
-| `action_events` | Action ID + sequence unique | Prechecks/execute/verify/audit |
-| `tasks_outbox` | Task ID + dedup key, status/lease/attempt | At-least-once workers |
-| `model_activations` | Environment/service/current bundle + revision | Controlled model routing |
-| `change_events` | Event ID, target, immutable version refs | Real deployment context |
+| `incidents` | Incident ID PK, current revision FK, lifecycle/clocks | Đã có: current pointer/list index với CAS |
+| `incident_versions` | `(incident_id,revision)` PK; idempotency key unique | Đã có: immutable payload/context/actor/reason và database receipt clock |
+| `incident_events`, `outbox` | Event ID PK/FK, incident/revision unique, lease/attempt state | Đã có: audit và transactional downstream publication |
+| `health_streams`, `health_batches`, `health_signals` | Source-bound stream; unique stream/bucket/service và signal IDs | Đã có: atomic accepted three-service health ledger/checkpoint |
+| `incident_consumers`, `incident_consumer_steps`, `incident_consumer_checkpoints` | Unique consumer per stream, ordered bucket/state refs và CAS pointer | Đã có: durable consumer progress |
+| `incident_jobs`, `incident_job_evidence`, `incident_episode_recoveries` | Unique group/job/incident, frozen evidence and recovery refs | Đã có: source-derived groups, one accepted evidence capture và natural recovery |
+| `incident_commands`, `incident_command_receipts` | Unique command/ref and job/expected revision; matching receipt | Đã có: stable retry/idempotency qua IER publication |
+| `explanations` | Incident/revision/provider/prompt identity | Chưa có bảng/provider pipeline; target validated projection/fallback |
+| `actions`, `action_events` | Action ID/idempotency, target/runbook và ordered audit | Chưa có bảng/controller/execution verification |
+| Generic `tasks_outbox` | Task/dedup key, status/lease/attempt | Chưa có generic scheduler contract; local incident outbox/commands ở trên có scope riêng |
+| Database `model_activations` | Environment/service/current bundle + revision | Chưa có bảng; local [model registry](MODEL_PIPELINE.md) đã dùng checksum-pinned artifact release ledger, zero approved models |
+| `change_events` | Event ID, target, immutable version refs | Chưa có bảng deployment/change ledger tổng quát |
 
 The [continuous local health producer](STEP7_HEALTH_WORKER.md) now uses additive schema-v2 health_streams/health_batches/health_signals tables for atomic three-service bucket decisions and a source-bound checkpoint. Its append-only health ledger is a prerequisite for downstream consumers; it does not enqueue or implement continuous RCA/IER itself.
 
@@ -414,21 +419,24 @@ The separately implemented [continuous incident consumer](STEP8_INCIDENT_WORKER.
 
 Update current pointer, append version/event và enqueue downstream tasks trong cùng transaction. Dùng compare-and-set revision; crash/retry không tạo hai current versions. Large raw evidence nằm trong object store; DB giữ refs/checksums.
 
-### 11.2 API behavior đích
+### 11.2 API hiện hành và interfaces còn dự kiến
 
-| Endpoint | Contract/hành vi |
-| --- | --- |
-| `GET /health` | Liveness; không phụ thuộc Bedrock |
-| `GET /ready` | Control DB và required local components/model availability theo deployment role |
-| `POST /v1/detect` | Giữ FeatureWindow request và DetectionResult response hiện có; thực hiện model thật sau P6 |
-| `POST /v1/incidents` | Giữ IER payload; validate semantics rồi persist sau P7; response vẫn là IER, revision qua headers |
-| `GET /v1/incidents` | New paginated list contract; filter state/service/time, limit tối đa 100, stable cursor |
-| `GET /v1/incidents/{id}` | Exact current IER; `ETag`/revision headers; revision-specific read là interface bổ sung |
-| `GET /v1/incidents/{id}/context` | New IncidentEnvelope chứa timeline, lifecycle, action/explanation refs |
-| `GET /v1/incidents/{id}/explanation` | Exact GroundedExplanation; revision/provider/validation/fallback metadata qua supplemental envelope/headers đã định |
-| `POST /v1/internal/windows` | New authenticated FeatureEnvelope ingestion; async processing/job ID |
-| `POST /v1/incidents/{id}/actions` | Request approved runbook evaluation; server computes target/approval/dry-run/blast radius, trả action/job ID |
-| `GET /v1/actions/{id}` | RemediationAction payload và execution detail endpoint riêng |
+[Local API runbook](STEP7_INCIDENT_API.md), [OpenAPI implementation](../src/sentinelops/api.py) và schema supplement xác định interface đang chạy. Local token scopes không phải production IdP/authorization acceptance.
+
+| Endpoint | Contract/hành vi | Trạng thái |
+| --- | --- | --- |
+| `GET /health` | Process liveness, độc lập Bedrock | Đã có |
+| `GET /ready`, `GET /ready/incidents` | Model/control-store readiness tách riêng | Đã có; inference readiness mặc định unavailable khi không có approved model |
+| `POST /v1/detect`, `POST /v1/risk` | Frozen FeatureWindow và DetectionResult/DegradationRiskResult; compatible pinned model | Guard/compatibility/software đã có; zero approved source models, mặc định 503 |
+| `POST /v1/incidents` | Authenticated validated IER import, idempotency/expected revision, exact IER response và revision headers | Đã persist vào control DB; không tự cấp model/action truth |
+| `POST /v1/incidents/{id}/revisions` | Protected bounded supplemental write/lifecycle context | Đã có với semantic/CAS/idempotency checks |
+| `GET /v1/incidents` | State/service filters, bounded stable cursor, limit 1…100 | Đã có; time-range filter còn thuộc target, chưa có query parameter |
+| `GET /v1/incidents/{id}` | Current hoặc revision-specific exact IER, ETag/revision headers | Đã có |
+| `GET /v1/incidents/{id}/context` | IncidentEnvelope với bounded/paginated timeline | Đã có; wire fields theo schema, không tự thêm action/explanation fields |
+| `POST /v1/incidents/demo` | Explicit demo-only provenance | Đã có; disabled mặc định, không là model/production evidence |
+| `GET /v1/incidents/{id}/explanation` | GroundedExplanation/provider validation/fallback metadata | Chưa triển khai |
+| `POST /v1/internal/windows` | Authenticated envelope ingress/job ID | Chưa triển khai; continuous workers hiện đọc verified local source ledger trực tiếp |
+| `POST /v1/incidents/{id}/actions`, `GET /v1/actions/{id}` | Server policy/runbook target/approval/dry-run/blast radius và execution detail | Chưa triển khai |
 
 New interfaces MUST có OpenAPI/JSON Schema và producer/consumer fixtures trước integration. Không publish wrapper-shaped response dưới contract cũ. Demo endpoint chỉ bật trong demo profile và payload/record phải có provenance demo bên ngoài frozen IER.
 
@@ -498,6 +506,8 @@ Phải chứng minh: disabled action; wrong namespace/resource UID; stale/missin
 Single AWS region/cluster; IaC mô tả network/EKS/RDS/S3/roles, workload manifests pin images bằng digest. Hạn chế public endpoints, kiểm soát egress cần thiết, retention và teardown. Region/model/quota/budget được xác nhận trước apply; không coi đây là authorization tạo tài nguyên từ tài liệu.
 
 Mỗi module emit own metrics: ingestion lag, valid/quarantined records, eligible windows, inference latency/errors, incident count/dedup, evidence validation, explanation fallback, action outcome và worker queue age. Không dùng incident ID/trace ID làm metric labels; giữ trong logs/traces.
+
+Implementation checkpoint: health-worker và [incident-worker operational metrics](reports/2026-10-30-incident-worker-metrics.md) đã có actual local OTLP/Collector/Prometheus observations, bounded labels và restart/source guards. Incident counters được đối chiếu theo process logs và durable journal, không dùng global IER totals. Các module khác và Grafana dashboard chưa được acceptance; đây không phải full NFR-10.
 
 Retries có bound/exponential backoff/jitter, checkpoint và dedup keys; poison records vào quarantine với reason. Bedrock hỏng không chặn detection/RCA. Control DB hỏng chặn action nếu không persist audit/lock được. Artifact/schema/model mismatch là lỗi startup/readiness, không fallback thành score healthy.
 

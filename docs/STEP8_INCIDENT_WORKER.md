@@ -34,7 +34,7 @@ Start the existing health producer first. Use an already configured loopback `CO
 
 Use the same arguments plus `--status` for a read-only checkpoint lookup; status cannot initialize or capture/publish. `--max-ticks` bounds a run. SIGTERM/SIGINT request graceful shutdown; allow an active bounded capture to finish. Transport/database outages are reported without credentials and retried by the process. Integrity/configuration/role/schema failures stop the worker. Readiness/model availability, source availability, incident lifecycle and the process being alive are distinct.
 
-### Optional operational metrics — software verified, native acceptance pending
+### Optional operational metrics
 
 Add `--metrics-otlp-endpoint http://127.0.0.1:4317 --metrics-instance incidents-0`
 to export through a private provider. Concurrent replicas need distinct stable
@@ -77,12 +77,20 @@ sentinelops_worker_processing_duration_seconds_count{environment="local",worker_
   and on(job,environment,worker_instance) (sentinelops_incident_has_local_progress == 1)
 ```
 
-Unit and captured-state counter checks cover backlog accounting, rejected-input
-atomicity, progress/source separation and startup/retry cleanup. Real incident
-OTLP/Collector/Prometheus acceptance with outages, crash/restart, follower and
-journal/log comparison remains pending. Health-worker metrics acceptance and
-general native incident CI do not substitute for this component's metrics proof;
-full NFR-10 remains unaccepted.
+Unit and captured-state checks cover backlog accounting, rejected-input atomicity,
+progress/source separation and startup/retry cleanup. The [measured native S1
+integration](reports/2026-10-30-incident-worker-metrics.md) additionally verifies
+actual incident OTLP/Collector/Prometheus export, positive group/abstention counters
+before crash, reused/distinct slots, follower BUSY, database/source/exporter outages
+and exact process-log/durable-journal accounting. The [metrics acceptance
+profile](../configs/incident_metrics_acceptance.json) requires a 130-second backlog
+pause and 75-second Collector outage without shortening business SLO windows.
+For the existing native health checker, `--incident-consumer` plus
+`--metrics-otlp-endpoint http://127.0.0.1:4317` enables this additional observer;
+scenario truth remains outside worker inputs. Preserve the generated
+`incident-consumer/own-metrics/` snapshots and the source/profile hashes with the
+native replay/HTTP evidence. Each published SHA needs its own CI and transported
+artifact checks. Other module metrics, Grafana and full NFR-10 remain unaccepted.
 
 ## Verification and rollback
 

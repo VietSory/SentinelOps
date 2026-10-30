@@ -1,0 +1,373 @@
+{
+  "report_version": "continuous-incident-worker-metrics/v1",
+  "mode": "local-native-development-integration",
+  "source_commit": "07c57c7e1fdefc2e3d6b4612c5f91d384c3fc1a7",
+  "started_at": "2026-10-30T08:08:30.951832+00:00",
+  "finished_at": "2026-10-30T08:33:06.887767+00:00",
+  "native_commands": [
+    {
+      "stage": "native",
+      "exit_code": 0
+    },
+    {
+      "stage": "health-replay",
+      "exit_code": 0
+    },
+    {
+      "stage": "incident-replay",
+      "exit_code": 0
+    },
+    {
+      "stage": "negative",
+      "exit_code": 0
+    },
+    {
+      "stage": "http",
+      "exit_code": 0
+    }
+  ],
+  "health_verification": {
+    "batches": 23,
+    "signals": 69,
+    "event_counts": {
+      "checkout-service/data_unknown": 10,
+      "inventory-service/data_unknown": 10,
+      "payment-service/data_unknown": 10,
+      "checkout-service/observation": 11,
+      "inventory-service/observation": 13,
+      "payment-service/observation": 11,
+      "checkout-service/incident_opened": 1,
+      "payment-service/incident_opened": 1,
+      "checkout-service/recovery_confirmed": 1,
+      "payment-service/recovery_confirmed": 1
+    },
+    "availability_counts": {
+      "checkout-service/UNKNOWN": 10,
+      "inventory-service/UNKNOWN": 10,
+      "payment-service/UNKNOWN": 10,
+      "checkout-service/ELIGIBLE": 13,
+      "inventory-service/ELIGIBLE": 13,
+      "payment-service/ELIGIBLE": 13
+    },
+    "unknown_active_counts": {
+      "checkout-service": 1,
+      "inventory-service": 0,
+      "payment-service": 1
+    },
+    "missed_deadline_buckets": 1,
+    "eligible_feature_outputs": 33,
+    "source_outage_unknown_counts": {
+      "checkout-service": 1,
+      "inventory-service": 1,
+      "payment-service": 1
+    },
+    "timed_batches": 23,
+    "timing_coverage": "all-accepted-batches",
+    "maximum_processing_ms": 570.373,
+    "raw_to_feature_and_health_replay": true,
+    "final_batch_ref": "artifact://manifests/14503bab4ff088a6bd323f37f98d0fd0fb692da5043220821a5f7fb6f72b4ab9.json"
+  },
+  "incident_metrics_verification": {
+    "status": "PASS",
+    "mode": "actual-incident-otlp-collector-prometheus",
+    "precrash_groups_observed": 1,
+    "precrash_abstentions_observed": 1,
+    "current_process_counters": {
+      "commits": {
+        "incidents-0": 7,
+        "incidents-1": 5
+      },
+      "groups": {
+        "incidents-0": 0,
+        "incidents-1": 0
+      },
+      "abstentions": {},
+      "busy": {
+        "incidents-0": 46,
+        "incidents-1": 44
+      },
+      "cycles": {
+        "incidents-0": 7,
+        "incidents-1": 4
+      },
+      "duration": {
+        "incidents-0": 5.337073,
+        "incidents-1": 4.157436
+      },
+      "errors": {}
+    },
+    "unknown_by_slot_service": [
+      {
+        "slot": "incidents-0",
+        "service": "checkout-service",
+        "count": 3
+      },
+      {
+        "slot": "incidents-0",
+        "service": "inventory-service",
+        "count": 3
+      },
+      {
+        "slot": "incidents-0",
+        "service": "payment-service",
+        "count": 3
+      },
+      {
+        "slot": "incidents-1",
+        "service": "checkout-service",
+        "count": 4
+      },
+      {
+        "slot": "incidents-1",
+        "service": "inventory-service",
+        "count": 4
+      },
+      {
+        "slot": "incidents-1",
+        "service": "payment-service",
+        "count": 4
+      }
+    ],
+    "source_gauges_match_last_local_ingest": true,
+    "local_progress_latency_guard": true,
+    "shutdown_readiness_zero": true,
+    "metrics_are_business_truth": false,
+    "full_NFR10_accepted": false,
+    "actions_allowed": false,
+    "maximum_actual_ingested_per_cycle": 2,
+    "protocol_sha256": "f8d635b01af0226e298f101ceba3b003fd5058d5917139cb66f79dd5149a1039"
+  },
+  "independent_metric_recomputation": {
+    "status": "PASS",
+    "scope": "offline recomputation of actual metric observations against log/durable journal",
+    "source_commit": "07c57c7e1fdefc2e3d6b4612c5f91d384c3fc1a7",
+    "precrash_groups_observed": 1,
+    "precrash_abstentions_observed": 1,
+    "source_state_refs_checked": 23,
+    "current_process_commits": {
+      "incidents-0": 7,
+      "incidents-1": 5
+    },
+    "current_process_groups": {
+      "incidents-0": 0,
+      "incidents-1": 0
+    },
+    "current_process_abstentions": {},
+    "current_process_busy": {
+      "incidents-0": 46,
+      "incidents-1": 44
+    },
+    "unknown_observations": 21,
+    "maximum_actual_ingested_per_cycle": 2,
+    "protocol_sha256": "f8d635b01af0226e298f101ceba3b003fd5058d5917139cb66f79dd5149a1039",
+    "actions_allowed": false,
+    "full_NFR10_accepted": false
+  },
+  "backlog_exporter_probe": {
+    "status": "PASS",
+    "baseline": {
+      "health": 16,
+      "steps": 16
+    },
+    "paused_backlog": {
+      "health": 18,
+      "steps": 16
+    },
+    "while_export_unavailable": {
+      "health": 19,
+      "steps": 19
+    },
+    "source_progress_without_export": true
+  },
+  "native_lifecycle": {
+    "incidents": 1,
+    "versions": 4,
+    "outbox": 4,
+    "natural_recovery_verified": true
+  },
+  "verification": {
+    "health_replay": "PASS",
+    "incident_replay": "PASS",
+    "raw_replay_corruptions_rejected": 10,
+    "metric_snapshot_corruptions_rejected": 9,
+    "original_files_unchanged": true,
+    "protected_HTTP": {
+      "status": "PASS",
+      "mode": "actual-uvicorn-HTTP-real-PostgreSQL-native-incident-read-history",
+      "native_incidents": 1,
+      "native_versions": 4,
+      "native_outbox": 4,
+      "selected_sources": [
+        {
+          "consumer_id": "d8507156c3262e32fbcc0d05fb6358c09e6a9150a5dc2499cac33bb216241d41",
+          "snapshot_sha256": "706dc6c9ad7b4ae73d8e01e1eab3cdf3f4229b11763805241f7eb56b68844c17"
+        }
+      ],
+      "authenticated_and_unauthorized_paths_verified": true,
+      "current_and_all_historical_payloads_match_immutable_native_snapshots": true,
+      "ETag_and_bounded_timeline_verified": true,
+      "pagination_contains_all_native_incidents": true,
+      "detected_at_immutable": true,
+      "read_only_side_effect_counts_unchanged": true,
+      "model_ready_503": true,
+      "demo_disabled": true,
+      "actions_allowed": false
+    }
+  },
+  "source_identity": {
+    "source_hashes_checked": 114,
+    "tested_files_checked": 237,
+    "implementation_sha256": {
+      "src/sentinelops/api.py": "a3f99d76fda86be798c650a05af75e0c6af970d27c231f846f1abc015f1c41e4",
+      "src/sentinelops/api_http.py": "0fd42643715a3d3ffccdfcec1431712e5fdff9d7544ea775e31624da20477c70",
+      "src/sentinelops/api_settings.py": "13e1f216dcda126cc5c32938d83ac3c71108346828b2e3eef2c225a5e29a3ffd",
+      "src/sentinelops/contracts.py": "4f20d5226045458dbe0dfe8a6702c3d06c687e644d8e321fd51f853a2946a638",
+      "src/sentinelops/demo.py": "8bbbf665cafadb75a114cdf9a3de0d3b3219ce314a734d366282aa72d2052201",
+      "src/sentinelops/main.py": "b23ac1f35f971d60c3274688043d58fe05e53822d9df390cd0bd3a440413e8cc",
+      "src/sentinelops/schema_registry.py": "e9ae12f5fe31b30d6a692cfe2c3930c66a557a96ef08ec6b09ce300e290e0334",
+      "src/sentinelops/trace_evidence.py": "cd8b5f236eb1eb0ecb08998d2b20ba400bcf3332d1331788e234bcfccdc2e903",
+      "src/sentinelops/trace_query.py": "c7c66f9285a729da3ed46e45b878f7cdf30dcbe59e8c94c7b84039f2673c2f5f",
+      "src/sentinelops/__init__.py": "91447944015cec709e8aa7655f7e9d64e1e4508e7023a57fe3746911c0fc6fed",
+      "src/sentinelops/experiments/datasets.py": "5d302088f69aaffb2b790168c83bf4d0f67b2f0b5d3d7120f43156904e37d7f6",
+      "src/sentinelops/experiments/diagnostics.py": "e05fec1c722f7f1f2484050b437e0d722ad8917d0dbfe58905b02b399cdbbe65",
+      "src/sentinelops/experiments/labels.py": "e7b0792c4a84c485699ef5ab50b8f5c68df103fbe0275ee71597635f4e984496",
+      "src/sentinelops/experiments/multifault.py": "966b32cb5807128326d74d1b2a61dc35d4851ec18b264e4c986883b4335e2f55",
+      "src/sentinelops/experiments/runner.py": "b4b8f0912229740dba801204bdf0e9ddcf77b421403f323f9b9872e1cea6c2cb",
+      "src/sentinelops/experiments/traffic.py": "a383cc9c471c4ddc62d9325d8afd6d54cd414ac5553137c1d5bc80a91fe38a56",
+      "src/sentinelops/experiments/verification.py": "5d233f82f2a7c9959a6e5c14fc4d0f71aae785c99cb58489b8f7f28d0bde3545",
+      "src/sentinelops/experiments/__init__.py": "90d0ed1bd9b7124c3f3046286be8e8a4abaece3b0153c5a8c8fb3efa341c908e",
+      "src/sentinelops/incidents/correlation.py": "7aa4fc1b6477755d644736ea55e5a467e24747f1c32f13f5ef711d3ed03239d6",
+      "src/sentinelops/incidents/correlation_replay.py": "e7e8061ee00f8920781fecf88eb4950427efd17e20ecda622e5772b8ce480328",
+      "src/sentinelops/incidents/domain.py": "772a88450fd576b47b3c5829a0445edeaae0146db93ddd74eabcc01329ef31df",
+      "src/sentinelops/incidents/health.py": "4de3e365df44df170d4ce5c2dd3963dd7c5ee220f43b3a926c1ba92a8dfff56a",
+      "src/sentinelops/incidents/health_replay.py": "fc7591328a7bad7d5d98f14b6cace99167a1bc223b8587f849272a788894f9da",
+      "src/sentinelops/incidents/native_rca.py": "e098ab4400c4982839d97c9e8dcef292817a60bd13bf9cf3fdbaa7e1cb8e77f0",
+      "src/sentinelops/incidents/rca.py": "3c1182713f554c66ee265233df47f492e55c971e6a0c52ec610f82cc44396051",
+      "src/sentinelops/incidents/rca_producer.py": "e4eb9a64a20a781785636342c40824401425b34ea07d7c4f119322f72dead6c4",
+      "src/sentinelops/incidents/rca_replay.py": "427ddd2a48c667692bb7f97705a4870845c2962fc0b80670d79ab51e56529cc3",
+      "src/sentinelops/incidents/rca_source.py": "874c71380afba1f822ef193ca7998fec044a2906287e030f22df9a9c13c3a917",
+      "src/sentinelops/incidents/repository.py": "1aa73f5bec937e63ccff95dc977a499d82c38b3b20bddf8414b5f708df4b4ce7",
+      "src/sentinelops/incidents/validation.py": "0e8f0846341d7394c547a3759e0ab903c6e5e68008bca1eeb8aaccc867644d03",
+      "src/sentinelops/incidents/__init__.py": "8102b2a0492d095d9b7030755f79f03217be634b1ba989f8d63c43b10fc391fa",
+      "src/sentinelops/ml/corpus.py": "fdf437aa33872c4cdbc8717611fd176909dc62c7196c11112357cca535175f3c",
+      "src/sentinelops/ml/evaluation.py": "f9b29b24096b4e4e999bc597650887896935a04d8ee121b20dd7aea8a0a76544",
+      "src/sentinelops/ml/models.py": "10f1ba440a04a76c9748650b433cd0add15ac2e030856fcaadca0b348ccb520f",
+      "src/sentinelops/ml/readiness.py": "f97e4a1d0164ae27f7b792fb1f2991f4964fe183bac5eb675ce28f2133117250",
+      "src/sentinelops/ml/registry.py": "764c5cc001cc9c47072bb7112ab7a490fe0c8aebec3d4e8cf8533d4b5fe8a3b7",
+      "src/sentinelops/ml/__init__.py": "17b1f89ff9511527eaea09f8701ea8d2d7af0f6a1ed3714a7b9331a845bd3f53",
+      "src/sentinelops/public_data/admission.py": "64c5c77af85841c9b9251c50ecb36b5a32cef09ec46593c034d15a3919be8893",
+      "src/sentinelops/public_data/audit.py": "49beae4852bf47eefcb4ce38e789e0d564ee5aa68921bda97e0383fee3eca01c",
+      "src/sentinelops/public_data/benchmark.py": "7f0abcd11a3a1b0eee84e686726495f86fc9be1acecb130f150cef766aacf086",
+      "src/sentinelops/public_data/cohort.py": "9a04c154ea41d2f46dc5537226cb20a83fed28d665f81a3c68bade4474c4f6df",
+      "src/sentinelops/public_data/dataset.py": "570bc477586cd8d28566ce72eb34d97083ab2c4327ad7f6277c7a949967aeb0d",
+      "src/sentinelops/public_data/downloads.py": "3842578828f99ce9eda76dcf9b89d653c0b544c4993bd0bfa929639b15016897",
+      "src/sentinelops/public_data/gamma.py": "436fe1f3f4496b26437aa13d52c9274a3959604e6c91c5977a1e91ec105aa73e",
+      "src/sentinelops/public_data/gamma_archive.py": "224e13f1393360aca3489fa073585d053a1abbd68e64e2adf2cd26aef7f5d310",
+      "src/sentinelops/public_data/gamma_audit.py": "ffa9888748ce57eebfa26685b18764d28e6baaaaf3176f3a1693ff2ce011a846",
+      "src/sentinelops/public_data/gamma_clients.py": "0ff54d22bc7deaaf87632e4d2f4991581bd33c62c5291bf9ba8376f02ab6d1dc",
+      "src/sentinelops/public_data/phases.py": "99e6888654c472ea3ec1310f3dfa729516eb9de8cecf94af30a7e388f1b7fe0c",
+      "src/sentinelops/public_data/policy.py": "fdd357c3b21fadade061e00cdf8bc550d727512c31e02692a93e19938b5047c4",
+      "src/sentinelops/public_data/rcaeval_evaluation.py": "a4eb37dcce3fa1d4b097d1456f5a6bd52c0e14d2a2b7d60eab68777f8a69cdea",
+      "src/sentinelops/public_data/rcaeval_native.py": "b094f9d2014029729288768e82267187ca6087bb2942f0e67a9b9b2213175885",
+      "src/sentinelops/public_data/rcaeval_native_inventory.py": "c1de0864a9c759075672739378d2e89cfe1e14829722281e71e2cc9d44211a04",
+      "src/sentinelops/public_data/rcaeval_partitions.py": "c814dda204cb40c8ac987841561ae7a7107708c0cbea7f1b27c238cf2269f53e",
+      "src/sentinelops/public_data/resources.py": "bbf7f02425e015ef92e9fbb9faca90ffd086ad042759bb72adcd20c117ecb236",
+      "src/sentinelops/public_data/__init__.py": "acbdac588e4fe4b786de57093543f2ebff703b458370be7e2b0194ed2e65a158",
+      "src/sentinelops/telemetry/core.py": "15cfa222c43f7ee0e325e5eec7d5bb2b50afaf65fe707b7076994e65039c603a",
+      "src/sentinelops/telemetry/infrastructure.py": "ac8b908bf3f8639ccaae6db3fe49595cb4d7e0fcfd19d804b9b13df8acc95da4",
+      "src/sentinelops/telemetry/pipeline.py": "99e01ac2177c42a88a696e7eb7d8be8f6f8a3428e1264dd1c70e48024c1885b6",
+      "src/sentinelops/telemetry/prometheus.py": "c2d794bb2098b888b15b5a19c23ea8fc772b37df20104fedabeca77caae8deed",
+      "src/sentinelops/telemetry/scheduling.py": "720780519b66edb53ac1020c4ae53c34fd7a6ada7ab5f73f92c2840c125b09f2",
+      "src/sentinelops/telemetry/store.py": "5c7f0d83414e6add0bd4d7d243d29fdc31938c26e15da0a07c282c36b0225b05",
+      "src/sentinelops/telemetry/__init__.py": "96a10e3d9c3239d3b7d5262cf6c14de6a7d076c2f01252d3c15386be5171177d",
+      "src/sentinelops/workers/health.py": "06a31e221f40825ef15956cc5f3bd81df65b0f3e02826544ae964b8e95e35b3d",
+      "src/sentinelops/workers/health_source.py": "1c77bd99dbd765a5c77592f0e6936ca8ea868b1465d21a0526daae4160f51b3a",
+      "src/sentinelops/workers/incident.py": "1ddce1a18adedca2505e622b20024d2684a9a40a4c21caea38af1db12805aa00",
+      "src/sentinelops/workers/incident_evidence.py": "e9c08c79cdee495c72e496bb542544ced864c712f329cc328b47f0b9f898d786",
+      "src/sentinelops/workers/incident_journal.py": "94ae81be4ae5b8b10037d5ad7b81e58d2965aaa3d8101ec22968413265b2e929",
+      "src/sentinelops/workers/incident_rca.py": "0eda76a962f6829ca72b1ca6e5b708ce7fbe753783ee6492447a6ddcdfa94ac7",
+      "src/sentinelops/workers/incident_replay.py": "615b2ea565dccf48c331020367962476bae84d2c00f66f9b1be7c594a484a9a3",
+      "src/sentinelops/workers/incident_state.py": "e61b3f1dcaa506dbc27142c42af0d8d9a5272b1ccf5b27c919cd51482408a0d0",
+      "src/sentinelops/workers/legacy_incident_projection.py": "50c0f717189f03b47a8c4ea649e0c8e78086e0fa18df38ce2b45e33ba65d2db7",
+      "src/sentinelops/workers/legacy_incident_replay.py": "d436a34d6d6f75180e4316aa0da8d566e7d3dd96dca181187f39ceb67ac3f31c",
+      "src/sentinelops/workers/metrics.py": "eccb608cd06be5ecbc8448a3af1bcf3b92cd79d49c22394ba2480132fd457a6c",
+      "src/sentinelops/workers/model_signals.py": "5e7bf0f20bab0f32992b1df4f0789793f8bfa41126506c30345d1f6e0a53ca14",
+      "src/sentinelops/workers/__init__.py": "1a44ed91681451474f124d262404a39693e5fc25f49f196be6ed27272acbe8fe",
+      "contracts/api-error.schema.json": "ffd095c4de8893743949100b23b152845758ff7ca6374ac08178b32c5f5877d5",
+      "contracts/correlation-result.schema.json": "57e86d238a29b457a84083dd9400efc915fcc6c2b3d41d513bca533739dc3fa4",
+      "contracts/dataset-manifest.schema.json": "adfcc0108f26d24381c664dd2a8468ba937f4efcd1e8aef647e15c3362d9bb62",
+      "contracts/degradation-risk.schema.json": "5e9b3292e5bde5e13046d5de9defa1a40f69ca22981510f33ebd1410cf851e80",
+      "contracts/detection-result.schema.json": "d09088f8c25079567c884dd670b4d3c7bb9d1169f81c875ef8540dd0231f5611",
+      "contracts/experiment-run.schema.json": "765034a0c997a0c5d41847c1ba9d4383f04a5aef8e3eede1862cbc27f168c757",
+      "contracts/explanation.schema.json": "751c9ecd800dc80a11d921deaae771338d2eb685c304af30c1ec43576b157218",
+      "contracts/feature-envelope.schema.json": "dfbf95d1328ac89a85e050e72fb0906136357a9fdadb06679125bcfe499c1643",
+      "contracts/feature-window.schema.json": "3d794646cad94f9362a83815938b00a8aaea1b2457bc06630fff1f986ab9c1ed",
+      "contracts/health-signal.schema.json": "98c0d1de0628d07f96e5472755ece41793cc8b26b850c12d72d8d4ac1f996a48",
+      "contracts/incident-envelope.schema.json": "ac4592dd9c87803c4f6a88bb99bcc70604f2b03f9c50a917e7e09f2d1f03734f",
+      "contracts/incident-evidence-record.schema.json": "dd92df9cc6257343de17c21b0019e6b33ee21e9c098830c66c45f80f73dbfb19",
+      "contracts/incident-list.schema.json": "256f445ce53cebc79b74843dd7f6692b2fd62d3454e442be85c62d2b36ecdb28",
+      "contracts/incident-write.schema.json": "77d78fddd70ebd989d0303fa6485cc7215afdfd6f2531aca613d83f457048180",
+      "contracts/infrastructure-observation.schema.json": "33862cec94d6d72df52e4e71db1c0fe50663d356b0ede91e124947d828dc8270",
+      "contracts/observation-envelope.schema.json": "d47017febbf5bc0097db5649a04549d1ef3a15888bc65c58b497a84cf6e7cf61",
+      "contracts/rca-policy.schema.json": "40d96fa91d671af768c6369f826bc88becc5efc11597dc3c863456617829dc52",
+      "contracts/rca-result.schema.json": "7986d808dae47a31c8f143a4f2c3108a9490c8fe6046f87c804a8510a8426bbc",
+      "contracts/remediation-action.schema.json": "3c79351b0f12aac8c4055bd0a5710678be12e7c661345803e3f538760c26632f",
+      "contracts/research-interference-label.schema.json": "6706cce6bc23560146843d36a723e600f18726f3112691eb39d2a63a62621fcf",
+      "contracts/research-resource-window.schema.json": "b998f03b2bee7a74da70f98af75bfc2547ddfb396ca780f72ff813c05eadaf94",
+      "contracts/telemetry.schema.json": "39af89ae2047b3e55723c424519235baabcf3aa176b4d48a3027433c684f4fcb",
+      "contracts/training-data-policy.schema.json": "519c392f03f1847fac67afb7fa5e9e262b39e087ecf33c041b0123da62a1be2e",
+      "scripts/run_health_worker.py": "a722ba37e040632fee19e84fe52e03be71445a26c22f2d9b39dc58db8d52dca1",
+      "scripts/check_health_worker_live.py": "de309a944ec9b335b036accf479734fb0b53777b01940b0972d4cb76a3687892",
+      "scripts/worker_metrics_evidence.py": "79a36f3a048a8322693564853f7ddb6adc500240fb3f6ec4eb6b575309e807fb",
+      "scripts/incident_worker_evidence.py": "3c8d052a1e72c91d2ef9441e903a4f7feb2c1c26878047b6edb7f90c0a9d8ebe",
+      "scripts/incident_metrics_evidence.py": "1259968ff360a0ef21a92e95d176261c15c3d4d4e1beff2188c4956d90757f8c",
+      "configs/incident_metrics_acceptance.json": "f8d635b01af0226e298f101ceba3b003fd5058d5917139cb66f79dd5149a1039",
+      "scripts/run_incident_worker.py": "dba6041f334983e74ec5082fb3a6f9eb1be1a15f32f3e6fe02fcf8057048b422",
+      "scripts/replay_incident_worker.py": "bb26738c06af004c9d355f4f250daa391e18ceda39b9475912976c41c83c2c70",
+      "scripts/check_incident_replay_integrity.py": "1efbe16d2a81377465117a22a94525911f90d2f2ed2ee60fac9151bbfea9adf3",
+      "scripts/check_native_incident_api.py": "8cb7ba30a8f98a47a8de7a97455dd16f369b63a77342d441280f369545bb85cb",
+      "configs/incident_worker_acceptance.json": "370a13587f0da21552935f2a1f500864e3c6c04a512438507e56927985a10d1a",
+      "infra/control/003-health-worker.sql": "ec2359adb045e276dc1442b351f1d4c5b5bb21a7d561329d9dea0e73f6251c4d",
+      "infra/control/004-incident-consumer.sql": "a83c93c4b35373a4df58160e60b794eb82498e8a5ca840d9726cf29e1bdbc811",
+      "configs/slo_health_policy.json": "ec1273ee621596a2f586c721067545a5b69cc12bfda5380a6c24f93ba0e32033",
+      "configs/rca_policy.json": "f11c1d023c68aff9aa1e29e4bb6725c2b92794aad5e90e9cae2b2513602f893a",
+      "configs/topology.yaml": "d1265592881a04d07bb6ed992baa59d43610c90cd76cb3565cc75dd53d0df9a3"
+    },
+    "profile_sha256": "f8d635b01af0226e298f101ceba3b003fd5058d5917139cb66f79dd5149a1039"
+  },
+  "evidence_sha256": {
+    "result.json": "dff9d0aab3baf17c711762af819a3ab5e6abc158575b89cd64b4a299ff8fdfbd",
+    "live/acceptance.json": "bd5c8ad7a1e4cf63f0781e959d785b5614108f59e5aaac71538e6bb60296bbc6",
+    "live/incident-consumer/database-snapshot.json": "706dc6c9ad7b4ae73d8e01e1eab3cdf3f4229b11763805241f7eb56b68844c17",
+    "offline-incident-metrics.json": "67f1a0bd15257d030d469dd389e7f437b1cf86cd982297ed078148e7a1c6e1fa",
+    "offline-incident-metrics-negative.json": "bd0137ecd00e61d5e99b4b76d3614f6fff72670d0909931cb1546e7f88e4d793",
+    "offline-incident-replay.json": "284016f3b8a8e893e0e295c672ed22396079015bc31f2a0f65ffcddc6d76e254",
+    "offline-incident-negative.json": "e9b30a573654c1859c2cacf7627dcfcb2973ade01ff9ac0cdaa566c7f2793edd",
+    "native-api/acceptance.json": "ceb7445f2c78a125b4ec3d3b738c58ee2ab546e3bed9d63c372c59593c180792"
+  },
+  "software_checks": {
+    "focused_passed": 36,
+    "regression_passed": 649,
+    "regression_skipped": 0,
+    "schema_count": 23,
+    "sample_count": 17,
+    "policy_config_count": 2,
+    "installed_package": "PASS outside checkout; package src/contracts unchanged since observer wheel check",
+    "docker_context_privacy": "PASS ordinary source retained and eight synthetic private markers excluded"
+  },
+  "prior_attempt": {
+    "source_commit": "0056433c598d1bf06a3996cdbc5660fecd7f362a",
+    "status": "COVERED_PATHS_PASS_COMPONENT_NOT_READY",
+    "limitation": "Primary crash preceded completed positive group/abstention metric export; v2 observer profile explicitly requires both before SIGKILL"
+  },
+  "boundaries": {
+    "independent_trials": false,
+    "training_corpus": false,
+    "model_outputs_available": false,
+    "actions_allowed": false,
+    "full_G4_accepted": false,
+    "full_NFR10_accepted": false,
+    "grafana_dashboard_deployed": false
+  },
+  "remote_ci": "Exact published SHA and transported three native bundles must be verified separately before release acceptance"
+}
