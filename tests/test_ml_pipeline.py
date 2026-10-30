@@ -148,3 +148,54 @@ def test_event_metrics_keep_duplicates_misses_and_real_emission_delays():
     assert (result["tp"], result["fp"], result["fn"]) == (1, 1, 1)
     assert result["f1"] == .5 and result["detection_delays_seconds"] == [10.]
     assert result["measured_leads_seconds"] == [50.] and result["false_incidents_per_healthy_service_hour"] == 1
+
+
+def test_self_attested_dataset_cannot_enter_fit_or_read_arbitrary_evidence(tmp_path):
+    from sentinelops.ml.corpus import load_training_rows
+    from sentinelops.public_data.policy import load_policy
+    from sentinelops.telemetry.core import stable_id
+    report = {'dataset_version': 'gamma-verified-training/v1', 'source': load_policy()['sources']['gamma'],
+              'training_data_policy_hash': stable_id(load_policy()), 'training_ready': True,
+              'health_labels_available': True, 'source_reference_is_healthy_certificate': True,
+              'source_reference_traffic_verified': True, 'independence_established': True,
+              'risk_target_available': True, 'source_audit_refs': ['forged://exists-is-not-proof']}
+    class NoRead:
+        def read(self, ref):
+            pytest.fail('self-attestation must be rejected before any corpus/evidence read')
+    with pytest.raises(DatasetNotReady, match='self-attested'):
+        load_training_rows(NoRead(), report)
+    store = ArtifactStore(tmp_path / 'store')
+    ref = store.write('manifests', report)
+    with pytest.raises(DatasetNotReady, match='self-attested'):
+        train_gamma(store, ref, tmp_path / 'models')
+    assert not (tmp_path / 'models').exists()
+
+
+@pytest.mark.parametrize('seconds', [-300, 0, 60, 299, 301, 600])
+def test_real_inference_rejects_wrong_duration_before_predict(fitted, seconds):
+    now = datetime.now(timezone.utc)
+    registry = ModelRegistry()
+    registry._models['payment-service'] = ({'model_version': 'fixture-only', 'ordered_features': list(FEATURE_KEYS),
+        'provenance': {'source_profile': 'fixture'}}, fitted[0], None, 'fixture://not-approved')
+    feature = {'schema_version': '1.0', 'service': 'payment-service',
+               'window_start': timestamp(now - timedelta(seconds=seconds)), 'window_end': timestamp(now),
+               'features': {k: 1. for k in FEATURE_KEYS}}
+    with pytest.raises(ValueError, match='precede|300-second'):
+        registry.infer(feature, source_profile='fixture', now=now)
+
+
+@pytest.mark.parametrize('service,features', [('foreign-service', list(FEATURE_KEYS)),
+    ('payment-service', ['cpu_cores', 'memory_bytes', 'network_bytes'])])
+def test_registry_rejects_wrong_route_or_feature_semantics_even_with_version_string(tmp_path, monkeypatch, service, features):
+    from sentinelops.ml import models
+    store = ArtifactStore(tmp_path)
+    manifest = {'origin': 'admitted-gamma', 'model_version': 'fixture', 'ordered_features': features,
+                'provenance': {'service': service, 'feature_set_version': 'http-red-5m/v1'}}
+    monkeypatch.setattr(models, 'load_bundle', lambda *a, **k: (manifest, None, None))
+    evidence = store.write('manifests', {'fixture': True})
+    validation = store.write('manifests', {'model_version': 'fixture', 'G2': 'PASS', 'G3': 'PASS',
+        'source_parity': 'PASS', 'activation_allowed': True, 'evaluation_refs': [evidence]})
+    release = store.write('manifests', {'release_version': 'validated-model-release/v1', 'models': [
+        {'bundle_directory': 'fixture', 'manifest_sha256': 'fixture', 'validation_ref': validation}]})
+    with pytest.raises(IncompatibleFeatures):
+        ModelRegistry.load(store, release)

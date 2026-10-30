@@ -9,18 +9,21 @@ blocked. The measured resource report is not an admission certificate.
 grouped report, identifies its historical scope, and records zero certified live
 business-service health/precursor support. It never opens raw or final data.
 
-`scripts.train_models` rejects an unready report **before estimator construction,
-table access or output creation**. The supplementary internal
-`gamma-verified-training/v1` admission interface requires the frozen source policy,
-source-audit refs, established independent groups, health certificates and actual
-pre-SLO labels. It is not minted by the existing interference dataset builder.
-Each `gamma-verified-training-rows/v1` entry references a separately validated
-resource feature and health/precursor label. Labels require evidence refs and an
-independently observed future breach for positives. Run/group/split metadata never
-becomes a numeric feature. Training accepts train/calibration entries only, checks
-whole-group disjointness and chronology, 300/100 healthy windows and 3/2 independent
-healthy and gradual groups per modeled native service. Test refs remain unopened.
-No current source satisfies that interface; the reader cannot cure absent evidence.
+`scripts.train_models` rejects unready reports **before estimator construction,
+table access or output creation**. The proposed internal
+`gamma-verified-training/v1` table reader has structural group/chronology/count
+checks, but no accepted source-backed health/precursor certificate verifier exists.
+Previously, caller-authored PASS flags and arbitrary existing evidence references
+could enter this reader. Admission now explicitly rejects self-attested reports,
+including reports claiming every gate passed. Content hashes prove byte integrity,
+not workload health, outcome truth or scientific approval.
+
+Enabling source-backed training requires implementing and reviewing a verifier
+that binds traffic completeness, objective SLO health/outcomes, native identities,
+independent groups and precursor chronology to approved original observations.
+Changing booleans cannot unlock training. The dormant row reader is not a certified
+admission pipeline. Actual numerical fit/serialization/inference primitives remain
+fixture-tested separately; no valid source-admission integration is claimed.
 
 Numerical primitives implement actual train-only RobustScaler/IsolationForest,
 median/MAD control and XGBoost binary risk. Per-service matrices preserve native

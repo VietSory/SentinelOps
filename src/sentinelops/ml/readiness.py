@@ -58,3 +58,9 @@ def require_training_ready(report: dict) -> None:
         or report.get("independence_established") is not True
         or report.get("risk_target_available") is not True):
         raise DatasetNotReady("no admitted source-compatible health/precursor/independence certificate")
+    # Content-addressed objects establish byte integrity, not scientific truth.
+    # No accepted GAMMA adapter currently verifies traffic, SLO outcomes and
+    # independent precursor certificates. Do not let caller-authored flags (or
+    # arbitrary existing evidence_refs) create an admitted-gamma model. Enabling
+    # this path requires an evidence verifier, not another approval boolean.
+    raise DatasetNotReady("no source-backed GAMMA health/precursor certificate verifier; self-attested admission rejected")
