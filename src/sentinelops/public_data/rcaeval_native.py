@@ -276,6 +276,22 @@ def adapt_native_case(tables: dict[str, bytes], profile: dict) -> dict:
                                "backwards_adjacent_times": backwards, "normalized_sha256": fingerprint.hexdigest()}
         if modality == "traces":
             summaries[modality]["native_status_counts"] = dict(sorted(statuses.items()))
+    # Parents may occur later in the file. Validate the complete ancestry before
+    # emitting dependency links; timestamps cannot make a cyclic trace valid.
+    # Each node is visited at most once, including on very deep traces.
+    completed = set()
+    for node in span_nodes:
+        path = set()
+        current = node
+        while current in span_nodes and current not in completed:
+            if current in path:
+                raise NativeSourceError("cyclic native trace ancestry")
+            path.add(current)
+            parent = span_nodes[current][1]
+            if parent is None:
+                break
+            current = (current[0], parent)
+        completed.update(path)
     edges, unresolved, roots = Counter(), 0, 0
     for (trace, _), (entity, parent, in_window) in span_nodes.items():
         if not in_window:

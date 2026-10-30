@@ -33,6 +33,8 @@ def evaluate_manifest(manifest_path: Path, profile: dict, policy: dict, *, sourc
     # Compute them before any ground-truth metadata can enter this evaluator.
     ablations = {case: diagnose_ablations(value["observations"], policy)
                  for case, value in business.items()} if include_ablations else {}
+    breakdowns = {case: evidence_breakdown(value["observations"], value["diagnosis"], policy)
+                  for case, value in business.items()}
     frozen = canonical(business)
     frozen_ablations = canonical(ablations)
     # The label reader cannot participate in selecting windows, candidates or scoring.
@@ -54,6 +56,7 @@ def evaluate_manifest(manifest_path: Path, profile: dict, policy: dict, *, sourc
             qualified += prediction is not None
             correct += prediction is not None and prediction == row["root_cause_service"]
             detail.update({"status": "EVALUATED", **value,
+                           "evidence_breakdown": breakdowns[case],
                            "ground_truth_in_native_entities": row["root_cause_service"] in value["observations"]["entities"],
                            "qualified_correct": prediction == row["root_cause_service"] if prediction is not None else None})
         results.append(detail)
@@ -84,6 +87,40 @@ def evaluate_manifest(manifest_path: Path, profile: dict, policy: dict, *, sourc
     return report
 
 
+def evidence_breakdown(scope: dict, diagnosis: dict, policy: dict) -> dict:
+    """Resolve diagnostic references to source bytes without evaluator labels.
+
+    Support counts describe this fixed observation window. Missing receipt
+    clocks remain missing; span work fractions do not become causal evidence.
+    """
+    if evaluate_native(scope, policy) != diagnosis:
+        raise ValueError("evidence breakdown requires a reproducible native diagnosis")
+    sources = {}
+    available = set()
+    for candidate in diagnosis["candidates"]:
+        entity = candidate["service"]
+        for name, card in candidate["components"].items():
+            if card["value"] is None:
+                continue
+            available.add(name)
+            modality = "traces" if name == "dependency_trace_relevance" else "logs"
+            stats = scope["trace_support" if modality == "traces" else "log_support"][entity]
+            for ref in card["evidence_refs"]:
+                sources[ref] = {"entity": entity, "modality": modality,
+                    "source_sha256": scope["source_telemetry_sha256"][modality],
+                    "window_start_ns": scope["window_start_ns"], "window_end_ns": scope["window_end_ns"],
+                    "receipt_clock": None, "method": card["method"], "observations": deepcopy(stats),
+                    "derivation": ("entity recorded duration / total recorded duration; overlapping spans retained"
+                        if modality == "traces" else "1 iff at least one fixed exception marker in an observed message; else 0")}
+    return {"available_categories": sorted(available),
+            "missing_categories": sorted(set(COMPONENTS) - available),
+            "observed_category_weight_ceiling": sum(policy["weights"][name] for name in sorted(available)),
+            "required_coverage": policy["minimum_coverage"],
+            "source_references": sources,
+            "known_weight_is_not_causal_confidence": True,
+            "receipt_time_recoverable_from_event_timestamps": False}
+
+
 def diagnose_ablations(scope: dict, policy: dict) -> dict:
     """Remove actually observed support; never introduce unavailable modalities."""
     results = {"native-traces-and-logs": evaluate_native(scope, policy)}
@@ -109,7 +146,12 @@ def summarize_ablations(ablations: dict, labels: dict) -> dict:
             abstained += bool(result and result["abstained"])
             qualified += bool(result and result["qualified_root"] is not None)
         n = len(labels)
+        component = {"without-native-logs": "log_support", "without-native-traces": "dependency_trace_relevance"}.get(name)
+        observed = sum(any(c["components"][component]["value"] is not None
+                          for c in runs["native-traces-and-logs"]["candidates"])
+                       for runs in ablations.values()) if component else None
         metrics[name] = {"selected_cases": n, "evaluated_cases": len(ablations),
+            "cases_with_removed_observed_support": observed,
             "top1": sum(r == 1 for r in ranks) / n if n else None,
             "top3": sum(r is not None and r <= 3 for r in ranks) / n if n else None,
             "mrr": sum(1 / r for r in ranks if r) / n if n else None,
