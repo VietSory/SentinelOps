@@ -1,9 +1,9 @@
 # Three-phase source change inventory
 
-Implementation frozen and locally verified at `f1b997c9a0f3d07dd5e695b51451ef9e7799d253`.
+Final implementation frozen and locally verified at `b27a8c260f1408962dcdba8770df59da0eb8b5a7`.
 This inventory lists final additions/modifications against the newer canonical
-upstream checkpoint `f1deb7ee2263aed79f4e49a43b0411ba2b7ad37a`, merged without
-resetting or rewriting shared history. Existing canonical runtime, ADR-012 and
+upstream checkpoint `3e43e35`, merged without
+resetting or rewriting shared history. Existing canonical runtime, ADR-012/013, native source inventory and
 SQL migrations remain authoritative; retaining them is not a claim they were
 newly created by this delivery.
 
@@ -19,9 +19,12 @@ newly created by this delivery.
 | `9e32c3e` | Phase 1 actual canonical native, raw-lineage/recovery and protected HTTP verification report |
 | `52e5fb8` | Phase 2 exact data readiness/blocker and numerical software verification report |
 
-Phase 3 reporting/status is committed separately after these checkpoints. Each
+| `de89010` | Phase 3 initial report/status and source inventory |
+| `b27a8c2` | Preserve newer upstream trusted RCAEval source admission/ADR-013; canonical fixed-window ablations and 599-test compatibility |
+
+Final supplemental measurement reporting follows these checkpoints. Each
 implementation commit was preceded by relevant executed checks; the merged source
-received the complete 557-test, contract, wheel and canonical local-runtime checks.
+received 557 tests and actual canonical local runtime checks, then the newer upstream merge received 599 tests, contract/wheel checks and canonical source/ablation execution.
 Published CI verifies its own exact delivery SHA; older CI is not reused as proof.
 
 ## Significant changes
@@ -81,7 +84,7 @@ excluded from Git; sanitized measured summaries and snapshot checksums are commi
 | A | [src/sentinelops/ml/models.py](../../src/sentinelops/ml/models.py) |
 | A | [src/sentinelops/ml/readiness.py](../../src/sentinelops/ml/readiness.py) |
 | A | [src/sentinelops/ml/registry.py](../../src/sentinelops/ml/registry.py) |
-| A | [src/sentinelops/public_data/rcaeval_evaluation.py](../../src/sentinelops/public_data/rcaeval_evaluation.py) |
+| M | [src/sentinelops/public_data/rcaeval_evaluation.py](../../src/sentinelops/public_data/rcaeval_evaluation.py) |
 | M | [src/sentinelops/workers/incident.py](../../src/sentinelops/workers/incident.py) |
 | M | [src/sentinelops/workers/incident_journal.py](../../src/sentinelops/workers/incident_journal.py) |
 | M | [src/sentinelops/workers/incident_rca.py](../../src/sentinelops/workers/incident_rca.py) |

@@ -97,5 +97,145 @@
         "unobserved-dependency-candidates"
       ]
     }
-  ]
+  ],
+  "canonical_ADR013_verification": {
+    "source_commit": "b27a8c260f1408962dcdba8770df59da0eb8b5a7",
+    "source_manifest_sha256": "3445957277004895c3a61460808355cf078123c890aad6d582c08373f666450f",
+    "profile_sha256": "4e9e5e2e57d01d0c59ac0de450612c90fb9d39d2a0f47370559a6568a991f3a1",
+    "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+    "business_results_sha256": "4d1ab2e228e559abc9e9a0d6bd66f9748573db05c20ebf68f4591bde09257101",
+    "report_sha256": "e3576c80c00cce803d5b50fbafc4cc53266bad33c50c1c727d093fb731df9eee",
+    "status": "PASS",
+    "denominators": {
+      "selected": 3,
+      "evaluated": 3,
+      "quarantined": 0,
+      "abstained": 3,
+      "qualified": 0,
+      "qualified_correct": 0
+    },
+    "conditional_qualified_accuracy": null,
+    "repeat_identical": true,
+    "holdout_opened": false,
+    "full_G4_accepted": false,
+    "ablation_metrics": {
+      "native-traces-and-logs": {
+        "selected_cases": 3,
+        "evaluated_cases": 3,
+        "top1": 0.0,
+        "top3": 0.3333333333333333,
+        "mrr": 0.16666666666666666,
+        "abstentions": 3,
+        "abstention_rate": 1.0,
+        "qualified_predictions": 0,
+        "maximum_candidate_coverage_per_case": [
+          0.0,
+          0.4,
+          0.4
+        ],
+        "ranking_metrics_include_abstained_hypotheses": true,
+        "independent_sessions_established": false,
+        "confidence_interval": null
+      },
+      "without-native-logs": {
+        "selected_cases": 3,
+        "evaluated_cases": 3,
+        "top1": 0.0,
+        "top3": 0.3333333333333333,
+        "mrr": 0.16666666666666666,
+        "abstentions": 3,
+        "abstention_rate": 1.0,
+        "qualified_predictions": 0,
+        "maximum_candidate_coverage_per_case": [
+          0.0,
+          0.25,
+          0.25
+        ],
+        "ranking_metrics_include_abstained_hypotheses": true,
+        "independent_sessions_established": false,
+        "confidence_interval": null
+      },
+      "without-native-traces": {
+        "selected_cases": 3,
+        "evaluated_cases": 3,
+        "top1": 0.0,
+        "top3": 0.0,
+        "mrr": 0.0,
+        "abstentions": 3,
+        "abstention_rate": 1.0,
+        "qualified_predictions": 0,
+        "maximum_candidate_coverage_per_case": [
+          0.0,
+          0.15,
+          0.15
+        ],
+        "ranking_metrics_include_abstained_hypotheses": true,
+        "independent_sessions_established": false,
+        "confidence_interval": null
+      }
+    },
+    "regression": {
+      "passed": 599,
+      "skipped": 0,
+      "warnings": 1
+    },
+    "cases": [
+      {
+        "case": "re1ob_adservice_cpu_1",
+        "window_start_ns": 1685204489000000000,
+        "window_end_ns": 1685204789000000000,
+        "ranking": [],
+        "eligible_log_records": 0,
+        "eligible_trace_records": 0,
+        "abstention_reasons": [
+          "no-positive-observed-support",
+          "unobserved-dependency-candidates"
+        ]
+      },
+      {
+        "case": "re2ob_checkoutservice_cpu_1",
+        "window_start_ns": 1705354987000000000,
+        "window_end_ns": 1705355287000000000,
+        "ranking": [
+          "frontendservice",
+          "checkoutservice",
+          "recommendationservice",
+          "currencyservice",
+          "productcatalogservice",
+          "emailservice",
+          "paymentservice"
+        ],
+        "eligible_log_records": 35016,
+        "eligible_trace_records": 80295,
+        "abstention_reasons": [
+          "insufficient-coverage",
+          "insufficient-score",
+          "source-availability-unverified",
+          "unobserved-dependency-candidates"
+        ]
+      },
+      {
+        "case": "re3ob_adservice_f3_1",
+        "window_start_ns": 1731904381000000000,
+        "window_end_ns": 1731904681000000000,
+        "ranking": [
+          "frontend",
+          "recommendationservice",
+          "checkoutservice",
+          "currencyservice",
+          "productcatalogservice",
+          "paymentservice",
+          "emailservice"
+        ],
+        "eligible_log_records": 14576,
+        "eligible_trace_records": 34532,
+        "abstention_reasons": [
+          "insufficient-coverage",
+          "insufficient-score",
+          "source-availability-unverified",
+          "unobserved-dependency-candidates"
+        ]
+      }
+    ]
+  }
 }

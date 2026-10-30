@@ -153,3 +153,13 @@ remain unaccepted. No sealed final holdout was accessed.
 Machine-readable measurements: [PHASE1_CONTINUOUS_PIPELINE.json](evidence/PHASE1_CONTINUOUS_PIPELINE.json).
 Each published SHA still requires its own completed CI; the release commit's exact
 run is recorded in the final delivery response. Older green runs do not certify it.
+
+## Final upstream compatibility check
+
+New upstream main `3e43e35` was merged without rewriting history at
+`b27a8c260f1408962dcdba8770df59da0eb8b5a7`. The source-admission correction and
+accepted ADR-013 remain intact. Full regression after the merge: **599 passed,
+zero skipped**, one upstream deprecation warning; contracts and installed-wheel
+checks PASS. The canonical captured incident history also replays with both
+external snapshot checksums under the merged code. Earlier actual measurements
+above retain their original source SHA; later exact-head CI is a separate run.
