@@ -6,9 +6,19 @@ import pytest
 
 from sentinelops.public_data.rcaeval_evaluation import diagnose_native, evaluate_development
 from sentinelops.public_data.rcaeval_partitions import load_partitions
+from sentinelops.incidents.rca import COMPONENTS, rank_native_support, unavailable
 
 CONFIG = json.loads(Path("configs/rcaeval_development_evidence.json").read_text())
 POLICY = json.loads(Path("configs/rca_policy.json").read_text())
+
+
+def test_legacy_native_kernel_cannot_admit_live_business_log_methods():
+    components = {name: unavailable() for name in COMPONENTS}
+    components['log_support'] = {'value': 1., 'method': 'business-completion-support/v1',
+                                 'evidence_refs': ['native-log'], 'missing_reason': None}
+    with pytest.raises(ValueError, match='method/evidence'):
+        rank_native_support(['native'], [{'id': 'native-log', 'type': 'log', 'service': 'native'}],
+                            [{'service': 'native', 'components': components}], POLICY)
 
 
 def test_native_evidence_ablation_reuses_weights_and_never_invents_slo_or_model():

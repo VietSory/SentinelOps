@@ -32,3 +32,7 @@ Reviewable acceptance for the next approved work package:
 - Keep final RCAEval/other sealed data closed. Evaluate more cases only through the existing partition/access and approved scope process; no claim of generalization from these three inspected cases.
 
 **Gate decision:** G2 NO-GO; G3 NO-GO; G4 diagnostic quality NO-GO. Existing continuous incident software remains usable with explicit unavailable model signals and safe abstention. No AWS infrastructure, remediation or unrelated service was introduced.
+
+## Concurrent main reconciliation
+
+While this topic branch was being verified, main advanced to `4846f1a649d8cefa6b92b836a44c4f5704eb2f93`, including the independently implemented method-isolation fix `903ef3d` and two regressions. The branch merges that history without rewriting it, retains upstream `LEGACY_NATIVE_METHODS` as the single implementation and preserves both test sets and historical reports. After conflict resolution, the complete suite passes **614 tests, zero skips**, one existing warning, 25.06s; contracts pass again. The earlier 612-test/source measurements remain attributed to their original checkpoint. PR #23 must verify its resulting exact HEAD; the concurrent main CI is not its certification.

@@ -65,6 +65,14 @@ def test_complete_known_support_has_unrenormalized_weighted_scores_and_never_act
     validate_payload('rca-result.schema.json',result)
 
 
+def test_foreign_log_pattern_cannot_enter_live_rca_method_admission():
+    facts, cards, available = fixtures()
+    payment = next(c for c in cards if c['service'] == 'payment-service')
+    payment['components']['log_support']['method'] = 'native-log-pattern-presence/v1'
+    with pytest.raises(ValueError, match='method/evidence'):
+        evaluate(facts, cards, available)
+
+
 def test_all_missing_candidates_remain_null_and_are_not_deleted_or_declared_healthy():
     result=evaluate([],[],{})
     assert {c['service'] for c in result['candidates']}==set(SERVICES)

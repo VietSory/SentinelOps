@@ -82,3 +82,8 @@ qualified predictions and identical repeated business results.
 The [source-admission correction](../reports/2026-10-30-rcaeval-source-admission.md)
 locks that inventory without changing the numerical profile, policy or selected
 cases; repeated business outputs remain identical.
+
+[Method-scope integration verification](../reports/2026-10-30-rca-method-isolation.md)
+keeps the retained legacy log-only helper in its own method allowlist. It cannot
+add native pattern methods to the live wire contract or admit live business-log
+methods into the legacy helper. Canonical ADR-013 results and ablations are unchanged.
