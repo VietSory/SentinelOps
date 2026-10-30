@@ -83,6 +83,22 @@ jobs:
           assert report['training_ready'] is False and report['activation_allowed'] is False
           print('COMPLETE GAMMA ZIP64 INVENTORY: PASS; MEMBER DATA ARE NOT ALL VERIFIED')
           PY
+      - name: Verify quarantined GAMMA client captures and source capability
+        run: |
+          python scripts/audit_gamma_clients.py --download --output artifacts/public-data/gamma-client-capability.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('artifacts/public-data/gamma-client-capability.json').read_text())
+          assert report['files']==48 and report['experiments']==4 and report['capture_pairs']==24
+          assert report['status']=='NOT_READY' and report['training_ready'] is False
+          assert report['activation_allowed'] is False and report['holdout_opened'] is False
+          assert report['certified_healthy_train_windows']==report['certified_healthy_calibration_windows']==0
+          assert report['acquisition']['status']=='PASS' and report['acquisition']['files']==48
+          assert report['acquisition']['archive_response_body_bytes']<=32_000_000
+          assert all(r['log']['http_5xx_count'] is None and r['integers']['unit'] is None for r in report['rows'])
+          print('FROZEN CLIENT CAPABILITY AUDIT: PASS; G2/G3 REMAIN BLOCKED')
+          PY
       - name: Acquire and verify the predeclared complete raw-resource cohort
         run: |
           python scripts/download_gamma_cohort.py --file-tree-lock configs/gamma_resource_cohort_files.json --result-file artifacts/public-data/gamma-cohort-acquisition.json

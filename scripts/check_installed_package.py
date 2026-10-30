@@ -35,6 +35,7 @@ from sentinelops.public_data.gamma_audit import audit_gamma
 from sentinelops.public_data.resources import resource_window
 from sentinelops.public_data.phases import parse_phases
 from sentinelops.public_data.gamma_archive import RangeReader
+from sentinelops.public_data.gamma_clients import summarize_log, summarize_integers
 from sentinelops.public_data.cohort import load_cohort_manifest
 from sentinelops.public_data.admission import admit_case, session_groups
 from sentinelops.public_data.dataset import build_grouped_dataset
@@ -56,6 +57,10 @@ from sentinelops.workers.model_signals import collect_model_signals
 from sentinelops.public_data.rcaeval_evaluation import diagnose_native
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
+client_summary = summarize_log(b'10 requests in 1.00m, 1.00MB read\n')
+assert client_summary['summary']['duration_seconds'] == '60.00'
+assert client_summary['http_5xx_count'] is None and client_summary['socket_errors'] is None
+assert summarize_integers(b'123\n456\n')['unit'] is None
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',
              'incident-evidence-record', 'explanation', 'remediation-action',
              'observation-envelope', 'feature-envelope', 'infrastructure-observation',
