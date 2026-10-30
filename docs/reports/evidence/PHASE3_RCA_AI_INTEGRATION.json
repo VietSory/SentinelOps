@@ -1,0 +1,101 @@
+{
+  "source_commit": "f1b997c9a0f3d07dd5e695b51451ef9e7799d253",
+  "source_manifest_sha256": "3445957277004895c3a61460808355cf078123c890aad6d582c08373f666450f",
+  "config_sha256": "a01b2ad658132561ee1c39ae48081b546629214fbb9ce38f22d12f504a350763",
+  "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+  "metrics": {
+    "native-error-log-support": {
+      "cases": 3,
+      "top1": 0.0,
+      "top3": 0.0,
+      "mrr": 0.0,
+      "abstentions": 3,
+      "abstention_rate": 1.0,
+      "maximum_candidate_coverage_per_case": [
+        0.0,
+        0.15,
+        0.15
+      ],
+      "independent_sessions_established": false,
+      "confidence_interval": null
+    },
+    "without-native-log-support": {
+      "cases": 3,
+      "top1": 0.0,
+      "top3": 0.0,
+      "mrr": 0.0,
+      "abstentions": 3,
+      "abstention_rate": 1.0,
+      "maximum_candidate_coverage_per_case": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "independent_sessions_established": false,
+      "confidence_interval": null
+    }
+  },
+  "holdout_opened": false,
+  "full_G4_accepted": false,
+  "cases": [
+    {
+      "case": "re1ob_adservice_cpu_1",
+      "modality_counts": {
+        "metric_rows": 4201,
+        "metric_channels": 49,
+        "logs": 0,
+        "traces": 0,
+        "admitted_log_messages": 0,
+        "invalid_log_times": 0,
+        "error_token_matches": 0,
+        "trace_start_microseconds_milliseconds_aligned": 0
+      },
+      "ranking": [],
+      "abstention_reasons": [
+        "no-positive-observed-support",
+        "unobserved-dependency-candidates"
+      ]
+    },
+    {
+      "case": "re2ob_checkoutservice_cpu_1",
+      "modality_counts": {
+        "metric_rows": 1441,
+        "metric_channels": 72,
+        "logs": 171322,
+        "traces": 391997,
+        "admitted_log_messages": 171322,
+        "invalid_log_times": 0,
+        "error_token_matches": 0,
+        "trace_start_microseconds_milliseconds_aligned": 391997
+      },
+      "ranking": [],
+      "abstention_reasons": [
+        "no-positive-observed-support",
+        "source-availability-unverified",
+        "unobserved-dependency-candidates"
+      ]
+    },
+    {
+      "case": "re3ob_adservice_f3_1",
+      "modality_counts": {
+        "metric_rows": 1441,
+        "metric_channels": 69,
+        "logs": 70558,
+        "traces": 165302,
+        "admitted_log_messages": 70558,
+        "invalid_log_times": 0,
+        "error_token_matches": 2138,
+        "trace_start_microseconds_milliseconds_aligned": 165302
+      },
+      "ranking": [
+        "frontend"
+      ],
+      "abstention_reasons": [
+        "insufficient-coverage",
+        "insufficient-score",
+        "source-availability-unverified",
+        "unobserved-dependency-candidates"
+      ]
+    }
+  ]
+}

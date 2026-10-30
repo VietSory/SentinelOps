@@ -20,8 +20,11 @@ A [continuous local SLO worker](docs/STEP7_HEALTH_WORKER.md) now has durable che
 [actual crash/outage/recovery evidence](docs/reports/2026-10-28-continuous-health-worker.md).
 Its optional [operational metrics](docs/reports/2026-10-28-health-worker-metrics.md)
 have measured OTLP/Prometheus outage recovery and guards against cached values after restart.
-Real model serving, RCA performance/continuous downstream workers, Bedrock, operator UI, controlled remediation and AWS deployment follow
-their separate gates; local telemetry and software checks do not certify them.
+The [continuous incident journal](docs/STEP8_INCIDENT_WORKER.md) now connects accepted health to
+source-derived RCA, persisted IER lifecycle and the protected API.
+[Guarded model software](docs/MODEL_PIPELINE.md) and [native RCA development evaluation](docs/RCAEVAL_NATIVE_DEVELOPMENT.md)
+keep missing data/model results explicit. Validated model serving, RCA performance, Bedrock,
+operator UI, controlled remediation and AWS deployment follow their separate gates; local telemetry and software checks do not certify them.
 
 The [frozen training-data contract](configs/training_data_contract.json) selects
 GAMMA v1 training and RCAEval RCA validation/heldout evaluation, with at most these
@@ -105,7 +108,8 @@ Jaeger is available at `http://127.0.0.1:16686`; Collector metrics are exposed a
 for the verification gates and troubleshooting. The AIOps API above remains a
 separate control process. The services generate measurements; host-side analytical
 [RCA replay/incident production](docs/STEP7_RCA.md) consumes captures separately.
-Continuous ML/RCA workers and remediation remain gated.
+The [continuous incident worker](docs/STEP8_INCIDENT_WORKER.md) is separately runnable.
+Validated ML activation and remediation remain gated.
 
 ## Telemetry history and feature windows
 
