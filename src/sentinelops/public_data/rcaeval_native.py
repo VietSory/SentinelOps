@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 import re
 
+from sentinelops.public_data.rcaeval_native_inventory import PINNED_FILES
 from sentinelops.public_data.downloads import verify_bytes
 from sentinelops.public_data.rcaeval_partitions import INSPECTED, REVISION, canonical, require_manifest_files
 
@@ -52,6 +53,11 @@ def load_native_inputs(manifest_path: Path, profile: dict) -> tuple[dict, dict[s
     targets = require_manifest_files(manifest, manifest_path.parent.parent.resolve())
     if not set(manifest["selection"]) <= set(INSPECTED):
         raise NativeSourceError("native profile permits only previously inspected development cases")
+    base = manifest_path.parent.parent.resolve() / "rcaeval" / REVISION
+    names = [path.relative_to(base).as_posix() for path in targets]
+    expected = {name for name in PINNED_FILES if "/" not in name or name.split("/", 1)[0] in manifest["selection"]}
+    if set(names) != expected:
+        raise NativeSourceError("native manifest differs from the complete frozen source inventory")
     for record in manifest["files"]:
         checksum = record.get("publisher_checksum")
         if (not isinstance(checksum, dict) or type(checksum.get("size")) is not int or checksum["size"] < 0
@@ -59,6 +65,11 @@ def load_native_inputs(manifest_path: Path, profile: dict) -> tuple[dict, dict[s
             or not ((isinstance(checksum.get("sha256"), str) and re.fullmatch("[0-9a-f]{64}", checksum["sha256"]))
                     or (isinstance(checksum.get("git_blob"), str) and re.fullmatch("[0-9a-f]{40}", checksum["git_blob"])) )):
             raise NativeSourceError("native source requires complete publisher checksum metadata")
+    for name, record in zip(names, manifest["files"]):
+        expected_file = PINNED_FILES[name]
+        if (record["sha256"] != expected_file["sha256"]
+            or record["publisher_checksum"]["size"] != expected_file["size"]):
+            raise NativeSourceError("native file checksum/size differs from the frozen source inventory")
     sizes = [path.stat().st_size for path in targets]
     if any(size > profile["maximum_file_bytes"] for size in sizes) or sum(sizes) > profile["maximum_total_file_bytes"]:
         raise NativeSourceError("source byte budget exceeded")

@@ -175,7 +175,8 @@ def save_input_manifest(tmp_path, data):
     return path
 
 
-def test_native_loader_verifies_bytes_before_decode_and_retains_verified_buffers(tmp_path, profile):
+def test_native_loader_verifies_bytes_before_decode_and_retains_verified_buffers(tmp_path, profile, monkeypatch):
+    from sentinelops.public_data import rcaeval_native as native
     case = INSPECTED[0]
     path = tmp_path / "rcaeval" / REVISION / case / "metrics.parquet"
     path.parent.mkdir(parents=True)
@@ -185,6 +186,8 @@ def test_native_loader_verifies_bytes_before_decode_and_retains_verified_buffers
     manifest = {"manifest_version": "public-download/v1", "dataset": "RCAEval", "revision": REVISION,
                 "activation_allowed": False, "selection": [case],
                 "files": [{"path": str(path), "sha256": sha, "publisher_checksum": {"size": len(original), "sha256": sha}}]}
+    # Synthetic trusted inventory exercises I/O mechanics without claiming publisher bytes.
+    monkeypatch.setattr(native, "PINNED_FILES", {case + "/metrics.parquet": {"size": len(original), "sha256": sha}})
     selected = save_input_manifest(tmp_path, manifest)
     _, loaded = load_native_inputs(selected, profile)
     path.write_bytes(b"corrupted after verification")
@@ -279,3 +282,40 @@ def test_unfinished_spans_are_not_counted_as_available_window_support(profile, p
     assert scope["modalities"]["traces"]["eligible_window_records"] == 0
     assert scope["trace_support"] == {}
     assert evaluate_native(scope, policy)["diagnostic_ranking"] == []
+
+
+@pytest.mark.parametrize("change", ["checksum-drift", "omitted-modality", "added-file", "publisher-size"])
+def test_forged_native_inventory_is_rejected_before_any_cache_byte(tmp_path, profile, monkeypatch, change):
+    from sentinelops.public_data import rcaeval_native as native
+    case = INSPECTED[1]
+    base = tmp_path / "rcaeval" / REVISION
+    records = []
+    for name, expected in native.PINNED_FILES.items():
+        if "/" in name and name.split("/", 1)[0] != case:
+            continue
+        path = base / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"must-not-be-read")
+        records.append({"path": str(path), "sha256": expected["sha256"],
+                        "publisher_checksum": {"size": expected["size"], "sha256": expected["sha256"]}})
+    telemetry = next(r for r in records if r["path"].endswith("/metrics.parquet"))
+    if change == "checksum-drift":
+        telemetry["sha256"] = telemetry["publisher_checksum"]["sha256"] = "0" * 64
+    elif change == "publisher-size":
+        telemetry["publisher_checksum"]["size"] += 1
+    elif change == "omitted-modality":
+        records = [r for r in records if not r["path"].endswith("/traces.parquet")]
+    else:
+        records.append({"path": str(base / case / "root_cause.txt"), "sha256": "0" * 64,
+                        "publisher_checksum": {"size": 10, "sha256": "0" * 64}})
+    manifest = {"manifest_version": "public-download/v1", "dataset": "RCAEval", "revision": REVISION,
+                "activation_allowed": False, "selection": [case], "files": records}
+    selected = save_input_manifest(tmp_path, manifest)
+    original = native._bounded_bytes
+    def only_manifest(path, limit):
+        if path != selected:
+            pytest.fail("cache byte touched before the entire trusted inventory was admitted")
+        return original(path, limit)
+    monkeypatch.setattr(native, "_bounded_bytes", only_manifest)
+    with pytest.raises(ValueError, match="inventory"):
+        load_native_inputs(selected, profile)
