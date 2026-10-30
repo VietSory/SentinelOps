@@ -18,9 +18,9 @@ newly created by this delivery.
 | `f1b997c` | Canonical upstream merge: dedicated journal/writer preserved, optional pinned model verification integrated, duplicate production runtime removed |
 | `9e32c3e` | Phase 1 actual canonical native, raw-lineage/recovery and protected HTTP verification report |
 | `52e5fb8` | Phase 2 exact data readiness/blocker and numerical software verification report |
-
 | `de89010` | Phase 3 initial report/status and source inventory |
 | `b27a8c2` | Preserve newer upstream trusted RCAEval source admission/ADR-013; canonical fixed-window ablations and 599-test compatibility |
+| `0a2944b` | Final canonical measurement and merged regression addenda for all phase reports |
 
 Final supplemental measurement reporting follows these checkpoints. Each
 implementation commit was preceded by relevant executed checks; the merged source
