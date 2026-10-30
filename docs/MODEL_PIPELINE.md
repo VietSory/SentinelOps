@@ -56,6 +56,8 @@ The existing `/v1/detect` wire shape is preserved. Real inference requires the
 matching `X-SentinelOps-Source-Profile`, exact finite feature schema and a nonfuture,
 fresh window. The model version is also returned in a header. Supplemental worker
 inference retains risk, provenance and availability; unavailable risk stays null.
+`/v1/risk` serves the existing strict degradation-risk contract with the same
+source/window checks and returns 503 when the compatible risk model is unavailable.
 The explicit legacy demo remains separately marked. No fallback supplies fake scores.
 
 Event evaluation matches actual alert emissions one-to-one to independent evaluator

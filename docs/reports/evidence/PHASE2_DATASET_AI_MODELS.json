@@ -1,0 +1,127 @@
+{
+  "readiness_version": "gamma-model-readiness/v1",
+  "status": "BLOCKED",
+  "G2": "BLOCKED",
+  "G3": "BLOCKED",
+  "source_report_sha256": "c93ce4d56be31f6c643a6317e2764f211a6ecd0b55900bcb41bce8081e143822",
+  "training_data_policy_hash": "ef0eb1b1c95a67faf424501e657c5e6530d49a1d18af7cbf59f9c07740afa21f",
+  "candidate_windows": 29610,
+  "feature_eligible_windows": 22771,
+  "excluded_windows": 6839,
+  "case_counts": {
+    "calibration/native-evidence-admitted": 20,
+    "development/native-evidence-admitted": 10,
+    "quarantine/quarantined": 57,
+    "test/native-evidence-admitted": 17,
+    "test/quarantined": 1,
+    "train/native-evidence-admitted": 54,
+    "train/quarantined": 35
+  },
+  "counts": {
+    "calibration/candidate": 11434,
+    "calibration/feature-eligible": 8776,
+    "development/candidate": 5716,
+    "development/feature-eligible": 4456,
+    "test/candidate": 4551,
+    "test/feature-eligible": 3481,
+    "train/candidate": 7909,
+    "train/feature-eligible": 6058
+  },
+  "reference_proxy_counts": {
+    "calibration/boundary-uncertain": 20,
+    "calibration/direct-recorded-interference": 1602,
+    "calibration/no-recorded-interference-reference": 553,
+    "calibration/other-host-interference-context": 6601,
+    "development/direct-recorded-interference": 1034,
+    "development/no-recorded-interference-reference": 227,
+    "development/other-host-interference-context": 3195,
+    "test/direct-recorded-interference": 483,
+    "test/no-recorded-interference-reference": 161,
+    "test/other-host-interference-context": 2837,
+    "train/direct-recorded-interference": 1137,
+    "train/no-recorded-interference-reference": 590,
+    "train/other-host-interference-context": 4331
+  },
+  "certified_business_service_health": {
+    "checkout-service": {
+      "train": 0,
+      "calibration": 0,
+      "train_runs": 0,
+      "calibration_runs": 0
+    },
+    "payment-service": {
+      "train": 0,
+      "calibration": 0,
+      "train_runs": 0,
+      "calibration_runs": 0
+    },
+    "inventory-service": {
+      "train": 0,
+      "calibration": 0,
+      "train_runs": 0,
+      "calibration_runs": 0
+    }
+  },
+  "required_per_service": {
+    "healthy_train": 300,
+    "healthy_calibration": 100
+  },
+  "reference_support": {
+    "train": {
+      "rows": 590,
+      "cases": 14,
+      "groups": 4,
+      "cutoffs": 28,
+      "minimum_rows_per_entity": 8,
+      "maximum_rows_per_entity": 26
+    },
+    "calibration": {
+      "rows": 553,
+      "cases": 20,
+      "groups": 2,
+      "cutoffs": 27,
+      "minimum_rows_per_entity": 8,
+      "maximum_rows_per_entity": 23
+    },
+    "development": {
+      "rows": 227,
+      "cases": 10,
+      "groups": 1,
+      "cutoffs": 10,
+      "minimum_rows_per_entity": 2,
+      "maximum_rows_per_entity": 10
+    },
+    "test": {
+      "rows": 161,
+      "cases": 7,
+      "groups": 1,
+      "cutoffs": 7,
+      "minimum_rows_per_entity": 1,
+      "maximum_rows_per_entity": 7
+    }
+  },
+  "blockers": [
+    "health_labels_available=false",
+    "insufficient_healthy_train_and_calibration:checkout-service",
+    "insufficient_healthy_train_and_calibration:inventory-service",
+    "insufficient_healthy_train_and_calibration:payment-service",
+    "live_compatible=false",
+    "model-specific independent reference support and evaluation protocol still require acceptance",
+    "recorded interference/reference is a research proxy, not healthy/SLO/precursor truth",
+    "risk_target_available=false",
+    "source resource features are not verified as the live five HTTP RED features",
+    "source_reference_is_healthy_certificate=false",
+    "source_reference_traffic_verified=false",
+    "training_ready=false"
+  ],
+  "fitted_models": [],
+  "activation_allowed": false,
+  "verified_precursor_runs": 0,
+  "holdout_opened": false,
+  "limitations": [
+    "Input is a previously committed measured report, not a new raw-source audit.",
+    "Overlapping resource windows are not independent experiments.",
+    "No-recorded-interference reference is not healthy/SLO/precursor truth.",
+    "Live HTTP feature/source parity is unverified; test data remains sealed."
+  ]
+}
