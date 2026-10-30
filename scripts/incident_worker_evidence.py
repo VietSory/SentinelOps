@@ -120,6 +120,10 @@ class IncidentWorkerEvidence:
                 JOIN sentinel_control.incidents i USING(incident_id) WHERE j.consumer_id=$1""", self.consumer_id)
         if count and not self.crashed:
             import asyncio
+            if self.metrics:
+                # Capture a completed creation/enrichment cycle before testing
+                # counter reset. Durable IER creation alone can precede export.
+                await self.metrics.completed_before_crash()
             primary = self.children[0]
             primary.kill()
             assert await asyncio.to_thread(primary.wait, timeout=10) == -9

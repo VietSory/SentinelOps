@@ -14,12 +14,14 @@ from sentinelops.telemetry.core import BUSINESS_ROUTES
 
 
 def validate_protocol(value):
-    expected = {'protocol_version': 'incident-metrics-acceptance/v1',
+    expected = {'protocol_version': 'incident-metrics-acceptance/v2',
+                'require_completed_progress_before_crash': True,
                 'instances': ['incidents-0', 'incidents-1'], 'backlog_pause_seconds': 130,
                 'collector_outage_seconds': 75, 'minimum_backlog_steps': 2,
                 'metrics_observation_seconds': 35, 'heartbeat_fresh_seconds': 15,
                 'training_corpus': False, 'actions_allowed': False, 'full_NFR10_accepted': False}
-    if value != expected or any(value[k] is not False for k in ('training_corpus', 'actions_allowed', 'full_NFR10_accepted')):
+    if (value != expected or value.get('require_completed_progress_before_crash') is not True
+        or any(value[k] is not False for k in ('training_corpus', 'actions_allowed', 'full_NFR10_accepted'))):
         raise ValueError('unsupported incident metrics acceptance protocol')
 
 
@@ -66,6 +68,12 @@ class IncidentMetricEvidence(WorkerMetricEvidence):
              'progress': 'sentinelops_incident_has_local_progress'}
     instance_pattern = 'incidents-[01]'
     duration_guard = 'sentinelops_incident_has_local_progress'
+
+    async def completed_before_crash(self):
+        return await self.wait('before-crash-completed-progress', lambda s:
+            self.fresh(s, {'incidents-0'}) and self.values(s, 'ready').get('incidents-0') == 1
+            and self.values(s, 'groups').get('incidents-0', 0) > 0
+            and self.values(s, 'abstentions').get('incidents-0', 0) > 0)
 
     async def guarded_source(self, snapshot):
         result = {}
@@ -120,6 +128,19 @@ class IncidentMetricEvidence(WorkerMetricEvidence):
                        for s in slots for service in BUSINESS_ROUTES)
 
         snapshot = await self.wait('final-process-accounting', matches)
+        before_crash = json.loads((self.output / 'before-crash-completed-progress.json').read_text())
+        initial_groups = initial_abstentions = 0
+        for line in logs[0].read_text().splitlines():
+            if line.startswith('{') and (row := json.loads(line)).get('status') == 'PROGRESS':
+                for event in row['events']:
+                    if event['status'] == 'INGESTED':
+                        assert event['state_ref'] in accepted_refs
+                        initial_groups += len(event['created_jobs'])
+                    if event['status'] == 'ENRICHED':
+                        initial_abstentions += int(store.read(event['result_ref'])['abstained'])
+        assert initial_groups > 0 and initial_abstentions > 0
+        assert self.values(before_crash, 'groups')['incidents-0'] == initial_groups
+        assert self.values(before_crash, 'abstentions')['incidents-0'] == initial_abstentions
         assert sum(totals['commits'].values()) > 0 and sum(totals['busy'].values()) > 0
         assert sum(totals['unknown'].values()) > 0
         assert any(float(p['metric'].get('le', 'nan')) == 10. for p in snapshot['series']['duration_bucket'])
@@ -133,6 +154,7 @@ class IncidentMetricEvidence(WorkerMetricEvidence):
         assert {p['metric']['worker_instance'] for p in guarded['age']} == set(latest)
         assert all(math.isfinite(float(p['value'][1])) and float(p['value'][1]) >= 0 for p in guarded['age'])
         report = {'status': 'PASS', 'mode': 'actual-incident-otlp-collector-prometheus',
+                  'precrash_groups_observed': initial_groups, 'precrash_abstentions_observed': initial_abstentions,
                   'current_process_counters': {k: dict(v) for k, v in totals.items() if k != 'unknown'},
                   'unknown_by_slot_service': [{'slot': s, 'service': service, 'count': n}
                                               for (s, service), n in sorted(totals['unknown'].items())],

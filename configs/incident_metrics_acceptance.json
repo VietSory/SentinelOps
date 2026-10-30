@@ -1,5 +1,6 @@
 {
-  "protocol_version": "incident-metrics-acceptance/v1",
+  "protocol_version": "incident-metrics-acceptance/v2",
+  "require_completed_progress_before_crash": true,
   "instances": ["incidents-0", "incidents-1"],
   "backlog_pause_seconds": 130,
   "collector_outage_seconds": 75,

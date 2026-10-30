@@ -26,11 +26,17 @@ def captures(tmp_path):
     events = [{'status': 'INGESTED', 'state_ref': ref, 'bucket_end': store.read(ref)['last_bucket_end'],
                'created_jobs': ['fixture-job'] if i == 0 else []} for i, ref in enumerate(refs)]
     logs = [tmp_path / ('consumer-' + str(i) + '.log') for i in range(3)]
-    logs[0].write_text(json.dumps({'status': 'PROGRESS', 'processing_ms': 999., 'events': events}) + '\n')
+    initial = {'last_bucket_end': '2026-10-29T23:59:00Z',
+               'service_states': {s: {'availability': 'UNKNOWN'} for s in BUSINESS_ROUTES}}
+    initial_ref = store.write('manifests', initial)
+    initial_event = {'status': 'INGESTED', 'state_ref': initial_ref, 'bucket_end': initial['last_bucket_end'],
+                     'created_jobs': ['initial-job']}
+    logs[0].write_text(json.dumps({'status': 'PROGRESS', 'processing_ms': 999., 'events': [initial_event,
+                                     {'status': 'ENRICHED', 'result_ref': rca}]}) + '\n')
     logs[1].write_text(json.dumps({'status': 'PROGRESS', 'processing_ms': 125., 'events': events +
                                    [{'status': 'ENRICHED', 'result_ref': rca}]}) + '\n')
     logs[2].write_text(json.dumps({'status': 'BUSY'}) + '\n' + json.dumps({'status': 'DEPENDENCY_UNAVAILABLE'}) + '\n')
-    return store, refs, events, logs
+    return store, [initial_ref, *refs], events, logs
 
 
 def test_counter_arithmetic_uses_each_current_process_event_and_durable_ref(tmp_path):
@@ -58,7 +64,7 @@ def test_profile_cannot_shorten_required_pauses_or_claim_full_acceptance():
     validate_protocol(value)
     for key, replacement in [('backlog_pause_seconds', 1), ('collector_outage_seconds', 0),
                              ('minimum_backlog_steps', 1), ('actions_allowed', True),
-                             ('full_NFR10_accepted', True)]:
+                             ('full_NFR10_accepted', True), ('require_completed_progress_before_crash', False)]:
         changed = deepcopy(value); changed[key] = replacement
         with pytest.raises(ValueError): validate_protocol(changed)
 
@@ -81,6 +87,22 @@ def test_native_observer_refuses_nonowned_metrics_endpoint_before_output(tmp_pat
         IncidentWorkerEvidence(tmp_path / 'run', ArtifactStore(tmp_path / 'source'), 'stream', 'project',
                                metrics_endpoint='http://example.invalid:4317')
     assert not (tmp_path / 'run').exists()
+
+
+@pytest.mark.parametrize('count', [0, 1])
+def test_completed_progress_before_crash_requires_positive_exported_group_and_abstention(tmp_path, count):
+    evidence = IncidentMetricEvidence(tmp_path / 'metrics')
+    def point(v): return [{'metric': {'worker_instance': 'incidents-0'}, 'value': [100, str(v)]}]
+    snapshot = {'observed_at_unix': 105, 'series': {'heartbeat': point(100), 'ready': point(1),
+                                                 'groups': point(count), 'abstentions': point(count)}}
+    async def wait(name, predicate):
+        assert predicate(snapshot), 'group or abstention branch was never observed'
+        return snapshot
+    evidence.wait = wait
+    if count == 0:
+        with pytest.raises(AssertionError): asyncio.run(evidence.completed_before_crash())
+    else:
+        assert asyncio.run(evidence.completed_before_crash()) == snapshot
 
 
 @pytest.mark.parametrize('drop_first_commit', [False, True])
@@ -113,6 +135,7 @@ def test_final_snapshot_matches_every_counter_duration_and_latest_local_source(t
     evidence.guarded_source = AsyncMock(return_value={
         'source': [{'metric': {'worker_instance': 'incidents-0', 'business_service': s}, 'value': [100, '1']} for s in BUSINESS_ROUTES],
         'bucket_end': points({'incidents-0': end}), 'age': points({'incidents-0': 5})})
+    (evidence.output / 'before-crash-completed-progress.json').write_text(json.dumps(snapshot))
     if drop_first_commit:
         with pytest.raises(AssertionError, match='exact accounting'):
             asyncio.run(evidence.final(logs, store, accepted_refs=set(refs)))
