@@ -1,0 +1,7 @@
+{
+  "name": "sentinelops-operator-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {"test:ui": "node --test tests/ui/*.test.mjs"},
+  "engines": {"node": ">=20"}
+}

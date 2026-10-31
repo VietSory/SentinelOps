@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Incidents · SentinelOps</title>
+  <link rel="stylesheet" href="/ui/assets/styles.css">
+  <script type="module" src="/ui/assets/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Skip to incidents</a>
+  <aside class="sidebar" aria-label="Workspace navigation">
+    <a class="brand" href="/ui/"><span class="brand-mark" aria-hidden="true">S</span>Sentinel<span class="brand-light">Ops</span></a>
+    <div class="workspace-label"><span class="status-dot neutral"></span>LOCAL WORKSPACE<span class="version">v0.2</span></div>
+    <p class="nav-label">OPERATIONS</p>
+    <a class="nav-item active" href="#workspace" aria-current="page"><span aria-hidden="true">▤</span> Incidents<span class="nav-count" id="nav-count">—</span></a>
+    <div class="nav-item muted"><span aria-hidden="true">◇</span> Explanations <span class="soon">Unavailable</span></div>
+    <div class="nav-item muted"><span aria-hidden="true">↗</span> Actions <span class="soon">Unavailable</span></div>
+    <div class="sidebar-bottom"><span class="small-mark" aria-hidden="true">◎</span><strong>Evidence first.</strong><p>Observe what happened.<br>Keep uncertainty visible.</p><span class="read-only">READ-ONLY CONSOLE</span></div>
+  </aside>
+  <div class="app-shell">
+    <header class="topbar"><span class="breadcrumb">Operations <span>/</span> <strong>Incidents</strong></span><div class="topbar-actions"><span id="session-label" class="session-label">Not connected</span><button id="disconnect" class="button quiet" hidden>Disconnect</button><span class="avatar" aria-hidden="true">SO</span></div></header>
+    <main id="workspace" tabindex="-1">
+      <div class="page-heading"><div><p class="eyebrow">RELIABILITY WORKSPACE</p><h1>Incidents<span class="heading-dot">.</span></h1><p class="subtitle">Every signal has a source. Every decision has evidence.</p></div><button id="refresh" class="button secondary" disabled><span aria-hidden="true">↻</span> Refresh</button></div>
+      <section class="connection-card" id="connection" aria-labelledby="connect-title">
+        <div class="connection-symbol" aria-hidden="true">⌘</div><div class="connection-copy"><h2 id="connect-title">Connect to your workspace</h2><p>Use your local API token to read persisted incidents. It stays in this tab only.</p></div>
+        <form id="connect-form"><label class="sr-only" for="api-token">Local API token</label><input id="api-token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste local API token" required minlength="32"><button class="button primary" type="submit">Connect <span aria-hidden="true">→</span></button></form>
+      </section>
+      <div id="notice" class="alert error" role="alert" hidden></div>
+      <section class="dependency-strip" aria-label="Dependency status"><div><span class="dependency-label">Incident store</span><strong id="store-status"><span class="status-dot neutral"></span>Not checked</strong></div><div><span class="dependency-label">AI models</span><strong id="model-status"><span class="status-dot neutral"></span>Not checked</strong></div><div class="dependency-note"><span class="status-dot neutral"></span>Missing telemetry stays unknown.<span id="readiness-error" class="small-error"></span></div></section>
+      <div class="workspace-grid">
+        <section class="panel list-panel" aria-labelledby="list-title">
+          <div class="panel-title"><h2 id="list-title">Incident feed <span id="loaded-count" class="count">0 loaded</span></h2><span class="live-label"><span class="status-dot neutral" id="feed-dot"></span>Persisted records</span></div>
+          <form id="filter-form" class="filters"><label>State<select id="state-filter"><option value="">All states</option><option value="degrading">Degrading</option><option value="incident">Incident</option><option value="recovering">Recovering</option><option value="recovered">Recovered</option><option value="escalated">Escalated</option></select></label><label>Service<select id="service-filter"><option value="">All services</option><option value="checkout-service">Checkout</option><option value="payment-service">Payment</option><option value="inventory-service">Inventory</option></select></label><button class="button quiet" type="submit">Apply filters</button></form>
+          <div id="list-error" class="inline-error" role="alert" hidden></div><div id="incident-list" aria-live="polite"></div>
+          <div class="list-footer"><span id="updated-at">Waiting for connection</span><button id="load-more" class="button quiet" hidden>Load more <span aria-hidden="true">↓</span></button></div>
+          <p class="list-disclaimer">A live current-state view. Filters can change as records are revised.</p>
+        </section>
+        <section id="detail-pane" class="panel detail-panel" aria-label="Incident details" aria-live="polite"></section>
+      </div>
+      <footer class="page-footer"><span><span class="footer-mark" aria-hidden="true">S</span> SentinelOps <span class="footer-separator">/</span> Evidence-driven reliability</span><span>No automatic actions enabled</span></footer>
+    </main>
+  </div>
+</body>
+</html>
