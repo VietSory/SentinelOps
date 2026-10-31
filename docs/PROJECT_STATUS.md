@@ -1,6 +1,6 @@
 # SentinelOps — verified implementation status
 
-Prospective-source checkpoint 2026-10-31: **724 regression tests pass, zero skips**;
+Prospective-source checkpoint 2026-10-31: **726 regression tests pass, zero skips**;
 24 schemas/17 samples/3 configurations and installed wheel pass. The
 [admission report](reports/2026-10-31-prospective-http-admission.md) records the
 accepted v2 migration, original-byte HTTP/SLO certificates, past-only features,
@@ -10,7 +10,10 @@ group, zero verified completed runs/windows and zero approved models. The full
 30-slot nonfinal workload budget is 19.5 hours plus overhead, not a promise of
 eligible data. **G2/G3 remain blocked; G4 coverage/abstention are unchanged.**
 PR #23 is merged in main `2d86968`, whose exact CI run 41165593194 succeeded.
-The new corpus branch requires its own exact-head CI after publication.
+The new corpus PR [#24](https://github.com/VietSory/SentinelOps/pull/24) requires its
+own exact-head CI after publication. Commit `915b05f` also blocks partition
+advancement until measured prior-role admission passes, preserving the chance to
+collect additional earlier-role groups without chronology leakage.
 
 Updated 2026-10-31 (Asia/Ho_Chi_Minh). This is the current evidence index; the initial-state tables in the delivery plan remain dated planning snapshots. Implementation and verification checkpoints are linked below. Delivery follows the owner's current task instructions; earlier published commits and their evidence retain their original scope.
 

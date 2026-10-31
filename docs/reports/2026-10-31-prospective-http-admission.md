@@ -48,10 +48,10 @@ the observer's own committed identity. Registration clocks are never retrofitted
 
 | Serving feature | New source and deterministic derivation | Availability |
 |---|---|---|
-| Request-rate mean | Existing source profile: per-route Prometheus 60s request-counter increase / 60; mean over five eligible buckets | Direct source semantics; actual run still needs completed replay/admission |
-| p95 latency mean | Existing native HTTP histogram normalization to milliseconds; mean over five eligible buckets | Same live profile, no CPU/RPC proxy |
+| Request-rate mean | Existing source profile: sum of eligible per-route 60s request-counter increases / (eligible bucket count × 60) in the five-minute history | Direct source semantics; actual run still needs completed replay/admission |
+| p95 latency mean | Existing native HTTP histogram normalization to milliseconds; arithmetic mean over eligible historical buckets | Same live profile, no CPU/RPC proxy |
 | p95 latency slope | Existing least-squares time slope over those historical bucket values | Derived only from past observed latency |
-| Error-rate mean | Existing native HTTP 5xx counter increase / request increase; historical mean | Missing/zero denominator stays unavailable |
+| Error-rate mean | Sum of eligible historical native HTTP 5xx counter increases / sum of their request increases | Missing/zero denominator stays unavailable |
 | Error-rate slope | Existing historical time slope over verified error-rate buckets | No outcome/intervention metadata in predictors |
 | CPU/memory/network/DB saturation | Outside this exact five-feature profile | Not invented or substituted |
 
@@ -60,6 +60,10 @@ The unchanged authoritative formulas/units and reset/missingness behavior live i
 builder with original raw observations and actual receipt cutoffs, never future
 observations. Numeric source replay precedes outcome labeling. Same profile names
 alone are insufficient: original source hashes, receipts and identities must pass.
+The unchanged serving feature builder requires at least four of five eligible
+buckets and uses only those observations, without zero imputation. The independent
+health/history oracle additionally requires verified evidence in all five buckets.
+Slopes are OLS `sum((t-mean(t))*(y-mean(y)))/sum((t-mean(t))**2)`, with `t` in minutes.
 
 ## Oracle and label controls
 
@@ -157,3 +161,25 @@ This checkpoint has actual acquisition progress and verified software, but no
 completed real-source admission result, trained model, new research metrics or
 qualified operational RCA claim. The new PR's exact-head CI must be checked after
 publishing; the merged PR #23/main green runs do not certify this branch.
+
+## Partition-transition correction
+
+Review identified a prospective acquisition defect: moving from train to
+calibration solely because the planned minimum runs completed could strand a
+deficient train split, because collecting more train after calibration begins is
+forbidden. Commit `915b05f` now checks the **measured prior-role admission** before
+starting a later role. A shortage stops while additional whole earlier-role groups
+can still be collected under the predeclared maximum. It never repairs shortages
+by changing labels, window floors or chronological roles.
+
+Same-plan descendant controller fixes bind separate immutable successor receipts;
+the original campaign registration, plan/slot budgets and source capture
+registrations are retained. Changed plans/roles/budgets are rejected. The waiting
+controller was replaced by a clean worktree at `915b05f`; the independent first
+capture at `4ceace5` continued uninterrupted. No raw observations were rewritten.
+
+Verification after this correction: **726 tests passed, zero skips**, one existing
+dependency warning, 41.68s. Focused campaign/corpus/admission tests: **35 passed**,
+2.67s. The earlier 724-test and zero-support source snapshot above retain their
+original attribution. PR [#24](https://github.com/VietSory/SentinelOps/pull/24) is
+published; final-head CI must be checked after this correction is pushed.
