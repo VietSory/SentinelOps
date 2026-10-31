@@ -1,1 +1,2 @@
 include contracts/*.schema.json
+recursive-include src/sentinelops/ui/assets *.html *.css *.js

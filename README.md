@@ -16,7 +16,8 @@ chứng, rồi hỗ trợ giải thích và remediation có kiểm soát.
 Local testbed/observability, telemetry/features, persistent incident API và
 health/incident workers đã có. Guarded model/admission software đã có; **G2/G3
 chưa được chấp nhận và chưa có approved model tại checkpoint đã công bố**.
-UI, explanation/provider, action execution và AWS còn cần hoàn thiện.
+UI read-only đã có tại `/ui/`, đọc IER/evidence/history thật và hiển thị model
+unavailable; explanation/provider, action execution và AWS còn cần hoàn thiện.
 Inventory/runtime mới nhất phải kiểm tra trên môi trường tương ứng.
 
 ## Chạy API local
@@ -35,6 +36,12 @@ Liveness: `http://127.0.0.1:8000/health`; OpenAPI: `http://127.0.0.1:8000/docs`.
 Lệnh này chưa dựng control DB/worker/model. Incident API cần DB và bearer identity;
 inference trả 503 khi thiếu model hợp lệ. Theo [API runbook](docs/runbooks/INCIDENT_API.md)
 và [local testbed](docs/runbooks/LOCAL_TESTBED.md) để chạy đầy đủ trên tài nguyên riêng.
+
+Lane B: `python -m scripts.lane_b up`, rồi chạy `python -m scripts.lane_b serve`
+ở terminal riêng và mở **http://127.0.0.1:18000/ui/**. Token local nằm trong
+`artifacts/lane-b/api-token` (0600); không gửi token qua URL hoặc commit vào Git.
+Theo [runtime B](docs/runbooks/LOCAL_TESTBED.md#lane-b-isolated-application-runtime)
+để chạy các workers/source riêng. Không cần model để xem incident; UI chỉ đọc.
 
 ## Ranh giới sản phẩm
 

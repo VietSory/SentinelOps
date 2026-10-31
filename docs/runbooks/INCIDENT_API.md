@@ -1,5 +1,52 @@
 # Protected incident API persistence
 
+## Read-only operator UI
+
+The API serves the operator console at `/ui/` from packaged same-origin assets.
+For lane B, follow [the isolated runtime](LOCAL_TESTBED.md#lane-b-isolated-application-runtime)
+and open `http://127.0.0.1:18000/ui/`. Enter the local API token from the private
+runtime file or your configured environment. Tokens stay in tab memory, are
+cleared from the input after connecting and are never persisted in browser storage.
+Disconnect clears incident state. No incident writes, fault controls or action
+execution are exposed by this UI.
+
+The feed uses the existing state/service/cursor API; loaded-row counts are not
+global incident counts. Detail pins a revision of the IncidentEnvelope and its
+exact IER. Evidence and timeline pages retain that revision; an explicit Latest
+revision action selects a newer snapshot. References are displayed/copied as
+opaque identifiers, not automatically fetched URLs. Recorded times are not inferred
+latency measurements. There is no server-side time-range filter.
+
+Store/model readiness are independent. Missing model signals stay unavailable,
+UNKNOWN does not become healthy, and a store outage does not become an empty
+successful feed. RCA entries are hypotheses/support; the current API does not
+expose all structured qualification fields, so the console never presents ranking
+as a confirmed cause. Explanation and action execution remain unavailable.
+
+Frontend tests need Node 20+ but the running UI has no Node/build service:
+
+```sh
+node tests/ui/workspace.test.mjs
+python -m pytest -q tests/test_operator_ui.py tests/test_api.py tests/test_incident_api_contracts.py
+python scripts/check_installed_package.py
+```
+
+Optional browser checks use `pip install -e '.[ui-test]'` and installed Chrome or
+Playwright Chromium. `--browser-executable` selects an existing browser. Fixture
+mode intercepts browser API reads and is explicitly software evidence only:
+
+```sh
+python -m scripts.check_operator_ui --fixtures --output artifacts/lane-b/ui-fixtures
+python -m scripts.check_operator_ui --incident-id <actual-SLO-incident-id> \
+  --output artifacts/lane-b/ui-native
+```
+
+Native mode reads an actual persisted SLO incident via protected HTTP and verifies
+its revision/evidence/history on desktop/mobile; it never creates an IER. Outputs
+are exclusive and never overwrite earlier verification. Tokens and browser request
+traces are not written to artifacts. A screenshot of fixture records is not live
+source or model/RCA quality evidence.
+
 The HTTP incident endpoints now use the [real control repository](INCIDENT_STORE.md). The seven original wire schemas remain unchanged: IER responses have the exact legacy body; revisions and conditional-write metadata use headers or supplemental contracts. This is a deliberate migration from Foundation echo/mock behavior, not completion of RCA/model/recovery gates.
 
 ## Local setup

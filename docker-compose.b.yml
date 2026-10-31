@@ -1,0 +1,23 @@
+# Lane B only. Combine with docker-compose.yml and docker-compose.control.yml.
+# !override replaces published ports instead of accidentally retaining A's ports.
+services:
+  prometheus:
+    ports: !override ["127.0.0.1:19090:9090"]
+  otel-collector:
+    ports: !override
+      - "127.0.0.1:14317:4317"
+      - "127.0.0.1:14318:4318"
+      - "127.0.0.1:18889:8889"
+      - "127.0.0.1:23133:13133"
+  jaeger:
+    ports: !override ["127.0.0.1:26686:16686"]
+  postgres:
+    ports: !override ["127.0.0.1:15432:5432"]
+  control-postgres:
+    ports: !override ["127.0.0.1:15433:5432"]
+  checkout-service:
+    ports: !override ["127.0.0.1:18001:8000"]
+  payment-service:
+    ports: !override ["127.0.0.1:18002:8000"]
+  inventory-service:
+    ports: !override ["127.0.0.1:18003:8000"]

@@ -92,6 +92,9 @@ worker_metrics = WorkerMetrics(InMemoryMetricReader(), environment='test', insta
 worker_metrics.heartbeat(ready=False)
 worker_metrics.close()
 client = TestClient(app)
+assert client.get('/ui/').status_code == 200
+assert 'IncidentClient' in client.get('/ui/assets/client.js').text
+assert "connect-src 'self'" in client.get('/ui/').headers['content-security-policy']
 assert client.get('/health').status_code == 200
 payload = {'schema_version':'1.0', 'service':'payment-service',
     'window_start':'2026-10-25T00:00:00Z', 'window_end':'2026-10-25T00:05:00Z',

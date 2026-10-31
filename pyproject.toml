@@ -25,6 +25,9 @@ dependencies = [
 dev = [
   "pytest==8.3.4"
 ]
+ui-test = [
+  "playwright==1.56.0"
+]
 ml = [
   "numpy==2.2.6",
   "pandas==2.3.3",

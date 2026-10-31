@@ -23,6 +23,7 @@ from sentinelops.incidents.repository import IncidentRepository,RepositoryIntegr
 from sentinelops.telemetry.core import stable_id
 from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, IncompatibleFeatures
 from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.ui.routes import router as ui_router
 
 logger = logging.getLogger("sentinelops-api")
 STATES = {"degrading","incident","recovering","recovered","escalated"}
@@ -113,6 +114,7 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
                   description="Incident persistence with revision headers. Real inference is unavailable until a model is activated; local demo mode is explicit.")
     app.state.incident_repository = repository
     app.add_middleware(RequestSafetyMiddleware)
+    app.include_router(ui_router)
 
     @app.exception_handler(ApiError)
     async def api_error(request,exc):

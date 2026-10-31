@@ -1,11 +1,28 @@
 name: ci
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      native: ${{ steps.impact.outputs.native }}
+      public_data: ${{ steps.impact.outputs.public_data }}
+      ui: ${{ steps.impact.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: impact
+        run: python3 scripts/ci_impact.py
+
   foundation:
     runs-on: ubuntu-latest
     steps:
@@ -20,6 +37,8 @@ jobs:
       - run: python scripts/check_installed_package.py
 
   public-data:
+    needs: changes
+    if: needs.changes.outputs.public_data == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -208,6 +227,8 @@ jobs:
           retention-days: 7
 
   incident-storage:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -239,6 +260,8 @@ jobs:
         run: docker compose -p sentinelops-control -f docker-compose.control.yml down --volumes --remove-orphans
 
   observability:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -346,6 +369,8 @@ jobs:
         run: docker compose -p sentinelops-rca-ci -f docker-compose.control.yml down --volumes --remove-orphans
 
   multi-fault-development:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -406,6 +431,8 @@ jobs:
         run: docker compose down --volumes --remove-orphans
 
   health-worker-integration:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -480,6 +507,8 @@ jobs:
         run: docker compose -p sentinelops-health-control-ci -f /tmp/sentinelops-health-v1.yml down --volumes --remove-orphans
 
   incident-worker-s5:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -540,3 +569,80 @@ jobs:
       - name: Stop incident control testbed
         if: always()
         run: docker compose -p sentinelops-incident-control-ci -f docker-compose.control.yml down --volumes --remove-orphans
+
+  ui:
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pip install -e '.[dev,ui-test]'
+      - run: node --test tests/ui/*.test.mjs
+      - run: pytest -q tests/test_operator_ui.py tests/test_api.py tests/test_incident_api_contracts.py
+      - run: python -m playwright install --with-deps chromium
+      - name: Verify operator UI in a real browser using explicit software fixtures
+        run: |
+          python - <<'PY'
+          import subprocess, sys, time
+          from pathlib import Path
+          import httpx
+          log=Path('/tmp/operator-ui-server.log')
+          with log.open('w') as stream:
+              server=subprocess.Popen([sys.executable,'-m','uvicorn','sentinelops.main:app',
+                  '--host','127.0.0.1','--port','18000'],stdout=stream,stderr=subprocess.STDOUT)
+              try:
+                  with httpx.Client(trust_env=False,timeout=1) as client:
+                      for attempt in range(40):
+                          try:
+                              if client.get('http://127.0.0.1:18000/health').status_code==200: break
+                          except httpx.HTTPError: pass
+                          if server.poll() is not None: raise RuntimeError('UI test server stopped')
+                          time.sleep(.25)
+                      else: raise RuntimeError('UI test server did not start')
+                  subprocess.run([sys.executable,'-m','scripts.check_operator_ui','--fixtures',
+                      '--output','artifacts/ui-browser'],check=True)
+              finally:
+                  server.terminate()
+                  server.wait(timeout=10)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: operator-ui-software-evidence
+          path: artifacts/ui-browser/
+          if-no-files-found: warn
+          retention-days: 7
+
+  ci-summary:
+    if: always()
+    needs: [changes, foundation, public-data, incident-storage, observability, multi-fault-development, health-worker-integration, incident-worker-s5, ui]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every applicable check and report a stable conclusion
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          needs=json.loads(os.environ['NEEDS_JSON'])
+          outputs=needs['changes'].get('outputs',{})
+          expected={'changes':True,'foundation':True,
+              'public-data':outputs.get('public_data')=='true','ui':outputs.get('ui')=='true'}
+          for name in ('incident-storage','observability','multi-fault-development','health-worker-integration','incident-worker-s5'):
+              expected[name]=outputs.get('native')=='true'
+          failures=[]
+          for name,required in expected.items():
+              result=needs[name]['result']
+              if required and result!='success' or not required and result not in ('success','skipped'):
+                  failures.append(name+': '+result)
+              print(name+': '+result+(' (required)' if required else ' (outside changed scope)'))
+          if failures: raise SystemExit('Applicable CI checks did not pass: '+', '.join(failures))
+          PY

@@ -14,4 +14,4 @@ class BuildWithContracts(build_py):
             self.copy_file(str(source), str(target / source.name))
 
 
-setup(cmdclass={"build_py": BuildWithContracts})
+setup(cmdclass={"build_py": BuildWithContracts},package_data={'sentinelops.ui':['assets/*']})

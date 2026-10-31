@@ -114,7 +114,12 @@ trước model; khi **nghiệm thu toàn hệ thống** vẫn giữ gate hiện 
   source/DB/observability và release. Giữ check kết luận luôn có kết quả; tránh
   required check Pending khi path-filter bỏ workflow
   ([GitHub workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)).
-  Đây là việc cần triển khai, tài liệu này chưa đổi workflow.
+  Implementation hiện có ở `scripts/ci_impact.py`: workflow luôn chạy, foundation
+  và `ci-summary` luôn cho kết luận; UI/assets chạy browser/JS checks, code/config/
+  DB/worker hoặc path chưa biết chạy đủ native/public suites. `workflow_dispatch`
+  buộc full validation cho release. Không dùng workflow-level path filter khiến
+  required check treo Pending; chỉ skip job ngoài scope và summary kiểm mọi job
+  được yêu cầu. Job bị skip không được mô tả là một native measurement đã pass.
 - Chỉ tối ưu khi số đo vượt yêu cầu, ảnh hưởng sử dụng hoặc chi phí đáng kể.
   Không dành nhiều giờ làm nhanh thêm chút ít khi đường demo còn thiếu.
 
@@ -153,6 +158,13 @@ phải xác nhận UI, override, auth production hoặc cloud đã có. Giữ ow
 A trong contract; không tiếp tục sửa corpus/model/worker để làm UI.
 
 ### B1 — Lát cắt đầu tiên: incident thật lên UI local
+
+B1 đã có implementation và đường chạy local nguồn thật; cách mở UI/kiểm tra ở
+[API/UI runbook](../runbooks/INCIDENT_API.md) và
+[runtime B](../runbooks/LOCAL_TESTBED.md#lane-b-isolated-application-runtime).
+Handoff capability hiện tại ở [PROJECT_STATUS](../PROJECT_STATUS.md). Các mục
+B2–B4 bên dưới vẫn cần hoàn tất theo dependency/gate riêng; B1 không nghiệm thu
+model, RCA accuracy, explanation, action hoặc AWS thay cho các gate đó.
 
 | Thứ tự | Việc B triển khai | Điểm kết thúc có thể kiểm tra |
 | --- | --- | --- |
