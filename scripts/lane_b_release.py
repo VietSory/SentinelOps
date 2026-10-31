@@ -43,7 +43,7 @@ def snapshot(config, *, project, root):
         raise ValueError('snapshot requires exactly the eight owned B runtime containers')
     template = ('{"container_id":{{json .Id}},"image_id":{{json .Image}},'
         '"service":{{json (index .Config.Labels "com.docker.compose.service")}},'
-        '"running":{{json .State.Running}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}}')
+        '"running":{{json .State.Running}},"health":{{with (index .State "Health")}}{{json .Status}}{{else}}null{{end}}}')
     raw = subprocess.check_output(['docker','inspect','--format',template,*identifiers],text=True)
     images = {}
     for line in raw.splitlines():
