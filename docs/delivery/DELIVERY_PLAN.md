@@ -159,6 +159,13 @@ A trong contract; không tiếp tục sửa corpus/model/worker để làm UI.
 
 ### B1 — Lát cắt đầu tiên: incident thật lên UI local
 
+B1 đã có implementation và đường chạy local nguồn thật; cách mở UI/kiểm tra ở
+[API/UI runbook](../runbooks/INCIDENT_API.md) và
+[runtime B](../runbooks/LOCAL_TESTBED.md#lane-b-isolated-application-runtime).
+Handoff capability hiện tại ở [PROJECT_STATUS](../PROJECT_STATUS.md). Các mục
+B2–B4 bên dưới vẫn cần hoàn tất theo dependency/gate riêng; B1 không nghiệm thu
+model, RCA accuracy, explanation, action hoặc AWS thay cho các gate đó.
+
 | Thứ tự | Việc B triển khai | Điểm kết thúc có thể kiểm tra |
 | --- | --- | --- |
 | B1.1 — Sandbox riêng | Override Compose cho project `sentinelops-b`, toàn bộ published ports theo contract; commerce/control volumes riêng. API trên 18000, control DB 15433. Kiểm rendered config và port ownership trước `up`; không down/prune tài nguyên A | Config không còn published port của A; start/stop chỉ tác động project B. Readiness DB và model tách riêng |
