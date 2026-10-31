@@ -1,5 +1,12 @@
 # Phase 2 — dataset and model software verification
 
+Successor on 2026-10-31: [owner-approved prospective HTTP admission](2026-10-31-prospective-http-admission.md)
+implements a separately versioned v2 source, independent original-observation
+certificates, guarded local fitting/bundles and a bounded acquisition campaign.
+Its first real capture is still in progress; G2/G3 remain blocked with zero
+approved models. The original implementation/evaluation evidence below retains
+its historical source policy and exact commit attribution.
+
 Implementation: `f1b997c9a0f3d07dd5e695b51451ef9e7799d253`, Python 3.11.15,
 NumPy 2.2.6, scikit-learn 1.7.2, XGBoost CPU 3.1.1, asyncpg 0.30.0.
 Status: **software implemented and fixture-tested; G2/G3 BLOCKED; zero approved

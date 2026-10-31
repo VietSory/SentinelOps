@@ -92,3 +92,30 @@ source contract, model admission and activation gates are unchanged.
 [Accepted ADR-014](adr/ADR-014-proposed-local-training-evidence.md) records explicit
 owner approval on 2026-10-31. The [new capture protocol](LOCAL_HTTP_CORPUS.md) describes
 prospective registration; source authorization does not pass admission or activate models.
+
+## Owner-approved prospective v2 implementation
+
+`scripts.audit_local_corpus` now implements the original-observation certificate
+producer for the new local source; the historical GAMMA limitations above remain
+unchanged. See [source verification, oracle and collection](LOCAL_HTTP_CORPUS.md).
+The source verifier must pass every per-service healthy/precursor/group/split
+condition and bind an immutable dataset freeze before `train_local_http` constructs
+estimators. The current in-progress corpus is BLOCKED, so no source-backed fit or
+research model metric is claimed.
+
+Admitted fitting reuses the existing numerical primitives and registry, with an
+explicit `sentinelops-model/v2` bundle. It stores the v2 policy, original dataset
+reference/report, fitting Git commit, row hashes, feature order/profile, 300-second
+risk horizon and all existing model/checksum/calibration metadata. Censored risk
+rows stay excluded; healthy calibration is not mixed into fitting. Fitting writes
+unactivated artifacts and cannot write the separate operator release ledger.
+Loading/promotion reject fixtures, historical GAMMA and locally relabelled v1
+bundles. Separate G2/G3, live-parity and matching dataset/policy validation are
+required before serving. The default registry remains empty and returns 503.
+
+The minute-aligned v2 risk target is anchored at the closed feature-window end.
+Both actual start and completion must precede its next minute; after that, risk is
+null with explicit supplemental availability, even if IF still has a valid fresh
+window. The collector/replayer apply the same completion qualification. This
+preserves the approved forecast horizon without backdating an emission. Existing
+strict HTTP contracts and v1 recorded model-signal replay remain unchanged.

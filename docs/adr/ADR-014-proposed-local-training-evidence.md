@@ -1,11 +1,14 @@
 # ADR-014 — Proposed observed local HTTP training source
 
 **Status:** Accepted — owner approved 2026-10-31. Acquisition and implementation are authorized; dataset/model acceptance still requires measured evidence.
-**Authorization:** Owner explicitly answered “Phê duyệt ADR-014” to the review question describing the replacement source, oracle, 300-second horizon and independent partition protocol.  
+**Authorization:** Owner explicitly answered “Phê duyệt ADR-014” to the review question describing the replacement source, oracle, 300-second horizon and independent partition protocol.
 **Date:** 2026-10-31  
 **Related:** ADR-002, ADR-007, ADR-008, ADR-010, ADR-011; [measured feasibility decision](../reports/AI_RCA_NEXT_DECISION.md).
 
 ## Problem and evidence
+
+The following baseline paragraph records the superseded v1 source decision;
+the accepted prospective source replacement is specified below.
 
 GAMMA remains the only accepted primary training source. The measured 142-file capability scope and separate 48-file client scope yield zero certified live-service healthy train/calibration windows and zero independent verified pre-SLO precursor runs. Resources/RPC observations do not establish the live HTTP feature, workload-denominator and SLO semantics. The existing source contract cannot be amended by passing flags or relabelling interventions. RCAEval retains its separate frozen evaluation role; its three inspected development cases abstain at a maximum 0.40 coverage.
 
@@ -32,6 +35,13 @@ Use the accepted **300-second forecast horizon** for XGBoost: positive means a v
 The source certificate verifier must be a deterministic producer from original observations, not a caller-controlled approval flag or an arbitrary readable artifact. It must validate complete scope, provenance, independent groups, chronology, units, missingness and label boundaries before numeric estimators can be constructed. Existing G2 requirements still apply globally; this proposal does not authorize fitting one model around a failed gate.
 
 ## Prospective partition and experiment plan
+
+Implementation clarification: `t` in the approved horizon is the closed,
+minute-aligned feature-window end. Actual observation availability and prediction
+completion must remain within that minute, preserving the same set of future
+minute-aligned SLO onsets. A later result has unavailable risk. Independently
+observed onset/confirmation and pre-onset trend remain necessary; no emission
+time is backdated. This does not change the 300-second horizon or guarantee lead time.
 
 Freeze whole acquisition groups before windowing. Runs sharing acquisition context, persistent fault state or a common correlated session must stay together. Distinct filenames/process restarts do not prove independence. Preserve chronological train → calibration → development-validation → sealed final roles. If the measured grouping collapses runs together, collect additional groups rather than count correlated windows as independent experiments.
 

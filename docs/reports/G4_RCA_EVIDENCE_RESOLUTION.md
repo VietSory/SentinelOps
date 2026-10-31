@@ -1,5 +1,11 @@
 # G4 RCA evidence resolution — 2026-10-30
 
+**Continuation 2026-10-31:** owner-approved local HTTP training acquisition is
+implemented separately in the [prospective source report](2026-10-31-prospective-http-admission.md).
+It produces no new RCAEval modality or accepted ML signal at this checkpoint.
+The measured G4 results below remain unchanged: zero qualified predictions and a
+0.40 maximum coverage, with frozen policy intact and final data unopened.
+
 **Verdict: G4 quality remains unaccepted.** Three authorized development cases still abstain; no qualified prediction. The corrections improve evidence safety and auditability, not measured diagnostic accuracy. Policy weights, coverage 0.75, score 0.75 and margin 0.15 are unchanged.
 
 Implementation checkpoint `d72e654`, baseline merged main `dd12339259b4f36bd61948eb2401a5939762cd1f`. [Per-case machine report](evidence/2026-10-30-rca-blocker-resolution.json) contains every candidate, all five component values/methods/reasons, score, known-weight coverage, rankings, margins, evaluator-only truth, observed entities, source hashes, event timestamps, dependency links and source-reference resolution. The business result hash is identical before/after:

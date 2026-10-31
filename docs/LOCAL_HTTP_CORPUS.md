@@ -73,3 +73,69 @@ activity and compliance; risk positives require independently measured future
 SLO onset within the accepted 300-second horizon and verified pre-onset deterioration.
 Unknown/censored intervals remain unavailable. Intervention timestamps alone are
 not targets. Model fitting and activation remain blocked until every gate passes.
+
+The implemented verifier is `ml.local_data.audit_local_corpus`. It verifies original
+run/source/image identities, loaded implementation hashes against Git objects,
+exclusive registrations, raw replay, nonoverlapping chronological whole groups,
+fresh container/volume identities and actual post-run Docker process clocks. A
+missing context receipt is pending, not admitted; corrupt completed evidence is
+quarantined without deleting it. `inspect_local_capture.py` records a real receipt
+after completion, including its own committed observer identity. It does not
+invent a receipt at the historical event time.
+
+The oracle reconciles unsampled request starts/completions with native trace,
+request and correlation IDs and an independent client status/elapsed ledger.
+Every complete bucket needs sufficient directly observed traffic. Missing starts,
+completions or traffic make affected buckets UNKNOWN; conflicting identities,
+statuses or source clocks reject the evidence. JSON round trips preserve bucket
+keys. Both client and server clocks are checked according to their actual semantics;
+UTC and monotonic duration samples are not assumed to be atomically identical.
+
+Features are reconstructed from past raw observations at their actual availability
+cutoff and frozen before any outcome joins. The risk forecast anchor `t` is the
+minute-aligned closed feature-window end; receipt and inference completion must
+remain in that same minute. SLO onsets occur on minute boundaries, so this retains
+the identical set of future onsets in `(t,t+300s]`. A delayed prediction crossing
+the next minute has unavailable risk, while otherwise valid IF inference remains
+available under its existing freshness rule. Negative labels require the complete
+two-bucket SLO confirmation tail at the horizon endpoint. Incident/post-incident,
+censored or incomplete windows do not supply risk targets. A positive additionally
+needs three strictly rising independently observed pre-onset p95 buckets and
+corroborated actual gradual control steps; controls are never model features.
+
+```sh
+python scripts/inspect_local_capture.py --root artifacts/local-http-corpus-v1 \
+  --slot train-01-healthy
+python scripts/audit_local_corpus.py --root artifacts/local-http-corpus-v1 \
+  --output artifacts/local-http-corpus-v1/admission.json
+```
+
+Only a fully reverified READY_FOR_FITTING report may use `--freeze`. The exclusive
+freeze binds that exact report and rejects further acquisition in this corpus
+epoch. Training recomputes the original evidence again and consumes only admitted
+train/calibration rows. Development is checked for independent support but its
+numeric rows never enter fitting. Final references remain unopened. Caller-authored
+READY/PASS flags, historical pilots and relabelled v1 bundles cannot bypass this.
+
+## Bounded campaign and restart
+
+`capture_local_campaign.py` acquires the plan's minimum three train, two calibration
+and five development groups, with all three capture kinds in each: 30 nonfinal
+slots. Its configured workload budget is 1170 minutes (19.5 hours), excluding
+startup, collection, verification and interruptions. This is a budget, not an
+eligible-data or completion guarantee. It never opens final data or fits/activates
+a model. Source gaps, insufficient precursors or other failed gates remain blocked.
+
+```sh
+python scripts/capture_local_campaign.py --root /absolute/corpus/root --follow-existing
+```
+
+Run from an immutable clean worktree. The controller preserves the exact original
+clean checkout of any existing acquisition group, then uses its own frozen source
+for later groups. It waits for a registered active slot only in explicit follow
+mode. A process failure never replays an interrupted workload or overwrites its
+slot. Completed receipts and content-addressed campaign events allow resume;
+incomplete/failed sources stop for investigation. Controller/source/plan changes
+are rejected rather than silently rewriting a campaign. Separate campaign and
+acquisition locks reject competing controllers/workloads; process exit releases
+the locks. End-context verification precedes source admission and the next slot.
