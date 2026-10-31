@@ -32,17 +32,18 @@
 
 ## Lịch sử và bằng chứng
 
-- [Reports](reports/README.md): kết quả có ngày/SHA và scope; không phải current status.
+- [Research results](reports/README.md): chỉ baseline/evaluation cần dùng lại, không phải hồ sơ service đã PASS.
 - [Archive](archive/README.md): spec/checkpoint/guide đã thay thế, gồm nghiên cứu GAMMA/SMD.
-- JSON trong `reports/evidence/` còn được tests/CLIs/CI tham chiếu; giữ paths/bytes
-  trừ khi có migration của consumer. Raw data/model binaries nằm ngoài Git.
+- Input dùng cho regression nằm ở `tests/fixtures/`. JSON trong reports chỉ đi kèm
+  kết quả nghiên cứu còn cần dùng; raw data/model binaries nằm ngoài Git.
 
 ## Quy tắc giữ tài liệu gọn
 
 - Mỗi chủ đề có một bản hiện hành. Sửa bản đó thay vì tạo thêm plan/status gần giống.
-- Thay đổi capability mới cập nhật PROJECT_STATUS; diễn biến chạy nằm trong report
-  của lane, không thêm một report cho từng vòng sửa/test.
+- Thay đổi capability mới cập nhật PROJECT_STATUS. Smoke PASS, sửa nhỏ và việc đã
+  có test/CI bảo vệ không cần report riêng hoặc bản lưu trong archive.
 - ADR dành cho quyết định kiến trúc/breaking boundary; bug fix và tiến độ không cần ADR.
 - Runbook chứa lệnh/điều kiện chạy; report giữ kết quả đo; không trộn hai mục đích.
-- Khi thay thế tài liệu, đưa bản cũ vào archive và sửa links. Hai trang chuyển tiếp
+- Chỉ đưa bản cũ vào archive khi có lý do tra cứu lâu dài; phiên bản thông thường
+  dùng Git history. Hai trang chuyển tiếp
   ở `DELIVERY_PLAN.md`/`WORKSTREAM_CONTRACT.md` chỉ giữ URL đã chia sẻ; không thêm bản sao nội dung.

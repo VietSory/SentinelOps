@@ -1,6 +1,8 @@
 # Step 4 — Telemetry and deterministic feature pipeline
 
-Status: contracts/transforms, local Prometheus adapter and capture/replay CLI are implemented. Live acceptance results are tracked in dated reports. This phase does not train models or implement RCA/remediation.
+Contracts/transforms, the local Prometheus adapter and capture/replay CLI are
+implemented. Use the current capture and smoke/replay commands below to validate
+a target environment. This path does not train models or execute remediation.
 
 ## Contracts and code
 
@@ -46,7 +48,9 @@ python -m scripts.step4_smoke_test --output artifacts/step4/local
 
 Tests cover known histogram interpolation/overflow, invalid distributions, weighted ratios, timestamp slopes with a missing bucket, 3/5 abstention, late arrival, future cutoff, duplicates/conflicting revisions, mixed sources, fractional alignment and API semantic rejection.
 
-The sample envelope provenance uses `fixture://` and is synthetic example data. It is not measured healthy/fault telemetry or ML evidence. G1 requires the additional live capture report; G2/G3 require independent datasets and trained model evaluation.
+The sample envelope provenance uses `fixture://` and is synthetic example data.
+Validate G1 on a current live capture; G2/G3 require independent data and actual
+model evaluation. No historical PASS document makes a new environment ready.
 
 The live smoke runs about 540 seconds at three checkouts/second through healthy,
 Payment latency, Payment error and recovery, while capturing each completed UTC
@@ -80,4 +84,6 @@ python scripts/collect_infrastructure.py --output artifacts/infrastructure/local
 
 This local PostgreSQL evidence does not certify an AWS RDS/CloudWatch adapter. Service DB client spans retain parentage without raw SQL/parameters; request-instance IDs allow log deduplication independently of a reused correlation ID. Fault APIs require ENABLE_FAULT_INJECTION=true and a local/test environment; Compose enables them only in the sandbox profile and binds published ports to loopback.
 
-See the [dated local verification report](../reports/2026-10-26-phase4-local.md) for actual counts, the failed first attempt, incomplete buckets and the distinction between test execution and raw-evidence archival.
+Inspect the current command result and capture quality for incomplete buckets or
+source errors. Retain raw/evaluation artifacts when required for reproducibility;
+routine smoke PASS needs no additional Markdown report.

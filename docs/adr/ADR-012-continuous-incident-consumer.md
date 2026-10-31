@@ -1,6 +1,6 @@
 # ADR-012 — Continuous incident input, grouping and publication ownership
 
-**Status:** Accepted for the local continuous consumer; [native development evidence](../reports/2026-10-29-continuous-incident-local.md) and per-release CI remain separate from full G4.
+**Status:** Accepted for the local continuous consumer; native development evidence and per-release CI remain separate from full G4.
 **Scope:** Local continuous health → correlation/RCA → persisted IER within ADR-006/007/008 boundaries. This does not accept G3/G4, authorize actions or change training sources.
 
 ## Context
@@ -28,4 +28,4 @@ Rollback normally disables the new consumer and retains additive data plus a com
 
 ## Verification and remaining gates
 
-Temporal boundary, late independent-root, corruption and retry tests, real PostgreSQL upgrade/permissions/atomicity/restart, protected API history/outbox, and actual S1 plus both S5 development health→IER captures are recorded in the [measured report](../reports/2026-10-29-continuous-incident-local.md). Captured-ledger source-reader integration alone does not prove a running continuous incident worker. Portable reconstruction and mutation probes verify transported ledgers without replacing the live captures. Every published candidate requires successful exact-head CI/artifact inspection. Final S5/RCAEval holdouts, full G4/model integration and production acceptance remain separate and unaccepted.
+Temporal boundary, late independent-root, corruption and retry tests, real PostgreSQL upgrade/permissions/atomicity/restart, protected API history/outbox, and actual S1 plus both S5 development health→IER captures are recorded in the measured report. Captured-ledger source-reader integration alone does not prove a running continuous incident worker. Portable reconstruction and mutation probes verify transported ledgers without replacing the live captures. Every published candidate requires successful exact-head CI/artifact inspection. Final S5/RCAEval holdouts, full G4/model integration and production acceptance remain separate and unaccepted.

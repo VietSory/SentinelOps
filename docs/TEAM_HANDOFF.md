@@ -127,8 +127,9 @@ không tự cấp activation khi gate thiếu.
 action/Kubernetes/AWS song song A; giao auth/deploy/known-good rollback/runbook;
 chỉ bật model/cloud trong phạm vi được duyệt.
 
-Mỗi lane cập nhật một report theo plan: SHA, cách chạy, kết quả/giới hạn, artifact
-URI/hash/version và dependency thật. Raw/model binary truyền qua artifact store
+Handoff gồm SHA, cách chạy, giới hạn, artifact URI/hash/version và dependency thật;
+dùng commit/CI và tài liệu hiện có, không tạo report chỉ để ghi service đã PASS.
+Chỉ giữ report riêng cho kết quả data/model/evaluation cần dùng lại. Raw/model binary truyền qua artifact store
 được phép, không commit Git. Consumer phải có quyền truy cập và cách materialize/
 verify; path chỉ tồn tại trên máy người gửi chưa đủ bàn giao. Không gửi holdout
 raw ngoài quyền, không ghi token/DSN trong report.

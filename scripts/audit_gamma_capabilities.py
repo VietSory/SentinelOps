@@ -9,7 +9,8 @@ from sentinelops.public_data.gamma_capabilities import audit_capabilities
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, required=True)
-    parser.add_argument('--grouped-report', type=Path, default=Path('docs/reports/evidence/2026-10-26-gamma-grouped-dataset.json'))
+    parser.add_argument('--grouped-report', type=Path, default=Path('tests/fixtures/gamma-grouped-dataset.json'),
+                        help='Historical reference input; not current local-HTTP training admission.')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     result = audit_capabilities(args.manifest, json.loads(args.grouped_report.read_text()))

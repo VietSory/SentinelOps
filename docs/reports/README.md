@@ -1,21 +1,13 @@
-# Reports và evidence
+# Kết quả cần giữ để dùng lại
 
-Đây là kết quả theo ngày, SHA, nguồn và môi trường; chúng giữ scope gốc.
-[PROJECT_STATUS](../PROJECT_STATUS.md) là bản tóm tắt hiện hành,
-[delivery plan](../delivery/DELIVERY_PLAN.md) là việc cần làm tiếp.
+Hiện chỉ giữ [RCA development baseline](RCA_DEVELOPMENT.md) và JSON đi kèm:
+chúng cung cấp mẫu số, giới hạn evidence và mốc so sánh cho thay đổi RCA tiếp theo.
 
-| Cần tra | Report |
-| --- | --- |
-| Source HTTP v2/admission | [2026-10-31 prospective admission](2026-10-31-prospective-http-admission.md) |
-| Data/model blockers | [G2/G3 resolution](G2_G3_BLOCKER_RESOLUTION.md), [model software](PHASE2_DATASET_AI_MODELS.md) |
-| Continuous incident local | [2026-10-29 integration](2026-10-29-continuous-incident-local.md), [worker metrics](2026-10-30-incident-worker-metrics.md) |
-| Native RCA scope/results | [Phase 3 evaluation](PHASE3_RCA_AI_INTEGRATION.md), [G4 findings](G4_RCA_EVIDENCE_RESOLUTION.md) |
-| Các thử nghiệm cũ | File có ngày/chủ đề trong thư mục này; source guides cũ ở [archive](../archive/README.md) |
+Không cần report lịch sử để xác nhận service chạy: dùng code/tests, lệnh kiểm tra
+trong [runbooks](../README.md#runbooks--mở-khi-cần-thực-hiện) và CI đúng phiên bản.
+Smoke PASS, sửa bug nhỏ, tiến độ phase hoặc snapshot readiness tạm thời không cần
+một file riêng. [PROJECT_STATUS](../PROJECT_STATUS.md) chỉ tóm tắt capability/gap.
 
-`evidence/` và các JSON cùng report giữ nguyên bytes/paths. Một số JSON là input
-của tests/CLIs/CI, nên không di chuyển/xóa như văn bản thông thường. Dữ liệu raw,
-model binary và secrets không thuộc thư mục này.
-
-Hai lane tạo/cập nhật `ai-data-delivery.md` và `platform-delivery.md` khi bắt đầu
-implementation. Mỗi report giữ kết quả sử dụng được, version, kiểm tra/giới hạn và
-dependency; không sinh một file mới cho từng lần chạy test.
+Chỉ thêm/cập nhật report khi có kết quả data/model/evaluation hoặc quyết định cần
+đối chiếu lâu dài. Không tự tạo một report cho mỗi người, tính năng hoặc vòng test.
+Input GAMMA lịch sử dùng cho regression nằm trong `tests/fixtures/`, không ở docs.

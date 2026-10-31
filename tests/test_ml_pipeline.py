@@ -76,7 +76,7 @@ def test_missing_nonfinite_boolean_or_wrong_schema_rejected(values):
 
 
 def test_exact_readiness_and_no_invalid_training_artifact(tmp_path):
-    recorded = json.loads(Path("docs/reports/evidence/2026-10-26-gamma-grouped-dataset.json").read_text())
+    recorded = json.loads(Path("tests/fixtures/gamma-grouped-dataset.json").read_text())
     audit = audit_readiness(recorded)
     assert (audit["candidate_windows"], audit["feature_eligible_windows"], audit["excluded_windows"]) == (29610, 22771, 6839)
     assert audit["status"] == "BLOCKED" and audit["verified_precursor_runs"] == 0

@@ -152,7 +152,7 @@ jobs:
           assert sum(dataset['case_counts'].values())==194
           assert dataset['training_ready'] is False and dataset['risk_target_available'] is False
           assert dataset['source_reference_is_healthy_certificate'] is False
-          expected=json.loads(Path('docs/reports/evidence/2026-10-26-gamma-grouped-dataset.json').read_text())
+          expected=json.loads(Path('tests/fixtures/gamma-grouped-dataset.json').read_text())
           for key in ('rows','counts','case_counts','label_counts','feature_eligible_label_counts',
                       'feature_values_sha256','profile_sha256','split_sha256','source_file_tree_sha256'):
               assert dataset[key]==expected[key], key

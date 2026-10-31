@@ -3,7 +3,7 @@
 **Status:** Accepted — owner approved 2026-10-31. Acquisition and implementation are authorized; dataset/model acceptance still requires measured evidence.
 **Authorization:** Owner explicitly answered “Phê duyệt ADR-014” to the review question describing the replacement source, oracle, 300-second horizon and independent partition protocol.
 **Date:** 2026-10-31  
-**Related:** ADR-002, ADR-007, ADR-008, ADR-010, ADR-011; [measured feasibility decision](../reports/AI_RCA_NEXT_DECISION.md).
+**Related:** ADR-002, ADR-007, ADR-008, ADR-010, ADR-011; measured feasibility decision.
 
 ## Problem and evidence
 

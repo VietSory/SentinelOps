@@ -1,6 +1,9 @@
 # Incident storage foundation
 
-This is the storage/lifecycle work allowed to start before G3 in the delivery plan. It does not implement correlation/RCA, model inference, recovery verification or remediation authorization and does not close G4. The separately tested [HTTP persistence migration](INCIDENT_API.md) connects this repository; the original storage acceptance remains a dated checkpoint.
+The control repository persists incident revisions, lifecycle context, audit and
+outbox state. The [HTTP API](INCIDENT_API.md) exposes the bounded interface.
+Use the storage/API checks below on an isolated current database when validating
+storage changes. This does not authorize models, RCA or remediation.
 
 ## Isolation and local setup
 

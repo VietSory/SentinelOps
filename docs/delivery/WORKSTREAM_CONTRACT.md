@@ -13,13 +13,13 @@ implementation chỉ vì được ghi ở đây.
 | **A** | Capture/training/model/SLO/RCA/evaluation configs; scripts capture/audit/train/evaluate/replay và worker runners tương ứng |
 | **B** | `src/sentinelops/api.py`, `api_http.py`, `api_settings.py`, `main.py`; `incidents/domain.py`, `repository.py`, `validation.py`; **mới** `src/sentinelops/remediation/`, `auth/`, `ui/` |
 | **B** | `services/`, `docker/`, Compose, `infra/`, `observability/`, `.github/`, `pyproject.toml`, `src/sentinelops/contracts.py`, `schema_registry.py`, `scripts/validate_contracts.py`; configs deployment mới |
-| **Theo module** | Tests/samples/runbook của module; report A `docs/reports/ai-data-delivery.md`, report B `docs/reports/platform-delivery.md` |
+| **Theo module** | Tests/samples/runbook của module; chỉ giữ report data/model/evaluation có nhu cầu dùng lại |
 | **B điều phối** | README, team docs, PROJECT_STATUS, TECHNICAL_SPEC: cập nhật gộp ở mốc integration; cả hai không sửa hằng ngày |
 
 Schema/ADR không tự đổi theo ownership. A đề xuất model/telemetry contract, B đề
 xuất API/envelope/action contract; producer+consumer kiểm compatibility trước
 version mới. Không đổi strict IER để tiện UI. Path chưa phân công: ghi owner vào
-report trước khi sửa, không mặc định hai người cùng sở hữu.
+handoff/commit trước khi sửa, không mặc định hai người cùng sở hữu.
 
 Cần sửa vùng lane kia thì giao yêu cầu/patch nhỏ cho owner đó. Chỉ item bị ảnh hưởng
 chờ; các item khác tiếp tục. Shared-interface review chỉ xem diff/caller liên quan,
@@ -134,6 +134,7 @@ H1/H2/H3/H4 Ready khi có version, producer SHA, URI/hash hoặc import path, co
 cách chạy và failure behavior. Consumer xác minh trên môi trường mình, ghi PASS/
 FAIL/BLOCKED và thiếu hụt cụ thể. Không đợi toàn lane producer xong.
 
-Hai report riêng là checkpoint. Đổi interface nêu version cũ/mới, caller bị tác
+Checkpoint dùng commit/CI và handoff thực sự cần thiết, không bắt hai report riêng.
+Đổi interface nêu version cũ/mới, caller bị tác
 động, migration và regression cần chạy; cùng chốt boundary rồi tiếp tục.
 Chỉ chờ ở compatibility/activation/side effect thật sự cần đầu ra của nhau.

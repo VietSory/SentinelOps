@@ -1,10 +1,13 @@
 # Step 5 — Experiment truth and dataset protocol
 
-Status: manifest/labeling/dataset-freeze implementation and a bounded local S0/S1/S3/S5 runner. [Two actual S5 development cases](../reports/2026-10-28-s5-development.md) passed raw-source grouping/evidence checks; final heldout/model gates remain separate. Live acceptance evidence and sufficient independent data are tracked separately. G2 is not PASS merely because these modules or synthetic fixtures exist.
+Status: manifest/labeling/dataset-freeze implementation and a bounded local
+S0/S1/S3/S5 runner. Inspect the current run's original inputs/results before data
+admission. Module availability or a prior successful run does not accept G2,
+model quality or final heldout results.
 
 ## Training data sources
 
-The frozen [training-data contract](../../configs/training_data_contract.json) and [ADR-011](../adr/ADR-011-frozen-gamma-rcaeval-contract.md) govern [published public datasets](../archive/guides/PUBLIC_DATA_PLAN.md): GAMMA v1 is primary training; pinned RCAEval is RCA validation/holdout only, without ML fitting. At most these two public sources are used, with no row concatenation. SMD is excluded historical research and is not expanded. The local three-service/PostgreSQL captures below are integration/transfer evidence, not the primary training corpus. They are experimental workload measurements, not production-user traffic or hand-authored metrics.
+The frozen [training-data contract](../../configs/training_data_contract.json) and [ADR-011](../adr/ADR-011-frozen-gamma-rcaeval-contract.md) govern published public datasets: GAMMA v1 is primary training; pinned RCAEval is RCA validation/holdout only, without ML fitting. At most these two public sources are used, with no row concatenation. SMD is excluded historical research and is not expanded. The local three-service/PostgreSQL captures below are integration/transfer evidence, not the primary training corpus. They are experimental workload measurements, not production-user traffic or hand-authored metrics.
 
 | Source | Training/evaluation use |
 | --- | --- |

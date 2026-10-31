@@ -7,7 +7,7 @@ from sentinelops.public_data import gamma_capabilities as module
 
 
 def test_matrix_preserves_scope_and_zero_certified_support(monkeypatch):
-    grouped = json.loads(Path('docs/reports/evidence/2026-10-26-gamma-grouped-dataset.json').read_text())
+    grouped = json.loads(Path('tests/fixtures/gamma-grouped-dataset.json').read_text())
     source = {'training_data_policy_hash': grouped['training_data_policy_hash'], 'experiments': [
         {'raw_metrics': [{'source_path': 'fixture/container_cpu_usage_seconds_total', 'empty': False}],
          'processed_tables': [{'source_path': 'fixture/processed.csv'}]}]}

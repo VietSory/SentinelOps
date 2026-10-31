@@ -34,8 +34,8 @@ exclusive. The original canonical evaluation retains its business-output identit
 and local/live method admission remains unchanged. Neither path writes local IERs,
 fits models, opens final data or authorizes actions.
 
-The earlier whole-capture generic error-token experiment at `f1b997c` is retained
-as historical evidence in the Phase 3 report. Its old config and pure scoring helper
+The earlier whole-capture generic error-token experiment at `f1b997c` is recorded
+in Git history. Its old config and pure scoring helper
 remain compatibility fixtures only; current manifest execution uses the bounded
 canonical source admission and fixed-window profile above. Its old numerical results
 must not be substituted for measurements of the current profile.

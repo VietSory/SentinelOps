@@ -56,7 +56,7 @@ through a separate method allowlist. The live RCA allowlist/wire contracts remai
 unchanged. The retained pre-ADR-013 log-only helper has its own legacy method
 allowlist: its `native-log-pattern-presence/v1` cannot enter live RCA, and live
 `business-completion-support/v1` cannot enter that legacy helper. The canonical
-ADR-013 allowlist remains separate from both. [The measured regression fix](../reports/2026-10-30-rca-method-isolation.md)
+ADR-013 allowlist remains separate from both. The measured regression fix
 preserves every canonical case result. The existing policy is hash locked; there
 is no weight redistribution:
 

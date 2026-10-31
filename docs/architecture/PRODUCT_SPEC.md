@@ -23,7 +23,7 @@ The closed loop is Observe → Detect/Predict → Correlate/Diagnose → Record 
 | Implementation design and default parameters | [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md) |
 | Constraints, target metrics, gates, decision status | [CONSTRAINTS_AND_GATES.md](CONSTRAINTS_AND_GATES.md) |
 | Delivery order, owners by role, estimates, backlog | [DELIVERY_PLAN.md](../delivery/DELIVERY_PLAN.md) |
-| Runtime evidence and known failures | Versioned execution reports in `docs/reports/` and immutable artefact manifests |
+| Runtime evidence and known failures | Current environment checks, version-matched CI and required data/model evaluation artifacts; routine PASS logs need no separate report |
 
 The previous v1.0 export omitted several tables and contained examples inconsistent with committed schemas. It is retained as history, not as a second implementation specification. Accepted architecture changes require an ADR; tuning parameters and unmeasured quality targets remain explicitly provisional until their stated freeze gates.
 

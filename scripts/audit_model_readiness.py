@@ -8,7 +8,8 @@ from sentinelops.ml.readiness import audit_readiness
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--report", type=Path, default=Path("docs/reports/evidence/2026-10-26-gamma-grouped-dataset.json"))
+    parser.add_argument("--report", type=Path, default=Path("tests/fixtures/gamma-grouped-dataset.json"),
+                        help="Historical GAMMA reference input by default; pass a grouped report to inspect another result.")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     result = audit_readiness(json.loads(args.report.read_text()))

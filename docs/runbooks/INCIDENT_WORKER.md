@@ -1,6 +1,10 @@
 # Continuous local incident consumer
 
-The separate local consumer reads the selected accepted health ledger, verifies raw lineage, closes conservative onset groups, captures bounded operational evidence and journals IER revisions. [Actual S1 and both S5 development captures](../reports/2026-10-29-continuous-incident-local.md) now verify seven complete incident lifecycles, restart/competition, source-derived recovery, portable integrity replay and protected HTTP history. [ADR-012](../adr/ADR-012-continuous-incident-consumer.md) is accepted for this local implementation. Each published revision still requires its own CI/artifact verification. This does not activate a model/action or accept full G4.
+The separate local consumer reads the selected accepted health ledger, verifies
+raw lineage, finalizes onset groups, captures bounded evidence and journals IER
+revisions under [ADR-012](../adr/ADR-012-continuous-incident-consumer.md).
+Use its status/readiness, database state and the checks below to inspect the current
+process; a historical run does not establish current health or full G4.
 
 ## Identity and source boundary
 
@@ -34,7 +38,26 @@ Start the existing health producer first. Use an already configured loopback `CO
 
 Use the same arguments plus `--status` for a read-only checkpoint lookup; status cannot initialize or capture/publish. `--max-ticks` bounds a run. SIGTERM/SIGINT request graceful shutdown; allow an active bounded capture to finish. Transport/database outages are reported without credentials and retried by the process. Integrity/configuration/role/schema failures stop the worker. Readiness/model availability, source availability, incident lifecycle and the process being alive are distinct.
 
-### Optional operational metrics
+## Optional validated model
+
+Optional `--model-store` and `--model-release-ref` on `scripts.run_incident_worker`
+load a separately approved, checksum-pinned release. The evidence profile binds
+that release to the existing consumer identity. Changing it on an existing stream
+requires an explicit migration; a restart cannot quietly create duplicate episodes.
+
+The supplemental `continuous-incident-evidence/v2` capture records the exact
+accepted consumer state, feature batch, feature/model signal identities and actual
+inference/receipt times. The journal verifies that source step against raw history
+before accepting or projecting evidence. Replay re-runs the pinned estimator.
+The existing v1 evidence path remains byte-compatible when no release is configured.
+
+Actual IF output may contribute the existing 0.25 anomaly weight. Actual risk stays
+separate explanatory evidence and never invents a new RCA component. Legacy IER
+signals require verified inference; unavailable models/features stay null/absent,
+with explicit reasons in model evidence. Without a compatible validated release,
+ordinary SLO processing continues with empty model signals.
+
+## Optional operational metrics
 
 Add `--metrics-otlp-endpoint http://127.0.0.1:4317 --metrics-instance incidents-0`
 to export through a private provider. Concurrent replicas need distinct stable
@@ -77,13 +100,10 @@ sentinelops_worker_processing_duration_seconds_count{environment="local",worker_
   and on(job,environment,worker_instance) (sentinelops_incident_has_local_progress == 1)
 ```
 
-Unit and captured-state checks cover backlog accounting, rejected-input atomicity,
-progress/source separation and startup/retry cleanup. The [measured native S1
-integration](reports/2026-10-30-incident-worker-metrics.md) additionally verifies
-actual incident OTLP/Collector/Prometheus export, positive group/abstention counters
-before crash, reused/distinct slots, follower BUSY, database/source/exporter outages
-and exact process-log/durable-journal accounting. The [metrics acceptance
-profile](../configs/incident_metrics_acceptance.json) requires a 130-second backlog
+For metrics integration changes, validate the current OTLP/Collector/Prometheus
+path, positive counters, restart guards and process-log/journal accounting on an
+isolated target. The [metrics acceptance
+profile](../../configs/incident_metrics_acceptance.json) requires a 130-second backlog
 pause and 75-second Collector outage without shortening business SLO windows.
 For the existing native health checker, `--incident-consumer` plus
 `--metrics-otlp-endpoint http://127.0.0.1:4317` enables this additional observer;

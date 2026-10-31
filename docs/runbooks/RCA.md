@@ -1,6 +1,9 @@
 # Evidence-linked deterministic RCA
 
-P7 now includes strict policy/result contracts, deterministic scoring/abstention, a raw → health → correlation verified source adapter, portable analytical RCA bundles and a trusted local computed-IER producer. [Actual-source and PostgreSQL/HTTP measurements](../reports/2026-10-28-rca-replay.md) cover S0/S3 and durable retries/restart. Full G4 still needs separate localization/multi-fault evaluation, model-signal integration and continuous worker processing.
+The RCA path uses strict policy/result contracts, deterministic scoring/abstention,
+a raw → health → correlation adapter, analytical replay and a computed-IER producer.
+Use the current source/profile and commands below for validation. Research quality,
+model compatibility and action eligibility have separate gates.
 
 [rca_policy.json](../../configs/rca_policy.json) records the initial technical-spec weights: 0.25 anomaly, 0.20 temporal, 0.25 dependency/trace, 0.15 log and 0.15 observed change. Score/coverage/margin floors are 0.75/0.75/0.15. They are initial development policy, not calibrated probabilities or benchmark results. No model fitting or RCAEval threshold selection is performed by scoring.
 

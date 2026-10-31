@@ -25,4 +25,9 @@ Commit implementation first; output is exclusive and content-addressed. The cons
 
 `source_identity` contains environment, source profile and health-policy hash. The result includes the topology snapshot and opening facts needed to resolve dependency-support IDs. Missing-model values are not filled with anomaly scores or risk zero. The existing detection endpoint continues to fail closed without a compatible model.
 
-Mode is explicitly `event-time-analytical`: opening/group history from replay clocks, not live emitted incidents. [The downstream RCA producer](RCA.md) derives bounded trace/log/connection support and persists computed analytical IERs with a distinct actual emission intent. [Two real S5 development cases](../reports/2026-10-28-s5-development.md) preserve separate Payment/Inventory groups and an ambiguous shared Checkout, with explicit native direct-request support. Continuous worker/checkpoint concurrency, observed deployment support, final S5 holdout and RCAEval evaluation remain separate deliverables. CI checks fresh Step 4 and a separate blocking-error S5 development capture. These checks do not close full G4 or the unchanged model/data gates.
+Mode is explicitly `event-time-analytical`: replay clocks describe analytical
+grouping, not live emitted incidents. The [RCA producer](RCA.md) independently
+validates bounded source support before scoring/persisting IERs. Independent
+Payment/Inventory roots retain separate groups and ambiguous shared Checkout.
+Validate a new input with current source/replay checks; grouping alone grants no
+model, action or diagnostic-quality acceptance.

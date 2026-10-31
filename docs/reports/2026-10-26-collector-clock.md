@@ -1,9 +1,0 @@
-# Collector UTC readiness — failed long-run audit
-
-The longer healthy attempt `run-c4ce869f9c8c4c8185056577c661d535` failed with `ValueError` before warmup completed. Its evidence remains retained and excluded from datasets. Actual UTC interval: 2026-10-26 03:54:16.632845 → 03:59:29.217953; four minute captures and four native DB observations were saved. The workload containers remained healthy. Twelve subsequent read-only native DB captures succeeded with positive client-arrival minus DB-observation time (about 1.8–6.7ms).
-
-The old collector converted a UTC deadline to a single `asyncio.sleep` duration, then immediately assumed readiness. Timer sleep and UTC time do not share an absolute clock. The failure occurred just before the next `:30` source watermark, which is consistent with an early wake/clock adjustment. The original run saved only the exception type, so that timing does **not prove** the exact original exception location; a further live run must establish whether another cause remains.
-
-Both experiment and Step 4 collectors now recheck actual UTC after bounded sleeps, distinguish not-yet-ready from other capture validation errors, retry only that readiness condition and bound UTC waits/retries. They never fabricate a future collection time or weaken the 30s watermark. Future failures retain safe file/function/line diagnostics in truth, excluding exception text/locals/credentials.
-
-Validation: **163 tests passed**, 16 schemas/12 samples validated and installed-wheel smoke passed. Tests cover a timer waking at UTC `:29.2`, a stuck UTC clock timing out, a clock change between wait/capture, no retry for unrelated validation errors, and diagnostics that exclude secret exception values. These are unit/runtime-package checks; successful sustained local collection after this patch remains separate evidence.

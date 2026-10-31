@@ -34,8 +34,8 @@ side effect chung. Không giả định một người thứ ba làm integration
   Collector/Prometheus/Jaeger, telemetry/features và experiment runner đã có.
 - Health/incident workers, IER persistence/read API, correlation và RCA có đường
   chạy local/CI. Dùng lại; không viết lại incident subsystem.
-- Fix `98cdd67` trong PR #24 đã merge. 743 regression tests tại fix pass;
-  CI PR run `41179556972` pass 8/8. CI của commit sau đó là bằng chứng riêng.
+- Kiểm tra code/runtime của phần bị tác động bằng runbook và CI đúng SHA;
+  không cần giữ một report lịch sử để xác nhận service hoạt động.
 - Corpus prospective HTTP v2 và guarded model software đã có, **chưa có model
   được chấp nhận**. Report gần nhất chưa đạt G2/G3; inventory đang chạy phải kiểm
   tra trên máy capture, không suy từ Git.
@@ -131,10 +131,10 @@ Không khóa lane kia trong suốt CI của phần độc lập. Nếu remote ti
 lại commit chưa publish của mình; không viết lại lịch sử đã gửi. Chỉ chạy lại
 kiểm tra bị tác động bởi phần vừa tích hợp.
 
-Mỗi lane tạo một report khi bắt đầu: `docs/reports/ai-data-delivery.md` (A),
-`docs/reports/platform-delivery.md` (B). Checkpoint gồm đầu ra dùng được, SHA,
-kiểm tra/giới hạn, dependency thật, next action; H1/H2/H3/H4 có URI/hash/version.
-Không thêm board hoặc nhật ký từng test.
+Checkpoint/handoff dùng commit/CI, URI/hash/version và dependency thật của
+H1/H2/H3/H4. Cập nhật status/runbook hiện có khi capability đổi. Chỉ giữ report
+riêng cho data/model/evaluation cần so sánh hoặc tái hiện; không bắt mỗi lane
+tạo report và không lưu riêng smoke PASS hay nhật ký từng test.
 
 **Lane done:** đầu ra bàn giao và consumer dùng được; blocker còn lại ghi riêng,
 không đổi BLOCKED thành DONE. **MVP chạy được:** telemetry thật → incident/IER →

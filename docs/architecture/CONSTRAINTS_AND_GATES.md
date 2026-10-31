@@ -218,7 +218,11 @@ artifacts/<release-or-run-id>/
 
 `artifacts/` là local ignored output; S3 là archive AWS. Git lưu sanitized manifests, configs và reports cần review, không lưu raw/model binaries/secrets. Path trên là convention đề xuất, chưa phải files đã được tạo.
 
-Mọi gate report ghi `NOT_RUN/PASS/FAIL/BLOCKED`, execution time/environment, commit/config hashes, người chạy/review và link evidence. Nếu không chạy được Docker/AWS, ghi đúng phạm vi đã kiểm tra; static validation không thay E2E.
+Kết quả gate phải phân biệt `NOT_RUN/PASS/FAIL/BLOCKED` và đúng phiên bản/phạm vi.
+Software/runtime checks dùng CI hoặc kết quả lệnh trên môi trường cần kiểm tra,
+không bắt có report riêng ghi PASS. Chỉ giữ report/artifact lâu dài khi cần cho
+reproduction, data/model evaluation hoặc release/action audit. Static validation
+không thay E2E, và report cũ không chứng minh process hiện tại đang hoạt động.
 
 ## 11. Decision register cần chốt
 

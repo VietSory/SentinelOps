@@ -1,39 +1,32 @@
-# SentinelOps — trạng thái hiện tại
+# SentinelOps — trạng thái triển khai
 
-Checkpoint tài liệu: **2026-10-31**, baseline `main` sau PR #24.
-Trang này chỉ giữ trạng thái hiện hành và việc kế tiếp. Diễn biến cũ nằm trong
-[checkpoint archive](archive/checkpoints/PROJECT_STATUS_2026-10-31.md) và
-[reports](reports/README.md); chúng không xác nhận process còn sống hôm nay.
+Cập nhật: **2026-10-31**. Trang này tóm tắt code và khoảng trống sản phẩm.
+Service có đang chạy/ready hay không phải kiểm tra trên môi trường hiện tại;
+report hoặc CI cũ không thay kết quả đó.
 
-## Khả năng đang có và khoảng trống
-
-| Phần | Trạng thái tại checkpoint đã công bố | Đọc khi làm phần đó |
+| Phần | Implementation / việc còn thiếu | Cách làm việc hoặc kiểm tra |
 | --- | --- | --- |
-| Workload / observability | Ba services, commerce PostgreSQL, OTel, Prometheus/Jaeger local đã có | [Testbed](runbooks/LOCAL_TESTBED.md), [observability](runbooks/OBSERVABILITY.md) |
-| Telemetry / features | Raw capture, quality/provenance, UTC 60s buckets / 300s windows và replay đã có | [Telemetry](runbooks/TELEMETRY.md), [timing](architecture/TRACE_TIMING.md) |
-| Data / model software | Prospective HTTP v2 registration/admission, campaign, fitting/bundles/registry guards đã có; **G2/G3 chưa accepted, zero approved models** | [Corpus](runbooks/LOCAL_HTTP_CORPUS.md), [models](runbooks/MODEL_PIPELINE.md), [admission evidence](reports/2026-10-31-prospective-http-admission.md) |
-| Incident pipeline | Continuous health/incident workers, control DB, immutable IER revisions và protected read API đã chạy local | [Health worker](runbooks/HEALTH_WORKER.md), [incident worker](runbooks/INCIDENT_WORKER.md), [API](runbooks/INCIDENT_API.md) |
-| Correlation / RCA | Conservative grouping, scope/evidence validation và abstention đã có; **full G4/diagnostic quality chưa accepted** | [RCA](runbooks/RCA.md), [development evidence](reports/PHASE3_RCA_AI_INTEGRATION.md) |
-| UI / explanation / remediation / AWS | Chưa hoàn thành/nghiệm thu; G5–G8 còn mở, cloud permissions/budget cần xác nhận | [Delivery plan](delivery/DELIVERY_PLAN.md), [gates](architecture/CONSTRAINTS_AND_GATES.md) |
+| Workload / observability | Có ba services, commerce PostgreSQL, OTel, Prometheus/Jaeger local | [Testbed](runbooks/LOCAL_TESTBED.md), [observability](runbooks/OBSERVABILITY.md) |
+| Telemetry / features | Có raw capture, quality/provenance, 60s buckets / 300s windows và replay | [Telemetry](runbooks/TELEMETRY.md), [timing](architecture/TRACE_TIMING.md) |
+| Data / models | Có prospective HTTP admission, campaign, fitting/bundles/registry guards; **G2/G3 chưa nghiệm thu** | Audit corpus hiện tại theo [corpus runbook](runbooks/LOCAL_HTTP_CORPUS.md); [model lifecycle](runbooks/MODEL_PIPELINE.md) |
+| Incident pipeline | Có health/incident workers, control DB, IER revisions và protected read API | [Health](runbooks/HEALTH_WORKER.md), [incident](runbooks/INCIDENT_WORKER.md), [API](runbooks/INCIDENT_API.md) |
+| Correlation / RCA | Có conservative grouping/abstention; **full G4 chưa nghiệm thu** | [RCA runbook](runbooks/RCA.md), [research baseline](reports/RCA_DEVELOPMENT.md) |
+| UI / explanation / action / AWS | Còn cần hoàn thiện; G5–G8 mở | [Plan hai người](delivery/DELIVERY_PLAN.md), [gates](architecture/CONSTRAINTS_AND_GATES.md) |
 
-## Nguồn và kiểm chứng
+[ADR-014](adr/ADR-014-proposed-local-training-evidence.md) và
+[contract v2](../configs/training_data_contract_v2.json) quy định prospective local
+HTTP fitting, pinned RCAEval evaluation-only; không promote v1/GAMMA/pilot cũ.
+Source authorization không đồng nghĩa dataset/model được accepted.
 
-- [ADR-014](adr/ADR-014-proposed-local-training-evidence.md) / [contract v2](../configs/training_data_contract_v2.json):
-  prospective local HTTP fitting; pinned RCAEval evaluation-only. V1/GAMMA và pilot
-  cũ không promote. Không thay source/label/threshold để làm gate pass.
-- Fix `98cdd67` của PR #24 đã merge qua `f4891cf`; 743 regression tests, contracts
-  và installed wheel pass ở bản fix. Plan hai người ở `439220e` có
-  [exact CI 41200790141 pass 8/8](https://github.com/VietSory/SentinelOps/actions/runs/41200790141).
-  Kết quả này không tự chứng minh dataset/model hoặc deployment mới.
-- [CI hiện tại](https://github.com/VietSory/SentinelOps/actions/workflows/ci.yml)
-  phải đối chiếu đúng SHA. Corpus root/process inventory, accepted counts và model
-  availability phải kiểm tra trên máy đang giữ dữ liệu; Git không chứa raw/models.
+[CI](https://github.com/VietSory/SentinelOps/actions/workflows/ci.yml) cần đối chiếu
+đúng SHA. Liveness, DB/model readiness, corpus admission và quality gates là các
+trạng thái khác nhau. Raw/model artifacts nằm trên môi trường tương ứng, ngoài Git.
 
-## Việc tiếp theo của hai người
+## Việc tiếp theo
 
 - **A:** admission/capture → models/evaluation → RCA/explanation → source parity.
 - **B:** UI/API local → packaging/auth/monitoring → controlled rollback → AWS.
 
-Theo [plan](delivery/DELIVERY_PLAN.md) và [ownership/interfaces](delivery/WORKSTREAM_CONTRACT.md).
-Mỗi lane cập nhật report riêng khi triển khai; chỉ cập nhật trang này khi trạng
-thái sản phẩm thay đổi, không nối nhật ký từng test hoặc CI vào cuối trang.
+Theo [ownership/interfaces](delivery/WORKSTREAM_CONTRACT.md). Cập nhật trang này
+khi capability/gap thay đổi; kiểm tra thông thường ghi ở commit/CI, không thêm
+nhật ký PASS hoặc report riêng cho mỗi lane.
