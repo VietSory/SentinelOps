@@ -50,6 +50,35 @@ revisions and protected API reads, never writes an IER manually. This is operati
 integration evidence, not admitted training data or RCA accuracy. Output under
 `artifacts/lane-b/live-*` is separate from A's corpus.
 
+### Pin observed B container images and configuration
+
+From a clean committed checkout with all eight B containers running, execute
+`python -m scripts.lane_b snapshot`. It returns an immutable content-addressed
+`deployment_ref` under `artifacts/lane-b/releases`. The observer records actual
+local image/container IDs, the rendered Compose configuration hash and hashes of
+every owned read-only bind file (SQL/Collector/Prometheus configuration). Its own
+Git/code identity is recorded; this does not claim the images were built by that
+commit. Container readiness is not business/SLO health certification.
+
+```sh
+python -m scripts.lane_b snapshot
+python -m scripts.lane_b up --deployment-ref artifact://manifests/<hash>.json
+```
+
+Locked `up` validates all configuration/bind bytes and local image identities
+before mutation, materializes an immutable override with exact image IDs, disables
+build/pull and retains volumes. Missing images or changed inputs stop the operation;
+there is no fallback to mutable tags. Normal `up` without a lock remains the dev
+build path. A lock is checkout/local-daemon bound; another machine must materialize
+the actual image bytes and verify its own configuration instead of assuming an
+image ID is a portable registry pull reference.
+
+The scope is Docker images and bind inputs only. Host API/worker processes, database
+contents and model releases are not pinned by this lock. It is not a backup, model
+approval, admitted dataset or approved known-good remediation ledger. The strict
+lock contract always carries `model_activation_allowed=false` and
+`remediation_approval=false`; it cannot unlock inference or automatic rollback.
+
 ## Goal
 
 Build a small but real dependency graph that SentinelOps can observe and later diagnose:

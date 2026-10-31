@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/lane-b-deployment-lock.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["lock_version", "scope", "compose_project", "observed_at", "observer_commit", "observer_code_sha256", "config_sha256", "bind_file_sha256", "images", "host_processes_pinned", "model_activation_allowed", "remediation_approval"],
+  "properties": {
+    "lock_version": {"const": "lane-b-deployment/v1"},
+    "scope": {"const": "local-compose-images-and-bind-inputs"},
+    "compose_project": {"const": "sentinelops-b"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "observer_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "observer_code_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "bind_file_sha256": {
+      "type": "object", "minProperties": 1,
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "images": {
+      "type": "object", "additionalProperties": false,
+      "required": ["prometheus", "otel-collector", "jaeger", "postgres", "control-postgres", "checkout-service", "payment-service", "inventory-service"],
+      "patternProperties": {
+        "^(prometheus|otel-collector|jaeger|postgres|control-postgres|checkout-service|payment-service|inventory-service)$": {
+          "type": "object", "additionalProperties": false,
+          "required": ["image_id", "container_id"],
+          "properties": {
+            "image_id": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "container_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      }
+    },
+    "host_processes_pinned": {"const": false},
+    "model_activation_allowed": {"const": false},
+    "remediation_approval": {"const": false}
+  }
+}
