@@ -122,3 +122,41 @@ def test_docker_clock_conversion_preserves_explicit_timezone_semantics():
     assert corpus.docker_clock('2026-10-31T10:00:00+07:00') == '2026-10-31T03:00:00Z'
     with pytest.raises(ValueError, match='explicit timezone'):
         corpus.docker_clock('2026-10-31T10:00:00')
+
+
+def test_end_context_rejects_restart_and_forged_or_missing_source_clock():
+    from copy import deepcopy
+    from sentinelops.contracts import utc_time
+    session = {'compose_project':'sentinelops-corpus-train-01', 'registered_at':'2026-10-31T01:00:00Z',
+               'context':{'containers':{'fixture':{'container_id':'id','image':'image','created_at':'2026-10-31T00:59:00Z'}}}}
+    container = {'container_id':'id','image':'image','created_at':'2026-10-31T00:59:00Z',
+        'started_at':'2026-10-31T00:59:30Z','finished_at':'0001-01-01T00:00:00Z','running':True,'restart_count':0}
+    container.update({k+'_source':container[k] for k in ('created_at','started_at','finished_at')})
+    observed = {'kind':'local-corpus-context-inspection/v1','compose_project':session['compose_project'],
+                'containers':{'fixture':container},'collected_at':'2026-10-31T03:00:00Z'}
+    end = utc_time('2026-10-31T02:00:00Z')
+    corpus.validate_end_context(session, observed, end)
+    changed = deepcopy(observed)
+    changed['containers']['fixture'].update(started_at='2026-10-31T01:30:00Z', started_at_source='2026-10-31T01:30:00Z')
+    with pytest.raises(ValueError, match='restarted'): corpus.validate_end_context(session,changed,end)
+    changed = deepcopy(observed); changed['containers']['fixture']['started_at_source'] = '2026-10-31T00:59:31Z'
+    with pytest.raises(ValueError, match='conversion'): corpus.validate_end_context(session,changed,end)
+    changed = deepcopy(observed); changed['collected_at'] = '2026-10-31T01:00:00Z'
+    with pytest.raises(ValueError, match='precedes'): corpus.validate_end_context(session,changed,end)
+
+
+def test_context_inspection_cannot_open_sealed_slot(tmp_path, monkeypatch):
+    monkeypatch.setattr(corpus, 'clean_source', lambda _: pytest.fail('sealed source read'))
+    with pytest.raises(ValueError, match='sealed'):
+        corpus.inspect_completed_capture(ArtifactStore(tmp_path), 'sealed-final-01-healthy')
+
+
+def test_acquisition_and_freeze_lock_is_exclusive_and_recovers_after_failure(tmp_path):
+    from sentinelops.experiments.local_corpus import acquisition_lock
+    store = ArtifactStore(tmp_path)
+    with pytest.raises(RuntimeError):
+        with acquisition_lock(store):
+            with pytest.raises(ValueError,match='another acquisition/freeze'):
+                with acquisition_lock(store): pytest.fail('concurrent acquisition was admitted')
+            raise RuntimeError('simulated process failure')
+    with acquisition_lock(store): pass

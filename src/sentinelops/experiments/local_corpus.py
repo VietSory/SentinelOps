@@ -7,7 +7,9 @@ traffic and never certifies health from a registration or completed-run flag.
 from __future__ import annotations
 
 from dataclasses import asdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -98,6 +100,21 @@ def bind(store, path, value):
     source = store.root / reference.removeprefix('artifact://')
     os.link(source, path)  # exclusive and atomic, never overwrite/re-admit
     return reference
+
+
+@contextmanager
+def acquisition_lock(store):
+    """One workload or freeze per corpus; an interrupted process releases it."""
+    store.root.mkdir(parents=True, exist_ok=True)
+    with (store.root / '.capture.lock').open('a') as stream:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError('another acquisition/freeze owns this corpus') from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(stream, fcntl.LOCK_UN)
 
 
 def configure_compose(project, root, group):
@@ -210,6 +227,8 @@ def close_completed_sessions(store, *, except_group):
 
 def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=False):
     group = group_name(plan, role, ordinal)  # reject final before source/context reads
+    if (store.root / 'dataset-freeze.json').exists():
+        raise ValueError('prospective dataset is frozen; new acquisition needs a new corpus epoch')
     source = clean_source(project)
     require_role_order(store, plan, role)
     path = registration_path(store, group)
@@ -267,6 +286,11 @@ def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=Fal
 
 
 async def capture_slot(store, plan, *, role, ordinal, kind, project=PROJECT, prepare=False):
+    with acquisition_lock(store):
+        return await _capture_slot(store, plan, role=role, ordinal=ordinal, kind=kind, project=project, prepare=prepare)
+
+
+async def _capture_slot(store, plan, *, role, ordinal, kind, project=PROJECT, prepare=False):
     config = recipe(plan, role, ordinal, kind)
     reference, registration = register_session(store, plan, role=role, ordinal=ordinal, project=project, prepare=prepare)
     slot = registration['group_id'] + '-' + kind
@@ -289,3 +313,88 @@ async def capture_slot(store, plan, *, role, ordinal, kind, project=PROJECT, pre
                'health_or_precursor_certified': False}
     bind(store, root / 'result.json', receipt)
     return receipt
+
+
+def validate_end_context(session, observation, run_end):
+    if (observation.get('kind') != 'local-corpus-context-inspection/v1'
+        or observation.get('compose_project') != session['compose_project']
+        or set(observation.get('containers', {})) != set(session['context']['containers'])):
+        raise ValueError('end-context observation has another source identity/scope')
+    if utc_time(observation['collected_at']) < run_end:
+        raise ValueError('end-context observation precedes workload completion')
+    for service, expected in session['context']['containers'].items():
+        item = observation['containers'][service]
+        for field in ('created_at','started_at','finished_at'):
+            if item[field] != docker_clock(item[field + '_source']):
+                raise ValueError('end-context source clock conversion differs')
+        if (item['container_id'] != expected['container_id'] or item['image'] != expected['image']
+            or utc_time(item['created_at']) != utc_time(expected['created_at'])
+            or type(item.get('restart_count')) is not int or item['restart_count'] < 0
+            or type(item.get('running')) is not bool):
+            raise ValueError('end-context container identity/state differs')
+        if not utc_time(expected['created_at']) <= utc_time(item['started_at']) <= utc_time(session['registered_at']):
+            raise ValueError('container process restarted after prospective registration')
+        if not item['running'] and utc_time(item['finished_at']) < run_end:
+            raise ValueError('source container stopped before workload completion')
+
+
+def inspect_completed_capture(store, slot, *, project=PROJECT):
+    """Capture a real post-run Docker observation; never infer a past receipt.
+
+    This observer also supports early capture-protocol v1 runs: current Docker
+    process start clocks must prove no restart after their registration. Missing
+    resources or clock/state evidence fails rather than minting a certificate.
+    """
+    if not re.fullmatch(r'(train|cal|dev)-[0-9]{2}-(healthy|payment-gradual|inventory-gradual)', slot):
+        raise ValueError('end-context observer rejects unregistered/sealed source slots')
+    source = clean_source(project)
+    root = store.root / 'runs' / slot
+    result_ref, result = read_binding(store, root/'result.json')
+    _, registration = read_binding(store, root/'registration.json')
+    session = store.read(registration['session_ref'])
+    if result['status'] != 'completed':
+        raise ValueError('cannot observe a completed context for unfinished source evidence')
+    from pathlib import PurePosixPath
+    parts = PurePosixPath(result['run_directory']).parts
+    if len(parts) != 4 or parts[:3] != ('runs',slot,'captures') or not re.fullmatch('run-[0-9a-f]{32}',parts[3]):
+        raise ValueError('end-context source path differs from its registered slot')
+    captured = store.root.joinpath(*parts)
+    if any(p.is_symlink() for p in (root, root/'captures', captured)):
+        raise ValueError('end-context observer refuses source symlinks')
+    run = json.loads((captured/'run.json').read_bytes())
+    if stable_id(run) != result['run_sha256']:
+        raise ValueError('end-context source run changed after capture')
+    previous = root/'end-context.json'
+    if previous.exists():
+        reference, receipt = read_binding(store, previous)
+        if (receipt.get('context_receipt_version') != 'local-http-context-end/v1'
+            or receipt.get('source_result_ref') != result_ref or receipt.get('session_ref') != registration['session_ref']):
+            raise ValueError('stored end-context receipt belongs to another source')
+        validate_end_context(session, store.read(receipt['inspection_ref']), utc_time(run['ended_at']))
+        return reference
+    ids = [item['container_id'] for item in session['context']['containers'].values()]
+    actual = json.loads(docker('inspect', *ids))
+    projected = {}
+    for item in actual:
+        labels = item['Config'].get('Labels') or {}
+        if labels.get('com.docker.compose.project') != session['compose_project']:
+            raise ValueError('end-context observer encountered an unowned source')
+        service = labels['com.docker.compose.service']
+        if service in projected:
+            raise ValueError('end-context observer duplicated a source service')
+        projected[service] = {'container_id':item['Id'],'image':item['Image'],
+            'created_at':docker_clock(item['Created']), 'started_at':docker_clock(item['State']['StartedAt']),
+            'finished_at':docker_clock(item['State']['FinishedAt']), 'running':item['State']['Running'],
+            'created_at_source':item['Created'], 'started_at_source':item['State']['StartedAt'],
+            'finished_at_source':item['State']['FinishedAt'],
+            'restart_count':item['RestartCount']}
+    import hashlib
+    if clean_source(project) != source:
+        raise ValueError('context observer source changed during inspection')
+    observed = {'kind':'local-corpus-context-inspection/v1','compose_project':session['compose_project'],
+                'containers':projected,'collected_at':timestamp(datetime.now(timezone.utc)),'observer_source_commit':source}
+    observed['observer_code_sha256'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    validate_end_context(session, observed, utc_time(run['ended_at']))
+    raw_ref = store.write('raw', observed)
+    return bind(store, root/'end-context.json', {'context_receipt_version':'local-http-context-end/v1',
+        'source_result_ref':result_ref,'session_ref':registration['session_ref'],'inspection_ref':raw_ref})
