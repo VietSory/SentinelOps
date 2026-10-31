@@ -9,6 +9,142 @@ from sentinelops.experiments.runner import ExperimentConfig
 from sentinelops.telemetry.store import ArtifactStore
 
 
+@pytest.fixture
+def same_second_registration(tmp_path, monkeypatch):
+    """A new volume's Docker clock loses fractions; container clocks do not."""
+    from datetime import datetime, timedelta, timezone
+    from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
+
+    start = datetime(2026, 10, 31, tzinfo=timezone.utc)
+    clocks = iter([start + timedelta(microseconds=100000),
+                   start + timedelta(seconds=2, microseconds=500000),
+                   start + timedelta(seconds=2, microseconds=600000)])
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return next(clocks)
+
+    monkeypatch.setattr(corpus, 'datetime', Clock)
+    monkeypatch.setattr(corpus, 'clean_source', lambda _: 'a'*40)
+    monkeypatch.setattr(corpus, 'configure_compose', lambda *a: 'sentinelops-corpus-train-01')
+    calls = []
+
+    def docker(*args):
+        calls.append(args)
+        if args[:2] in [('ps', '-aq'), ('volume', 'ls')]:
+            return ''
+        if args[:2] == ('compose', 'exec'):
+            return '0'
+        raise AssertionError(args)
+
+    monkeypatch.setattr(corpus, 'docker', docker)
+    monkeypatch.setattr(corpus.subprocess, 'run', lambda *a, **kw: None)
+    images = {service: 'sha256:' + str(i)*64 for i, service in enumerate(BUSINESS_ROUTES)}
+    names = list(BUSINESS_ROUTES) + ['postgres', 'prometheus', 'otel-collector', 'jaeger']
+    container_clock = timestamp(start + timedelta(milliseconds=300))
+    context = {
+        'containers': {name: {'container_id': f'{i+1:064x}',
+            'image': images.get(name, 'sha256:' + 'f'*64),
+            'created_at': container_clock, 'created_at_source': container_clock}
+            for i, name in enumerate(names)},
+        'images': images, 'compose_config_sha256': 'b'*64, 'host_boot_sha256': 'c'*64,
+        'database_volume': {'name': 'sentinelops-corpus-train-01_sentinelops_postgres',
+            'created_at': timestamp(start),
+            'created_at_source': start.astimezone(timezone(timedelta(hours=7))).isoformat(timespec='seconds')},
+    }
+    monkeypatch.setattr(corpus, 'context_snapshot', lambda *a: context)
+    return ArtifactStore(tmp_path), corpus.load_plan(), context, calls
+
+
+@pytest.mark.parametrize('partial_startup', [False, True])
+@pytest.mark.parametrize('volume_clock', ['2026-10-31T00:00:00Z', '2026-10-31T00:00:00.200000Z'])
+def test_same_second_volume_registers_and_passes_admission(same_second_registration, monkeypatch, partial_startup, volume_clock):
+    import subprocess
+    from sentinelops.ml.local_data import _session_identity
+
+    store, plan, context, calls = same_second_registration
+    if volume_clock.endswith('.200000Z'):
+        context['database_volume'].update(created_at=volume_clock, created_at_source=volume_clock)
+    if partial_startup:
+        def interrupted(*a, **kw):
+            raise subprocess.CalledProcessError(1, a[0])
+        monkeypatch.setattr(corpus.subprocess, 'run', interrupted)
+        with pytest.raises(subprocess.CalledProcessError):
+            corpus.register_session(store, plan, role='train', ordinal=1, prepare=True)
+        intent = corpus.read_binding(store, store.root/'contexts/train-01/provisioning.json')
+        monkeypatch.setattr(corpus.subprocess, 'run', lambda *a, **kw: None)
+
+    ref, session = corpus.register_session(store, plan, role='train', ordinal=1, prepare=True)
+    _session_identity(session, plan)
+    assert store.read(ref) == session and session['context'] == context
+    assert session['context_created_after'].endswith('00.100000Z')
+    assert session['fitting_allowed_by_registration'] is False
+    assert corpus.register_session(store, plan, role='train', ordinal=1, prepare=True) == (ref, session)
+    assert sum(args[:2] == ('volume', 'ls') for args in calls) == 1
+    if partial_startup:
+        assert corpus.read_binding(store, store.root/'contexts/train-01/provisioning.json') == intent
+
+
+@pytest.mark.parametrize('kind,clock', [
+    ('database_volume', '2026-10-30T23:59:59Z'),
+    ('database_volume', '2026-10-31T00:00:00.050000Z'),
+    ('database_volume', '2026-10-31T00:00:03Z'),
+    ('containers', '2026-10-31T00:00:00.050000Z'),
+    ('containers', '2026-10-31T00:00:02.550000Z'),
+])
+def test_registration_rejects_old_or_future_source_clocks(same_second_registration, kind, clock):
+    store, plan, context, _ = same_second_registration
+    item = context['database_volume'] if kind == 'database_volume' else next(iter(context['containers'].values()))
+    item.update(created_at=clock, created_at_source=clock)
+    with pytest.raises(ValueError, match='creation clocks'):
+        corpus.register_session(store, plan, role='train', ordinal=1, prepare=True)
+    assert not (store.root/'sessions/train-01/registration.json').exists()
+
+
+@pytest.mark.parametrize('resource', ['project', 'volume'])
+def test_same_second_preexisting_resources_still_block_registration(same_second_registration, monkeypatch, resource):
+    store, plan, _, _ = same_second_registration
+
+    def docker(*args):
+        if args[:2] == ('ps', '-aq'):
+            return 'existing-container' if resource == 'project' else ''
+        if args[:2] == ('volume', 'ls'):
+            return 'existing-volume'
+        pytest.fail('preexisting context reached provisioning')
+
+    monkeypatch.setattr(corpus, 'docker', docker)
+    monkeypatch.setattr(corpus.subprocess, 'run', lambda *a, **kw: pytest.fail('preexisting context started'))
+    with pytest.raises(ValueError, match='already exists'):
+        corpus.register_session(store, plan, role='train', ordinal=1, prepare=True)
+    assert not (store.root/'contexts/train-01/provisioning.json').exists()
+
+
+@pytest.mark.parametrize('change', ['old-volume', 'old-fractional-volume', 'future-volume', 'unowned-volume', 'forged-clock', 'old-container'])
+def test_admission_retains_clock_and_volume_ownership_guards(same_second_registration, change):
+    from copy import deepcopy
+    from sentinelops.ml.local_data import _session_identity
+
+    store, plan, _, _ = same_second_registration
+    _, session = corpus.register_session(store, plan, role='train', ordinal=1, prepare=True)
+    session = deepcopy(session)
+    volume = session['context']['database_volume']
+    if change in ('old-volume', 'old-fractional-volume', 'future-volume'):
+        clock = {'old-volume': '2026-10-30T23:59:59Z',
+                 'old-fractional-volume': '2026-10-31T00:00:00.050000Z',
+                 'future-volume': '2026-10-31T00:00:03Z'}[change]
+        volume.update(created_at=clock, created_at_source=clock)
+    elif change == 'unowned-volume':
+        volume['name'] = 'foreign_sentinelops_postgres'
+    elif change == 'forged-clock':
+        volume['created_at_source'] = '2026-10-30T23:59:59Z'
+    else:
+        item = next(iter(session['context']['containers'].values()))
+        item.update(created_at='2026-10-31T00:00:00.050000Z', created_at_source='2026-10-31T00:00:00.050000Z')
+    with pytest.raises(ValueError, match='fresh|conversion'):
+        _session_identity(session, plan)
+
+
 def test_registered_recipes_keep_four_roles_and_real_oracle_traffic():
     plan = corpus.load_plan()
     healthy = corpus.recipe(plan, 'train', 1, 'healthy')

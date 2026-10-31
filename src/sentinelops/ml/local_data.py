@@ -16,7 +16,10 @@ import subprocess
 
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.experiments.labels import SLOConfig, feature_vector
-from sentinelops.experiments.local_corpus import KINDS, ROLES, group_name, load_plan, read_binding, recipe, validate_end_context, docker_clock
+from sentinelops.experiments.local_corpus import (
+    KINDS, ROLES, group_name, load_plan, read_binding, recipe,
+    validate_end_context, docker_clock, volume_created_within,
+)
 from sentinelops.experiments.local_labels import oracle_from_requests, window_labels
 from sentinelops.experiments.verification import verify_source_replay
 from sentinelops.ml.readiness import DatasetNotReady
@@ -247,7 +250,8 @@ def _session_identity(session, plan):
         if service in BUSINESS_ROUTES and item['image'] != context['images'][service]:
             raise ValueError('prospective business image identity differs')
     volume = context['database_volume']
-    if not volume['name'].startswith(session['compose_project'] + '_') or not lower <= utc_time(volume['created_at']) <= upper:
+    if (not volume['name'].startswith(session['compose_project'] + '_')
+        or not volume_created_within(volume['created_at'], lower, upper)):
         raise ValueError('prospective database volume is not fresh/owned')
     if volume['created_at'] != docker_clock(volume['created_at_source']):
         raise ValueError('prospective volume creation clock conversion differs')

@@ -145,6 +145,16 @@ def docker_clock(value):
     return timestamp(parsed.astimezone(timezone.utc))
 
 
+def volume_created_within(value, lower, upper):
+    # Docker volume CreatedAt has whole-second precision. Its creation can be
+    # later within that second than the provisioning intent. Keep the upper
+    # bound strict and leave container clocks and preexisting-resource checks
+    # unchanged; no source timestamp is rewritten.
+    point = utc_time(value)
+    earliest = lower.replace(microsecond=0) if point.microsecond == 0 else lower
+    return earliest <= point <= upper
+
+
 def context_snapshot(project, compose_project):
     identifiers = docker('compose', 'ps', '-q').split()
     if not identifiers:
@@ -267,8 +277,8 @@ def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=Fal
     context = context_snapshot(project, compose_project)
     inspected_at = datetime.now(timezone.utc)
     clocks = [utc_time(v['created_at']) for v in context['containers'].values()]
-    clocks.append(utc_time(context['database_volume']['created_at']))
-    if any(not created <= point <= inspected_at for point in clocks):
+    if (any(not created <= point <= inspected_at for point in clocks)
+        or not volume_created_within(context['database_volume']['created_at'], created, inspected_at)):
         raise ValueError('prospective source creation clocks escape the registered provisioning interval')
     # Read the actual initial state before any workload. Starts/IDs alone do not
     # certify independence; the verifier additionally keeps each whole group.
