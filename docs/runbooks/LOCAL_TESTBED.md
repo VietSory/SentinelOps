@@ -39,8 +39,13 @@ After H1 acceptance, materialize the complete trusted model store inside
 for both processes. The existing registry verifies checksums, approvals and
 compatibility at startup. The launcher writes no approval and never inherits A's
 model configuration. Invalid releases fail startup. Keep the previous immutable
-release/reference and restart both processes with that pair to roll back; no hot
-activation is implemented. Without an accepted release, leave both flags absent.
+release/reference for rollback; no hot activation is implemented. The API can
+select it at restart, but an existing incident consumer is already bound to its
+original evidence/release profile. Changing that profile needs A's explicit
+consumer migration/rollover protocol; simply restarting it with another release
+is rejected by the existing journal. Do not reset checkpoints or create duplicate
+streams to evade this guard. These flags provide wiring, not that migration.
+Without an accepted release and applicable migration, leave both flags absent.
 
 For B1 source integration, start both workers then run
 `python -m scripts.check_lane_b_live`. It executes 180s healthy, 360s Payment

@@ -1,6 +1,6 @@
 # SentinelOps — trạng thái triển khai
 
-Cập nhật: **2026-10-31**. Trang này tóm tắt code và khoảng trống sản phẩm.
+Cập nhật: **2026-11-01**. Trang này tóm tắt code và khoảng trống sản phẩm.
 Service có đang chạy/ready hay không phải kiểm tra trên môi trường hiện tại;
 report hoặc CI cũ không thay kết quả đó.
 
@@ -12,7 +12,7 @@ report hoặc CI cũ không thay kết quả đó.
 | Incident pipeline | Có health/incident workers, control DB, IER revisions và protected read API | [Health](runbooks/HEALTH_WORKER.md), [incident](runbooks/INCIDENT_WORKER.md), [API](runbooks/INCIDENT_API.md) |
 | Correlation / RCA | Có conservative grouping/abstention; **full G4 chưa nghiệm thu** | [RCA runbook](runbooks/RCA.md), [research baseline](reports/RCA_DEVELOPMENT.md) |
 | Operator UI / B1 | Có UI read-only cùng origin `/ui/`: token trong tab, list/filter/cursor, revision-pinned detail/history/evidence, UNKNOWN/503 và model-unavailable. Đã chạy trên incident SLO thật của B, 4 immutable revisions, API/DB restart và browser outage/reconnect | [API/UI](runbooks/INCIDENT_API.md), [runtime B](runbooks/LOCAL_TESTBED.md); không coi ranking là root đã xác nhận |
-| B2 integration / CI | Có explicit paired H1 wiring qua registry sẵn có; mặc định không model. CI phân scope, browser/JS checks và always-run summary; image/config release packaging và production auth còn cần hoàn thiện | [Plan B](delivery/DELIVERY_PLAN.md#lane-b-execution), [workstream contract](delivery/WORKSTREAM_CONTRACT.md) |
+| B2 integration / CI | Có explicit paired H1 wiring qua registry sẵn có; mặc định không model, đổi release của consumer hiện hữu cần migration A. Có immutable local image/config locks đã kiểm tra locked-up giữ đúng 8 image IDs và history. CI phân scope, browser/JS checks và always-run summary; host-process release packaging và production auth còn cần hoàn thiện | [Plan B](delivery/DELIVERY_PLAN.md#lane-b-execution), [runtime/lock scope](runbooks/LOCAL_TESTBED.md), [workstream contract](delivery/WORKSTREAM_CONTRACT.md) |
 | Explanation / action / AWS | H2 backend chưa có; chưa triển khai executor/action và AWS. G5–G8 vẫn mở | [Plan hai người](delivery/DELIVERY_PLAN.md), [gates](architecture/CONSTRAINTS_AND_GATES.md) |
 
 [ADR-014](adr/ADR-014-proposed-local-training-evidence.md) và

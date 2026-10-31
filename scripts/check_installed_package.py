@@ -71,7 +71,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'experiment-run', 'dataset-manifest', 'incident-write',
              'incident-envelope', 'incident-list', 'api-error', 'training-data-policy',
              'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result',
-             'rca-policy', 'rca-result', 'training-data-policy-v2'):
+             'rca-policy', 'rca-result', 'training-data-policy-v2', 'lane-b-deployment-lock'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 assert 'root_causes_ground_truth' in load_schema('experiment-run.schema.json')['properties']
 policy={'policy_version':'slo-health/local-v1','latency_ms':750.,'error_rate':.05,
