@@ -60,3 +60,39 @@ def test_registered_source_checkout_requires_exact_clean_commit(tmp_path,monkeyp
     assert source_checkout(tmp_path,'a'*40) == tmp_path
     with pytest.raises(ValueError,match='original clean source'):
         source_checkout(tmp_path,'b'*40)
+
+
+def test_later_partition_cannot_begin_before_measured_prior_role_readiness():
+    from sentinelops.experiments.local_campaign import require_completed_role_admission
+    report = {'failed_conditions':[{'condition':'train/payment-service/healthy_windows','available':299,'required':300},
+                                   {'condition':'calibration/payment-service/healthy_windows','available':0,'required':100}],
+              'quarantined_slots':[]}
+    with pytest.raises(ValueError,match='previous role lacks source-admitted support'):
+        require_completed_role_admission(report,'train')
+    report['failed_conditions'] = report['failed_conditions'][1:]
+    require_completed_role_admission(report,'train')
+    report['quarantined_slots'] = [{'slot':'train-01-healthy','reason':'corrupted source'}]
+    with pytest.raises(ValueError,match='quarantine'):
+        require_completed_role_admission(report,'train')
+
+
+def test_controller_successor_preserves_original_registration_and_frozen_plan(tmp_path,monkeypatch):
+    from copy import deepcopy
+    from sentinelops.experiments import local_campaign as campaign
+    store = ArtifactStore(tmp_path)
+    original = {'campaign_version':'local-http-acquisition/v1','controller_source_commit':'a'*40,
+                'plan_sha256':'b'*64,'slots':[['train',1,'healthy']], 'sealed_final_allowed':False,
+                'automatic_fitting_allowed':False}
+    reference = campaign.register_controller(store,tmp_path,original)
+    saved = (tmp_path/'campaign/registration.json').read_bytes()
+    calls = []
+    monkeypatch.setattr(campaign.subprocess,'run',lambda args,**kwargs:calls.append(args))
+    successor = {**original,'controller_source_commit':'c'*40}
+    updated = campaign.register_controller(store,tmp_path,successor)
+    assert updated != reference
+    assert campaign.register_controller(store,tmp_path,successor) == updated
+    assert (tmp_path/'campaign/registration.json').read_bytes() == saved
+    assert calls[0] == ['git','merge-base','--is-ancestor','a'*40,'c'*40]
+    changed = deepcopy(successor); changed['slots'].append(['sealed-final',1,'healthy'])
+    with pytest.raises(ValueError,match='plan/roles/budgets are frozen'):
+        campaign.register_controller(store,tmp_path,changed)

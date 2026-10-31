@@ -83,23 +83,56 @@ def _event(store, value):
         'recorded_at':timestamp(datetime.now(timezone.utc)),**value})
 
 
+def require_completed_role_admission(report, role):
+    """Do not make an earlier split unrepairable by starting a later one."""
+    deficits = [condition for condition in report['failed_conditions']
+                if condition['condition'].startswith(role+'/')]
+    if deficits or report['quarantined_slots']:
+        raise ValueError('previous role lacks source-admitted support before chronological transition: '
+                         +json.dumps({'role':role,'deficits':deficits,'quarantine':report['quarantined_slots']},sort_keys=True))
+
+
+def register_controller(store, project, identity):
+    """Retain the original campaign and bind a same-plan descendant fix explicitly."""
+    path = store.root/'campaign/registration.json'
+    if not path.exists():
+        return bind(store,path,{**identity,'registered_at':timestamp(datetime.now(timezone.utc))})
+    original_ref, saved = read_binding(store,path)
+    prior = {k:v for k,v in saved.items() if k not in ('registered_at','controller_source_commit')}
+    if prior != {k:v for k,v in identity.items() if k != 'controller_source_commit'}:
+        raise ValueError('campaign plan/roles/budgets are frozen; cannot silently replace them')
+    if saved['controller_source_commit'] == identity['controller_source_commit']:
+        return original_ref
+    subprocess.run(['git','merge-base','--is-ancestor',saved['controller_source_commit'],identity['controller_source_commit']],
+                   cwd=project,check=True)
+    upgrade = store.root/'campaign/controllers'/(identity['controller_source_commit']+'.json')
+    if upgrade.exists():
+        reference, value = read_binding(store,upgrade)
+        if value['original_campaign_ref'] != original_ref or value['controller'] != identity:
+            raise ValueError('controller successor differs from its immutable registration')
+        return reference
+    return bind(store,upgrade,{'controller_successor_version':'local-http-same-plan/v1',
+        'original_campaign_ref':original_ref,'controller':identity,
+        'registered_at':timestamp(datetime.now(timezone.utc)),'capture_registrations_rewritten':False})
+
+
 def run_campaign(store, *, project=PROJECT, follow_existing=False):
     """Acquire exactly the minimum registered nonfinal plan, then report G2."""
     with campaign_lock(store):
         source = clean_source(project)
         plan = load_plan(project/'configs/local_http_capture_plan.json')
-        path = store.root/'campaign/registration.json'
         identity = {'campaign_version':'local-http-acquisition/v1','controller_source_commit':source,
                     'plan_sha256':stable_id(plan),'slots':[list(slot) for slot in planned_slots(plan)],
                     'sealed_final_allowed':False,'automatic_fitting_allowed':False}
-        if path.exists():
-            _, saved = read_binding(store,path)
-            if {k:v for k,v in saved.items() if k != 'registered_at'} != identity:
-                raise ValueError('campaign source/plan is frozen; cannot silently replace its controller')
-        else:
-            bind(store,path,{**identity,'registered_at':timestamp(datetime.now(timezone.utc))})
+        controller_ref = register_controller(store,project,identity)
+        _event(store,{'status':'CONTROLLER_RESUMED','controller_ref':controller_ref})
+        previous_role = None
         try:
             for role, ordinal, kind in planned_slots(plan):
+                if previous_role is not None and role != previous_role:
+                    report, _, _ = audit_local_corpus(store,plan=plan,project=project)
+                    require_completed_role_admission(report,previous_role)
+                previous_role = role
                 if (store.root/'dataset-freeze.json').exists():
                     raise ValueError('corpus is frozen; campaign cannot append acquisition')
                 group = group_name(plan,role,ordinal)

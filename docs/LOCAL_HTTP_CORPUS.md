@@ -135,7 +135,12 @@ clean checkout of any existing acquisition group, then uses its own frozen sourc
 for later groups. It waits for a registered active slot only in explicit follow
 mode. A process failure never replays an interrupted workload or overwrites its
 slot. Completed receipts and content-addressed campaign events allow resume;
-incomplete/failed sources stop for investigation. Controller/source/plan changes
-are rejected rather than silently rewriting a campaign. Separate campaign and
+incomplete/failed sources stop for investigation. A same-plan descendant controller
+fix binds a new immutable successor receipt, preserving the original registration;
+changed roles, plans and budgets are rejected. Separate campaign and
 acquisition locks reject competing controllers/workloads; process exit releases
 the locks. End-context verification precedes source admission and the next slot.
+Before a later partition starts, the prior role's measured per-service admission
+must pass. Otherwise the controller stops while additional whole earlier-role
+groups can still be collected within the predeclared maximum; it cannot silently
+make a deficient train/calibration split unrepairable by advancing chronology.
