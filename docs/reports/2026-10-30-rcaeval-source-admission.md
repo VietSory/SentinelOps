@@ -66,7 +66,7 @@ transported native RCAEval result and three recomputed S1/S5 incident bundles.
 Those results are historical evidence for that SHA. This correction requires its
 own published-head CI and artifact verification before its release closes.
 
-Reproduce with the [existing native CLI](../RCAEVAL_NATIVE.md#reproduce-and-recover),
+Reproduce with the [existing native CLI](../runbooks/RCAEVAL_NATIVE.md#reproduce-and-recover),
 the same acquisition manifest and a new exclusive output path. Incomplete or
 replacement manifests fail before diagnostic execution. Stop/revert the offline
 consumer on failure; preserve the publisher cache and previous measurements.

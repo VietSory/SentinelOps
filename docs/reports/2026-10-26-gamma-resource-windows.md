@@ -1,6 +1,6 @@
 # GAMMA raw-resource windows — measured processing and replay
 
-This is feature engineering under the frozen GAMMA/RCAEval contract, not a model-training or live-activation report. The versioned [profile](../../configs/gamma_resource_profile.json) and [processing semantics](../GAMMA_RESOURCE_FEATURES.md) preserve the existing HTTP registry and XGBoost pre-SLO target.
+This is feature engineering under the frozen GAMMA/RCAEval contract, not a model-training or live-activation report. The versioned [profile](../../configs/gamma_resource_profile.json) and [processing semantics](../archive/guides/GAMMA_RESOURCE_FEATURES.md) preserve the existing HTTP registry and XGBoost pre-SLO target.
 
 ## Actual execution
 

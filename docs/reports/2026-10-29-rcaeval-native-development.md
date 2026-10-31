@@ -1,6 +1,6 @@
 # Native RCAEval development: measured source-to-policy execution
 
-The [native adapter/evaluator](../RCAEVAL_NATIVE.md) executes all three previously
+The [native adapter/evaluator](../runbooks/RCAEVAL_NATIVE.md) executes all three previously
 inspected development cases at frozen revision
 `afeacb11bcc94dadfd1c8f483ee4377b2b8b614e`. **Three evaluated, zero quarantined,
 three abstentions, zero qualified predictions.** Conditional qualified accuracy
@@ -86,7 +86,7 @@ RE1 has neither supported log nor trace evidence. All three correctly abstain;
 abstention is not counted as a correct root cause. No healthy, HTTP RED, precursor,
 historical online/MTTD, cross-system generalization or causal claim follows.
 
-Use the [runbook command](../RCAEVAL_NATIVE.md#reproduce-and-recover) with the existing
+Use the [runbook command](../runbooks/RCAEVAL_NATIVE.md#reproduce-and-recover) with the existing
 manifest and a new exclusive output path. Keep the source pair, partitions, target
 and policy fixed. Full G4, final P11/S5 quality, ML readiness/transfer and G5–G8 remain
 open. Stop/revert the offline consumer if necessary; do not rewrite raw files or

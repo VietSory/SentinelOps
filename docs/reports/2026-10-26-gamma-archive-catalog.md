@@ -1,6 +1,6 @@
 # Complete GAMMA v1 archive catalogue
 
-Clean implementation commit `7d21b59f0e88e6fbd2800b9f6fb18fb979d7d327` inventoried the publisher's canonical version-pinned ZIP64 archive using [bounded HTTP ranges](../GAMMA_ARCHIVE_ACQUISITION.md). This verifies the complete **member inventory**, not all member contents, source labels, training splits or live compatibility.
+Clean implementation commit `7d21b59f0e88e6fbd2800b9f6fb18fb979d7d327` inventoried the publisher's canonical version-pinned ZIP64 archive using [bounded HTTP ranges](../archive/guides/GAMMA_ARCHIVE_ACQUISITION.md). This verifies the complete **member inventory**, not all member contents, source labels, training splits or live compatibility.
 
 - Archive representation size: **10,111,803,053 bytes**.
 - Central directory starts at byte **10,090,375,449**.

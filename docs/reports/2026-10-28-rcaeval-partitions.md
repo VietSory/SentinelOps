@@ -1,6 +1,6 @@
 # RCAEval metadata partition measurement — 2026-10-28
 
-The [frozen source policy](../adr/ADR-011-frozen-gamma-rcaeval-contract.md) is unchanged. [Partition rules and reproduction](../RCAEVAL_PARTITIONS.md) describe the new source-access prerequisite; [machine-readable evidence](2026-10-28-rcaeval-partitions.json) is generated from actual local audit output, not fixture values.
+The [frozen source policy](../adr/ADR-011-frozen-gamma-rcaeval-contract.md) is unchanged. [Partition rules and reproduction](../runbooks/RCAEVAL_PARTITIONS.md) describe the new source-access prerequisite; [machine-readable evidence](2026-10-28-rcaeval-partitions.json) is generated from actual local audit output, not fixture values.
 
 The protocol/config/code was committed at `4dfdb09761218a0ce8750b6440c4b56132ae9b77` before the measured audit. The auditor verified RCAEval revision `afeacb11bcc94dadfd1c8f483ee4377b2b8b614e`, exact index SHA256 `c49a288920dbba2e8e724679a14636d5c7eb2b45426bba14007ef79a6c0ab1bb`, and partition canonical SHA256 `e8267898af1ea52444adfa85fb9bc477ccf450fd9bebc1a99019998035b188ef`. Source manifest SHA256 is `565c5b7b3f43d05ef9ba2930e80a65714e3ce4bc1e562fbc91835eefe6a0a0c6`.
 

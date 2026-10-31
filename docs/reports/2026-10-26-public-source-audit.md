@@ -29,4 +29,4 @@ Public files have not been relabeled into the five live RED features. SMD's anon
 
 The frozen SMD protocol selects the first machine before scoring, fits on the first 70% of official train, calibrates on the remaining 30%, and reserves the original test for evaluation. IF and median/MAD receive the same calibration exceedance budget. No point adjustment or test-label threshold search is permitted. Training/evaluation output belongs in a subsequent artifact/report; this source-audit report does not claim a trained model or G3.
 
-Primary references: [RCAEval data card](https://huggingface.co/datasets/phamquiluan/RCAEval), [RCAEval paper](https://arxiv.org/abs/2412.17015), [SMD publisher](https://github.com/NetManAIOps/OmniAnomaly). Optional sources and dataset-specific limits are recorded in [PUBLIC_DATA_PLAN](../PUBLIC_DATA_PLAN.md).
+Primary references: [RCAEval data card](https://huggingface.co/datasets/phamquiluan/RCAEval), [RCAEval paper](https://arxiv.org/abs/2412.17015), [SMD publisher](https://github.com/NetManAIOps/OmniAnomaly). Optional sources and dataset-specific limits are recorded in [PUBLIC_DATA_PLAN](../archive/guides/PUBLIC_DATA_PLAN.md).

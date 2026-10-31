@@ -1,6 +1,6 @@
 # GAMMA native interference-label audit
 
-This audit implements the [separate label-store semantics](../GAMMA_INTERFERENCE_LABELS.md) under the frozen GAMMA/RCAEval contract. It does not train a model or certify SLO/precursor targets.
+This audit implements the [separate label-store semantics](../archive/guides/GAMMA_INTERFERENCE_LABELS.md) under the frozen GAMMA/RCAEval contract. It does not train a model or certify SLO/precursor targets.
 
 ## Acquisition and real execution
 

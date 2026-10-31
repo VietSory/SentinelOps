@@ -4,7 +4,7 @@ This is measured semantic admission after complete raw-resource content verifica
 
 ## Actual execution and identity
 
-Clean commit `cb4aa1f7e052e1530a9cbef55095e32623fc97d7` ran [native admission](../GAMMA_NATIVE_ADMISSION.md) over every case in cohort manifest `190c2cc83635d67f883e48392216ae18ef0fbb011bbf8dda8f320a6a86fb6497`. The verified source-file tree remains `ee11cd27de2451194fbe9df68365cbe6c67b0982d3b48f9dd0fb74b49374c3c6`. No raw source byte was repaired or rewritten.
+Clean commit `cb4aa1f7e052e1530a9cbef55095e32623fc97d7` ran [native admission](../archive/guides/GAMMA_NATIVE_ADMISSION.md) over every case in cohort manifest `190c2cc83635d67f883e48392216ae18ef0fbb011bbf8dda8f320a6a86fb6497`. The verified source-file tree remains `ee11cd27de2451194fbe9df68365cbe6c67b0982d3b48f9dd0fb74b49374c3c6`. No raw source byte was repaired or rewritten.
 
 The final [profile](../../configs/gamma_admission_profile.json) SHA256 is `daa277019b5dfc3b6149bc3a1bbbbf3d347a7950ce598e1413b98d2f00179d6e`. The development-inspection config SHA256 is `89567d8868c21d0f90125f90907d87ceb89843fc25dcba04a51ff2938c883d55`.
 

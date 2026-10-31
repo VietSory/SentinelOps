@@ -1,6 +1,6 @@
 # Continuous local health producer — 2026-10-28
 
-The [worker/runbook](../STEP7_HEALTH_WORKER.md) implements a continuous local metric→feature→SLO producer with atomic PostgreSQL checkpoints. [Machine-readable evidence](2026-10-28-continuous-health-worker.json) is derived from actual native and database artifacts. This is integration evidence, separate from ML training, final holdout and continuous RCA/IER acceptance.
+The [worker/runbook](../runbooks/HEALTH_WORKER.md) implements a continuous local metric→feature→SLO producer with atomic PostgreSQL checkpoints. [Machine-readable evidence](2026-10-28-continuous-health-worker.json) is derived from actual native and database artifacts. This is integration evidence, separate from ML training, final holdout and continuous RCA/IER acceptance.
 
 ## Measured native result
 

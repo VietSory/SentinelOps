@@ -15,7 +15,7 @@ Date: 2026-10-26. This verifies the storage prerequisite that the delivery plan 
 - Concurrent outbox claims returned disjoint events. A 1s expired lease was reclaimed with attempt 2; its old token could not acknowledge the new lease.
 - After a **real control PostgreSQL container restart**, `--verify-report` read back the same current payload, revision and audit history.
 
-Commands and role boundaries are in [the storage guide](../STEP7_INCIDENT_STORE.md). Local acceptance output is `artifacts/incidents/store-acceptance.json` (ignored runtime artifact). Its IER data are explicitly synthetic storage fixtures; their evidence text/URLs are not measured RCA facts. CI runs the actual database acceptance and restart path in a separate job.
+Commands and role boundaries are in [the storage guide](../runbooks/INCIDENT_STORE.md). Local acceptance output is `artifacts/incidents/store-acceptance.json` (ignored runtime artifact). Its IER data are explicitly synthetic storage fixtures; their evidence text/URLs are not measured RCA facts. CI runs the actual database acceptance and restart path in a separate job.
 
 ## Limits
 

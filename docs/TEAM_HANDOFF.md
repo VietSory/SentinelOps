@@ -26,16 +26,16 @@ phải xác nhận controller vẫn sống hôm nay. Kiểm tra trên đúng má
 
 ## 2. Đọc vừa đủ rồi nhận lane
 
-Đọc [DELIVERY_PLAN.md](DELIVERY_PLAN.md) và [WORKSTREAM_CONTRACT.md](WORKSTREAM_CONTRACT.md)
+Đọc [DELIVERY_PLAN.md](delivery/DELIVERY_PLAN.md) và [WORKSTREAM_CONTRACT.md](delivery/WORKSTREAM_CONTRACT.md)
 trước, sau đó đọc caller/code bị tác động. Không cần đọc toàn bộ reports cũ.
 
 | Cần hiểu | Nguồn sự thật |
 | --- | --- |
 | Trạng thái / phần chưa đạt | [PROJECT_STATUS.md](PROJECT_STATUS.md), đối chiếu Git/CI/runtime của mình |
-| Sản phẩm / thiết kế / acceptance | [PRODUCT_SPEC.md](PRODUCT_SPEC.md), [TECHNICAL_SPEC.md](TECHNICAL_SPEC.md), [gates](CONSTRAINTS_AND_GATES.md), [ADR index](adr/README.md) |
-| A: data/model hiện tại | [ADR-014](adr/ADR-014-proposed-local-training-evidence.md), [v2 contract](../configs/training_data_contract_v2.json), [corpus](LOCAL_HTTP_CORPUS.md), [models](MODEL_PIPELINE.md) |
-| A: worker/RCA | [health](STEP7_HEALTH_WORKER.md), [incident](STEP8_INCIDENT_WORKER.md), [RCA](STEP7_RCA.md), [RCAEval](RCAEVAL_NATIVE_DEVELOPMENT.md) |
-| B: API/DB/UI | [API runbook](STEP7_INCIDENT_API.md), [storage](STEP7_INCIDENT_STORE.md), `src/sentinelops/api.py`, `contracts/` |
+| Sản phẩm / thiết kế / acceptance | [PRODUCT_SPEC.md](architecture/PRODUCT_SPEC.md), [TECHNICAL_SPEC.md](architecture/TECHNICAL_SPEC.md), [gates](architecture/CONSTRAINTS_AND_GATES.md), [ADR index](adr/README.md) |
+| A: data/model hiện tại | [ADR-014](adr/ADR-014-proposed-local-training-evidence.md), [v2 contract](../configs/training_data_contract_v2.json), [corpus](runbooks/LOCAL_HTTP_CORPUS.md), [models](runbooks/MODEL_PIPELINE.md) |
+| A: worker/RCA | [health](runbooks/HEALTH_WORKER.md), [incident](runbooks/INCIDENT_WORKER.md), [RCA](runbooks/RCA.md), [RCAEval](runbooks/RCAEVAL_NATIVE_DEVELOPMENT.md) |
+| B: API/DB/UI | [API runbook](runbooks/INCIDENT_API.md), [storage](runbooks/INCIDENT_STORE.md), `src/sentinelops/api.py`, `contracts/` |
 | B: deploy/action | [ADR-006](adr/ADR-006-control-plane-and-storage.md), [ADR-009](adr/ADR-009-payment-rollback-runbook.md), technical spec §13–14, Compose/infra/observability |
 
 ## 3. Quyết định không cần research lại
@@ -83,7 +83,7 @@ python scripts/train_models.py --help
 Trước campaign: kiểm tra máy capture, corpus root tuyệt đối, controller/slot đang
 sống và source đã freeze. Không tạo corpus mới vì clone thiếu `artifacts/`: raw/
 models không nằm trong Git. Nếu có capture sống, lấy root/process/hash từ người
-giữ máy, không restart mù quáng. Theo [runbook](LOCAL_HTTP_CORPUS.md); audit dùng
+giữ máy, không restart mù quáng. Theo [runbook](runbooks/LOCAL_HTTP_CORPUS.md); audit dùng
 output mới vì CLI không overwrite. A có capture checkout riêng sạch/bất biến,
 implementation checkout tiếp tục coding được trong lúc controller chạy.
 

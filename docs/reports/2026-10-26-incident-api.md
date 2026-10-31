@@ -17,6 +17,6 @@ Local evidence: `artifacts/incidents/api-acceptance.json` and `api-server.log` (
 
 ## Migration and limits
 
-See [the API migration guide](../STEP7_INCIDENT_API.md) for headers, status codes, supplemental schemas, local configuration and fixture opt-in. Existing clients must supply authentication/expected revision/idempotency for persistence. Detector fixtures no longer look like default inference.
+See [the API migration guide](../runbooks/INCIDENT_API.md) for headers, status codes, supplemental schemas, local configuration and fixture opt-in. Existing clients must supply authentication/expected revision/idempotency for persistence. Detector fixtures no longer look like default inference.
 
 Production identity, model bundles, correlation/RCA producers, verified explanation/action/recovery writers and AWS remain separate gates. Imported/manual assertions do not certify source truth or grant remediation authority. Database administrators retain privileged access; append-only role checks are not a claim against an owner/admin compromise.

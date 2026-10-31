@@ -4,7 +4,7 @@ Status: source dataset construction and integrity checks **PASS**; model fitting
 
 ## Inputs and execution
 
-The [split protocol](../GAMMA_GROUPED_DATASET.md) and [whole-group assignments](../../configs/gamma_resource_splits.json) were committed before any cohort feature/label windows were generated. All 194 cases are assigned; only the 101 native-evidence-admitted cases can produce windows. The 93 quarantined cases remain in denominators. Test/calibration roles were not changed after observing support.
+The [split protocol](../archive/guides/GAMMA_GROUPED_DATASET.md) and [whole-group assignments](../../configs/gamma_resource_splits.json) were committed before any cohort feature/label windows were generated. All 194 cases are assigned; only the 101 native-evidence-admitted cases can produce windows. The 93 quarantined cases remain in denominators. Test/calibration roles were not changed after observing support.
 
 ```bash
 .venv-ml/bin/python scripts/build_gamma_dataset.py \

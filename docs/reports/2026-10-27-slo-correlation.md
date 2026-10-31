@@ -2,7 +2,7 @@
 
 Status: conservative correlation software and captured-source integration **PASS**; RCA localization, real multi-fault grouping evaluation, continuous processing and durable computed IER integration remain open. Executed 2026-10-27 Asia/Bangkok from clean committed code `e00212ae1bc9f2a3968ceff87cb7dbf93d86138a`.
 
-The [consumer](../STEP7_CORRELATION.md) read the immutable [S0/S3 health replay reports](2026-10-26-slo-health-replay.md), verified hashes, health policy/final states and per-service prior-ID/time-grid/cutoff chains. It did not read an experiment truth store, inject a target label or fit a model. Each report is an explicit separate source scope.
+The [consumer](../runbooks/CORRELATION.md) read the immutable [S0/S3 health replay reports](2026-10-26-slo-health-replay.md), verified hashes, health policy/final states and per-service prior-ID/time-grid/cutoff chains. It did not read an experiment truth store, inject a target label or fit a model. Each report is an explicit separate source scope.
 
 | Input scope | Signal snapshots | Opening episodes | Non-opening snapshots | Correlation groups |
 | --- | ---: | ---: | ---: | ---: |

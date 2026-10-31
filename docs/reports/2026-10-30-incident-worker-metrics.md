@@ -1,6 +1,6 @@
 # Continuous incident worker operational metrics — measured local evidence
 
-The native S1 integration was measured at `07c57c7e1fdefc2e3d6b4612c5f91d384c3fc1a7`. Optional private OTLP metrics now account for every accepted backlog step and expose honest process liveness through the existing Collector and Prometheus. The SLO, correlation, RCA, data-source and model policies are unchanged. [Measurements](evidence/2026-10-30-incident-worker-metrics.json), [metric definitions and queries](../STEP8_INCIDENT_WORKER.md#optional-operational-metrics) and the [versioned acceptance profile](../../configs/incident_metrics_acceptance.json) identify the scope.
+The native S1 integration was measured at `07c57c7e1fdefc2e3d6b4612c5f91d384c3fc1a7`. Optional private OTLP metrics now account for every accepted backlog step and expose honest process liveness through the existing Collector and Prometheus. The SLO, correlation, RCA, data-source and model policies are unchanged. [Measurements](evidence/2026-10-30-incident-worker-metrics.json), [metric definitions and queries](../runbooks/INCIDENT_WORKER.md#optional-operational-metrics) and the [versioned acceptance profile](../../configs/incident_metrics_acceptance.json) identify the scope.
 
 ## Corrected behavior
 

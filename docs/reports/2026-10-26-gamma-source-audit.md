@@ -33,6 +33,6 @@ All 120 selected raw metric files are nonempty time/value series. CPU/network fi
 - XGBoost readiness: **NOT READY**; independently measured SLO and gradual pre-breach labels are unproven. The product target is unchanged.
 - Live G2/G3/G7 and `/v1/detect` activation: **not passed / not enabled**. No p90/p95, RPC/HTTP or missing/error substitution is used.
 
-The full machine-readable [audit evidence](evidence/2026-10-26-gamma-source-audit.json) contains exact raw-series coverage, counts and blockers. Raw data, acquisition manifests and full inventory remain ignored artifacts. Reproduction is documented in [PUBLIC_DATA_PLAN](../PUBLIC_DATA_PLAN.md).
+The full machine-readable [audit evidence](evidence/2026-10-26-gamma-source-audit.json) contains exact raw-series coverage, counts and blockers. Raw data, acquisition manifests and full inventory remain ignored artifacts. Reproduction is documented in [PUBLIC_DATA_PLAN](../archive/guides/PUBLIC_DATA_PLAN.md).
 
 Validation at this implementation checkpoint: **207 tests passed** in the ML environment; **17 schemas, 12 samples and the frozen policy configuration** validate. A wheel built and installed outside the checkout loads the new modules/contracts and passes the API smoke check. CI adds the exact project-hash-locked GAMMA acquisition and real-table audit; its remote result is verified separately after push.

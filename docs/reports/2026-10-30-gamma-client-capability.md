@@ -9,7 +9,7 @@ blocked.** This result covers these four quarantined groups, not every GAMMA mod
 
 [Machine evidence](evidence/2026-10-30-gamma-client-capability.json) records the
 complete safe per-pair summaries, source/config hashes, acquisition bounds and
-verification. [Protocol and reproduction](../GAMMA_CLIENT_CAPABILITY.md) describe
+verification. [Protocol and reproduction](../archive/guides/GAMMA_CLIENT_CAPABILITY.md) describe
 the fixed interpretation and source-access controls.
 
 ## Source identity and acquisition

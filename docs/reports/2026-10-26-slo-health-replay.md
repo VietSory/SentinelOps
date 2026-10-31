@@ -4,7 +4,7 @@ Status: health producer and captured-source replay **PASS**; continuous live wor
 
 ## Actual inputs and results
 
-The [health producer](../STEP7_SLO_HEALTH.md) independently verified raw→normalized parity and read the immutable serving manifests of the existing [healthy S0](2026-10-26-healthy-pilot.md) and [gradual S3](2026-10-26-gradual-pilot.md) pilots. No fault schedule, target, scenario label or experiment truth store was supplied to processing. The S0/S3 names below identify inputs for reporting only.
+The [health producer](../runbooks/SLO_HEALTH.md) independently verified raw→normalized parity and read the immutable serving manifests of the existing [healthy S0](2026-10-26-healthy-pilot.md) and [gradual S3](2026-10-26-gradual-pilot.md) pilots. No fault schedule, target, scenario label or experiment truth store was supplied to processing. The S0/S3 names below identify inputs for reporting only.
 
 | Captured source | Raw captures / observations | Bucket times | Signals | Eligible / UNKNOWN | Incident openings | Recovery events |
 | --- | ---: | ---: | ---: | ---: | --- | --- |

@@ -1,6 +1,6 @@
 # Continuous health worker operational metrics — measured local evidence
 
-This development integration was captured at `8dc8f3c14faf8f121f827582536e5d96940eb6c2`. It adds optional worker telemetry through the existing local OTLP Collector and Prometheus. The existing SLO/checkpoint algorithm, frozen native protocol and ten-second processing gate are unchanged. [Machine-readable measurements](2026-10-28-health-worker-metrics.json) and [operator definitions/queries](../STEP7_HEALTH_WORKER.md#optional-worker-operational-metrics) describe the version and scope.
+This development integration was captured at `8dc8f3c14faf8f121f827582536e5d96940eb6c2`. It adds optional worker telemetry through the existing local OTLP Collector and Prometheus. The existing SLO/checkpoint algorithm, frozen native protocol and ten-second processing gate are unchanged. [Machine-readable measurements](2026-10-28-health-worker-metrics.json) and [operator definitions/queries](../runbooks/HEALTH_WORKER.md#optional-worker-operational-metrics) describe the version and scope.
 
 ## Measured behavior
 

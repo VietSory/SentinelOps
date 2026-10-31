@@ -1,164 +1,66 @@
 # SentinelOps
 
-**Evidence-Driven AIOps Platform for Cloud-Native Reliability**
+Evidence-driven AIOps cho ba microservice: **Checkout, Payment, Inventory**.
+Hệ thống thu metrics/logs/traces, tính SLO và model signals, tạo incident có bằng
+chứng, rồi hỗ trợ giải thích và remediation có kiểm soát.
 
-SentinelOps is the implementation repository for the approved AI4Life 2026 AIOps design. The architecture is contract-first: telemetry, model outputs, RCA results, Incident Evidence Records, LLM explanations, and remediation actions must conform to versioned schemas.
+## Bắt đầu ở đây
 
-## Implementation status
+| Bạn cần | Tài liệu |
+| --- | --- |
+| Mới tham gia / nhận việc A hoặc B | [Team handoff](docs/TEAM_HANDOFF.md) |
+| Biết phần nào đã có, phần nào còn thiếu | [Trạng thái hiện tại](docs/PROJECT_STATUS.md) |
+| Kế hoạch hai người và vùng sở hữu | [Delivery plan](docs/delivery/DELIVERY_PLAN.md), [workstream contract](docs/delivery/WORKSTREAM_CONTRACT.md) |
+| Tìm đặc tả, lệnh chạy hoặc quyết định kiến trúc | [Mục lục tài liệu](docs/README.md) |
 
-The repository implements a protected incident API, a real
-three-service/PostgreSQL testbed, distributed OpenTelemetry, local Prometheus
-history, immutable metric captures, deterministic feature windows, predeclared
-local experiments, objective SLO episodes, conservative correlation, analytical
-RCA with abstention and a computed-IER producer with an isolated incident repository. Dated
-verification reports live under [docs/reports](docs/reports/).
+Local testbed/observability, telemetry/features, persistent incident API và
+health/incident workers đã có. Guarded model/admission software đã có; **G2/G3
+chưa được chấp nhận và chưa có approved model tại checkpoint đã công bố**.
+UI, explanation/provider, action execution và AWS còn cần hoàn thiện.
+Inventory/runtime mới nhất phải kiểm tra trên môi trường tương ứng.
 
-The API detector returns 503 until a real validated model is available; Foundation
-fixtures require explicit local demo mode. Public source acquisition and local validation
-have not closed healthy-reference, precursor-label and live-feature-parity gates.
-A [continuous local SLO worker](docs/STEP7_HEALTH_WORKER.md) now has durable checkpoints and
-[actual crash/outage/recovery evidence](docs/reports/2026-10-28-continuous-health-worker.md).
-Its optional [operational metrics](docs/reports/2026-10-28-health-worker-metrics.md)
-have measured OTLP/Prometheus outage recovery and guards against cached values after restart.
-The [continuous incident journal](docs/STEP8_INCIDENT_WORKER.md) now connects accepted health to
-source-derived RCA, persisted IER lifecycle and the protected API.
-[Guarded model software](docs/MODEL_PIPELINE.md) and [native RCA development evaluation](docs/RCAEVAL_NATIVE_DEVELOPMENT.md)
-keep missing data/model results explicit. Validated model serving, RCA performance, Bedrock,
-operator UI, controlled remediation and AWS deployment follow their separate gates; local telemetry and software checks do not certify them.
+## Chạy API local
 
-The owner accepted [ADR-014](docs/adr/ADR-014-proposed-local-training-evidence.md)
-on 2026-10-31. The [prospective training contract v2](configs/training_data_contract_v2.json)
-authorizes a newly registered local HTTP corpus as primary training data, with
-RCAEval kept separately for RCA validation/heldout evaluation. Readiness still
-requires original workload/SLO evidence, independent groups and live feature parity.
-The [historical v1 contract](configs/training_data_contract.json) and GAMMA source
-snapshots remain unchanged for reproduction; earlier local pilots are not promoted.
-See the [migration/source plan](docs/PUBLIC_DATA_PLAN.md).
-[RCAEval partitions and source access](docs/RCAEVAL_PARTITIONS.md) freeze case groups
-and keep the final holdout sealed. Earlier local captures retain their integration scope; only prospectively registered
-v2 captures may enter the new admission process. Public bundles require measured live feature/source
-compatibility before activation; XGBoost still requires independent pre-SLO
-gradual labels.
+Python 3.11 là baseline CI; Python 3.12 được project cho phép.
 
-Incident writes persist exact IERs with idempotency and revision checks. See the current
-[phase status](docs/PROJECT_STATUS.md), [experiment protocol](docs/STEP5_EXPERIMENTS.md)
-and [incident API guide](docs/STEP7_INCIDENT_API.md).
-
-Runtime contracts remain strict and versioned. Supplemental envelopes carry
-quality, provenance and future lifecycle metadata without changing legacy wire
-payloads. The current architecture baseline is [PRODUCT_SPEC v1.1](docs/PRODUCT_SPEC.md).
-
-## Architecture boundaries
-
-- Isolation Forest: anomaly detection.
-- XGBoost: degradation-risk scoring.
-- RCA Engine: root-cause ranking from anomaly strength + topology/traces + timeline + log evidence.
-- Incident Evidence Record: authoritative source of truth.
-- Amazon Bedrock: explanation only; it must not invent evidence, decide root cause, or authorize remediation.
-- Remediation: only approved runbooks, least privilege, pre-check, execution, telemetry verification, rollback/escalation, audit.
-
-> Evidence is computed; LLM explanation is generated. Never the reverse.
-
-## Implementation planning
-
-The current delivery plan uses two independent contributors, based on merged
-PR #24 (`f4891cf`, 2026-10-31). New contributors start with:
-
-- [Team handoff](docs/TEAM_HANDOFF.md): project context, existing commands and the assignment for each contributor.
-- [Two-person delivery plan](docs/DELIVERY_PLAN.md): A owns Data/AI/RCA/explanation; B owns application/platform/AWS. Build usable features first and verify according to impact.
-- [Workstream contract](docs/WORKSTREAM_CONTRACT.md): file ownership, isolated checkouts/resources and model/explanation/AWS integration boundaries.
-- [Technical specification](docs/TECHNICAL_SPEC.md): component design, data semantics, APIs, model lifecycle and controlled remediation.
-- [Constraints and acceptance gates](docs/CONSTRAINTS_AND_GATES.md): frozen decisions, proposed targets, verification evidence and open decisions.
-
-The older phase sequencing is superseded by this delivery plan; dated reports
-retain their original evidence scope. These documents supplement the product spec
-and accepted ADRs. New design choices are marked as proposals; planned capabilities and acceptance targets are not claims
-of completed implementation or measured performance.
-
-Delivery follows the owner's current instructions for the task. Keep small,
-verified `feat:`, `fix:` and `docs:` commits, preserve existing history and monitor
-CI for the exact published commit. Earlier direct-main and pull-request deliveries
-retain their recorded verification scope.
-
-## Quick start
-
-Use Python 3.11 (CI/runtime baseline) or 3.12.
-
-```bash
+```sh
 python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-pytest -q
-uvicorn sentinelops.main:app --app-dir src --reload
-```
-
-Then:
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-OpenAPI docs are available at `http://127.0.0.1:8000/docs`.
-
-## Local testbed and observability
-
-The repository also includes the Step 2 microservices and Step 3 OpenTelemetry
-baseline. With Docker running and the virtual environment activated:
-
-```bash
-docker compose up --build -d --wait --wait-timeout 120
-python scripts/step2_smoke_test.py
-python scripts/step3_smoke_test.py
-```
-
-Jaeger is available at `http://127.0.0.1:16686`; Collector metrics are exposed at
-`http://127.0.0.1:8889/metrics`. See [Step 3 observability](docs/STEP3_OBSERVABILITY.md)
-for the verification gates and troubleshooting. The AIOps API above remains a
-separate control process. The services generate measurements; host-side analytical
-[RCA replay/incident production](docs/STEP7_RCA.md) consumes captures separately.
-The [continuous incident worker](docs/STEP8_INCIDENT_WORKER.md) is separately runnable.
-Validated ML activation and remediation remain gated.
-
-## Telemetry history and feature windows
-
-Prometheus at `http://127.0.0.1:9090` retains local metric history for seven days.
-Published testbed ports bind to loopback. Phase 4 adds immutable source captures,
-quality-aware observations and deterministic five-minute feature windows:
-
-```bash
-python scripts/collect_telemetry.py --output artifacts/capture --minutes 6
-python -m scripts.step4_smoke_test --output artifacts/step4/local
-```
-
-The live Step 4 check takes about ten minutes and temporarily controls sandbox
-faults; run it without another fault experiment. It checks real histogram/rate
-signals, replay and trace/log evidence, then restores the original fault settings.
-See [Step 4 telemetry](docs/STEP4_TELEMETRY.md). Captures are test evidence, not a
-trained model or an AWS integration claim.
-
-## Contract validation
-
-```bash
+. .venv/bin/activate
+python -m pip install -e '.[dev,ml]'
 python scripts/validate_contracts.py
+uvicorn sentinelops.main:app --app-dir src --host 127.0.0.1 --port 8000
 ```
 
-## Repository layout
+Liveness: `http://127.0.0.1:8000/health`; OpenAPI: `http://127.0.0.1:8000/docs`.
+Lệnh này chưa dựng control DB/worker/model. Incident API cần DB và bearer identity;
+inference trả 503 khi thiếu model hợp lệ. Theo [API runbook](docs/runbooks/INCIDENT_API.md)
+và [local testbed](docs/runbooks/LOCAL_TESTBED.md) để chạy đầy đủ trên tài nguyên riêng.
+
+## Ranh giới sản phẩm
+
+- MAD là control, Isolation Forest phát hiện anomaly, XGBoost dự báo pre-SLO gradual.
+- IER và deterministic RCA giữ evidence/ranking/uncertainty; Bedrock chỉ giải thích.
+- Action chỉ dùng runbook được phép, có policy, audit và telemetry verification.
+- Primary fitting dùng prospective local HTTP theo [ADR-014](docs/adr/ADR-014-proposed-local-training-evidence.md);
+  RCAEval chỉ evaluation, GAMMA/v1 giữ lịch sử. Source authorization không phải data/model acceptance.
+
+Schemas trong `contracts/` là wire truth. Thiết kế ở
+[technical spec](docs/architecture/TECHNICAL_SPEC.md); breaking architecture changes
+được ghi bằng ADR trước implementation. Thay đổi nhỏ cập nhật tài liệu hiện có.
+
+## Cấu trúc repository
 
 ```text
-contracts/        Frozen external data/API schemas
-configs/          Product configuration that is allowed to change without redesign
-docs/             Product spec and ADRs
-samples/          Contract-valid example payloads
-scripts/          Validation/replay/developer utilities
-src/sentinelops/  Control-plane API and telemetry/feature modules
-services/         Monitored Checkout, Payment and Inventory workload
-observability/    Collector and local Prometheus configuration
-infra/            Local database and future deployment infrastructure
-tests/            Contract and API tests
+src/sentinelops/   API, telemetry, models, incidents và workers
+services/          Checkout / Payment / Inventory
+scripts/           Capture, train, replay, kiểm tra và vận hành
+contracts/         JSON Schemas
+configs/           Policy, source/split và experiment configuration
+infra/             Database và deployment infrastructure
+observability/     Collector và Prometheus
+tests/            Regression và contract tests
+docs/             Đặc tả, delivery, runbooks, ADR và lịch sử có phân loại
 ```
 
-## Change policy
-
-Changes to thresholds, feature windows, hyperparameters, RCA weights, model versions, and deployment sizing are tunable implementation changes.
-
-Changes to mandatory contract fields, model responsibility boundaries, the Incident Evidence Record authority, LLM privileges, or remediation safety flow are breaking architecture changes and require an ADR before implementation.
+Raw data, model binaries, secrets và output chạy thử không commit vào Git.
+Cách chia hai người và mức kiểm tra theo tác động nằm trong delivery plan.

@@ -1,6 +1,6 @@
 # GAMMA complete raw-resource cohort acquisition
 
-This is completed acquisition/content verification of the [predeclared raw-resource scope](../GAMMA_RESOURCE_COHORT.md), not complete acquisition of every GAMMA modality and not a training/holdout acceptance report. The frozen GAMMA v1 / pinned RCAEval policy and original pre-SLO gradual target remain unchanged.
+This is completed acquisition/content verification of the [predeclared raw-resource scope](../archive/guides/GAMMA_RESOURCE_COHORT.md), not complete acquisition of every GAMMA modality and not a training/holdout acceptance report. The frozen GAMMA v1 / pinned RCAEval policy and original pre-SLO gradual target remain unchanged.
 
 ## Actual source acquisition
 
