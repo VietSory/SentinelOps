@@ -127,6 +127,10 @@ không tự cấp activation khi gate thiếu.
 action/Kubernetes/AWS song song A; giao auth/deploy/known-good rollback/runbook;
 chỉ bật model/cloud trong phạm vi được duyệt.
 
+Owner đã nhận lane B/UI; [checklist thực thi B](delivery/DELIVERY_PLAN.md#lane-b-execution)
+chốt lát cắt local đầu tiên, mapping fields API, isolation và thứ tự commit.
+Các mục là việc cần triển khai, không phải capability đã có.
+
 Handoff gồm SHA, cách chạy, giới hạn, artifact URI/hash/version và dependency thật;
 dùng commit/CI và tài liệu hiện có, không tạo report chỉ để ghi service đã PASS.
 Chỉ giữ report riêng cho kết quả data/model/evaluation cần dùng lại. Raw/model binary truyền qua artifact store
