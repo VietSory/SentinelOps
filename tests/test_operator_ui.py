@@ -1,6 +1,14 @@
 from fastapi.testclient import TestClient
 from sentinelops.api import create_app
 from sentinelops.api_settings import Settings
+import pytest
+
+
+@pytest.mark.parametrize('revision,after',[(1,0),(3,0),(3,1)])
+def test_browser_fixtures_preserve_the_existing_envelope_contract(revision,after):
+    from scripts.check_operator_ui import fixture_envelope
+    from sentinelops.contracts import validate_payload
+    validate_payload('incident-envelope.schema.json',fixture_envelope('INC-FIXTURE-A',revision,after))
 
 
 def test_ui_serves_same_origin_without_exposing_token_or_private_incidents():
