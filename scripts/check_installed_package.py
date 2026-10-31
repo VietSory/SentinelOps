@@ -59,8 +59,10 @@ from sentinelops.ml.registry import ModelRegistry
 from sentinelops.ml.readiness import audit_readiness
 from sentinelops.workers.model_signals import collect_model_signals
 from sentinelops.public_data.rcaeval_evaluation import diagnose_native
+from sentinelops.remediation.verification import verify_post_action_health
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
+assert callable(verify_post_action_health)
 client_summary = summarize_log(b'10 requests in 1.00m, 1.00MB read\n')
 assert client_summary['summary']['duration_seconds'] == '60.00'
 assert client_summary['http_5xx_count'] is None and client_summary['socket_errors'] is None
