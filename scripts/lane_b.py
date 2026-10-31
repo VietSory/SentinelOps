@@ -131,13 +131,15 @@ def launch_arguments(command, stream=None, model_store=None, release_ref=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['config','up','down','status','serve','health','incidents'])
+    parser.add_argument('command',choices=['config','up','down','status','snapshot','serve','health','incidents'])
     parser.add_argument('--health-stream')
     parser.add_argument('--model-store',type=Path,help='Explicit H1 materialized trusted store inside artifacts/lane-b/models/')
     parser.add_argument('--model-release-ref',help='Separately accepted immutable H1 release; no automatic activation')
+    parser.add_argument('--deployment-ref',help='Explicit immutable local deployment lock; up only, no build/pull fallback')
     args = parser.parse_args()
     if (args.model_store or args.model_release_ref) and args.command not in ('serve','incidents'):
         parser.error('model configuration is only valid for API/incident processes')
+    if args.deployment_ref and args.command != 'up': parser.error('deployment lock is only valid with up')
     environment = runtime_environment(args.model_store,args.model_release_ref) if args.command in ('serve','health','incidents') else None
     if args.command == 'serve':
         os.chdir(PROJECT)
@@ -147,12 +149,24 @@ def main():
                                                                cwd=PROJECT,env=docker_environment(),text=True)))
     if args.command == 'config':
         print(json.dumps({'project':config['name'],'ports':PORTS,'api_port':18000},indent=2))
+    elif args.command == 'snapshot':
+        from scripts.lane_b_release import snapshot
+        init_runtime()
+        print(json.dumps({'deployment_ref':snapshot(config,project=PROJECT,root=ROOT),
+                          'model_activation_allowed':False,'remediation_approval':False}))
     elif args.command in ('up','down','status'):
         require_owned_containers()
         init_runtime()
         action = {'up':['up','--build','-d','--wait','--wait-timeout','180'],
                   'down':['down'],'status':['ps']}[args.command]
-        subprocess.run(compose(*action),cwd=PROJECT,env=docker_environment(),check=True)
+        command = compose(*action)
+        if args.deployment_ref:
+            from scripts.lane_b_release import materialize
+            override = materialize(config,args.deployment_ref,project=PROJECT,root=ROOT)
+            command = compose('-f',str(override),'up','-d','--wait','--wait-timeout','180')
+            validate_config(json.loads(subprocess.check_output(compose('-f',str(override),'config','--format','json'),
+                                               cwd=PROJECT,env=docker_environment(),text=True)))
+        subprocess.run(command,cwd=PROJECT,env=docker_environment(),check=True)
     else:
         require_owned_containers()
         os.chdir(PROJECT)
