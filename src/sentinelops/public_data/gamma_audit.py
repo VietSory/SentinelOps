@@ -131,7 +131,7 @@ def audit_gamma(manifest_path: Path) -> dict:
         "training_ready": {"isolation_forest": False, "xgboost": False, "live_http_red": False},
         "blocking_reasons": ["RPC/node/service alignment and time/duration units require semantic verification",
             "processed traces omit the live HTTP status/error denominator; request sampling/completeness is unverified",
-            "grouped split, source-specific causal features and healthy-window admission are not frozen yet",
+            "resource feature profile and grouped splits exist, but do not certify health or independent acquisition sessions",
             "source bottleneck labels and phase schedules do not independently establish SLO/gradual precursor labels"],
         "limitations": ["capability audit of selected experiments, not the complete GAMMA corpus",
             "published experiment names are not proof of independent acquisition sessions",

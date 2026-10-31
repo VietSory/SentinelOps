@@ -1,0 +1,2584 @@
+{
+  "evaluation_version": "rcaeval-native-development/v1",
+  "source_commit": "d72e654eaeec1d23435382600907ec0a81101501",
+  "source_revision": "afeacb11bcc94dadfd1c8f483ee4377b2b8b614e",
+  "source_manifest_sha256": "3445957277004895c3a61460808355cf078123c890aad6d582c08373f666450f",
+  "profile_sha256": "4e9e5e2e57d01d0c59ac0de450612c90fb9d39d2a0f47370559a6568a991f3a1",
+  "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+  "business_results_sha256": "4d1ab2e228e559abc9e9a0d6bd66f9748573db05c20ebf68f4591bde09257101",
+  "status": "PASS",
+  "denominators": {
+    "selected": 3,
+    "evaluated": 3,
+    "quarantined": 0,
+    "abstained": 3,
+    "qualified": 0,
+    "qualified_correct": 0
+  },
+  "conditional_qualified_accuracy": null,
+  "abstention_rate": 1.0,
+  "holdout_opened": false,
+  "ml_fitting_allowed": false,
+  "independent_sessions_established": false,
+  "full_G4_accepted": false,
+  "actions_allowed": false,
+  "limitations": [
+    "Three previously inspected OB development cases; no independent heldout quality estimate.",
+    "PASS describes source-to-policy execution, not RCA accuracy or operational readiness.",
+    "Event-time windows have no verified source receipt clocks or SLO opening/onset evidence.",
+    "Native span work fractions and lexical exception markers are research-only support.",
+    "Recorded parent links are observations, not a complete topology or causal graph.",
+    "No healthy inference, HTTP RED mapping, approved anomaly model or precursor labels."
+  ],
+  "metrics": {
+    "native-traces-and-logs": {
+      "selected_cases": 3,
+      "evaluated_cases": 3,
+      "cases_with_removed_observed_support": null,
+      "top1": 0.0,
+      "top3": 0.3333333333333333,
+      "mrr": 0.16666666666666666,
+      "abstentions": 3,
+      "abstention_rate": 1.0,
+      "qualified_predictions": 0,
+      "maximum_candidate_coverage_per_case": [
+        0.0,
+        0.4,
+        0.4
+      ],
+      "ranking_metrics_include_abstained_hypotheses": true,
+      "independent_sessions_established": false,
+      "confidence_interval": null
+    },
+    "without-native-logs": {
+      "selected_cases": 3,
+      "evaluated_cases": 3,
+      "cases_with_removed_observed_support": 2,
+      "top1": 0.0,
+      "top3": 0.3333333333333333,
+      "mrr": 0.16666666666666666,
+      "abstentions": 3,
+      "abstention_rate": 1.0,
+      "qualified_predictions": 0,
+      "maximum_candidate_coverage_per_case": [
+        0.0,
+        0.25,
+        0.25
+      ],
+      "ranking_metrics_include_abstained_hypotheses": true,
+      "independent_sessions_established": false,
+      "confidence_interval": null
+    },
+    "without-native-traces": {
+      "selected_cases": 3,
+      "evaluated_cases": 3,
+      "cases_with_removed_observed_support": 2,
+      "top1": 0.0,
+      "top3": 0.0,
+      "mrr": 0.0,
+      "abstentions": 3,
+      "abstention_rate": 1.0,
+      "qualified_predictions": 0,
+      "maximum_candidate_coverage_per_case": [
+        0.0,
+        0.15,
+        0.15
+      ],
+      "ranking_metrics_include_abstained_hypotheses": true,
+      "independent_sessions_established": false,
+      "confidence_interval": null
+    }
+  },
+  "baseline_commit": "dd12339259b4f36bd61948eb2401a5939762cd1f",
+  "baseline_business_results_sha256": "4d1ab2e228e559abc9e9a0d6bd66f9748573db05c20ebf68f4591bde09257101",
+  "cases": [
+    {
+      "case": "re1ob_adservice_cpu_1",
+      "ground_truth_service": "adservice",
+      "ground_truth_in_native_entities": true,
+      "label_clock_in_capture": true,
+      "diagnosis": {
+        "result_version": "rcaeval-native-policy-result/v1",
+        "scope_sha256": "8e56bcb79d65e19ea17ebbbc4dac8926005a79d96aaa352d132badf56ec206f8",
+        "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+        "candidates": [
+          {
+            "service": "PassthroughCluster",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "adservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "cartservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "checkoutservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "currencyservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "emailservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "frontend",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "frontend-external",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "main",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "paymentservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "productcatalogservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "recommendationservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "redis",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "shippingservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          }
+        ],
+        "diagnostic_ranking": [],
+        "margin": null,
+        "abstained": true,
+        "abstention_reasons": [
+          "no-positive-observed-support",
+          "unobserved-dependency-candidates"
+        ],
+        "qualified_root": null,
+        "source_availability": "unverified",
+        "live_rca_compatible": false,
+        "actions_allowed": false
+      },
+      "evidence_breakdown": {
+        "available_categories": [],
+        "missing_categories": [
+          "anomaly_strength",
+          "dependency_trace_relevance",
+          "log_support",
+          "recent_change_support",
+          "temporal_precedence"
+        ],
+        "observed_category_weight_ceiling": 0,
+        "required_coverage": 0.75,
+        "source_references": {},
+        "known_weight_is_not_causal_confidence": true,
+        "receipt_time_recoverable_from_event_timestamps": false
+      },
+      "window_start_ns": 1685204489000000000,
+      "window_end_ns": 1685204789000000000,
+      "entities": [
+        "PassthroughCluster",
+        "adservice",
+        "cartservice",
+        "checkoutservice",
+        "currencyservice",
+        "emailservice",
+        "frontend",
+        "frontend-external",
+        "main",
+        "paymentservice",
+        "productcatalogservice",
+        "recommendationservice",
+        "redis",
+        "shippingservice"
+      ],
+      "modalities": {
+        "metrics": {
+          "present": true,
+          "rows": 4201,
+          "normalized_sha256": "4eb44f045ff141d213d1031427f2c1406c9a726b48f5ca2a1224dde342d735f7",
+          "source_start_ns": 1685200588000000000,
+          "source_end_ns": 1685204788000000000
+        },
+        "logs": {
+          "present": false,
+          "rows": 0,
+          "missing_reason": "not-published-in-admitted-inventory"
+        },
+        "traces": {
+          "present": false,
+          "rows": 0,
+          "missing_reason": "not-published-in-admitted-inventory"
+        }
+      },
+      "observed_parent_links": [],
+      "unresolved_parent_links": 0
+    },
+    {
+      "case": "re2ob_checkoutservice_cpu_1",
+      "ground_truth_service": "checkoutservice",
+      "ground_truth_in_native_entities": true,
+      "label_clock_in_capture": true,
+      "diagnosis": {
+        "result_version": "rcaeval-native-policy-result/v1",
+        "scope_sha256": "7f7d54c866a06de9e8967e2be93171aaf293cd0335600072fd78870e08f81086",
+        "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+        "candidates": [
+          {
+            "service": "frontendservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 0.9333376820851493,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "6fe6e8e5250437acc9a1d4fa7ca3d63f50fdfc580e57c54462a41837e045431e"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.23333442052128733,
+            "coverage": 0.25,
+            "evidence_refs": [
+              "6fe6e8e5250437acc9a1d4fa7ca3d63f50fdfc580e57c54462a41837e045431e"
+            ]
+          },
+          {
+            "service": "checkoutservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 0.05155109669413877,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "89c10fd6af3264b3fd389c555b26118ae87af39df686fc5c82a4fdc8f1d5784a"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "c2a8eea7796f6e711f49fb6175b63a25ea3c814262f8406c3ac2e151b472b7e4"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.012887774173534693,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "89c10fd6af3264b3fd389c555b26118ae87af39df686fc5c82a4fdc8f1d5784a",
+              "c2a8eea7796f6e711f49fb6175b63a25ea3c814262f8406c3ac2e151b472b7e4"
+            ]
+          },
+          {
+            "service": "recommendationservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 0.00979692929007083,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "ee6e3d4097c771d71a890bfdced256e2ed21d7fc5e76abe3a71b917129006de8"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "b035d676439630435a2d6fcbd86d153674ffde7d02108edbd6809841c433f3f0"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.0024492323225177074,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "b035d676439630435a2d6fcbd86d153674ffde7d02108edbd6809841c433f3f0",
+              "ee6e3d4097c771d71a890bfdced256e2ed21d7fc5e76abe3a71b917129006de8"
+            ]
+          },
+          {
+            "service": "currencyservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 0.00488315610510052,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "b68d0370a94a062c53c7a78dd507c1cec285121b831189611841391106eafcbe"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "cd0887d5d7fc85a3482e6c50902fc3ea34f21cf5b77a7981277565ecaa95b36f"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.00122078902627513,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "b68d0370a94a062c53c7a78dd507c1cec285121b831189611841391106eafcbe",
+              "cd0887d5d7fc85a3482e6c50902fc3ea34f21cf5b77a7981277565ecaa95b36f"
+            ]
+          },
+          {
+            "service": "productcatalogservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 0.00038927578301500094,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "e4d0ea8040be234ff0100bb5c84c289799c245de5c72f7b05334c35ca506a5bd"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 9.731894575375024e-05,
+            "coverage": 0.25,
+            "evidence_refs": [
+              "e4d0ea8040be234ff0100bb5c84c289799c245de5c72f7b05334c35ca506a5bd"
+            ]
+          },
+          {
+            "service": "emailservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 2.5292257580547994e-05,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "3541444dd830ebb78656406802bdce11e55647a2989cd6d44dbdd604f12a21e2"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "f294f4eb9b5fd3b9bdf732e4080350133bfa4fb714eb70e045a431a9f90e4ce3"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 6.3230643951369985e-06,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "3541444dd830ebb78656406802bdce11e55647a2989cd6d44dbdd604f12a21e2",
+              "f294f4eb9b5fd3b9bdf732e4080350133bfa4fb714eb70e045a431a9f90e4ce3"
+            ]
+          },
+          {
+            "service": "paymentservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 1.6567784944954696e-05,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "5f9aeb86107db9b700a2d4ba2b891a0724cd6740518adc43350f3e3dca8c649a"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "e3e57dd7cd44047ca56d427219b354d69514b617c7b94a6a50a2d93df83baef4"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 4.141946236238674e-06,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "5f9aeb86107db9b700a2d4ba2b891a0724cd6740518adc43350f3e3dca8c649a",
+              "e3e57dd7cd44047ca56d427219b354d69514b617c7b94a6a50a2d93df83baef4"
+            ]
+          },
+          {
+            "service": "adservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "9c370c7bff09092e35cc19e68407e51828c5faa397fedb79557b3396952bdcca"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.0,
+            "coverage": 0.15,
+            "evidence_refs": [
+              "9c370c7bff09092e35cc19e68407e51828c5faa397fedb79557b3396952bdcca"
+            ]
+          },
+          {
+            "service": "cartservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "ca52d323016f14e8a8eeb4872fb35d613dd4cfed3461465ed90350adfd2f0882"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.0,
+            "coverage": 0.15,
+            "evidence_refs": [
+              "ca52d323016f14e8a8eeb4872fb35d613dd4cfed3461465ed90350adfd2f0882"
+            ]
+          },
+          {
+            "service": "frontend",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "9f4236e31a5a9f2711e6b2e4f36d713130fcdef9d959ec5bf9e19eb59d0f484e"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.0,
+            "coverage": 0.15,
+            "evidence_refs": [
+              "9f4236e31a5a9f2711e6b2e4f36d713130fcdef9d959ec5bf9e19eb59d0f484e"
+            ]
+          },
+          {
+            "service": "redis",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "9c986d951091b0669fcd8613719d76da6ab0a0f5cfd1438b811814a7e1abcacf"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.0,
+            "coverage": 0.15,
+            "evidence_refs": [
+              "9c986d951091b0669fcd8613719d76da6ab0a0f5cfd1438b811814a7e1abcacf"
+            ]
+          },
+          {
+            "service": "shippingservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "08f602e5d8781272ee7d09403692c9f3095b7ae00768a6c69cb926e42177dc3e"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.0,
+            "coverage": 0.15,
+            "evidence_refs": [
+              "08f602e5d8781272ee7d09403692c9f3095b7ae00768a6c69cb926e42177dc3e"
+            ]
+          },
+          {
+            "service": "frontend-external",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          }
+        ],
+        "diagnostic_ranking": [
+          "frontendservice",
+          "checkoutservice",
+          "recommendationservice",
+          "currencyservice",
+          "productcatalogservice",
+          "emailservice",
+          "paymentservice"
+        ],
+        "margin": 0.22044664634775263,
+        "abstained": true,
+        "abstention_reasons": [
+          "insufficient-coverage",
+          "insufficient-score",
+          "source-availability-unverified",
+          "unobserved-dependency-candidates"
+        ],
+        "qualified_root": null,
+        "source_availability": "unverified",
+        "live_rca_compatible": false,
+        "actions_allowed": false
+      },
+      "evidence_breakdown": {
+        "available_categories": [
+          "dependency_trace_relevance",
+          "log_support"
+        ],
+        "missing_categories": [
+          "anomaly_strength",
+          "recent_change_support",
+          "temporal_precedence"
+        ],
+        "observed_category_weight_ceiling": 0.4,
+        "required_coverage": 0.75,
+        "source_references": {
+          "6fe6e8e5250437acc9a1d4fa7ca3d63f50fdfc580e57c54462a41837e045431e": {
+            "entity": "frontendservice",
+            "modality": "traces",
+            "source_sha256": "56ca8f6dbeb76fab2d33faeca54bce8f40e9c5491ebd76404ebb2dfd83409367",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 40922,
+              "recorded_duration_ns": 1799605219000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "89c10fd6af3264b3fd389c555b26118ae87af39df686fc5c82a4fdc8f1d5784a": {
+            "entity": "checkoutservice",
+            "modality": "traces",
+            "source_sha256": "56ca8f6dbeb76fab2d33faeca54bce8f40e9c5491ebd76404ebb2dfd83409367",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 1806,
+              "recorded_duration_ns": 99397704000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "c2a8eea7796f6e711f49fb6175b63a25ea3c814262f8406c3ac2e151b472b7e4": {
+            "entity": "checkoutservice",
+            "modality": "logs",
+            "source_sha256": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 392,
+              "messages": 392,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "ee6e3d4097c771d71a890bfdced256e2ed21d7fc5e76abe3a71b917129006de8": {
+            "entity": "recommendationservice",
+            "modality": "traces",
+            "source_sha256": "56ca8f6dbeb76fab2d33faeca54bce8f40e9c5491ebd76404ebb2dfd83409367",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 5400,
+              "recorded_duration_ns": 18889846000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "b035d676439630435a2d6fcbd86d153674ffde7d02108edbd6809841c433f3f0": {
+            "entity": "recommendationservice",
+            "modality": "logs",
+            "source_sha256": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 2644,
+              "messages": 2644,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "b68d0370a94a062c53c7a78dd507c1cec285121b831189611841391106eafcbe": {
+            "entity": "currencyservice",
+            "modality": "traces",
+            "source_sha256": "56ca8f6dbeb76fab2d33faeca54bce8f40e9c5491ebd76404ebb2dfd83409367",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 11347,
+              "recorded_duration_ns": 9415406000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "cd0887d5d7fc85a3482e6c50902fc3ea34f21cf5b77a7981277565ecaa95b36f": {
+            "entity": "currencyservice",
+            "modality": "logs",
+            "source_sha256": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 11296,
+              "messages": 11296,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "e4d0ea8040be234ff0100bb5c84c289799c245de5c72f7b05334c35ca506a5bd": {
+            "entity": "productcatalogservice",
+            "modality": "traces",
+            "source_sha256": "56ca8f6dbeb76fab2d33faeca54bce8f40e9c5491ebd76404ebb2dfd83409367",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 20382,
+              "recorded_duration_ns": 750578000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "3541444dd830ebb78656406802bdce11e55647a2989cd6d44dbdd604f12a21e2": {
+            "entity": "emailservice",
+            "modality": "traces",
+            "source_sha256": "56ca8f6dbeb76fab2d33faeca54bce8f40e9c5491ebd76404ebb2dfd83409367",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 249,
+              "recorded_duration_ns": 48767000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "f294f4eb9b5fd3b9bdf732e4080350133bfa4fb714eb70e045a431a9f90e4ce3": {
+            "entity": "emailservice",
+            "modality": "logs",
+            "source_sha256": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 131,
+              "messages": 131,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "5f9aeb86107db9b700a2d4ba2b891a0724cd6740518adc43350f3e3dca8c649a": {
+            "entity": "paymentservice",
+            "modality": "traces",
+            "source_sha256": "56ca8f6dbeb76fab2d33faeca54bce8f40e9c5491ebd76404ebb2dfd83409367",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 189,
+              "recorded_duration_ns": 31945000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "e3e57dd7cd44047ca56d427219b354d69514b617c7b94a6a50a2d93df83baef4": {
+            "entity": "paymentservice",
+            "modality": "logs",
+            "source_sha256": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 262,
+              "messages": 262,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "9c370c7bff09092e35cc19e68407e51828c5faa397fedb79557b3396952bdcca": {
+            "entity": "adservice",
+            "modality": "logs",
+            "source_sha256": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 2134,
+              "messages": 2134,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "ca52d323016f14e8a8eeb4872fb35d613dd4cfed3461465ed90350adfd2f0882": {
+            "entity": "cartservice",
+            "modality": "logs",
+            "source_sha256": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 3627,
+              "messages": 3627,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "9f4236e31a5a9f2711e6b2e4f36d713130fcdef9d959ec5bf9e19eb59d0f484e": {
+            "entity": "frontend",
+            "modality": "logs",
+            "source_sha256": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 12465,
+              "messages": 12465,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "9c986d951091b0669fcd8613719d76da6ab0a0f5cfd1438b811814a7e1abcacf": {
+            "entity": "redis",
+            "modality": "logs",
+            "source_sha256": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 5,
+              "messages": 5,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "08f602e5d8781272ee7d09403692c9f3095b7ae00768a6c69cb926e42177dc3e": {
+            "entity": "shippingservice",
+            "modality": "logs",
+            "source_sha256": "e1a25e50c8b0beae4b2886df54d86d2f28877d0b611fed98411e9c0b0c77dad3",
+            "window_start_ns": 1705354987000000000,
+            "window_end_ns": 1705355287000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 2060,
+              "messages": 2060,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          }
+        },
+        "known_weight_is_not_causal_confidence": true,
+        "receipt_time_recoverable_from_event_timestamps": false
+      },
+      "window_start_ns": 1705354987000000000,
+      "window_end_ns": 1705355287000000000,
+      "entities": [
+        "adservice",
+        "cartservice",
+        "checkoutservice",
+        "currencyservice",
+        "emailservice",
+        "frontend",
+        "frontend-external",
+        "frontendservice",
+        "paymentservice",
+        "productcatalogservice",
+        "recommendationservice",
+        "redis",
+        "shippingservice"
+      ],
+      "modalities": {
+        "metrics": {
+          "present": true,
+          "rows": 1441,
+          "normalized_sha256": "b658ee2ccf67561c841be90a17add1b2ad2a301d00a439afabe89cf014794b87",
+          "source_start_ns": 1705353846000000000,
+          "source_end_ns": 1705355286000000000
+        },
+        "logs": {
+          "present": true,
+          "rows": 171322,
+          "eligible_window_records": 35016,
+          "source_start_ns": 1705353846000000000,
+          "source_end_ns": 1705355286000000000,
+          "backwards_adjacent_times": 0,
+          "normalized_sha256": "574a7ec4af2363c6707ae471a0611bd1f27266bec7489e4ee188317dbf63565f"
+        },
+        "traces": {
+          "present": true,
+          "rows": 391997,
+          "eligible_window_records": 80295,
+          "source_start_ns": 1705353846065431000,
+          "source_end_ns": 1705355285970988000,
+          "backwards_adjacent_times": 67134,
+          "normalized_sha256": "21392fbbddd1dc1d62afa0cb8da653978e3cf037d4edbd988f10104fe7016ead",
+          "native_status_counts": {
+            "0": 373623,
+            "null": 18374
+          }
+        }
+      },
+      "observed_parent_links": [
+        {
+          "consumer": "checkoutservice",
+          "dependency": "checkoutservice",
+          "spans": 1101
+        },
+        {
+          "consumer": "checkoutservice",
+          "dependency": "currencyservice",
+          "spans": 456
+        },
+        {
+          "consumer": "checkoutservice",
+          "dependency": "emailservice",
+          "spans": 129
+        },
+        {
+          "consumer": "checkoutservice",
+          "dependency": "paymentservice",
+          "spans": 129
+        },
+        {
+          "consumer": "checkoutservice",
+          "dependency": "productcatalogservice",
+          "spans": 327
+        },
+        {
+          "consumer": "frontendservice",
+          "dependency": "checkoutservice",
+          "spans": 129
+        },
+        {
+          "consumer": "frontendservice",
+          "dependency": "currencyservice",
+          "spans": 10831
+        },
+        {
+          "consumer": "frontendservice",
+          "dependency": "frontendservice",
+          "spans": 37103
+        },
+        {
+          "consumer": "frontendservice",
+          "dependency": "productcatalogservice",
+          "spans": 17296
+        },
+        {
+          "consumer": "frontendservice",
+          "dependency": "recommendationservice",
+          "spans": 2640
+        },
+        {
+          "consumer": "recommendationservice",
+          "dependency": "productcatalogservice",
+          "spans": 2640
+        },
+        {
+          "consumer": "recommendationservice",
+          "dependency": "recommendationservice",
+          "spans": 2640
+        }
+      ],
+      "unresolved_parent_links": 0
+    },
+    {
+      "case": "re3ob_adservice_f3_1",
+      "ground_truth_service": "adservice",
+      "ground_truth_in_native_entities": true,
+      "label_clock_in_capture": true,
+      "diagnosis": {
+        "result_version": "rcaeval-native-policy-result/v1",
+        "scope_sha256": "9f8d3f715cf7deab6467b2c407bed8b5564928c4e754003b9a2380603b05d7ed",
+        "policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+        "candidates": [
+          {
+            "service": "frontend",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 0.8818620127026319,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "ecee071d25c4384428e7f8cbed6fcc65feaee5224e4190fe86a33d483f6f368e"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "2434d116edfc530db47129c9b0b0e9d195450915d1d31e13f3caf04f9799cfb7"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.22046550317565797,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "2434d116edfc530db47129c9b0b0e9d195450915d1d31e13f3caf04f9799cfb7",
+              "ecee071d25c4384428e7f8cbed6fcc65feaee5224e4190fe86a33d483f6f368e"
+            ]
+          },
+          {
+            "service": "recommendationservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 0.0718284500443738,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "b8240c2493cfc88f67c781a4999caa602fe541081eaa30549102de9c9417c299"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "db681eda39df9b7af45534a4f260c8e42743f6894c30d46b28bb33136fe3750d"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.01795711251109345,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "b8240c2493cfc88f67c781a4999caa602fe541081eaa30549102de9c9417c299",
+              "db681eda39df9b7af45534a4f260c8e42743f6894c30d46b28bb33136fe3750d"
+            ]
+          },
+          {
+            "service": "checkoutservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 0.03992045140864476,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "266543825a1f292b9c15401cfa47b2454012a1663631a5d36f8001d429f9e2e6"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "040af5cab66475b17beaaba2c448fa89aecebb201388b99811595e9c7dd9b6ac"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.00998011285216119,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "040af5cab66475b17beaaba2c448fa89aecebb201388b99811595e9c7dd9b6ac",
+              "266543825a1f292b9c15401cfa47b2454012a1663631a5d36f8001d429f9e2e6"
+            ]
+          },
+          {
+            "service": "currencyservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 0.0038115028865888835,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "12092c6daf728e32f51b419efe348e0fe83df37e2336b23b6767f36646c59c4e"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "f4605b2ea5b4228b246d0f25b7a8f5715c2e17161888eef23a8e0a1ea0742211"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.0009528757216472209,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "12092c6daf728e32f51b419efe348e0fe83df37e2336b23b6767f36646c59c4e",
+              "f4605b2ea5b4228b246d0f25b7a8f5715c2e17161888eef23a8e0a1ea0742211"
+            ]
+          },
+          {
+            "service": "productcatalogservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 0.002422454141047376,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "919bbd6d0a409937d69228da693d1baa4686bdf17e3a2640a11e789159bb2823"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.000605613535261844,
+            "coverage": 0.25,
+            "evidence_refs": [
+              "919bbd6d0a409937d69228da693d1baa4686bdf17e3a2640a11e789159bb2823"
+            ]
+          },
+          {
+            "service": "paymentservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 8.6933365473569e-05,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "40f17d82c0f036c15791753999e1ece00410d3498e6c60f2f2dfcfd2feea706f"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "ac707b85c601dd0ca3b7a6853963a5345dc267dd86c7e9a57f233f0b4769ecc6"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 2.173334136839225e-05,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "40f17d82c0f036c15791753999e1ece00410d3498e6c60f2f2dfcfd2feea706f",
+              "ac707b85c601dd0ca3b7a6853963a5345dc267dd86c7e9a57f233f0b4769ecc6"
+            ]
+          },
+          {
+            "service": "emailservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": 6.819545123973962e-05,
+                "method": "native-observed-span-duration-fraction/v1",
+                "evidence_refs": [
+                  "f71f2495660aa471fe253af800a6885431460194f730f3c7a970d4c798cdef37"
+                ],
+                "missing_reason": null
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "d87e8d23387cb9c64b0581ccbdc85843fbd098f9ac3400f497ae9e734455ebe8"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 1.7048862809934905e-05,
+            "coverage": 0.4,
+            "evidence_refs": [
+              "d87e8d23387cb9c64b0581ccbdc85843fbd098f9ac3400f497ae9e734455ebe8",
+              "f71f2495660aa471fe253af800a6885431460194f730f3c7a970d4c798cdef37"
+            ]
+          },
+          {
+            "service": "cartservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "03222a9bf333091c61dba2d73a7be0b29749716b5c34eac042fe4bfa20de00e4"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.0,
+            "coverage": 0.15,
+            "evidence_refs": [
+              "03222a9bf333091c61dba2d73a7be0b29749716b5c34eac042fe4bfa20de00e4"
+            ]
+          },
+          {
+            "service": "redis",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "6a5cee030af4d195460f32c26e9c89b3693749844c01f441c39bfa0a238a922a"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.0,
+            "coverage": 0.15,
+            "evidence_refs": [
+              "6a5cee030af4d195460f32c26e9c89b3693749844c01f441c39bfa0a238a922a"
+            ]
+          },
+          {
+            "service": "shippingservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": 0.0,
+                "method": "native-exception-marker-presence/v1",
+                "evidence_refs": [
+                  "9541b0ce74ad6ed722cae25f3e977287a9b493d9f6f0320e01a11f6398dc38e4"
+                ],
+                "missing_reason": null
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": 0.0,
+            "coverage": 0.15,
+            "evidence_refs": [
+              "9541b0ce74ad6ed722cae25f3e977287a9b493d9f6f0320e01a11f6398dc38e4"
+            ]
+          },
+          {
+            "service": "adservice",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          },
+          {
+            "service": "frontend-external",
+            "components": {
+              "anomaly_strength": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-approved-source-compatible-model"
+              },
+              "temporal_precedence": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-objective-SLO-onsets"
+              },
+              "dependency_trace_relevance": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-spans"
+              },
+              "log_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-native-log-messages"
+              },
+              "recent_change_support": {
+                "value": null,
+                "method": "unavailable/v1",
+                "evidence_refs": [],
+                "missing_reason": "no-observed-deployment"
+              }
+            },
+            "score": null,
+            "coverage": 0.0,
+            "evidence_refs": []
+          }
+        ],
+        "diagnostic_ranking": [
+          "frontend",
+          "recommendationservice",
+          "checkoutservice",
+          "currencyservice",
+          "productcatalogservice",
+          "paymentservice",
+          "emailservice"
+        ],
+        "margin": 0.20250839066456452,
+        "abstained": true,
+        "abstention_reasons": [
+          "insufficient-coverage",
+          "insufficient-score",
+          "source-availability-unverified",
+          "unobserved-dependency-candidates"
+        ],
+        "qualified_root": null,
+        "source_availability": "unverified",
+        "live_rca_compatible": false,
+        "actions_allowed": false
+      },
+      "evidence_breakdown": {
+        "available_categories": [
+          "dependency_trace_relevance",
+          "log_support"
+        ],
+        "missing_categories": [
+          "anomaly_strength",
+          "recent_change_support",
+          "temporal_precedence"
+        ],
+        "observed_category_weight_ceiling": 0.4,
+        "required_coverage": 0.75,
+        "source_references": {
+          "ecee071d25c4384428e7f8cbed6fcc65feaee5224e4190fe86a33d483f6f368e": {
+            "entity": "frontend",
+            "modality": "traces",
+            "source_sha256": "6ec516a79bbd427766b02d0d87f06ea9ec15d0b990f4d65f74283e341e70eda7",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 17615,
+              "recorded_duration_ns": 116951496000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "2434d116edfc530db47129c9b0b0e9d195450915d1d31e13f3caf04f9799cfb7": {
+            "entity": "frontend",
+            "modality": "logs",
+            "source_sha256": "d8fb490a359db7cda3ce618ce51251ceec89b90026839f90a891391e3d51b197",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 5883,
+              "messages": 5883,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "b8240c2493cfc88f67c781a4999caa602fe541081eaa30549102de9c9417c299": {
+            "entity": "recommendationservice",
+            "modality": "traces",
+            "source_sha256": "6ec516a79bbd427766b02d0d87f06ea9ec15d0b990f4d65f74283e341e70eda7",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 2340,
+              "recorded_duration_ns": 9525804000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "db681eda39df9b7af45534a4f260c8e42743f6894c30d46b28bb33136fe3750d": {
+            "entity": "recommendationservice",
+            "modality": "logs",
+            "source_sha256": "d8fb490a359db7cda3ce618ce51251ceec89b90026839f90a891391e3d51b197",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 1171,
+              "messages": 1171,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "266543825a1f292b9c15401cfa47b2454012a1663631a5d36f8001d429f9e2e6": {
+            "entity": "checkoutservice",
+            "modality": "traces",
+            "source_sha256": "6ec516a79bbd427766b02d0d87f06ea9ec15d0b990f4d65f74283e341e70eda7",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 832,
+              "recorded_duration_ns": 5294203000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "040af5cab66475b17beaaba2c448fa89aecebb201388b99811595e9c7dd9b6ac": {
+            "entity": "checkoutservice",
+            "modality": "logs",
+            "source_sha256": "d8fb490a359db7cda3ce618ce51251ceec89b90026839f90a891391e3d51b197",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 174,
+              "messages": 174,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "12092c6daf728e32f51b419efe348e0fe83df37e2336b23b6767f36646c59c4e": {
+            "entity": "currencyservice",
+            "modality": "traces",
+            "source_sha256": "6ec516a79bbd427766b02d0d87f06ea9ec15d0b990f4d65f74283e341e70eda7",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 4641,
+              "recorded_duration_ns": 505477000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "f4605b2ea5b4228b246d0f25b7a8f5715c2e17161888eef23a8e0a1ea0742211": {
+            "entity": "currencyservice",
+            "modality": "logs",
+            "source_sha256": "d8fb490a359db7cda3ce618ce51251ceec89b90026839f90a891391e3d51b197",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 4643,
+              "messages": 4643,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "919bbd6d0a409937d69228da693d1baa4686bdf17e3a2640a11e789159bb2823": {
+            "entity": "productcatalogservice",
+            "modality": "traces",
+            "source_sha256": "6ec516a79bbd427766b02d0d87f06ea9ec15d0b990f4d65f74283e341e70eda7",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 8988,
+              "recorded_duration_ns": 321263000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "40f17d82c0f036c15791753999e1ece00410d3498e6c60f2f2dfcfd2feea706f": {
+            "entity": "paymentservice",
+            "modality": "traces",
+            "source_sha256": "6ec516a79bbd427766b02d0d87f06ea9ec15d0b990f4d65f74283e341e70eda7",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 58,
+              "recorded_duration_ns": 11529000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "ac707b85c601dd0ca3b7a6853963a5345dc267dd86c7e9a57f233f0b4769ecc6": {
+            "entity": "paymentservice",
+            "modality": "logs",
+            "source_sha256": "d8fb490a359db7cda3ce618ce51251ceec89b90026839f90a891391e3d51b197",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 116,
+              "messages": 116,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "f71f2495660aa471fe253af800a6885431460194f730f3c7a970d4c798cdef37": {
+            "entity": "emailservice",
+            "modality": "traces",
+            "source_sha256": "6ec516a79bbd427766b02d0d87f06ea9ec15d0b990f4d65f74283e341e70eda7",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-observed-span-duration-fraction/v1",
+            "observations": {
+              "spans": 58,
+              "recorded_duration_ns": 9044000
+            },
+            "derivation": "entity recorded duration / total recorded duration; overlapping spans retained"
+          },
+          "d87e8d23387cb9c64b0581ccbdc85843fbd098f9ac3400f497ae9e734455ebe8": {
+            "entity": "emailservice",
+            "modality": "logs",
+            "source_sha256": "d8fb490a359db7cda3ce618ce51251ceec89b90026839f90a891391e3d51b197",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 58,
+              "messages": 58,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "03222a9bf333091c61dba2d73a7be0b29749716b5c34eac042fe4bfa20de00e4": {
+            "entity": "cartservice",
+            "modality": "logs",
+            "source_sha256": "d8fb490a359db7cda3ce618ce51251ceec89b90026839f90a891391e3d51b197",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 1558,
+              "messages": 1558,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "6a5cee030af4d195460f32c26e9c89b3693749844c01f441c39bfa0a238a922a": {
+            "entity": "redis",
+            "modality": "logs",
+            "source_sha256": "d8fb490a359db7cda3ce618ce51251ceec89b90026839f90a891391e3d51b197",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 5,
+              "messages": 5,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          },
+          "9541b0ce74ad6ed722cae25f3e977287a9b493d9f6f0320e01a11f6398dc38e4": {
+            "entity": "shippingservice",
+            "modality": "logs",
+            "source_sha256": "d8fb490a359db7cda3ce618ce51251ceec89b90026839f90a891391e3d51b197",
+            "window_start_ns": 1731904381000000000,
+            "window_end_ns": 1731904681000000000,
+            "receipt_clock": null,
+            "method": "native-exception-marker-presence/v1",
+            "observations": {
+              "records": 968,
+              "messages": 968,
+              "exception_markers": 0
+            },
+            "derivation": "1 iff at least one fixed exception marker in an observed message; else 0"
+          }
+        },
+        "known_weight_is_not_causal_confidence": true,
+        "receipt_time_recoverable_from_event_timestamps": false
+      },
+      "window_start_ns": 1731904381000000000,
+      "window_end_ns": 1731904681000000000,
+      "entities": [
+        "adservice",
+        "cartservice",
+        "checkoutservice",
+        "currencyservice",
+        "emailservice",
+        "frontend",
+        "frontend-external",
+        "paymentservice",
+        "productcatalogservice",
+        "recommendationservice",
+        "redis",
+        "shippingservice"
+      ],
+      "modalities": {
+        "metrics": {
+          "present": true,
+          "rows": 1441,
+          "normalized_sha256": "03e10bcec62dfdfb0b6ab0f8950e3687c7b30167730aed236a2d9ea0d87662df",
+          "source_start_ns": 1731903240000000000,
+          "source_end_ns": 1731904680000000000
+        },
+        "logs": {
+          "present": true,
+          "rows": 70558,
+          "eligible_window_records": 14576,
+          "source_start_ns": 1731903240000000000,
+          "source_end_ns": 1731904680000000000,
+          "backwards_adjacent_times": 0,
+          "normalized_sha256": "c05554b21408533d30649c11d6ffc765959ee46912101ca75f32cd9c323a2ff8"
+        },
+        "traces": {
+          "present": true,
+          "rows": 165302,
+          "eligible_window_records": 34532,
+          "source_start_ns": 1731903240203597000,
+          "source_end_ns": 1731904679980940000,
+          "backwards_adjacent_times": 22540,
+          "normalized_sha256": "aa32f78d1f437caa5b83583c02ec1073572d49f9c707fd8376e6a7b76ba6b4bc",
+          "native_status_counts": {
+            "0": 155478,
+            "12": 2124,
+            "14": 6,
+            "4": 8,
+            "null": 7686
+          }
+        }
+      },
+      "observed_parent_links": [
+        {
+          "consumer": "checkoutservice",
+          "dependency": "checkoutservice",
+          "spans": 502
+        },
+        {
+          "consumer": "checkoutservice",
+          "dependency": "currencyservice",
+          "spans": 212
+        },
+        {
+          "consumer": "checkoutservice",
+          "dependency": "emailservice",
+          "spans": 58
+        },
+        {
+          "consumer": "checkoutservice",
+          "dependency": "paymentservice",
+          "spans": 58
+        },
+        {
+          "consumer": "checkoutservice",
+          "dependency": "productcatalogservice",
+          "spans": 154
+        },
+        {
+          "consumer": "frontend",
+          "dependency": "checkoutservice",
+          "spans": 58
+        },
+        {
+          "consumer": "frontend",
+          "dependency": "currencyservice",
+          "spans": 4429
+        },
+        {
+          "consumer": "frontend",
+          "dependency": "frontend",
+          "spans": 15957
+        },
+        {
+          "consumer": "frontend",
+          "dependency": "productcatalogservice",
+          "spans": 7604
+        },
+        {
+          "consumer": "frontend",
+          "dependency": "recommendationservice",
+          "spans": 1170
+        },
+        {
+          "consumer": "recommendationservice",
+          "dependency": "productcatalogservice",
+          "spans": 1170
+        },
+        {
+          "consumer": "recommendationservice",
+          "dependency": "recommendationservice",
+          "spans": 1170
+        }
+      ],
+      "unresolved_parent_links": 0
+    }
+  ]
+}

@@ -9,18 +9,21 @@ blocked. The measured resource report is not an admission certificate.
 grouped report, identifies its historical scope, and records zero certified live
 business-service health/precursor support. It never opens raw or final data.
 
-`scripts.train_models` rejects an unready report **before estimator construction,
-table access or output creation**. The supplementary internal
-`gamma-verified-training/v1` admission interface requires the frozen source policy,
-source-audit refs, established independent groups, health certificates and actual
-pre-SLO labels. It is not minted by the existing interference dataset builder.
-Each `gamma-verified-training-rows/v1` entry references a separately validated
-resource feature and health/precursor label. Labels require evidence refs and an
-independently observed future breach for positives. Run/group/split metadata never
-becomes a numeric feature. Training accepts train/calibration entries only, checks
-whole-group disjointness and chronology, 300/100 healthy windows and 3/2 independent
-healthy and gradual groups per modeled native service. Test refs remain unopened.
-No current source satisfies that interface; the reader cannot cure absent evidence.
+`scripts.train_models` rejects unready reports **before estimator construction,
+table access or output creation**. The proposed internal
+`gamma-verified-training/v1` table reader has structural group/chronology/count
+checks, but no accepted source-backed health/precursor certificate verifier exists.
+Previously, caller-authored PASS flags and arbitrary existing evidence references
+could enter this reader. Admission now explicitly rejects self-attested reports,
+including reports claiming every gate passed. Content hashes prove byte integrity,
+not workload health, outcome truth or scientific approval.
+
+Enabling source-backed training requires implementing and reviewing a verifier
+that binds traffic completeness, objective SLO health/outcomes, native identities,
+independent groups and precursor chronology to approved original observations.
+Changing booleans cannot unlock training. The dormant row reader is not a certified
+admission pipeline. Actual numerical fit/serialization/inference primitives remain
+fixture-tested separately; no valid source-admission integration is claimed.
 
 Numerical primitives implement actual train-only RobustScaler/IsolationForest,
 median/MAD control and XGBoost binary risk. Per-service matrices preserve native
@@ -66,3 +69,23 @@ and refuses to invent uncertainty or timing for missing/instantaneous precursors
 No numerical fixture score is reported as benchmark accuracy. Independent session
 evidence, sealed final evaluation and a bootstrap protocol remain prerequisites for
 generalization/uncertainty claims.
+
+## Recorded model-signal clocks
+
+The continuous collector emits `validated-window-model/v2` with a separate
+`inference_started_at` and `evaluated_at`. It pins feature eligibility and model
+execution to the recorded start, then records prediction availability at actual
+completion. Replay recomputes with the original start and validates completion
+ordering, source identity, signal status and actual estimator output. Completion
+time does not become the feature freshness decision. The existing RCA stale
+support guard still applies at the later RCA decision; replaying a valid inference
+does not automatically make it eligible RCA evidence.
+
+Readers retain v1 completion-based replay because v1 did not capture a start. No
+historical start is invented and immutable v1 artifacts are not rewritten. Both
+canonical and legacy replay use the same validator. Unsupported versions and
+forged status/clock combinations fail closed. The strict HTTP prediction payloads,
+source contract, model admission and activation gates are unchanged.
+
+[Proposed ADR-014](adr/ADR-014-proposed-local-training-evidence.md) prepares the
+next source decision for owner review; it does not enable a new training source.

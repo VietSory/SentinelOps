@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 
 from sentinelops.contracts import utc_time, validate_payload
-from sentinelops.telemetry.core import BUSINESS_ROUTES, FEATURE_SET, stable_id
+from sentinelops.telemetry.core import BUSINESS_ROUTES, FEATURE_KEYS, FEATURE_SET, stable_id
 from sentinelops.telemetry.store import ArtifactStore
 
 
@@ -51,7 +51,9 @@ class ModelRegistry:
                 store.read(ref)
             provenance = manifest["provenance"]
             service = provenance["service"]
-            if service in registry._models or provenance["feature_set_version"] != FEATURE_SET:
+            if (service not in BUSINESS_ROUTES or service in registry._models
+                or provenance["feature_set_version"] != FEATURE_SET
+                or set(manifest["ordered_features"]) != set(FEATURE_KEYS)):
                 raise IncompatibleFeatures("duplicate model route or incompatible live feature set")
             registry._models[service] = (manifest, detector, risk, item["validation_ref"])
         registry.identity = release_ref
@@ -72,6 +74,8 @@ class ModelRegistry:
             raise IncompatibleFeatures("feature/source schema differs from the pinned bundle")
         current = now or datetime.now(timezone.utc)
         end = utc_time(feature["window_end"])
+        if end - utc_time(feature["window_start"]) != timedelta(seconds=300):
+            raise IncompatibleFeatures("live feature profile requires a 300-second historical window")
         if end > current or current - end > timedelta(seconds=180):
             raise IncompatibleFeatures("future or stale feature window")
         values = [feature["features"][key] for key in manifest["ordered_features"]]

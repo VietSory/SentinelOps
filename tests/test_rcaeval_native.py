@@ -231,7 +231,9 @@ def test_evaluator_reads_labels_only_after_all_business_results_are_frozen(profi
         events.append("business")
         return original(scope, policy)
     def labels(path):
-        assert events == ["business"] * 3
+        # Three diagnoses plus three independent breakdown consistency checks,
+        # all completed before evaluator-only labels can be read.
+        assert events == ["business"] * 6
         events.append("labels")
         return [{"case": case, "root_cause_service": "label-only-root", "time_start": 1000,
                  "time_end": 1002, "inject_time": 1001} for case in INSPECTED], {}
@@ -319,3 +321,46 @@ def test_forged_native_inventory_is_rejected_before_any_cache_byte(tmp_path, pro
     monkeypatch.setattr(native, "_bounded_bytes", only_manifest)
     with pytest.raises(ValueError, match="inventory"):
         load_native_inputs(selected, profile)
+
+
+def test_legacy_native_log_method_is_not_operational_evidence(policy):
+    from sentinelops.incidents.rca import rank_native_support
+    cards = {name: unavailable() for name in COMPONENTS}
+    cards['log_support'] = {'value': 1., 'method': 'native-log-pattern-presence/v1',
+                            'evidence_refs': ['log'], 'missing_reason': None}
+    fact = {'id': 'log', 'type': 'log', 'service': 'frontend'}
+    with pytest.raises(ValueError, match='method/evidence'):
+        _score(cards, {'log': fact}, 'frontend', policy)
+    historical = rank_native_support(['frontend'], [fact], [{'service': 'frontend', 'components': cards}], policy)
+    assert historical['abstained'] and historical['candidates'][0]['coverage'] == .15
+
+
+def test_native_parent_cycle_rejected_without_rejecting_forward_links(profile):
+    table = pq.read_table(pa.BufferReader(traces()))
+    index = table.schema.get_field_index('parentSpanID')
+    cyclic = table.set_column(index, 'parentSpanID', pa.array(['000b', '000a'], type=pa.large_string()))
+    with pytest.raises(ValueError, match='cyclic native trace'):
+        adapt_native_case({'metrics': metrics(), 'traces': parquet(cyclic)}, profile)
+    valid = adapt_native_case({'metrics': metrics(), 'traces': traces()}, profile)
+    assert valid['observed_parent_links'][0]['consumer'] == 'frontend'
+    # Identical span identifiers in different traces never form a parent link.
+    index = cyclic.schema.get_field_index('traceID')
+    separate = cyclic.set_column(index, 'traceID', pa.array(['one', 'two'], type=pa.large_string()))
+    isolated = adapt_native_case({'metrics': metrics(), 'traces': parquet(separate)}, profile)
+    assert isolated['observed_parent_links'] == [] and isolated['unresolved_parent_links'] == 2
+
+
+def test_breakdown_resolves_source_bytes_and_does_not_invent_receipt_clocks(profile, policy):
+    from sentinelops.public_data.rcaeval_evaluation import evidence_breakdown
+    scope = adapt_native_case({'metrics': metrics(), 'logs': logs(), 'traces': traces()}, profile)
+    diagnosis = evaluate_native(scope, policy)
+    report = evidence_breakdown(scope, diagnosis, policy)
+    assert report['observed_category_weight_ceiling'] == .4
+    assert report['required_coverage'] == .75
+    assert set(report['source_references']) == {r for c in diagnosis['candidates'] for r in c['evidence_refs']}
+    for source in report['source_references'].values():
+        assert source['source_sha256'] == scope['source_telemetry_sha256'][source['modality']]
+        assert source['receipt_clock'] is None
+    diagnosis['candidates'][0]['score'] = 1.
+    with pytest.raises(ValueError, match='reproducible'):
+        evidence_breakdown(scope, diagnosis, policy)

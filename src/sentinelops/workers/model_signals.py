@@ -10,6 +10,51 @@ from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, Incompatibl
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 
 
+def verify_model_signal(envelope, signal, registry):
+    """Recompute numerics at the recorded start; preserve completion availability.
+
+    V1 did not record a separate start. Its original completion-based replay is
+    retained without inventing a historical start for already recorded signals.
+    """
+    fields = {"signal_version", "service", "window_end", "feature_ref", "status", "missing_reason",
+              "inference", "evaluated_at", "signal_id"}
+    version = signal.get("signal_version")
+    if version == "validated-window-model/v2":
+        fields.add("inference_started_at")
+    elif version != "validated-window-model/v1":
+        raise ValueError("unsupported recorded model signal version")
+    if set(signal) != fields:
+        raise ValueError("recorded model signal fields differ from its version")
+    if signal["service"] != envelope["service"] or signal["window_end"] != envelope["window_end"]:
+        raise ValueError("recorded model signal belongs to another feature window")
+    inference = signal["inference"]
+    evaluated = utc_time(signal["evaluated_at"])
+    if inference is not None:
+        completed = utc_time(inference["inferred_at"])
+        if completed > evaluated:
+            raise ValueError("model inference completes after signal evaluation")
+    if version == "validated-window-model/v2":
+        started = utc_time(signal["inference_started_at"])
+        if started > evaluated or (inference is not None and started < utc_time(envelope["as_of"])):
+            raise ValueError("model inference start contradicts source availability/completion")
+        if inference is not None and completed != evaluated:
+            raise ValueError("model inference completion differs from recorded availability")
+    else:
+        started = completed if inference is not None else evaluated
+    expected, reason = None, None
+    try:
+        expected = registry.infer_envelope(envelope, now=started)
+    except ModelUnavailable:
+        reason = "no-validated-compatible-model"
+    except IncompatibleFeatures:
+        reason = "ineligible-incompatible-or-stale-feature"
+    if expected is not None and version == "validated-window-model/v2":
+        expected = {**expected, "inferred_at": signal["evaluated_at"]}
+    status = "AVAILABLE" if expected is not None else "UNAVAILABLE"
+    if expected != inference or reason != signal["missing_reason"] or status != signal["status"]:
+        raise ValueError("model signal does not reproduce with the pinned actual estimator")
+
+
 class ModelIncidentEvidence:
     """Add a pinned model release to the canonical bounded evidence collector."""
     def __init__(self, collector, registry):
@@ -59,16 +104,7 @@ def verify_model_evidence(store, capture, registry):
             or signal["window_end"] != envelope["window_end"] or utc_time(signal["evaluated_at"]) > utc_time(capture["analyzed_at"])
             or signal["signal_id"] != stable_id({"feature_ref": signal["feature_ref"], "release_identity": registry.identity})):
             raise ValueError("model signal differs from its frozen feature/source clock")
-        expected, reason = None, None
-        decision = signal["inference"]["inferred_at"] if signal["inference"] is not None else signal["evaluated_at"]
-        try:
-            expected = registry.infer_envelope(envelope, now=utc_time(decision))
-        except ModelUnavailable:
-            reason = "no-validated-compatible-model"
-        except IncompatibleFeatures:
-            reason = "ineligible-incompatible-or-stale-feature"
-        if expected != signal["inference"] or reason != signal["missing_reason"]:
-            raise ValueError("model signal does not reproduce with the pinned actual estimator")
+        verify_model_signal(envelope, signal, registry)
     return pack["signals"]
 
 
@@ -90,14 +126,17 @@ def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRe
         if service in seen:
             raise ValueError("duplicate current feature envelope for service")
         seen.add(service)
+        started = now or datetime.now(timezone.utc)
         output, reason, status = None, None, "AVAILABLE"
         try:
-            output = registry.infer_envelope(envelope, now=now)
+            output = registry.infer_envelope(envelope, now=started)
         except ModelUnavailable:
             reason, status = "no-validated-compatible-model", "UNAVAILABLE"
         except IncompatibleFeatures:
             reason, status = "ineligible-incompatible-or-stale-feature", "UNAVAILABLE"
         completed = now or datetime.now(timezone.utc)
+        if completed < started:
+            raise ValueError("model processing clock moved backwards")
         if output is not None:
             validate_payload("detection-result.schema.json", output["detection"])
             if output["risk"] is not None:
@@ -107,11 +146,12 @@ def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRe
                     or payload["model_version"] != output["model_version"]):
                     raise ValueError("model result identity differs from exact feature window/version")
             if (output["feature_sha256"] != stable_id(envelope["payload"])
-                or output["source_profile"] != envelope["source_profile"] or utc_time(output["inferred_at"]) > completed):
+                or output["source_profile"] != envelope["source_profile"] or utc_time(output["inferred_at"]) != started):
                 raise ValueError("model inference source/clock differs from feature provenance")
-        body = {"signal_version": "validated-window-model/v1", "service": service, "window_end": bucket_end,
+            output = {**output, "inferred_at": timestamp(completed)}
+        body = {"signal_version": "validated-window-model/v2", "service": service, "window_end": bucket_end,
                 "feature_ref": reference, "status": status, "missing_reason": reason, "inference": output,
-                "evaluated_at": timestamp(completed)}
+                "inference_started_at": timestamp(started), "evaluated_at": timestamp(completed)}
         body["signal_id"] = stable_id({"feature_ref": reference, "release_identity": registry.identity})
         ref = store.write("signals", body)
         signals.append((ref, body))

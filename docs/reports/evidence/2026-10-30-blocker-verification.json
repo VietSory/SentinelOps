@@ -1,0 +1,56 @@
+{
+  "verification_code_commit": "d72e654eaeec1d23435382600907ec0a81101501",
+  "baseline_commit": "dd12339259b4f36bd61948eb2401a5939762cd1f",
+  "python": ".venv/bin/python (3.11.15)",
+  "environment": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "LD_LIBRARY_PATH": "/nix/store/0iv8glcslgfcgn371lbjr5jjw5a6cqir-gcc-15.3.0-lib/lib:/nix/store/dbz6pb9g67kpgpl95k8d85kzpxm1c32p-zlib-1.3.2/lib"
+  },
+  "regression": {
+    "baseline_passed": 599,
+    "updated_passed": 612,
+    "skipped": 0,
+    "warnings": 1,
+    "seconds": 26.15
+  },
+  "contracts": {
+    "schemas": 23,
+    "samples": 17,
+    "configurations": 2,
+    "status": "PASS"
+  },
+  "installed_wheel": "PASS",
+  "native_repeat_identical": true,
+  "business_results_sha256": "4d1ab2e228e559abc9e9a0d6bd66f9748573db05c20ebf68f4591bde09257101",
+  "local_raw_replay": {
+    "captures": 3,
+    "incidents": 7,
+    "revisions": 28,
+    "status": "PASS"
+  },
+  "local_postgresql_http": {
+    "status": "PASS",
+    "mode": "actual-uvicorn-HTTP-real-PostgreSQL-native-incident-read-history",
+    "native_incidents": 1,
+    "native_versions": 4,
+    "native_outbox": 4,
+    "selected_sources": [
+      {
+        "consumer_id": "2335d074a0f9824dcedae86cd876ca7a1fb77cc4567215150a8f7acf4ba42c00",
+        "snapshot_sha256": "9d0141fd03dc00da7908be19a4a51d63e8ef00f7a3ae9bd455793d748d97c796"
+      }
+    ],
+    "authenticated_and_unauthorized_paths_verified": true,
+    "current_and_all_historical_payloads_match_immutable_native_snapshots": true,
+    "ETag_and_bounded_timeline_verified": true,
+    "pagination_contains_all_native_incidents": true,
+    "detected_at_immutable": true,
+    "read_only_side_effect_counts_unchanged": true,
+    "model_ready_503": true,
+    "demo_disabled": true,
+    "actions_allowed": false
+  },
+  "publication_ci": "not yet verified at report creation; use PR exact-head checks",
+  "holdout_opened": false,
+  "models_fitted_from_real_data": 0
+}
