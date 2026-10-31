@@ -67,3 +67,18 @@ def test_resource_mutation_rejects_another_checkouts_project(monkeypatch):
                            'com.docker.compose.project.working_dir':'/foreign/checkout'})
     monkeypatch.setattr(lane_b.subprocess,'check_output',read)
     with pytest.raises(ValueError,match='another checkout'): lane_b.require_owned_containers()
+
+
+def test_h1_activation_is_explicit_paired_owned_and_reuses_existing_loader(tmp_path,monkeypatch):
+    monkeypatch.setattr(lane_b,'ROOT',tmp_path/'b')
+    monkeypatch.delenv('CONTROL_DATABASE_URL',raising=False)
+    model = lane_b.ROOT/'models'/'handoff-v1'
+    release = 'artifact://manifests/'+'a'*64+'.json'
+    with pytest.raises(ValueError,match='both explicitly'): lane_b.runtime_environment(model)
+    with pytest.raises(ValueError,match='materialized'): lane_b.runtime_environment('/foreign/models',release)
+    environment = lane_b.runtime_environment(model,release)
+    assert environment['SENTINELOPS_MODEL_STORE'] == str(model)
+    assert environment['SENTINELOPS_MODEL_RELEASE_REF'] == release
+    assert not model.exists()  # no fabricated bundle or approval is written
+    arguments = lane_b.launch_arguments('incidents','stream',model,release)
+    assert arguments[-4:] == ['--model-store',str(model),'--model-release-ref',release]

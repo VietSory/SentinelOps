@@ -33,6 +33,23 @@ remain unavailable until separately accepted H1 wiring. Control credentials must
 select B's explicit nonowner loopback database on 15433. API liveness remains
 available during database/model outages; it is not proof those dependencies work.
 
+After H1 acceptance, materialize the complete trusted model store inside
+`artifacts/lane-b/models/`. Select it explicitly with paired `--model-store` and
+`--model-release-ref` on `serve` and `incidents`; use the same immutable release
+for both processes. The existing registry verifies checksums, approvals and
+compatibility at startup. The launcher writes no approval and never inherits A's
+model configuration. Invalid releases fail startup. Keep the previous immutable
+release/reference and restart both processes with that pair to roll back; no hot
+activation is implemented. Without an accepted release, leave both flags absent.
+
+For B1 source integration, start both workers then run
+`python -m scripts.check_lane_b_live`. It executes 180s healthy, 360s Payment
+latency and 300s recovery against B only, preserves request observations and restores
+the original healthy fault configuration in `finally`. It checks native journal/DB
+revisions and protected API reads, never writes an IER manually. This is operational
+integration evidence, not admitted training data or RCA accuracy. Output under
+`artifacts/lane-b/live-*` is separate from A's corpus.
+
 ## Goal
 
 Build a small but real dependency graph that SentinelOps can observe and later diagnose:

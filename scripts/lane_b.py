@@ -86,7 +86,7 @@ def init_runtime():
     return identity
 
 
-def runtime_environment():
+def runtime_environment(model_store=None, release_ref=None):
     init_runtime()
     control = os.environ.get('CONTROL_DATABASE_URL',
         'postgresql://control_writer:local-control-writer@127.0.0.1:15433/sentinelops_control')
@@ -96,13 +96,22 @@ def runtime_environment():
         raise ValueError('lane B requires its explicit loopback control_writer database on 15433')
     environment = {k:v for k,v in docker_environment().items()
                    if k not in ('SENTINELOPS_MODEL_STORE','SENTINELOPS_MODEL_RELEASE_REF','DATABASE_URL')}
+    if bool(model_store) != bool(release_ref):
+        raise ValueError('model activation requires both explicitly selected H1 store and release reference')
+    if model_store:
+        selected = Path(model_store).resolve()
+        if not selected.is_relative_to(ROOT.resolve()/'models'):
+            raise ValueError('H1 models must be materialized inside the owned B models directory')
+        # Existing ModelRegistry performs checksum/admission/validation checks at
+        # API/worker startup. Wiring never writes an approval or a release ledger.
+        environment.update(SENTINELOPS_MODEL_STORE=str(selected),SENTINELOPS_MODEL_RELEASE_REF=release_ref)
     return {**environment,'CONTROL_DATABASE_URL':control,
         'COMMERCE_EVIDENCE_DATABASE_URL':'postgresql://sentinel:sentinel@127.0.0.1:15432/sentinelops',
         'SENTINELOPS_ENV':'local','SENTINELOPS_ENABLE_DEMO':'false',
         'SENTINELOPS_API_TOKEN':os.environ.get('SENTINELOPS_API_TOKEN') or (ROOT/'api-token').read_text().strip()}
 
 
-def launch_arguments(command, stream=None):
+def launch_arguments(command, stream=None, model_store=None, release_ref=None):
     if command == 'serve':
         return [sys.executable,'-m','uvicorn','sentinelops.main:app','--app-dir',str(PROJECT/'src'),
                 '--host','127.0.0.1','--port','18000']
@@ -111,19 +120,25 @@ def launch_arguments(command, stream=None):
         return [sys.executable,'-m','scripts.run_health_worker','--store',str(ROOT/'health'),*shared]
     if not stream:
         raise ValueError('incident launcher needs the exact READY stream_id from the health worker')
+    models = ['--model-store',str(model_store),'--model-release-ref',release_ref] if model_store and release_ref else []
     return [sys.executable,'-m','scripts.run_incident_worker','--health-stream',stream,
         '--source-store',str(ROOT/'health'),'--store',str(ROOT/'incidents'),'--project',NAME,
-        '--jaeger','http://127.0.0.1:26686',*shared]
+        '--jaeger','http://127.0.0.1:26686',*shared,*models]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['config','up','down','status','serve','health','incidents'])
     parser.add_argument('--health-stream')
+    parser.add_argument('--model-store',type=Path,help='Explicit H1 materialized trusted store inside artifacts/lane-b/models/')
+    parser.add_argument('--model-release-ref',help='Separately accepted immutable H1 release; no automatic activation')
     args = parser.parse_args()
+    if (args.model_store or args.model_release_ref) and args.command not in ('serve','incidents'):
+        parser.error('model configuration is only valid for API/incident processes')
+    environment = runtime_environment(args.model_store,args.model_release_ref) if args.command in ('serve','health','incidents') else None
     if args.command == 'serve':
         os.chdir(PROJECT)
-        os.execvpe(sys.executable,launch_arguments('serve'),runtime_environment())
+        os.execvpe(sys.executable,launch_arguments('serve'),environment)
         return
     config = validate_config(json.loads(subprocess.check_output(compose('config','--format','json'),
                                                                cwd=PROJECT,env=docker_environment(),text=True)))
@@ -138,7 +153,7 @@ def main():
     else:
         require_owned_containers()
         os.chdir(PROJECT)
-        os.execvpe(sys.executable,launch_arguments(args.command,args.health_stream),runtime_environment())
+        os.execvpe(sys.executable,launch_arguments(args.command,args.health_stream,args.model_store,args.model_release_ref),environment)
 
 
 if __name__ == '__main__':
