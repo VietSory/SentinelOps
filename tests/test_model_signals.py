@@ -185,3 +185,32 @@ def test_future_feature_is_recorded_unavailable_and_replays(timed_model_capture)
     signal = signals[0][1]
     assert signal['status'] == 'UNAVAILABLE' and signal['inference'] is None
     verify_model_signal(original, signal, registry)
+
+
+def test_completed_v2_risk_is_suppressed_and_replays_across_anchor_minute(timed_model_capture, monkeypatch):
+    """Numerical software fixture; no model/corpus promotion."""
+    from sentinelops.workers import model_signals as module
+    from sentinelops.telemetry.core import timestamp
+    from sentinelops.ml.models import fit_risk
+    import numpy as np
+    store, normal, batch, registry, _, _, capture = timed_model_capture
+    manifest, detector, _, validation = registry._models[PAY]
+    sample = np.random.default_rng(42).normal(size=(300, 5))
+    risk = fit_risk(sample, (sample[:, 0] > 0).astype(int), FEATURE_KEYS)
+    manifest.update(origin='admitted-local-http',risk_thresholds={'watch':.5,'degrading':.8})
+    registry._models[PAY] = (manifest,detector,risk,validation)
+    end = utc_time(batch['bucket_end'])
+    start, finish = end + timedelta(seconds=59), end + timedelta(seconds=61)
+    ticks = iter([start, finish] * 3)
+    class Clock:
+        @staticmethod
+        def now(zone): return next(ticks)
+    monkeypatch.setattr(module,'datetime',Clock)
+    capture['analyzed_at'] = timestamp(finish)
+    signals = collect_model_signals(store,normal,bucket_end=batch['bucket_end'],registry=registry)
+    signal = next(s for _,s in signals if s['service'] == PAY)
+    assert signal['status'] == 'AVAILABLE' and signal['inference']['detection'] is not None
+    assert signal['inference']['risk'] is None
+    assert signal['inference']['risk_availability']['missing_reason'] == 'forecast-anchor-minute-advanced'
+    capture['model_evidence']['signals'] = signals
+    assert verify_model_evidence(store,capture,registry) == signals

@@ -189,13 +189,58 @@ def test_real_inference_rejects_wrong_duration_before_predict(fitted, seconds):
 def test_registry_rejects_wrong_route_or_feature_semantics_even_with_version_string(tmp_path, monkeypatch, service, features):
     from sentinelops.ml import models
     store = ArtifactStore(tmp_path)
-    manifest = {'origin': 'admitted-gamma', 'model_version': 'fixture', 'ordered_features': features,
-                'provenance': {'service': service, 'feature_set_version': 'http-red-5m/v1'}}
+    from sentinelops.public_data.policy import load_training_policy, policy_hash
+    policy = load_training_policy()
+    manifest = {'origin': 'admitted-local-http', 'bundle_version': 'sentinelops-model/v2', 'model_version': 'fixture', 'ordered_features': features,
+                'provenance': {'service': service, 'feature_set_version': 'http-red-5m/v1',
+                    'training_policy': policy, 'training_data_policy_hash': policy_hash(policy),
+                    'source_profile': policy['sources']['local_http']['source_profile'], 'dataset_ref': 'fixture://routing-test'}}
     monkeypatch.setattr(models, 'load_bundle', lambda *a, **k: (manifest, None, None))
     evidence = store.write('manifests', {'fixture': True})
     validation = store.write('manifests', {'model_version': 'fixture', 'G2': 'PASS', 'G3': 'PASS',
-        'source_parity': 'PASS', 'activation_allowed': True, 'evaluation_refs': [evidence]})
+        'source_parity': 'PASS', 'activation_allowed': True, 'evaluation_refs': [evidence],
+        'dataset_ref':'fixture://routing-test', 'training_data_policy_hash':policy_hash(policy)})
     release = store.write('manifests', {'release_version': 'validated-model-release/v1', 'models': [
         {'bundle_directory': 'fixture', 'manifest_sha256': 'fixture', 'validation_ref': validation}]})
     with pytest.raises(IncompatibleFeatures):
         ModelRegistry.load(store, release)
+
+
+def test_v2_risk_anchor_cannot_be_backdated_while_if_window_is_still_fresh(fitted):
+    detector, train, _ = fitted
+    risk_model = fit_risk(train, (train[:, 0] > 0).astype(int), FEATURE_KEYS)
+    anchor = datetime(2026,10,31,tzinfo=timezone.utc)
+    registry = ModelRegistry()
+    # Numerical-only route injection bypasses admission deliberately in this
+    # timing unit test. It cannot write/activate a validated release.
+    registry._models['payment-service'] = ({'origin':'admitted-local-http','model_version':'fixture-only',
+        'ordered_features':list(FEATURE_KEYS),'provenance':{'source_profile':'fixture'},
+        'risk_thresholds':{'watch':.5,'degrading':.8}},detector,risk_model,'fixture://not-approved')
+    frame = {'schema_version':'1.0','service':'payment-service','window_start':timestamp(anchor-timedelta(seconds=300)),
+             'window_end':timestamp(anchor),'features':dict(zip(FEATURE_KEYS,train[0].tolist()))}
+    first = registry.infer(frame,source_profile='fixture',now=anchor+timedelta(seconds=30))
+    assert first['risk'] is not None and first['risk_availability']['available']
+    later = registry.infer(frame,source_profile='fixture',now=anchor+timedelta(seconds=60))
+    assert later['detection'] == first['detection'] and later['risk'] is None
+    assert later['risk_availability']['missing_reason'] == 'forecast-anchor-minute-advanced'
+
+
+def test_local_bundle_cannot_claim_admission_without_original_source(tmp_path,fitted):
+    from sentinelops.public_data.policy import load_training_policy, policy_hash
+    policy = load_training_policy()
+    with pytest.raises(ValueError,match='original-source admission'):
+        save_bundle(tmp_path/'forged-local',fitted[0],provenance={
+            'origin':'admitted-local-http','training_policy':policy,
+            'training_data_policy_hash':policy_hash(policy),'dataset_report':{'training_ready':True}})
+    assert not (tmp_path/'forged-local').exists()
+
+
+def test_local_origin_cannot_relabel_a_v1_fixture_artifact(tmp_path,fitted):
+    manifest = save_bundle(tmp_path/'fixture-v1',fitted[0],provenance={'origin':'fixture-only'})
+    manifest['origin'] = 'admitted-local-http'
+    manifest['model_version'] = __import__('sentinelops.telemetry.core',fromlist=['stable_id']).stable_id(
+        {k:v for k,v in manifest.items() if k != 'model_version'})
+    path = tmp_path/'fixture-v1/manifest.json'
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError,match='explicit v2 bundle'):
+        load_bundle(path.parent,expected_manifest_sha256=hashlib.sha256(path.read_bytes()).hexdigest())

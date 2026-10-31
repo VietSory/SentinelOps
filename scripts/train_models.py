@@ -1,4 +1,4 @@
-"""Fit only an admitted GAMMA health/precursor corpus; never activates models."""
+"""Fit only source-admitted current data; historical GAMMA stays blocked."""
 import argparse
 import json
 from pathlib import Path
@@ -17,9 +17,16 @@ def main():
     from sentinelops.ml.readiness import require_training_ready
     store = ArtifactStore(args.store)
     try:
-        require_training_ready(store.read(args.dataset_ref))
-        from sentinelops.ml.models import train_gamma
-        result = train_gamma(store, args.dataset_ref, args.output)
+        report = store.read(args.dataset_ref)
+        if report.get("dataset_version") == "local-http-admission/v1":
+            from sentinelops.ml.corpus import load_training_rows
+            load_training_rows(store, report)  # original-source gate before numerical imports
+            from sentinelops.ml.models import train_local_http
+            result = train_local_http(store, args.dataset_ref, args.output)
+        else:
+            require_training_ready(report)
+            from sentinelops.ml.models import train_gamma
+            result = train_gamma(store, args.dataset_ref, args.output)
     except DatasetNotReady as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc), "models_fitted": 0, "activation_allowed": False}))
         raise SystemExit(2) from None

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.incidents.rca import COMPONENTS, evaluate_rca
-from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, IncompatibleFeatures
+from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, IncompatibleFeatures, complete_inference
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 
 
@@ -49,7 +49,7 @@ def verify_model_signal(envelope, signal, registry):
     except IncompatibleFeatures:
         reason = "ineligible-incompatible-or-stale-feature"
     if expected is not None and version == "validated-window-model/v2":
-        expected = {**expected, "inferred_at": signal["evaluated_at"]}
+        expected = complete_inference(expected, signal["evaluated_at"])
     status = "AVAILABLE" if expected is not None else "UNAVAILABLE"
     if expected != inference or reason != signal["missing_reason"] or status != signal["status"]:
         raise ValueError("model signal does not reproduce with the pinned actual estimator")
@@ -148,7 +148,7 @@ def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRe
             if (output["feature_sha256"] != stable_id(envelope["payload"])
                 or output["source_profile"] != envelope["source_profile"] or utc_time(output["inferred_at"]) != started):
                 raise ValueError("model inference source/clock differs from feature provenance")
-            output = {**output, "inferred_at": timestamp(completed)}
+            output = complete_inference(output, timestamp(completed))
         body = {"signal_version": "validated-window-model/v2", "service": service, "window_end": bucket_end,
                 "feature_ref": reference, "status": status, "missing_reason": reason, "inference": output,
                 "inference_started_at": timestamp(started), "evaluated_at": timestamp(completed)}
