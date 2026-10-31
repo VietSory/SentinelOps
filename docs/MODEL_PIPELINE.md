@@ -69,3 +69,23 @@ and refuses to invent uncertainty or timing for missing/instantaneous precursors
 No numerical fixture score is reported as benchmark accuracy. Independent session
 evidence, sealed final evaluation and a bootstrap protocol remain prerequisites for
 generalization/uncertainty claims.
+
+## Recorded model-signal clocks
+
+The continuous collector emits `validated-window-model/v2` with a separate
+`inference_started_at` and `evaluated_at`. It pins feature eligibility and model
+execution to the recorded start, then records prediction availability at actual
+completion. Replay recomputes with the original start and validates completion
+ordering, source identity, signal status and actual estimator output. Completion
+time does not become the feature freshness decision. The existing RCA stale
+support guard still applies at the later RCA decision; replaying a valid inference
+does not automatically make it eligible RCA evidence.
+
+Readers retain v1 completion-based replay because v1 did not capture a start. No
+historical start is invented and immutable v1 artifacts are not rewritten. Both
+canonical and legacy replay use the same validator. Unsupported versions and
+forged status/clock combinations fail closed. The strict HTTP prediction payloads,
+source contract, model admission and activation gates are unchanged.
+
+[Proposed ADR-014](adr/ADR-014-proposed-local-training-evidence.md) prepares the
+next source decision for owner review; it does not enable a new training source.
