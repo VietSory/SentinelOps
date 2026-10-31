@@ -643,7 +643,7 @@ td .incident-link:hover{
 .detail-header h2{
   font:600 13px/1.65 var(--mono);
   margin:10px 0 6px;
-  word-break:break-all;
+  overflow-wrap:anywhere;
   letter-spacing:-.3px
 }
 .detail-header h2:focus{

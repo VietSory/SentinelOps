@@ -105,7 +105,7 @@ async function openIncident(id, revision = null) {
   if (workspace.state.selected === id && workspace.state.detail) {
     const query = new URLSearchParams({incident:id,revision:String(workspace.state.detail.revision)});
     history.replaceState(null,'',`#${query}`);
-    $('#detail-title')?.focus({preventScroll:true});
+    $('#detail-title')?.focus({preventScroll:!matchMedia('(max-width: 1250px)').matches});
   }
 }
 
@@ -218,6 +218,8 @@ function renderDetail(state) {
   const header = node('div',null,'detail-header'), overline = node('div',null,'detail-overline');
   overline.append(node('span','INCIDENT DETAIL'),node('span',`REVISION ${detail.revision}`,'count'));
   const title = node('h2',detail.incident_id); title.id = 'detail-title'; title.tabIndex = -1;
+  if (detail.incident_id.length > 36) title.replaceChildren(document.createTextNode(detail.incident_id.slice(0,36)),
+    node('wbr'),document.createTextNode(detail.incident_id.slice(36)));
   const summary = node('div',null,'detail-summary'); summary.append(badge(payload.state),badge(payload.severity));
   header.append(overline,summary,title);
   const form = node('form',null,'revision-controls'), label = node('label','Revision '), input = node('input');
