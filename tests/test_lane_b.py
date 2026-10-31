@@ -60,11 +60,12 @@ def test_runtime_cannot_inherit_lane_a_model_or_compose_settings(tmp_path,monkey
     assert ':15433/' in environment['CONTROL_DATABASE_URL'] and environment['SENTINELOPS_ENABLE_DEMO'] == 'false'
 
 
-def test_resource_mutation_rejects_another_checkouts_project(monkeypatch):
+@pytest.mark.parametrize('owner',['/foreign/checkout','',None])
+def test_resource_mutation_rejects_another_checkouts_project(monkeypatch,owner):
     def read(command,**kwargs):
         if command[:2] == ['docker','ps']: return 'fixture-container\n'
         return json.dumps({'com.docker.compose.project':'sentinelops-b','com.docker.compose.service':'postgres',
-                           'com.docker.compose.project.working_dir':'/foreign/checkout'})
+                           'com.docker.compose.project.working_dir':owner})
     monkeypatch.setattr(lane_b.subprocess,'check_output',read)
     with pytest.raises(ValueError,match='another checkout'): lane_b.require_owned_containers()
 

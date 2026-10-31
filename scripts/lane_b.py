@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import stat
 import subprocess
 import sys
 from urllib.parse import urlsplit
@@ -60,9 +61,11 @@ def require_owned_containers():
     for identifier in identifiers:
         # Only read ownership metadata, never the container environment.
         labels = json.loads(subprocess.check_output(['docker','inspect','--format','{{json .Config.Labels}}',identifier],text=True))
+        owner = labels.get('com.docker.compose.project.working_dir')
         if (labels.get('com.docker.compose.project') != NAME
             or labels.get('com.docker.compose.service') not in PORTS
-            or Path(labels.get('com.docker.compose.project.working_dir','')).resolve() != PROJECT):
+            or not isinstance(owner,str) or not owner
+            or Path(owner).resolve() != PROJECT):
             raise ValueError('refuse to mutate a lane B project owned by another checkout')
 
 
@@ -81,7 +84,7 @@ def init_runtime():
     if not token.exists():
         fd = os.open(token,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
         with os.fdopen(fd,'w') as stream: stream.write(secrets.token_urlsafe(48)+'\n')
-    if token.is_symlink() or token.stat().st_mode & 0o077:
+    if token.is_symlink() or not stat.S_ISREG(token.stat().st_mode) or token.stat().st_mode & 0o077:
         raise ValueError('lane B API token must be a private regular file')
     return identity
 
