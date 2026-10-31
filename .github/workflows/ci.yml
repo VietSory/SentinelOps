@@ -29,7 +29,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -e '.[ml,dev]'
-      - run: pytest -q tests/test_public_data*.py tests/test_gamma*.py tests/test_training_data_policy.py tests/test_rcaeval*.py tests/test_ml_pipeline.py tests/test_model_signals.py
+      - run: pytest -q tests/test_public_data*.py tests/test_gamma*.py tests/test_training_data_policy.py tests/test_rcaeval*.py tests/test_ml_pipeline.py tests/test_model_signals.py tests/test_local_*.py
       - name: Verify pinned publisher data and audit real Parquet tables
         run: |
           python - <<'PY'
