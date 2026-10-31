@@ -240,6 +240,7 @@ Mọi gate report ghi `NOT_RUN/PASS/FAIL/BLOCKED`, execution time/environment, c
 | D-14 | Rules/DOCX nguồn và competition scoring | Bổ sung authoritative files/links, tạo traceability matrix; TechX chỉ tham khảo | UNKNOWN | I / trước compliance/release sign-off |
 | D-15 | Targets về availability, public access và retention chính thức | Private demo access mặc định; SLA production để ngoài scope; retention/budget được chốt | PROPOSED/UNKNOWN | I + P / G0/G7 |
 | D-16 | Nguồn training/evaluation v1 | GAMMA v1 training; RCAEval pinned revision cho RCA validation/holdout; tối đa hai nguồn, không trộn rows, không đổi nhãn/SLO vì score thấp | ACCEPTED 2026-10-26, ADR-011; [machine contract](../configs/training_data_contract.json) | Owner-approved; readiness/source parity vẫn theo G2/G3/G7 |
+| D-17 | Prospective primary training v2 | Corpus HTTP local đăng ký mới với oracle workload/SLO độc lập; RCAEval giữ evaluation-only; không nâng vai trò pilot cũ, không thay G2/G3/G7 hay RCA thresholds | ACCEPTED 2026-10-31, owner phê duyệt ADR-014; [v2 contract](../configs/training_data_contract_v2.json) | Supersedes D-16 cho prospective primary fitting; v1 evidence giữ nguyên |
 
 Không cần chốt mọi UNKNOWN để đọc/review kế hoạch. Chỉ công việc phụ thuộc quyết định đó mới bị chặn. Khi quyết định được chốt, thêm ngày, actor, rationale và reference; không sửa PROPOSED thành Accepted mà không có bằng chứng review.
 

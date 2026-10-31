@@ -1,5 +1,13 @@
 # Dataset and Model Research Feasibility Decision — owner review
 
+**Owner decision 2026-10-31:** Option B was explicitly accepted through ADR-014.
+The separately versioned v2 contract now authorizes prospectively registered local
+HTTP primary training, preserving the original v1 contract and RCAEval's separate
+evaluation role. The [implemented successor and actual acquisition checkpoint](2026-10-31-prospective-http-admission.md)
+records original-byte admission, causal labels and guarded model software; no new
+dataset or model is accepted yet. The dated v1 findings and alternatives below
+remain historical evidence, not a pending request to approve ADR-014 again.
+
 2026-10-30. **Proposed decision only; no ADR approved and no frozen source policy changed.** Evidence: [G2/G3 investigation](G2_G3_BLOCKER_RESOLUTION.md), [G4 investigation](G4_RCA_EVIDENCE_RESOLUTION.md), associated machine-readable source/candidate reports. Implementation checkpoint `d72e654`; branch from merged main `dd12339`.
 
 1. **Can GAMMA support the current model targets?** Not from currently admitted evidence. Resource observations support source-specific numerical features. They do not establish live Checkout/Payment/Inventory HTTP RED semantics, certified healthy traffic, or verified gradual pre-SLO targets. RPC observations exist, but the audited tables have no HTTP status denominator and unverified units/mapping/completeness. Entire-archive absence is not claimed; full request traces are catalogued in four quarantined cases and are not silently admitted.

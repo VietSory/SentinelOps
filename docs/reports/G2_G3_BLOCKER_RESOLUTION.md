@@ -1,5 +1,12 @@
 # G2/G3 dataset and model resolution — 2026-10-30
 
+**Successor checkpoint 2026-10-31:** the owner accepted ADR-014 and prospective
+local HTTP source contract v2. See [implemented admission and actual capture status](2026-10-31-prospective-http-admission.md).
+The original GAMMA findings/counts below remain unchanged historical evidence.
+New source authorization does not pass G2/G3: the first capture is in progress,
+the audited completed support is zero, and no source-backed model is fitted or
+approved. Future acceptance must use actual newly collected certificates.
+
 **Verdict: G2 BLOCKED; G3 BLOCKED; zero admitted/activated models.** This investigation began at merged main `dd12339259b4f36bd61948eb2401a5939762cd1f`, on topic branch `fix/ai-rca-evidence-blockers`. Implementation checkpoint: `d72e654` (ML `f2c5a98`, RCA `baf7a8d`). No source policy, objective, threshold, accepted ADR or frozen schema changed. No final holdout was opened.
 
 ## Measured source and scope

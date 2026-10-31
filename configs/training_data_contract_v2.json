@@ -1,0 +1,59 @@
+{
+  "schema_version": "2.0",
+  "policy_version": "training-data/v2",
+  "approved_on": "2026-10-31",
+  "authorizing_adr": "ADR-014",
+  "supersedes_for_prospective_fitting": "training-data/v1",
+  "historical_policy_sha256": "ef0eb1b1c95a67faf424501e657c5e6530d49a1d18af7cbf59f9c07740afa21f",
+  "sources": {
+    "local_http": {
+      "publisher": "VietSory/SentinelOps",
+      "version": 1,
+      "role": "primary-training",
+      "source_profile": "prometheus-increase-60s-5s/v1",
+      "feature_set_version": "http-red-5m/v1",
+      "acquisition": "prospective-registered-isolated-local-sessions",
+      "oracle": "unsampled-server-completions-reconciled-with-independent-client-ledger"
+    },
+    "rcaeval": {
+      "publisher": "phamquiluan/RCAEval",
+      "revision": "afeacb11bcc94dadfd1c8f483ee4377b2b8b614e",
+      "role": "rca-validation-and-heldout-evaluation",
+      "ml_fitting_allowed": false,
+      "declared_license": "MIT"
+    }
+  },
+  "historical_only": [
+    "GAMMA-v1",
+    "previous-local-pilots-and-worker-captures"
+  ],
+  "combination_strategy": "source-isolated-no-row-concatenation",
+  "split_unit": "registered-acquisition-session-before-windowing",
+  "roles": [
+    "train",
+    "calibration",
+    "development-validation",
+    "sealed-final"
+  ],
+  "feature_mapping": "exact-live-http-red-units-and-service-identities",
+  "risk_target": "pre-slo-gradual-degradation",
+  "risk_horizon_seconds": 300,
+  "risk_readiness": "independent-slo-and-precursor-evidence-required",
+  "healthy_windows_per_service": {
+    "train": 300,
+    "calibration": 100
+  },
+  "minimum_healthy_groups_per_service": {
+    "train": 3,
+    "calibration": 2
+  },
+  "minimum_precursor_groups_per_service": {
+    "train": 3,
+    "calibration": 2
+  },
+  "source_certificates": "recompute-original-observations-never-self-attested-flags",
+  "on_gate_failure": "report-failure-without-changing-sources-targets-or-test-thresholds",
+  "third_source_allowed": false,
+  "activation_requires": "live-feature-source-parity-and-G3-G7",
+  "final_access": "sealed-until-owner-authorized-final-evaluation"
+}

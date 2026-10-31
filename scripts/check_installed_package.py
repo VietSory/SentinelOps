@@ -27,6 +27,10 @@ from sentinelops.incidents.rca import evaluate_rca
 from sentinelops.incidents.rca_replay import replay_rca
 from sentinelops.incidents.rca_producer import prepare_intent, publish_intent
 from sentinelops.experiments.runner import ExperimentConfig
+from sentinelops.experiments.local_corpus import acquisition_lock
+from sentinelops.experiments.local_campaign import planned_slots
+from sentinelops.experiments.local_labels import oracle_from_requests
+from sentinelops.ml.local_data import audit_local_corpus
 from sentinelops.experiments.multifault import grouping_report
 from sentinelops.public_data.downloads import fetch_file
 from sentinelops.public_data.audit import load_verified_manifest
@@ -67,7 +71,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'experiment-run', 'dataset-manifest', 'incident-write',
              'incident-envelope', 'incident-list', 'api-error', 'training-data-policy',
              'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result',
-             'rca-policy', 'rca-result'):
+             'rca-policy', 'rca-result', 'training-data-policy-v2'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 assert 'root_causes_ground_truth' in load_schema('experiment-run.schema.json')['properties']
 policy={'policy_version':'slo-health/local-v1','latency_ms':750.,'error_rate':.05,

@@ -139,6 +139,8 @@ Các lệnh trên là kế hoạch xác minh tại P0, không phải kết quả
 
 ## 8. P5 — Experiment Harness và dataset có ground truth
 
+**Cập nhật nguồn 2026-10-31:** owner đã phê duyệt [ADR-014](adr/ADR-014-proposed-local-training-evidence.md) và nguồn prospective local HTTP qua [contract v2](../configs/training_data_contract_v2.json). Corpus mới cần registration trước capture, oracle độc lập, group/split và admission dựa trên raw; pilot cũ không được promote. Đoạn ngày 2026-10-26 dưới đây giữ lịch sử v1; source authorization không chứng nhận G2/G3.
+
 **Cập nhật nguồn 2026-10-26:** owner đã chốt [ADR-011](adr/ADR-011-frozen-gamma-rcaeval-contract.md) và [training-data contract](../configs/training_data_contract.json): GAMMA v1 training chính, RCAEval RCA validation/heldout evaluation; không thêm nguồn thứ ba hoặc trộn rows. SMD là thí nghiệm lịch sử, không mở rộng tiếp. [PUBLIC_DATA_PLAN.md](PUBLIC_DATA_PLAN.md) xác định provenance, split và compatibility. Harness local phục vụ integration, label/source parity và transfer/calibration, không thay corpus chính. Không đếm public rows thành 300/100 live RED windows khi semantics chưa khớp; không đổi mục tiêu XGBoost thành nhãn bottleneck.
 
 **Mục tiêu:** Tạo dữ liệu đủ để học và đánh giá, có run độc lập và kiểm soát leakage.
