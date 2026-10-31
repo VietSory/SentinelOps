@@ -9,16 +9,33 @@ from sentinelops.contracts import validate_payload
 
 
 DEFAULT_POLICY = Path(__file__).resolve().parents[3] / "configs/training_data_contract.json"
+CURRENT_POLICY = DEFAULT_POLICY.with_name("training_data_contract_v2.json")
 
 
 def load_policy(path: Path = DEFAULT_POLICY) -> dict:
+    """Historical v1 authority for immutable GAMMA source reproduction."""
     policy = json.loads(path.read_text(encoding="utf-8"))
     validate_payload("training-data-policy.schema.json", policy)
     return policy
 
 
+def load_training_policy(path: Path = CURRENT_POLICY) -> dict:
+    """Current owner-approved prospective fitting authority (ADR-014)."""
+    policy = json.loads(path.read_text(encoding="utf-8"))
+    validate_payload("training-data-policy-v2.schema.json", policy)
+    return policy
+
+
+def require_current_training_source(dataset: str, policy: dict) -> None:
+    validate_payload("training-data-policy-v2.schema.json", policy)
+    source = policy["sources"].get(dataset)
+    if source is None or source.get("role") != "primary-training":
+        raise ValueError("training-data/v2 permits prospective registered local HTTP fitting only")
+
+
 def policy_hash(policy: dict) -> str:
-    validate_payload("training-data-policy.schema.json", policy)
+    schema = "training-data-policy-v2.schema.json" if policy.get("policy_version") == "training-data/v2" else "training-data-policy.schema.json"
+    validate_payload(schema, policy)
     return hashlib.sha256(json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 

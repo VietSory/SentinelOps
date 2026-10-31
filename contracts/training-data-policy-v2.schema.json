@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/training-data-policy-v2.schema.json",
+  "title": "OwnerApprovedProspectiveTrainingDataPolicyV2",
+  "description": "ADR-014 source authorization; not a healthy/precursor certificate or model approval. Historical v1 remains separately validated.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_version",
+    "approved_on",
+    "authorizing_adr",
+    "supersedes_for_prospective_fitting",
+    "historical_policy_sha256",
+    "sources",
+    "historical_only",
+    "combination_strategy",
+    "split_unit",
+    "roles",
+    "feature_mapping",
+    "risk_target",
+    "risk_horizon_seconds",
+    "risk_readiness",
+    "healthy_windows_per_service",
+    "minimum_healthy_groups_per_service",
+    "minimum_precursor_groups_per_service",
+    "source_certificates",
+    "on_gate_failure",
+    "third_source_allowed",
+    "activation_requires",
+    "final_access"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2.0"
+    },
+    "policy_version": {
+      "const": "training-data/v2"
+    },
+    "approved_on": {
+      "const": "2026-10-31"
+    },
+    "authorizing_adr": {
+      "const": "ADR-014"
+    },
+    "supersedes_for_prospective_fitting": {
+      "const": "training-data/v1"
+    },
+    "historical_policy_sha256": {
+      "const": "ef0eb1b1c95a67faf424501e657c5e6530d49a1d18af7cbf59f9c07740afa21f"
+    },
+    "sources": {
+      "const": {
+        "local_http": {
+          "publisher": "VietSory/SentinelOps",
+          "version": 1,
+          "role": "primary-training",
+          "source_profile": "prometheus-increase-60s-5s/v1",
+          "feature_set_version": "http-red-5m/v1",
+          "acquisition": "prospective-registered-isolated-local-sessions",
+          "oracle": "unsampled-server-completions-reconciled-with-independent-client-ledger"
+        },
+        "rcaeval": {
+          "publisher": "phamquiluan/RCAEval",
+          "revision": "afeacb11bcc94dadfd1c8f483ee4377b2b8b614e",
+          "role": "rca-validation-and-heldout-evaluation",
+          "ml_fitting_allowed": false,
+          "declared_license": "MIT"
+        }
+      }
+    },
+    "historical_only": {
+      "const": [
+        "GAMMA-v1",
+        "previous-local-pilots-and-worker-captures"
+      ]
+    },
+    "combination_strategy": {
+      "const": "source-isolated-no-row-concatenation"
+    },
+    "split_unit": {
+      "const": "registered-acquisition-session-before-windowing"
+    },
+    "roles": {
+      "const": [
+        "train",
+        "calibration",
+        "development-validation",
+        "sealed-final"
+      ]
+    },
+    "feature_mapping": {
+      "const": "exact-live-http-red-units-and-service-identities"
+    },
+    "risk_target": {
+      "const": "pre-slo-gradual-degradation"
+    },
+    "risk_horizon_seconds": {
+      "const": 300
+    },
+    "risk_readiness": {
+      "const": "independent-slo-and-precursor-evidence-required"
+    },
+    "healthy_windows_per_service": {
+      "const": {
+        "train": 300,
+        "calibration": 100
+      }
+    },
+    "minimum_healthy_groups_per_service": {
+      "const": {
+        "train": 3,
+        "calibration": 2
+      }
+    },
+    "minimum_precursor_groups_per_service": {
+      "const": {
+        "train": 3,
+        "calibration": 2
+      }
+    },
+    "source_certificates": {
+      "const": "recompute-original-observations-never-self-attested-flags"
+    },
+    "on_gate_failure": {
+      "const": "report-failure-without-changing-sources-targets-or-test-thresholds"
+    },
+    "third_source_allowed": {
+      "const": false
+    },
+    "activation_requires": {
+      "const": "live-feature-source-parity-and-G3-G7"
+    },
+    "final_access": {
+      "const": "sealed-until-owner-authorized-final-evaluation"
+    }
+  }
+}

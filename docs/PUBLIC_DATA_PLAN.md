@@ -1,8 +1,14 @@
 # Public training data — frozen selection and execution plan
 
-The owner-approved [ADR-011](adr/ADR-011-frozen-gamma-rcaeval-contract.md) and machine-validated [training_data_contract.json](../configs/training_data_contract.json) are authoritative. GAMMA v1 is the primary training source; RCAEval is the second and final public source for RCA validation and heldout evaluation. Public research does not automatically satisfy live G2/G3/G7. Local pilots remain integration evidence, not the primary training corpus.
+Current prospective fitting is governed by owner-approved [ADR-014](adr/ADR-014-proposed-local-training-evidence.md)
+and [training_data_contract_v2.json](../configs/training_data_contract_v2.json), accepted 2026-10-31.
+It replaces the primary GAMMA source with newly registered local HTTP captures and an independent workload/SLO oracle.
+RCAEval remains evaluation-only with its unchanged frozen partitions. The source replacement does not pass G2/G3,
+retroactively promote pilots or activate models. The v1 source policy/schema and GAMMA bytes remain immutable historical
+reproduction inputs. `load_policy()` serves that historical v1 context; `load_training_policy()` is the v2 prospective authority.
+The public-source inventory and findings below retain their original historical scope.
 
-## Frozen source roles
+## Historical v1 source roles (unchanged reproduction scope)
 
 | Source | Identity | Role / boundary |
 | --- | --- | --- |

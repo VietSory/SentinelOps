@@ -26,14 +26,17 @@ source-derived RCA, persisted IER lifecycle and the protected API.
 keep missing data/model results explicit. Validated model serving, RCA performance, Bedrock,
 operator UI, controlled remediation and AWS deployment follow their separate gates; local telemetry and software checks do not certify them.
 
-The [frozen training-data contract](configs/training_data_contract.json) selects
-GAMMA v1 training and RCAEval RCA validation/heldout evaluation, with at most these
-two public sources and no row concatenation. SMD remains historical research.
-See [ADR-011](docs/adr/ADR-011-frozen-gamma-rcaeval-contract.md) and the
-[execution plan](docs/PUBLIC_DATA_PLAN.md).
+The owner accepted [ADR-014](docs/adr/ADR-014-proposed-local-training-evidence.md)
+on 2026-10-31. The [prospective training contract v2](configs/training_data_contract_v2.json)
+authorizes a newly registered local HTTP corpus as primary training data, with
+RCAEval kept separately for RCA validation/heldout evaluation. Readiness still
+requires original workload/SLO evidence, independent groups and live feature parity.
+The [historical v1 contract](configs/training_data_contract.json) and GAMMA source
+snapshots remain unchanged for reproduction; earlier local pilots are not promoted.
+See the [migration/source plan](docs/PUBLIC_DATA_PLAN.md).
 [RCAEval partitions and source access](docs/RCAEVAL_PARTITIONS.md) freeze case groups
-and keep the final holdout sealed. Local captures support integration
-and transfer/calibration. Public bundles require measured live feature/source
+and keep the final holdout sealed. Earlier local captures retain their integration scope; only prospectively registered
+v2 captures may enter the new admission process. Public bundles require measured live feature/source
 compatibility before activation; XGBoost still requires independent pre-SLO
 gradual labels.
 
