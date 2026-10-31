@@ -1,5 +1,26 @@
 # SentinelOps — verified implementation status
 
+## Current delivery checkpoint — 2026-10-31
+
+PR [#24](https://github.com/VietSory/SentinelOps/pull/24) is merged as `f4891cf`.
+Its reviewed fix `98cdd67` passed 743 local regression tests, contract/package
+checks and [exact-head CI run 41179556972](https://github.com/VietSory/SentinelOps/actions/runs/41179556972)
+(8/8 jobs). This is evidence for that code; later merge/delivery SHAs have their
+own CI results. No new model, cloud deployment or quality-gate acceptance follows
+from this documentation checkpoint.
+
+The owner requested two independent delivery lanes: **A Data/AI/RCA/explanation**
+and **B application/platform/AWS**, with feature completion prioritized over
+unmeasured optimization or repeated verification. Follow the new
+[delivery plan](DELIVERY_PLAN.md), [onboarding](TEAM_HANDOFF.md) and
+[integration/ownership contract](WORKSTREAM_CONTRACT.md).
+G2/G3 remain unaccepted at the latest published technical checkpoint; current
+corpus/process inventory must be checked on the acquisition host. UI, explanation,
+remediation and AWS remain work to deliver. The entries below retain their dated
+scope, not a command to repeat completed phases.
+
+## Prior technical checkpoints
+
 Prospective-source checkpoint 2026-10-31: **726 regression tests pass, zero skips**;
 24 schemas/17 samples/3 configurations and installed wheel pass. The
 [admission report](reports/2026-10-31-prospective-http-admission.md) records the

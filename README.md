@@ -61,14 +61,18 @@ payloads. The current architecture baseline is [PRODUCT_SPEC v1.1](docs/PRODUCT_
 
 ## Implementation planning
 
-The implementation planning pack, based on the source review at `20edcae`, is:
+The current delivery plan uses two independent contributors, based on merged
+PR #24 (`f4891cf`, 2026-10-31). New contributors start with:
 
-- [Delivery plan](docs/DELIVERY_PLAN.md): phases, dependencies, ownership, estimates and deliverables.
+- [Team handoff](docs/TEAM_HANDOFF.md): project context, existing commands and the assignment for each contributor.
+- [Two-person delivery plan](docs/DELIVERY_PLAN.md): A owns Data/AI/RCA/explanation; B owns application/platform/AWS. Build usable features first and verify according to impact.
+- [Workstream contract](docs/WORKSTREAM_CONTRACT.md): file ownership, isolated checkouts/resources and model/explanation/AWS integration boundaries.
 - [Technical specification](docs/TECHNICAL_SPEC.md): component design, data semantics, APIs, model lifecycle and controlled remediation.
 - [Constraints and acceptance gates](docs/CONSTRAINTS_AND_GATES.md): frozen decisions, proposed targets, verification evidence and open decisions.
 
-These documents supplement the product spec and accepted ADRs. New design choices
-are marked as proposals; planned capabilities and acceptance targets are not claims
+The older phase sequencing is superseded by this delivery plan; dated reports
+retain their original evidence scope. These documents supplement the product spec
+and accepted ADRs. New design choices are marked as proposals; planned capabilities and acceptance targets are not claims
 of completed implementation or measured performance.
 
 Delivery follows the owner's current instructions for the task. Keep small,
