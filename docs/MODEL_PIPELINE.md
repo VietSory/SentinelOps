@@ -1,9 +1,11 @@
 # Guarded offline model software
 
-GAMMA v1 remains the only primary training source; RCAEval cannot fit models,
-preprocessors or thresholds. No new accepted training dataset/model is produced
-while healthy-reference, independent precursor and feature/source gates remain
-blocked. The measured resource report is not an admission certificate.
+Owner-approved ADR-014 and `training-data/v2` now authorize prospectively registered
+local HTTP observations as primary training data. Original source/health/precursor
+evidence is still required before admission. RCAEval cannot fit models, preprocessors
+or thresholds. No new dataset/model is accepted while those gates remain blocked.
+The GAMMA interfaces/counts below describe immutable historical v1 reproduction;
+the measured resource report is not a current admission certificate.
 
 `scripts.audit_model_readiness` recomputes exact accounting from the committed
 grouped report, identifies its historical scope, and records zero certified live
@@ -87,5 +89,6 @@ canonical and legacy replay use the same validator. Unsupported versions and
 forged status/clock combinations fail closed. The strict HTTP prediction payloads,
 source contract, model admission and activation gates are unchanged.
 
-[Proposed ADR-014](adr/ADR-014-proposed-local-training-evidence.md) prepares the
-next source decision for owner review; it does not enable a new training source.
+[Accepted ADR-014](adr/ADR-014-proposed-local-training-evidence.md) records explicit
+owner approval on 2026-10-31. The [new capture protocol](LOCAL_HTTP_CORPUS.md) describes
+prospective registration; source authorization does not pass admission or activate models.

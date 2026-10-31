@@ -48,6 +48,8 @@ class ExperimentConfig:
     recovery_seconds: int = 180
     fault_mode: str = "latency"
     maximum_delay_ms: int = 1200
+    target_service: str = "payment-service"
+    all_entry_traffic: bool = False
 
     def validate(self):
         if any(type(value) is not int for value in (self.seed,self.warmup_seconds,self.active_seconds,self.recovery_seconds,self.maximum_delay_ms)):
@@ -68,6 +70,10 @@ class ExperimentConfig:
             raise ValueError("invalid sandbox fault bounds")
         if self.scenario == "S3" and self.fault_mode != "latency":
             raise ValueError("S3 requires gradual latency, not an abrupt error fault")
+        if self.target_service not in ("payment-service", "inventory-service") or type(self.all_entry_traffic) is not bool:
+            raise ValueError("invalid local fault target or entry traffic mode")
+        if self.scenario == "S5" and self.target_service != "payment-service":
+            raise ValueError("S5 retains its frozen independent Payment/Inventory targets")
 
 
 class ExperimentLock:
@@ -151,7 +157,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
     source = PrometheusSource()
     slo = SLOConfig()
     captures,infra_refs,trace_refs,outcomes = [],[],[],[]
-    recent = deque(maxlen=180 if config.scenario=="S5" else 60)
+    multi_entry = config.scenario == "S5" or config.all_entry_traffic
+    recent = deque(maxlen=180 if multi_entry else 60)
     counts = Counter()
     ended = None
     originals = {}
@@ -162,20 +169,21 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         "scenario_id":config.scenario,"declared_split":config.split,"environment":"local","source_profile":SOURCE_PROFILE,
         "seed":config.seed,"status":"running","source_commit":commit,"dirty_worktree":dirty,"image_digests":images,
         "started_at":timestamp(datetime.now(timezone.utc)),"ended_at":None,"warmup_end_at":None,"fault_start_at":None,
-        "recovery_start_at":None,"root_cause_ground_truth":None if config.scenario in ("S0","S5") else "payment-service",
-        "affected_services_ground_truth":[] if config.scenario == "S0" else sorted(BUSINESS_ROUTES) if config.scenario=="S5" else ["payment-service","checkout-service"],
+        "recovery_start_at":None,"root_cause_ground_truth":None if config.scenario in ("S0","S5") else config.target_service,
+        "affected_services_ground_truth":[] if config.scenario == "S0" else sorted(BUSINESS_ROUTES) if config.scenario=="S5" else [config.target_service,"checkout-service"],
         "fault_method":"none" if config.scenario == "S0" else "multi-fault" if config.scenario=="S5" else ("gradual-latency" if config.scenario == "S3" else "sandbox-"+config.fault_mode),
         "slo_config_version":"slo/local-v1","label_protocol_version":"degradation-phase/v1",
         "slo_by_service":{service:{"first_violation_at":None,"confirmed_at":None,"request_count":0} for service in BUSINESS_ROUTES},
         "parameters":{**asdict(config),"slo":asdict(slo),"loaded_source_sha256":hashes},"phase_intervals":[],
         "source_manifest_ref":None,"logs_ref":None,"request_outcomes_ref":None,"infrastructure_refs":[],"failure_reason":None,
     }
-    entries=tuple(BUSINESS_ROUTES) if config.scenario=="S5" else ("checkout-service",)
+    entries=tuple(BUSINESS_ROUTES) if multi_entry else ("checkout-service",)
+    if multi_entry:
+        run["parameters"]["traffic_plan"]={service:{"entry_rps":config.rps,"method":BUSINESS_ROUTES[service][0],
+            "route":BUSINESS_ROUTES[service][1]} for service in entries}
     if config.scenario=="S5":
         run["root_causes_ground_truth"]=["payment-service","inventory-service"]
         run["parameters"]["s5_protocol_sha256"]=protocol_hash
-        run["parameters"]["traffic_plan"]={service:{"entry_rps":config.rps,"method":BUSINESS_ROUTES[service][0],
-            "route":BUSINESS_ROUTES[service][1]} for service in entries}
         run["parameters"]["role"]="local-RCA-development-or-heldout-only"
     failure = None
     async with httpx.AsyncClient(timeout=12.,trust_env=False) as client:
@@ -190,6 +198,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             async with semaphore:
                 trace_id,correlation = uuid4().hex,"exp-"+uuid4().hex
                 began = timestamp(datetime.now(timezone.utc))
+                began_monotonic = time.perf_counter()
                 try:
                     headers={"x-correlation-id":correlation,"traceparent":f"00-{trace_id}-{uuid4().hex[:16]}-01"}
                     if entry=="checkout-service":
@@ -205,7 +214,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                     status = "transport_error"
                 counts[str(status)] += 1
                 outcomes.append({"phase":phase,"started_at":began,"completed_at":timestamp(datetime.now(timezone.utc)),
-                                 "status":status,"trace_id":trace_id,"correlation_id":correlation,"request_entry_service":entry})
+                                 "status":status,"trace_id":trace_id,"correlation_id":correlation,"request_entry_service":entry,
+                                 "client_duration_ms":round((time.perf_counter()-began_monotonic)*1000, 3)})
                 recent.append({"trace_id":trace_id,"completed_at":time.time(),"correlation_id":correlation,"entry_service":entry})
 
         def capture_trace(probe):
@@ -259,7 +269,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                     collector.result()
                 if ramp and time.monotonic() >= next_ramp:
                     progress = max(.05,1-(deadline-time.monotonic())/duration)
-                    await set_fault(PAYMENT,"latency",max(1,int(config.maximum_delay_ms*progress)))
+                    target = PAYMENT if config.target_service == "payment-service" else INVENTORY
+                    await set_fault(target,"latency",max(1,int(config.maximum_delay_ms*progress)))
                     next_ramp += 30
                 if len(active)+len(entries) > 32:
                     raise RuntimeError("bounded workload queue saturated; lower load or fault delay")
@@ -289,11 +300,12 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                 await load("healthy",config.active_seconds)
             else:
                 mode = "latency" if config.scenario == "S3" else config.fault_mode
-                await set_fault(PAYMENT,mode,1 if config.scenario == "S3" else config.maximum_delay_ms)
+                target = PAYMENT if config.target_service == "payment-service" else INVENTORY
+                await set_fault(target,mode,1 if config.scenario == "S3" else config.maximum_delay_ms)
                 if config.scenario=="S5":await set_fault(INVENTORY,mode,config.maximum_delay_ms)
                 run["fault_start_at"] = timestamp(datetime.now(timezone.utc))
                 await load("degrading" if config.scenario == "S3" else "fault",config.active_seconds,config.scenario == "S3")
-                await set_fault(PAYMENT,"healthy")
+                await set_fault(target,"healthy")
                 if config.scenario=="S5":await set_fault(INVENTORY,"healthy")
                 run["recovery_start_at"] = timestamp(datetime.now(timezone.utc))
                 await load("recovery",config.recovery_seconds)
@@ -323,14 +335,14 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         correlations = {item["correlation_id"] for item in outcomes}
         if any(item["correlation_id"] not in correlations for item in admitted if item["event"] == "request_completed"):
             failure = failure or "UnexpectedBusinessTraffic"
-        if config.scenario=="S5":
+        if multi_entry:
             coverage=server_log_coverage(full,admitted,outcomes)
             run["parameters"].update(full_logs_ref=full_logs_ref,server_log_coverage=coverage)
             if not all(row["complete"] for row in coverage.values()):failure=failure or "IncompleteServerLogs"
         for service in BUSINESS_ROUTES:
             measured = measure_slo(admitted,service,slo,start_at=datetime.fromisoformat(run["started_at"].replace("Z","+00:00")),end_at=ended)
             run["slo_by_service"][service] = {key:measured[key] for key in ("first_violation_at","confirmed_at","request_count")}
-            if config.scenario!="S5" and measured["request_count"] < .95*len(outcomes): failure = failure or "IncompleteServerLogs"
+            if not multi_entry and measured["request_count"] < .95*len(outcomes): failure = failure or "IncompleteServerLogs"
         base = process_captures(captures,serving)
         if base["eligible_feature_count"] == 0:
             failure = failure or "NoEligibleFeatureWindows"

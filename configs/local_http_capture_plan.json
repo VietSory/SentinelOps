@@ -1,0 +1,41 @@
+{
+  "plan_version": "local-http-prospective-plan/v1",
+  "policy_sha256": "b7faba71c1241886eb825903bbfdfcb560a899138942277cbdd60ee9172bda66",
+  "source_profile": "prometheus-increase-60s-5s/v1",
+  "feature_set_version": "http-red-5m/v1",
+  "environment": "local",
+  "oracle_protocol": "server-completion-client-ledger/v1",
+  "label_protocol": "verified-pre-slo-300s/v1",
+  "healthy_active_seconds": {
+    "train": 6300,
+    "calibration": 3300,
+    "development-validation": 900
+  },
+  "gradual_active_seconds": 1200,
+  "warmup_seconds": 300,
+  "recovery_seconds": 360,
+  "entry_rps": 1.0,
+  "maximum_delay_ms": 1200,
+  "seed_base": 20261031,
+  "minimum_groups": {
+    "train": 3,
+    "calibration": 2,
+    "development-validation": 5,
+    "sealed-final": 5
+  },
+  "maximum_groups": {
+    "train": 10,
+    "calibration": 6,
+    "development-validation": 10,
+    "sealed-final": 5
+  },
+  "roles_in_order": [
+    "train",
+    "calibration",
+    "development-validation",
+    "sealed-final"
+  ],
+  "group_isolation": "fresh-owned-compose-project-containers-and-postgresql-volume; record host/context; never count filenames as independence",
+  "sealed_final_capture_allowed": false,
+  "previous_capture_promotion_allowed": false
+}
