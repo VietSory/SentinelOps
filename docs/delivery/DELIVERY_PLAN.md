@@ -142,3 +142,89 @@ UI, model đã được chấp nhận và môi trường AWS được phép. **T
 explanation/fallback, action+verify local/AWS, source parity, final evaluation/
 release và G0–G8 liên quan được chứng minh. Demo có giới hạn có thể giao sớm,
 không thay nghiệm thu phần còn thiếu.
+
+<a id="lane-b-execution"></a>
+
+## 7. Checklist thực thi B — Application/Platform và UI
+
+Owner đã nhận **lane B và UI** ngày 2026-10-31. Baseline đối chiếu code:
+`39b8694` sau PR #24 và lần tổ chức lại docs. Đây là kế hoạch triển khai, không
+phải xác nhận UI, override, auth production hoặc cloud đã có. Giữ ownership của
+A trong contract; không tiếp tục sửa corpus/model/worker để làm UI.
+
+### B1 — Lát cắt đầu tiên: incident thật lên UI local
+
+| Thứ tự | Việc B triển khai | Điểm kết thúc có thể kiểm tra |
+| --- | --- | --- |
+| B1.1 — Sandbox riêng | Override Compose cho project `sentinelops-b`, toàn bộ published ports theo contract; commerce/control volumes riêng. API trên 18000, control DB 15433. Kiểm rendered config và port ownership trước `up`; không down/prune tài nguyên A | Config không còn published port của A; start/stop chỉ tác động project B. Readiness DB và model tách riêng |
+| B1.2 — UI shell + kết nối | Assets trong **mới** `src/sentinelops/ui/`, route same-origin `/ui` từ FastAPI. Bản đầu dùng HTML/CSS và JavaScript modules, không thêm frontend service/build framework. Token nhập vào memory của tab, không nhúng bundle, URL hay localStorage; logout xóa dữ liệu/token | Mở UI qua API 18000; có loading, chưa đăng nhập, sai token, mất mạng và DB unavailable; không lộ token trong log/DOM nội dung lỗi |
+| B1.3 — List và detail | List incident, filter state/service, phân trang bằng opaque cursor. Detail đọc exact IER và context, evidence có thể tra theo ID, source refs hiển thị/copy an toàn; giữ thứ tự ranking backend | Thao tác trên API thật, không hardcode incident/score. Empty list khác lỗi 503; số đếm của một trang không được gọi tổng incident |
+| B1.4 — Timeline/history + uncertainty | Pin incident revision khi tải detail/context/history; theo `next_after_revision`, không trộn revision. Tách trạng thái store/model và thời điểm cập nhật; UNKNOWN không hiển thị healthy | Chuyển revision đúng nội dung; response cũ không ghi đè selection mới. Model 503 vẫn xem được incident/evidence/history |
+| B1.5 — Đóng đường chạy thật | Dùng CLI worker hiện có trên host B với endpoint/DSN/root riêng; thu workload của B khi không gây nhiễu phép đo A. Gây một lỗi Payment có kiểm soát trong sandbox B, đọc IER worker tạo từ control DB qua UI | Một incident có source lineage thật đi qua worker → PostgreSQL → HTTP → UI. Khởi động lại API vẫn đọc cùng revision; fixture chỉ chứng minh phần mềm UI, không thay nghiệm thu này |
+
+**Mapping UI chỉ dùng wire fields đã có:**
+
+| Màn hình/trạng thái | Nguồn | Ràng buộc |
+| --- | --- | --- |
+| Readiness | `/health`, `/ready` và protected `/ready/incidents` | `/health` chỉ liveness; `/ready` có thể 503 vì model dù store dùng được. Render `dependencies` riêng |
+| List | `GET /v1/incidents`: `items`, `next_cursor` | Chỉ `state`, `service`, `limit`, `cursor`; chưa có time-range/search/global aggregate API. Đổi filter phải reset cursor |
+| Detail | `GET /v1/incidents/{id}?revision=N` | IER giữ strict v1, revision/ETag ở headers; không thêm field để tiện UI |
+| History và availability | `GET /v1/incidents/{id}/context?revision=N&after_revision=…` | Pin revision; dùng `context.availability`, `lifecycle_stage`, `recovery_source` và `timeline`; không suy recovered từ thiếu dữ liệu |
+| Model signals | `service_signals` của IER và readiness | Mảng rỗng/risk null là không có signal tương ứng, không phải score 0. Không gọi `/detect` với feature do UI bịa |
+| RCA/evidence | `root_cause_ranking`, `evidence[]`, `evidence_refs` | Đây là suspect/support, không phải xác suất đúng hay quyền remediation. Hiển thị facts/reasons nguyên nghĩa, không tự xếp hạng lại |
+
+IER/context hiện chưa có typed fields cho đầy đủ RCA coverage/margin/abstention
+và model-version provenance. B1 không parse prose để dựng trạng thái “RCA đã xác
+nhận”, cũng không biến `escalated` thành một lý do abstention cụ thể. Khi thiếu
+structured qualification, hiển thị chưa có kết luận RCA được xác nhận từ API,
+vẫn cho xem ranking/facts. Nếu cần field mới, chốt supplemental contract/version
+và producer với A; không mở rộng strict IER hoặc đọc trực tiếp corpus/artifact
+riêng của A từ browser. `artifact://` là reference, không mặc định là URL tải được.
+
+B1 là UI **chỉ đọc**. Explanation hiện unavailable cho đến H2 thật; không thêm
+provider giả. Action không có nút execute khi policy/executor chưa triển khai;
+không coi lifecycle ghi trong DB là bằng chứng action đã chạy.
+
+**Packaging và isolation:** bổ sung assets vào wheel/image rồi kiểm installed
+package, không để UI chỉ chạy được từ checkout. Worker CLI đang xác minh loopback
+source/control DB; bản local đầu giữ worker là host processes có lifecycle riêng,
+không nhét vào container rồi đổi hostname/bỏ guard để chạy. Các flags hiện có
+`--prometheus`, `--jaeger`, `--project`, `--metrics-otlp-endpoint` và DSN môi trường
+được wiring theo port B. Artifact roots B không dùng chung checkpoint của A.
+Không bật load/stress cùng host trong lúc A đang đo nếu capacity chưa tách được;
+coding/UI và API/DB checks độc lập vẫn tiếp tục.
+
+**Kiểm tra đủ cho B1:** focused API/schema regressions; browser flow login → list
+→ filter/pagination → detail → pinned history; lỗi 401/404/503, network/retry và
+response đến sai thứ tự; render log/fact không thực thi HTML/script. Kiểm keyboard,
+focus, tương phản và layout hẹp ở các màn chính. Dùng một integration real DB/API
+và một incident nguồn thật để nghiệm thu lát cắt; không chạy lại cả native suite
+cho từng sửa CSS. Dùng CI đúng SHA ở mốc integration.
+
+### B2 → B4 — Việc tiếp sau và dependency thật
+
+- **B2:** package/start-stop/readiness và config/image pin; health/model-unavailable
+  UI; nối H2 qua wrapper versioned khi backend A tồn tại; auth adapter và session
+  phù hợp môi trường; dashboard vận hành và CI theo tác động. Các phần action chưa
+  có phải hiển thị unavailable, không thành công giả.
+- **B3:** executor `payment-rollback-known-good/v1` trong Kubernetes local riêng;
+  immutable known-good digest, policy/dry-run/approval, idempotency/lock/audit,
+  telemetry verify và escalation. Viết/validate IaC plan song song; giữ auto action
+  blocked khi H4 thiếu qualification. Không dùng explanation làm authorization.
+- **B4:** chỉ deploy/activate khi có quyền cloud/budget/region và H1/H3 đủ gate.
+  Lệnh apply AWS, mở final holdout và activation model không được cấp quyền chỉ
+  bởi checklist này. Phạm vi hiện tại vẫn local; không provision AWS.
+
+### Thứ tự commit dự kiến
+
+1. `feat(platform): isolate lane B local runtime` — override, config và lifecycle
+   riêng; chưa tuyên bố có incident E2E.
+2. `feat(ui): add authenticated incident list and detail` — shell/asset packaging,
+   API client, read-only list/detail và unavailable states.
+3. `feat(ui): show pinned incident history and evidence` — timeline pagination,
+   revision consistency, provenance và uncertainty theo fields thực sự có.
+4. `test(ui): verify source-backed local incident flow` — hoàn tất đường chạy B1
+   trên nguồn/DB thật, sửa lỗi thực tế và cập nhật runbook mở UI.
+
+Không hứa thời gian hoàn thành theo số test hoặc thời gian chờ A/CI. Điểm bắt đầu
+tiếp theo là **B1.1**, rồi giao list/detail sử dụng được trước khi mở rộng B2–B4.
