@@ -6,8 +6,8 @@ from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.workers.health_source import verify_health_batch
 from sentinelops.workers.incident_state import advance_groups
 from sentinelops.workers.legacy_incident_projection import evaluate_cluster, incident_commands
-from sentinelops.workers.model_signals import add_model_support
-from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, IncompatibleFeatures
+from sentinelops.workers.model_signals import add_model_support, verify_model_signal
+from sentinelops.ml.registry import ModelRegistry
 
 
 def replay_incident_history(store, snapshot, topology, health_policy, rca_policy, *, model_registry=None):
@@ -48,16 +48,7 @@ def replay_incident_history(store, snapshot, topology, health_policy, rca_policy
                 raise ValueError("recorded model signal differs from accepted source/version/window")
             seen.add(signal["service"])
             feature = store.read(signal["feature_ref"])
-            decision = signal["inference"]["inferred_at"] if signal["inference"] is not None else signal["evaluated_at"]
-            expected, reason = None, None
-            try:
-                expected = registry.infer_envelope(feature, now=utc_time(decision))
-            except ModelUnavailable:
-                reason = "no-validated-compatible-model"
-            except IncompatibleFeatures:
-                reason = "ineligible-incompatible-or-stale-feature"
-            if expected != signal["inference"] or reason != signal["missing_reason"]:
-                raise ValueError("recorded model inference does not reproduce with the pinned bundle")
+            verify_model_signal(feature, signal, registry)
         for item, modalities in zip(closed, recorded["modalities"]):
             results = evaluate_cluster(store, item, policy=rca_policy, as_of=utc_time(recorded["processed_at"]),
                 health_policy=health_policy, modalities=modalities,
