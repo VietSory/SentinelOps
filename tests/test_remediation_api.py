@@ -40,6 +40,10 @@ class Reader:
         self.args=(incident_id,revision,kwargs)
         return {'observation_version':'action-list/v1','incident_id':incident_id,
             'incident_revision':revision,'items':[observation(state())] if revision>=2 else [],'next_cursor':None}
+    async def quarantine(self,key):
+        if self.corrupt: raise RuntimeError('SECRET optional quarantine migration unavailable')
+        return {'observation_version':'quarantine-status/v1','action_id':key,'action_revision':3,
+                'action_phase':'escalated','quarantine_state':'held','resolution':None} if key=='a'*64 else None
 
 
 class Incidents:
@@ -133,4 +137,32 @@ def test_existing_positional_settings_keep_the_api_token_and_optional_dependency
                                      headers={'Authorization':'Bearer '+TOKEN}) as client:
             assert (await client.get('/ready/incidents')).status_code==200
             assert (await client.get('/ready/actions')).status_code==200
+    asyncio.run(run())
+
+
+def test_quarantine_status_is_authenticated_read_only_and_keeps_its_own_etag():
+    async def run():
+        app=create_app(Settings(api_token=TOKEN),action_reader=Reader())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://api') as client:
+            path='/v1/actions/'+'a'*64+'/quarantine'
+            assert (await client.get(path)).status_code==401
+            client.headers['Authorization']='Bearer '+TOKEN
+            response=await client.get(path)
+            assert response.status_code==200 and response.json()['quarantine_state']=='held'
+            validate_payload('quarantine-status.schema.json',response.json())
+            assert (await client.get(path,headers={'If-None-Match':response.headers['etag']})).status_code==304
+            assert (await client.post(path,json={'released':True})).status_code==405
+            assert (await client.get('/v1/actions/'+'b'*64+'/quarantine')).status_code==404
+            assert (await client.get('/v1/actions/invalid/quarantine')).status_code==422
+    asyncio.run(run())
+
+
+def test_missing_quarantine_feature_does_not_become_an_unlocked_healthy_success():
+    async def run():
+        reader=Reader();reader.corrupt=True
+        app=create_app(Settings(api_token=TOKEN),action_reader=reader)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://api',headers={'Authorization':'Bearer '+TOKEN}) as client:
+            response=await client.get('/v1/actions/'+'a'*64+'/quarantine')
+            assert response.status_code==503 and 'SECRET' not in response.text
+            assert 'quarantine_state' not in response.json()
     asyncio.run(run())

@@ -3,7 +3,7 @@ import {ApiFailure, IncidentClient} from './client.js';
 const blank = () => ({session:false, filters:{state:'',service:''}, rows:[], nextCursor:null, listLoading:false,
   listError:null, detail:null, detailLoading:false, detailError:null, historyLoading:false, historyError:null,
   readiness:null, readinessError:null, selected:null, selectedRevision:null, updatedAt:null, notice:null,
-  actions:null, actionsLoading:false, actionsError:null});
+  actions:null, actionsLoading:false, actionsError:null, quarantines:{}});
 
 /** Generation guards also reject responses from transports that ignore AbortSignal. */
 export class Workspace {
@@ -13,6 +13,10 @@ export class Workspace {
   }
   emit() { this.#notify(this.state); }
   #cancel(key) { this.#tasks.get(key)?.abort(); this.#tasks.delete(key); }
+  #clearQuarantines() {
+    for (const key of [...this.#tasks.keys()]) if (key.startsWith('quarantine:')) this.#cancel(key);
+    this.state.quarantines={};
+  }
   async #run(key, action, success, failure, end) {
     this.#cancel(key);
     const controller = new AbortController(); this.#tasks.set(key,controller);
@@ -51,6 +55,7 @@ export class Workspace {
   }
   async filter(filters) {
     this.#cancel('detail'); this.#cancel('history'); this.#cancel('actions');
+    this.#clearQuarantines();
     Object.assign(this.state,{filters:{...filters},rows:[],nextCursor:null,detail:null,selected:null,selectedRevision:null,
       detailError:null,detailLoading:false,historyLoading:false,historyError:null,actions:null,actionsLoading:false,actionsError:null});
     return this.loadList();
@@ -61,6 +66,7 @@ export class Workspace {
       this.state.detailError = new ApiFailure(0,'invalid_response'); this.emit(); return;
     }
     this.#cancel('history'); this.#cancel('actions');
+    this.#clearQuarantines();
     const client = this.#client;
     Object.assign(this.state,{selected:id,selectedRevision:revision,detail:null,detailLoading:true,detailError:null,historyError:null,
       historyLoading:false,actions:null,actionsLoading:false,actionsError:null});
@@ -82,10 +88,22 @@ export class Workspace {
     const detail = this.state.detail;
     if (!this.#client || !detail || this.state.actionsLoading || append && !this.state.actions?.next_cursor) return;
     const client = this.#client, cursor = append ? this.state.actions.next_cursor : null;
+    if (!append) this.#clearQuarantines();
     this.state.actionsLoading = true; this.state.actionsError = null; this.emit();
     return this.#run('actions',s => client.actions(detail.incident_id,detail.revision,cursor,s),value => {
       const items = append ? [...this.state.actions.items,...value.items] : value.items;
       this.state.actions = {...value,items:[...new Map(items.map(item => [item.action_id,item])).values()]};
     },error => { this.state.actionsError = error; },() => { this.state.actionsLoading = false; });
+  }
+  async loadQuarantine(id) {
+    const item=this.state.actions?.items.find(value => value.action_id===id);
+    if (!this.#client || !item || this.state.quarantines[id]?.loading) return;
+    const client=this.#client;
+    const set=value => { this.state.quarantines={...this.state.quarantines,[id]:value}; };
+    set({loading:true,result:null,error:null});this.emit();
+    return this.#run(`quarantine:${id}`,s => client.quarantine(id,item.action_revision,s),
+      value => {set({loading:true,result:value,error:null});},
+      error => {set({loading:true,result:null,error});},
+      () => {set({...this.state.quarantines[id],loading:false});});
   }
 }

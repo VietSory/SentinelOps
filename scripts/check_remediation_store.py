@@ -203,6 +203,10 @@ async def test_database(name,port,bootstrap_password,runtime_password):
             return await journal.transition(next_state['action_id'],next_state['revision'],'escalated',next_state['facts'])
         await asyncio.gather(snapshots(),transitions())
         checks.append('concurrent read snapshots match the immutable audit while transitions commit')
+        from scripts.check_quarantine_store import exercise as check_quarantine
+        quarantine_checks,quarantine_action,quarantine_before=await check_quarantine(
+            bootstrap,action,reader_pool,repository,incident,target,port,runtime_password)
+        checks.extend(quarantine_checks)
         before=await journal.get(state3['action_id'])
         require_owned(name);docker('stop',name)
         try:
@@ -217,6 +221,7 @@ async def test_database(name,port,bootstrap_password,runtime_password):
                 await asyncio.sleep(.25)
         else: raise AssertionError('action store failed to reconnect')
         assert await journal.get(state3['action_id'])==before
+        assert await reader.quarantine(quarantine_action)==quarantine_before
         await repository.check_ready()
         checks.append('actual PostgreSQL stop/start preserves exact immutable action history and core readiness')
         await reader.check_ready()
@@ -253,7 +258,7 @@ async def test_database(name,port,bootstrap_password,runtime_password):
             assert (await client.post('/v1/actions/'+state3['action_id'],json={'approved':True})).status_code==405
         checks.append('actual PostgreSQL read-only action HTTP exposes verified audit, ETag and revision-scoped pagination; no write route')
         return {'status':'PASS','fixture_only':True,'kubernetes_mutated':False,'H4_accepted':False,
-                'core_migrations':[1,2,3],'action_migrations':[1],'checks':checks}
+                'core_migrations':[1,2,3],'action_migrations':[1,2],'checks':checks}
     finally:
         if action: await action.close()
         if core: await core.close()
@@ -266,7 +271,10 @@ async def run(output):
     hashes={name:hashlib.sha256((PROJECT/name).read_bytes()).hexdigest() for name in (
         'scripts/check_remediation_store.py','src/sentinelops/remediation/journal.py','infra/control/005-remediation.sql',
         'src/sentinelops/remediation/reader.py','src/sentinelops/remediation/worker.py',
-        'src/sentinelops/api.py','src/sentinelops/api_settings.py','scripts/run_remediation_worker.py')}
+        'src/sentinelops/api.py','src/sentinelops/api_settings.py','scripts/run_remediation_worker.py',
+        'infra/control/006-quarantine-review.sql','src/sentinelops/remediation/quarantine.py',
+        'src/sentinelops/remediation/verification.py','src/sentinelops/remediation/executor.py',
+        'scripts/check_quarantine_store.py','scripts/review_payment_quarantine.py')}
     image=docker('image','inspect','postgres:16-alpine','--format','{{.Id}}').decode().strip()
     name='sentinelops-b-actions-'+uuid4().hex[:12]
     password,runtime_password=secrets.token_hex(24),secrets.token_hex(24)

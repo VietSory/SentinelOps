@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
+from sentinelops.telemetry.core import stable_id
 
 
 def fixture_envelope(incident, revision, after=0):
@@ -40,20 +41,36 @@ def fixture_envelope(incident, revision, after=0):
 def fixture_actions(incident, revision, cursor=None):
     reason='<img src=x onerror="window.__action_xss=true">'
     item={'observation_version':'action-observation/v1','action_id':('2' if cursor else '1')*64,
-        'incident_id':incident,'incident_revision':2,'action_revision':1,'runbook':'payment-rollback-known-good/v1',
-        'phase':'blocked','recorded_at':'2026-01-01T00:00:00Z','updated_at':'2026-01-01T00:00:00Z',
-        'reason':reason,'before_image':None,'known_good_image':None,
+        'incident_id':incident,'incident_revision':2,'action_revision':3,'runbook':'payment-rollback-known-good/v1',
+        'phase':'escalated','recorded_at':'2026-01-01T00:00:00Z','updated_at':'2026-01-01T00:00:00Z',
+        'reason':reason,'before_image':'localhost:5001/payment@sha256:'+'b'*64,
+        'known_good_image':'localhost:5001/payment@sha256:'+'a'*64,
         'target':{'cluster_uid':'fixture-cluster','namespace':'sentinelops-b-actions','namespace_uid':'fixture-namespace',
                   'deployment':'payment-service','deployment_uid':'fixture-deployment','container':'payment'},
-        'history':[{'revision':1,'phase':'blocked','recorded_at':'2026-01-01T00:00:00Z','reason':reason,
-                    'event_hash':'a'*64,'previous_hash':None}]}
+        'history':[{'revision':i,'phase':phase,'recorded_at':'2026-01-01T00:00:00Z','reason':reason,
+                    'event_hash':str(i)*64,'previous_hash':str(i-1)*64 if i>1 else None}
+                   for i,phase in enumerate(('prepared','dispatching','escalated'),1)]}
     return {'observation_version':'action-list/v1','incident_id':incident,'incident_revision':revision,
         'items':[item] if revision>=2 else [],'next_cursor':'fixture-actions-2' if revision>=2 and not cursor else None}
 
 
+def fixture_quarantine(action_id):
+    item=fixture_actions('INC-FIXTURE-A',3)['items'][0]
+    payload={'release_version':'manual-quarantine-release/v1','review_ref':'artifact://manifests/'+'d'*64+'.json',
+        'action_id':action_id,'action_revision':3,'terminal_event_hash':'3'*64,'target_key':stable_id(item['target']),
+        'opened_at':'2026-01-01T00:00:00Z','observed_at':'2026-01-01T00:04:40Z',
+        'verification_as_of':'2026-01-01T00:04:40Z','last_bucket_end':'2026-01-01T00:04:00Z',
+        'before_ref':'artifact://observations/'+'a'*64+'.json','after_ref':'artifact://observations/'+'b'*64+'.json',
+        'health_ref':'artifact://manifests/'+'c'*64+'.json','dispatch_authorized':False,'recovery_accepted':False,'ier_mutated':False}
+    return {'observation_version':'quarantine-status/v1','action_id':action_id,'action_revision':3,
+        'action_phase':'escalated','quarantine_state':'released','resolution':{'status':'RELEASED','resolution_id':'d'*64,
+            'action_id':action_id,'operator_actor':'<img src=x onerror=window.__quarantine_xss=true>',
+            'recorded_at':'2026-01-01T00:04:40Z','payload':payload}}
+
+
 def exercise_fixtures(page, base, output, expect):
     token = 'fixture-browser-token-not-a-real-secret'*2
-    outage = {'active':False,'actions':False}
+    outage = {'active':False,'actions':False,'quarantine':False}
     records = [{'incident_id':'INC-FIXTURE-A','revision':3,'state':'escalated','severity':'high','detected_at':'2026-01-01T00:00:00Z',
         'affected_services':['payment-service','checkout-service']},
         {'incident_id':'INC-FIXTURE-B','revision':1,'state':'incident','severity':'medium','detected_at':'2026-01-01T01:00:00Z',
@@ -80,8 +97,13 @@ def exercise_fixtures(page, base, output, expect):
             if outage['actions']:
                 route.fulfill(status=503,json={'code':'action_store_unavailable','request_id':'fixture-action-outage'}); return
             route.fulfill(json=fixture_actions(url.path.split('/')[-2],int(query['revision'][0]),query.get('cursor',[None])[0])); return
+        if url.path.endswith('/quarantine'):
+            assert route.request.method=='GET'
+            if outage['quarantine']:
+                route.fulfill(status=503,json={'code':'stored_action_unavailable','request_id':'fixture-quarantine-outage'});return
+            route.fulfill(json=fixture_quarantine(url.path.split('/')[-2]));return
         route.fulfill(status=404,json={'code':'not_found','message':'Not found','request_id':'fixture-request'})
-    page.route('**/ready',reply); page.route('**/v1/incidents**',reply)
+    page.route('**/ready',reply); page.route('**/v1/incidents**',reply);page.route('**/v1/actions/**',reply)
     page.goto(base+'/ui/',wait_until='networkidle')
     page.locator('#api-token').focus(); page.keyboard.press('Tab')
     expect(page.get_by_role('button',name='Connect',exact=True)).to_be_focused()
@@ -115,6 +137,16 @@ def exercise_fixtures(page, base, output, expect):
     page.locator('.evidence-card summary').click()
     expect(page.locator('.evidence-body > p').first).to_have_text('<img src=x onerror="window.__action_xss=true">')
     assert page.evaluate('window.__action_xss') is None and page.locator('#detail-pane img').count()==0
+    page.get_by_role('button',name='View quarantine status',exact=True).focus();page.keyboard.press('Enter')
+    expect(page.get_by_text('Quarantine released by operator',exact=True)).to_be_visible()
+    expect(page.get_by_role('button',name='Reload quarantine status',exact=True)).to_be_focused()
+    expect(page.get_by_text('A released lock does not establish recovery or authorize another dispatch.',exact=False)).to_be_visible()
+    assert page.evaluate('window.__quarantine_xss') is None and page.locator('#detail-pane img').count()==0
+    outage['quarantine']=True;page.get_by_role('button',name='Reload quarantine status',exact=True).click()
+    expect(page.locator('#detail-pane [role=alert]')).to_contain_text('could not be verified')
+    expect(page.get_by_text('Quarantine released by operator',exact=True)).to_have_count(0)
+    outage['quarantine']=False;page.get_by_role('button',name='View quarantine status',exact=True).click()
+    expect(page.get_by_text('Quarantine released by operator',exact=True)).to_be_visible()
     page.get_by_role('button',name='Load more actions',exact=True).click()
     expect(page.locator('.evidence-card')).to_have_count(2)
     page.screenshot(path=str(output/'fixture-actions-desktop.png'),full_page=True)
@@ -137,6 +169,9 @@ def exercise_fixtures(page, base, output, expect):
     page.screenshot(path=str(output/'fixture-mobile.png'),full_page=True)
     page.get_by_role('button',name='Actions',exact=True).click()
     expect(page.locator('.evidence-card')).to_have_count(1)
+    page.locator('.evidence-card summary').click()
+    page.get_by_role('button',name='View quarantine status',exact=True).click()
+    expect(page.get_by_text('Quarantine released by operator',exact=True)).to_be_visible()
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     page.screenshot(path=str(output/'fixture-actions-mobile.png'),full_page=True)
     outage['active'] = True; page.locator('#refresh').click()
@@ -149,7 +184,8 @@ def exercise_fixtures(page, base, output, expect):
     return {'scope':'fixture-browser-software-test-not-source-or-research-evidence',
         'checks':['authentication','pagination','filters','revision-pinning','timeline-pagination','model-unavailable',
                   'unknown-context','XSS-safe-facts-and-references','missing-timestamp','mobile-layout','store-outage','logout-clears-data',
-                  'read-only-action-audit','action-pagination','action-revision-scope','action-outage','XSS-safe-action-reason']}
+                  'read-only-action-audit','action-pagination','action-revision-scope','action-outage','XSS-safe-action-reason',
+                  'manual-quarantine-receipt-not-recovery','quarantine-outage','quarantine-keyboard-focus','XSS-safe-operator-identity']}
 
 
 def exercise_native(page, base, output, incident, token, expect):
