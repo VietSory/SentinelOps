@@ -266,7 +266,7 @@ async def run(output):
     hashes={name:hashlib.sha256((PROJECT/name).read_bytes()).hexdigest() for name in (
         'scripts/check_remediation_store.py','src/sentinelops/remediation/journal.py','infra/control/005-remediation.sql',
         'src/sentinelops/remediation/reader.py','src/sentinelops/remediation/worker.py',
-        'src/sentinelops/api.py','scripts/run_remediation_worker.py')}
+        'src/sentinelops/api.py','src/sentinelops/api_settings.py','scripts/run_remediation_worker.py')}
     image=docker('image','inspect','postgres:16-alpine','--format','{{.Id}}').decode().strip()
     name='sentinelops-b-actions-'+uuid4().hex[:12]
     password,runtime_password=secrets.token_hex(24),secrets.token_hex(24)

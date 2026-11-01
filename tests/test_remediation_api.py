@@ -122,3 +122,15 @@ def test_action_read_settings_hide_dsn_and_contract_is_advertised_in_openapi(mon
     assert settings.action_database_url and 'SECRET' not in repr(settings)
     schema=create_app(settings).openapi()['paths']['/v1/actions/{action_id}']['get']['responses']['200']['content']['application/json']['schema']
     assert schema['properties']['observation_version']['const']=='action-observation/v1'
+
+
+def test_existing_positional_settings_keep_the_api_token_and_optional_dependency_order():
+    settings=Settings('test',None,TOKEN,False,None,None)
+    assert settings.api_token==TOKEN and settings.action_database_url is None
+    async def run():
+        app=create_app(settings,repository=Incidents(),action_reader=Reader())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://api',
+                                     headers={'Authorization':'Bearer '+TOKEN}) as client:
+            assert (await client.get('/ready/incidents')).status_code==200
+            assert (await client.get('/ready/actions')).status_code==200
+    asyncio.run(run())

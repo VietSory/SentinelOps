@@ -6,11 +6,11 @@ import os
 class Settings:
     environment: str = "local"
     control_database_url: str | None = field(default=None,repr=False)
-    action_database_url: str | None = field(default=None,repr=False)
     api_token: str | None = field(default=None,repr=False)
     demo_mode: bool = False
     model_store: str | None = None
     model_release_ref: str | None = None
+    action_database_url: str | None = field(default=None,repr=False)
 
     def __post_init__(self):
         if self.api_token is not None and len(self.api_token)<32:
