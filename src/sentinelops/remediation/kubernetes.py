@@ -87,6 +87,14 @@ class LocalKubernetes:
         return '/apis/apps/v1/namespaces/' + self.target.namespace + '/deployments/' + self.target.deployment
 
     def _deployment(self, body):
+        try:
+            return self._project_deployment(body)
+        except Blocked:
+            raise
+        except (KeyError,TypeError,IndexError,ValueError):
+            raise KubernetesUnavailable('kubernetes-deployment-shape-invalid') from None
+
+    def _project_deployment(self, body):
         meta = body.get('metadata', {})
         if (body.get('kind') != 'Deployment' or body.get('apiVersion') != 'apps/v1'
             or meta.get('uid') != self.target.deployment_uid or meta.get('name') != self.target.deployment
@@ -111,6 +119,14 @@ class LocalKubernetes:
             strategy=strategy.get('type', 'RollingUpdate'), paused=spec.get('paused', False))
 
     async def observe(self):
+        try:
+            return await self._observe()
+        except (Blocked,KubernetesUnavailable):
+            raise
+        except (KeyError,TypeError,IndexError,ValueError):
+            raise KubernetesUnavailable('kubernetes-inventory-shape-invalid') from None
+
+    async def _observe(self):
         cluster, namespace = await asyncio.gather(self._request('GET', '/api/v1/namespaces/kube-system'),
             self._request('GET', '/api/v1/namespaces/' + self.target.namespace))
         if (cluster.get('metadata', {}).get('uid') != self.target.cluster_uid
