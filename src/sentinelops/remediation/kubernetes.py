@@ -64,7 +64,7 @@ class LocalKubernetes:
     async def close(self):
         await self.client.aclose()
 
-    async def _request(self, method, path, **kwargs):
+    async def _request(self, method, path, *, expected_status=200, **kwargs):
         try:
             response = await self.client.request(method, path, **kwargs)
         except httpx.HTTPError:
@@ -73,7 +73,7 @@ class LocalKubernetes:
             raise Blocked('kubernetes-rbac-denied')
         if response.status_code in (404, 409, 422):
             raise Blocked('kubernetes-target-missing-or-precondition-failed')
-        if response.status_code != 200 or len(response.content) > 2_000_000:
+        if response.status_code != expected_status or len(response.content) > 2_000_000:
             raise KubernetesUnavailable('kubernetes-response-unavailable')
         try:
             result = response.json()
@@ -81,6 +81,17 @@ class LocalKubernetes:
             return result
         except (ValueError, TypeError):
             raise KubernetesUnavailable('kubernetes-response-invalid') from None
+
+    async def require_observer(self):
+        """Ask the authenticated API, never a client flag, about mutation scope."""
+        for verb in ('patch','update','delete','create','deletecollection'):
+            review=await self._request('POST','/apis/authorization.k8s.io/v1/selfsubjectaccessreviews',
+                expected_status=201,json={'apiVersion':'authorization.k8s.io/v1','kind':'SelfSubjectAccessReview',
+                'spec':{'resourceAttributes':{'namespace':self.target.namespace,'group':'apps',
+                    'resource':'deployments','name':self.target.deployment,'verb':verb}}})
+            status=review.get('status',{})
+            if status.get('allowed') is not False or status.get('evaluationError'):
+                raise Blocked('quarantine-credential-can-mutate-target-or-is-unverified')
 
     @property
     def path(self):

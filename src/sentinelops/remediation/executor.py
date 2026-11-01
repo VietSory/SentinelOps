@@ -9,7 +9,6 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import json
 import logging
-import re
 
 from opentelemetry import metrics
 
@@ -18,7 +17,7 @@ from sentinelops.incidents.rca import validate_policy
 from sentinelops.remediation.authority import qualify
 from sentinelops.remediation.domain import ActionConflict, Blocked, KubernetesUnavailable, Request, RUNBOOK
 from sentinelops.remediation.registry import deployment_from_projection
-from sentinelops.remediation.verification import verify_post_action_health
+from sentinelops.remediation.verification import verify_post_action_health, validate_current_support
 from sentinelops.telemetry.core import stable_id, timestamp
 
 logger=logging.getLogger('sentinelops-remediation')
@@ -184,23 +183,8 @@ class RollbackExecutor:
         cutoff=self.clock()
         verdict=await self.recovery.verify(effective_at=utc_time(facts['effective_at']),now=cutoff,target=self.policy.target)
         if verdict['status']=='telemetry_verified':
-            if (verdict['verification_version']!='post-action-current-slo/v1'
-                or verdict['health_stream_id']!=self.recovery.source.stream_id
-                or verdict['health_policy_sha256']!=stable_id(self.recovery.source.policy)
-                or verdict['effective_at']!=facts['effective_at'] or verdict['as_of']!=timestamp(cutoff)
-                or verdict['environment']!=self.recovery.environment or verdict['required_buckets']!=3
-                or len(verdict['support'])!=3
-                or any(verdict[k] is not False for k in ('action_dispatch_authorized','deployment_identity_verified','recovery_accepted'))):
-                raise Blocked('invalid-recovery-verdict')
-            ends=[utc_time(b['bucket_end']) for b in verdict['support']]
-            if (ends[0]-timedelta(seconds=60)<utc_time(facts['effective_at'])
-                or ends[1]-ends[0]!=timedelta(seconds=60) or ends[2]-ends[1]!=timedelta(seconds=60)
-                or len({b['signal_id'] for b in verdict['support']})!=3
-                or any(not re.fullmatch(r'[0-9a-f]{64}',b['signal_id'])
-                    or not re.fullmatch(r'artifact://manifests/[0-9a-f]{64}\.json',b['batch_ref'])
-                    or not re.fullmatch(r'artifact://observations/[0-9a-f]{64}\.json',b['observation_ref'])
-                    or not utc_time(b['bucket_end'])<=utc_time(b['recorded_at'])<=cutoff for b in verdict['support'])):
-                raise Blocked('invalid-current-recovery-support')
+            ends=validate_current_support(verdict,source=self.recovery.source,environment=self.recovery.environment,
+                effective_at=facts['effective_at'],as_of=cutoff)
             final=await self.kube.observe()
             final.validate(self.policy,before_dispatch=False)
             if final.image!=good or final.generation!=before.generation+1:

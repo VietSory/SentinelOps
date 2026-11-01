@@ -1,0 +1,30 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://sentinelops.local/contracts/quarantine-status.schema.json",
+  "title":"Per-action quarantine receipt, separate from incident recovery",
+  "type":"object","additionalProperties":false,
+  "required":["observation_version","action_id","action_revision","action_phase","quarantine_state","resolution"],
+  "properties":{
+    "observation_version":{"const":"quarantine-status/v1"},
+    "action_id":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "action_revision":{"type":"integer","minimum":1,"maximum":100},
+    "action_phase":{"enum":["prepared","blocked","dispatching","verifying","recovered","escalated"]},
+    "quarantine_state":{"enum":["held","released","not_held"]},
+    "resolution":{"anyOf":[{"type":"null"},{
+      "type":"object","additionalProperties":false,
+      "required":["status","resolution_id","action_id","operator_actor","recorded_at","payload"],
+      "properties":{
+        "status":{"const":"RELEASED"},
+        "resolution_id":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "action_id":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "operator_actor":{"type":"string","minLength":1,"maxLength":63},
+        "recorded_at":{"type":"string","format":"date-time"},
+        "payload":{"$ref":"https://sentinelops.local/contracts/quarantine-release.schema.json"}
+      }
+    }]}
+  },
+  "allOf":[
+    {"if":{"properties":{"quarantine_state":{"const":"released"}}},"then":{"properties":{"resolution":{"type":"object"}}},"else":{"properties":{"resolution":{"type":"null"}}}},
+    {"if":{"properties":{"quarantine_state":{"enum":["held","released"]}}},"then":{"properties":{"action_phase":{"const":"escalated"}}}}
+  ]
+}

@@ -53,6 +53,35 @@ def client(tmp_path, handler):
                            transport=httpx.MockTransport(handler))
 
 
+@pytest.mark.parametrize('status',[{'allowed':True},{},{'allowed':False,'evaluationError':'unverified'}])
+def test_quarantine_observer_rejects_mutation_or_unverified_authorization(tmp_path,status):
+    def handler(request):
+        assert request.method=='POST' and request.url.path.endswith('/selfsubjectaccessreviews')
+        return httpx.Response(201,json={'status':status})
+    async def run():
+        kube=client(tmp_path,handler)
+        try:
+            with pytest.raises(Blocked): await kube.require_observer()
+        finally: await kube.close()
+    asyncio.run(run())
+
+
+def test_quarantine_observer_checks_all_mutating_target_verbs_without_sending_them(tmp_path):
+    verbs=[]
+    def handler(request):
+        assert request.method=='POST' and request.url.path.endswith('/selfsubjectaccessreviews')
+        attrs=json.loads(request.content)['spec']['resourceAttributes']
+        assert attrs['namespace']==TARGET.namespace and attrs['name']==TARGET.deployment
+        verbs.append(attrs['verb'])
+        return httpx.Response(201,json={'status':{'allowed':False}})
+    async def run():
+        kube=client(tmp_path,handler)
+        try: await kube.require_observer()
+        finally: await kube.close()
+    asyncio.run(run())
+    assert verbs==['patch','update','delete','create','deletecollection']
+
+
 @pytest.mark.parametrize('url', ['http://127.0.0.1:6443', 'https://eks.example.com:6443',
     'https://127.0.0.1:6443/extra', 'https://secret@127.0.0.1:6443', 'https://127.0.0.1:6443?token=secret'])
 def test_no_ambient_or_cloud_cluster_and_no_credentials_in_endpoint(url):

@@ -12,6 +12,7 @@ import re
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.remediation.domain import RUNBOOK
 from sentinelops.remediation.journal import ActionJournal
+from sentinelops.remediation.quarantine import RECEIPT_SELECT, receipt
 from sentinelops.telemetry.core import stable_id
 
 
@@ -58,7 +59,7 @@ class ActionReader:
 
     async def check_ready(self):
         async with self.pool.acquire() as conn:
-            if await conn.fetchval('SELECT array_agg(version ORDER BY version) FROM sentinel_remediation.schema_migrations') != [1]:
+            if await conn.fetchval('SELECT array_agg(version ORDER BY version) FROM sentinel_remediation.schema_migrations') not in ([1],[1,2]):
                 raise RuntimeError('explicit action schema required')
             unsafe = await conn.fetchval('''SELECT rolsuper OR rolcreaterole OR rolcreatedb
                 OR pg_has_role(current_user,'control_owner','MEMBER')
@@ -72,6 +73,9 @@ class ActionReader:
                 WHERE n.nspname IN ('sentinel_control','sentinel_remediation') AND c.relkind IN ('r','p')''')
             if unsafe or writes:
                 raise RuntimeError('action API requires a dedicated read-only runtime')
+            release_function=await conn.fetchval("SELECT to_regprocedure('sentinel_remediation.release_quarantine(text,integer,text,text,text,jsonb)')::oid")
+            if release_function and await conn.fetchval("SELECT has_function_privilege($1::oid,'EXECUTE')",release_function):
+                raise RuntimeError('action API must not be able to release quarantine')
             for table in ('intents', 'states', 'events', 'targets', 'dispatches'):
                 if not await conn.fetchval("SELECT has_table_privilege($1,'SELECT')", 'sentinel_remediation.' + table):
                     raise RuntimeError('action reader lacks required SELECT privileges')
@@ -79,6 +83,24 @@ class ActionReader:
     async def get(self, action_id):
         state = await self._snapshots.get(action_id)
         return observation(state) if state else None
+
+    async def quarantine(self,action_id):
+        async with self.pool.acquire() as conn,conn.transaction(isolation='repeatable_read',readonly=True):
+            versions=await conn.fetchval('SELECT array_agg(version ORDER BY version) FROM sentinel_remediation.schema_migrations')
+            if versions!=[1,2]: raise RuntimeError('quarantine observation migration unavailable')
+            state=await self._snapshots._read(conn,action_id)
+            if state is None: return None
+            target=state['intent']['policy']['target']
+            target_key=stable_id(target)
+            active=await conn.fetchval('SELECT active_action FROM sentinel_remediation.targets WHERE target_key=$1',target_key)
+            row=await conn.fetchrow(RECEIPT_SELECT+'WHERE action_id=$1',action_id)
+            resolution=receipt(row) if row else None
+        if resolution and (active==action_id or row['action_revision']!=state['revision']
+            or row['terminal_event_hash']!=state['last_event_hash'] or row['target_key']!=target_key):
+            raise RuntimeError('quarantine receipt and action audit/claim differ')
+        value='released' if resolution else 'held' if active==action_id and state['phase']=='escalated' else 'not_held'
+        return {'observation_version':'quarantine-status/v1','action_id':action_id,'action_revision':state['revision'],
+            'action_phase':state['phase'],'quarantine_state':value,'resolution':resolution}
 
     async def list(self, incident_id, max_revision, *, limit=10, after=None):
         if type(limit) is not int or not 1 <= limit <= 25:

@@ -29,7 +29,7 @@ class ActionJournal:
 
     async def check_ready(self):
         async with self.pool.acquire() as conn:
-            if await conn.fetchval('SELECT array_agg(version ORDER BY version) FROM sentinel_remediation.schema_migrations') != [1]:
+            if await conn.fetchval('SELECT array_agg(version ORDER BY version) FROM sentinel_remediation.schema_migrations') not in ([1],[1,2]):
                 raise RuntimeError('explicit remediation migration 1 required')
             unsafe=await conn.fetchval('''SELECT rolsuper OR rolcreaterole OR rolcreatedb
                 OR pg_has_role(current_user,'control_owner','MEMBER')

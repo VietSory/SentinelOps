@@ -1,0 +1,53 @@
+# Apply after payment-rollback-rbac.yaml. This credential cannot PATCH any image.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: payment-quarantine-observer
+  namespace: sentinelops-b-actions
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: payment-quarantine-observer
+  namespace: sentinelops-b-actions
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [payment-service]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list]
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: payment-quarantine-observer
+  namespace: sentinelops-b-actions
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: payment-quarantine-observer
+subjects:
+  - kind: ServiceAccount
+    name: payment-quarantine-observer
+    namespace: sentinelops-b-actions
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sentinelops-b-quarantine-identity
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sentinelops-b-action-identity
+subjects:
+  - kind: ServiceAccount
+    name: payment-quarantine-observer
+    namespace: sentinelops-b-actions
