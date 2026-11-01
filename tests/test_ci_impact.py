@@ -50,7 +50,8 @@ def test_workflow_summary_requires_requested_jobs_and_allows_only_out_of_scope_s
     summary=workflow['jobs']['ci-summary']
     assert summary['if']=='always()' and 'workflow_dispatch' in workflow['on']
     code='\n'.join(summary['steps'][0]['run'].splitlines()[1:-1])
-    names=['changes','foundation','public-data','ui','incident-storage','observability','multi-fault-development','health-worker-integration','incident-worker-s5']
+    names=['changes','foundation','public-data','ui','incident-storage','remediation-integration','observability','multi-fault-development','health-worker-integration','incident-worker-s5']
+    assert 'remediation-integration' in summary['needs']
     def execute(needs):
         return subprocess.run([sys.executable,'-c',code],env={**os.environ,'NEEDS_JSON':json.dumps(needs)},capture_output=True).returncode
     needs={name:{'result':'success'} for name in names}
@@ -58,6 +59,9 @@ def test_workflow_summary_requires_requested_jobs_and_allows_only_out_of_scope_s
     assert execute(needs)==0
     needs['incident-worker-s5']['result']='failure'; assert execute(needs)!=0
     needs['incident-worker-s5']['result']='skipped'; assert execute(needs)!=0
+    needs['incident-worker-s5']['result']='success'
+    needs['remediation-integration']['result']='failure'; assert execute(needs)!=0
+    needs['remediation-integration']['result']='skipped'; assert execute(needs)!=0
     needs['changes']['outputs']={'native':'false','public_data':'true','ui':'true'}
     assert execute(needs)==0
     needs['changes']['result']='failure'; assert execute(needs)!=0

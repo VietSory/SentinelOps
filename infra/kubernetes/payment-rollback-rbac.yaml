@@ -1,0 +1,71 @@
+# Local B namespace only. Bootstrap applies this; the controller receives only
+# the ServiceAccount token, never bootstrap kubeconfig or commerce credentials.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sentinelops-b-actions
+  labels:
+    sentinelops.dev/lane: B
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: payment-rollback
+  namespace: sentinelops-b-actions
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: payment-rollback
+  namespace: sentinelops-b-actions
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [payment-service]
+    verbs: [get, patch]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list]
+  - apiGroups: ['']
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: payment-rollback
+  namespace: sentinelops-b-actions
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: payment-rollback
+subjects:
+  - kind: ServiceAccount
+    name: payment-rollback
+    namespace: sentinelops-b-actions
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sentinelops-b-action-identity
+rules:
+  - apiGroups: ['']
+    resources: [namespaces]
+    resourceNames: [kube-system, sentinelops-b-actions]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sentinelops-b-action-identity
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sentinelops-b-action-identity
+subjects:
+  - kind: ServiceAccount
+    name: payment-rollback
+    namespace: sentinelops-b-actions
