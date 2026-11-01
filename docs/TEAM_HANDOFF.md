@@ -110,6 +110,7 @@ có; public API local bằng static token không phải AWS acceptance.
 | `GET /v1/incidents/{id}` | Exact IER, current hoặc `revision`, ETag/revision headers |
 | `GET /v1/incidents/{id}/context` | IncidentEnvelope và timeline phân trang; không nhét field mới vào IER |
 | `GET /v1/incidents/{id}/actions`, `/v1/actions/{id}` | Optional SELECT-only action journal, pin incident revision và action ETag; xem [action runbook](runbooks/CONTROLLED_REMEDIATION.md#read-only-action-http-and-ui) |
+| `GET /v1/actions/{id}/quarantine` | Optional migration 2, receipt operator riêng; không biến `escalated` thành recovered, không có HTTP release/dispatch |
 | `POST /v1/detect`, `/v1/risk` | FeatureWindow, source-profile header, approved model; unavailable 503 |
 | Incident writes | Trusted producer/operator; If-Match + Idempotency-Key, không public upload tùy ý |
 
