@@ -87,6 +87,15 @@ Stored IDs are bounded URI-safe ASCII identifiers (`A–Z`, `a–z`, digits, `.`
 
 Limits are 1–100. Incident ordering uses immutable creation time plus ID; cursors bind filters and use keyset pagination. It is a live current-state view: concurrent updates can change which records match a filter; it is not a database snapshot across HTTP pages. Historical context never includes events from later revisions.
 
+Optional action observations use a **separate SELECT-only** credential via
+`SENTINELOPS_ACTION_READ_DATABASE_URL`, explicit optional migration and
+`control_action_reader` group. [Action HTTP/UI setup](CONTROLLED_REMEDIATION.md#read-only-action-http-and-ui)
+documents `/ready/actions`, `/v1/actions/{id}` and
+`/v1/incidents/{id}/actions?revision=N`. Action pages allow 1–25 items and preserve
+the pinned incident revision; their action audit stays separate from strict IER
+and incident lifecycle. The UI Actions tab reads these routes; missing storage is
+unavailable, not proof that no action happened. There is no public dispatch API.
+
 Requests are bounded to 1MB even for chunked bodies; excessive bodies return 413. Errors use [ApiError](../../contracts/api-error.schema.json), include a server request ID matching `X-Request-ID`, and hide database exceptions/credentials. Responses disable caching by default.
 
 Supplemental schema `$ref`s resolve the original IER from installed package resources through a local-only registry. They do not duplicate its definition or fetch arbitrary network/file URLs. The registry follows the [jsonschema referencing API](https://python-jsonschema.readthedocs.io/en/stable/referencing/).

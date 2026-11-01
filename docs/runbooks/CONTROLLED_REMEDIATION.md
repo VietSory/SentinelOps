@@ -4,8 +4,9 @@
 `payment-rollback-known-good/v1`. Internal policy/known-good verification,
 Kubernetes adapter, PostgreSQL journal and bounded executor are implemented.
 There is **no enabled production H4 provider, approved real known-good release,
-public action endpoint, background action worker or closed-loop acceptance**.
-UI remains read-only. No AWS resources are required for this local work.
+public dispatch endpoint or closed-loop acceptance**. A resume-only worker and
+authenticated read-only action observations/UI are available. No process here
+creates new actions automatically. No AWS resources are required for this work.
 
 ## Executor and durable journal
 
@@ -155,6 +156,10 @@ data. It tests real concurrent proposals/dispatch CAS, append-only ACLs, native
 rejection of manual IER authority, cooldown/quarantine, injected audit rollback,
 atomic status snapshots and actual DB stop/start with exact history preservation.
 Incident/terminal action states in this storage test are explicitly fixtures.
+The same test checks the dedicated SELECT-only API credential (including rejected
+column-level writes and writer credentials), revision-scoped action pagination,
+actual HTTP handlers against PostgreSQL, quarantine after outage and cancellation
+of a prepared intent without a dispatch or IER write.
 
 The Kubernetes check requires Docker, kubectl and kind v0.30.0, pins the official
 v1.34.0 node digest, creates a unique local cluster/registry and uses an explicit
@@ -181,11 +186,83 @@ API semantics and pinning references: [Kubernetes API/dry-run](https://kubernete
 [local registry](https://kind.sigs.k8s.io/docs/user/local-registry/),
 [containerd registry hosts](https://github.com/containerd/containerd/blob/main/docs/hosts.md).
 
+## Resume-only worker
+
+`scripts/run_remediation_worker.py` loads one exact target and its original health
+stream/store. It does not enumerate incidents, accept proposals, call `execute`,
+grant H4 or resend a Kubernetes mutation. A pending `prepared` intent is blocked
+with `prepared-intent-requires-explicit-revalidation` and its claim released;
+it has not consumed a dispatch attempt. `dispatching`/`verifying` intents use the
+existing observation reconciler. Escalated claims remain quarantined. An idle
+worker does not create an intent or synthetic incident.
+
+An operator explicitly applies `005-remediation.sql` and provisions a dedicated
+login in `control_action_writer`; use its loopback DSN in
+`SENTINELOPS_ACTION_DATABASE_URL`, **not** the API reader DSN or core writer role.
+The script checks actual privileges, exact source identity/root/environment and
+private TLS credentials. Do not select an unrelated capture or fabricate a stream
+to make startup succeed. The original physical source/H4 activation review is
+still required before a live producer can arm any intent.
+
+```sh
+python -m scripts.run_remediation_worker \
+  --target /owned/config/payment-target.json \
+  --health-stream VERIFIED_STREAM_SHA256 \
+  --source-store /owned/original-health-store \
+  --server https://127.0.0.1:LOCAL_KUBERNETES_PORT \
+  --ca-file /owned/private/cluster-ca.pem \
+  --token-file /owned/private/runtime-token \
+  --poll-seconds 5
+```
+
+The target JSON contains exactly the `Target` fields shown in the RBAC/known-good
+contract, with actual cluster/namespace/Deployment UIDs. The placeholders above
+are not working credentials or an approved deployment. `--max-ticks N` bounds a
+verification run. There is no enable/force/arbitrary-image/provider flag. SIGTERM
+interrupts backoff; a tick is bounded to 30 seconds. Dependency outages retry with
+capped exponential backoff, at most 12 consecutive failures, then exit for
+operator intervention. Integrity/configuration errors stop immediately with a
+sanitized error type. No database transaction spans a source/Kubernetes request.
+Concurrent processes rely on the existing transactional CAS, never a second send.
+
+## Read-only action HTTP and UI
+
+Reapply the optional idempotent migration explicitly to add the new NOLOGIN
+`control_action_reader` group and history index; schema history stays `[1]` and
+core stays `[1,2,3]`. Provision a separate login in this reader group and configure
+`SENTINELOPS_ACTION_READ_DATABASE_URL` for the API. No existing API/AI role gains
+action permissions. Reader readiness rejects schema ownership/creation and any
+table- or column-level DML in either control schema, including writer credentials.
+The API does not auto-apply a migration or provision a login/password.
+
+All routes use the existing local/test bearer authentication and no-store/errors:
+
+| Route | Observation |
+| --- | --- |
+| `GET /ready/actions` | SELECT-only store readiness; `dispatch_enabled=false` describes this read API |
+| `GET /v1/actions/{sha256}` | Strict [action-observation/v1](../../contracts/action-observation.schema.json), action ETag/`X-Action-Revision`, conditional 304 |
+| `GET /v1/incidents/{id}/actions?revision=N&limit=10&cursor=…` | [action-list/v1](../../contracts/action-list.schema.json), only intents issued through pinned incident revision N, incident revision headers |
+
+Pages allow 1–25 items ordered by immutable action creation time/ID; cursors bind
+incident and pinned revision. Each action's at-most-100-event history is verified
+against the original intent, hash chain and current state in a consistent read
+snapshot. Responses project only allowlisted metadata/image identities/reasons
+and audit cards, excluding raw facts, idempotency keys and credentials. Action
+phases are not IER lifecycle transitions or a claim of qualified recovery.
+
+The incident UI's Actions tab loads these observations on demand, pins the viewed
+revision and rejects late responses after changing selection/logout. It supports
+pagination/reload, shows missing storage separately from an empty returned page
+and renders reasons as text. It never offers execute/approval controls. Existing
+incident/evidence views work without action configuration. Missing action store
+or invalid audit returns 503; production authentication remains unavailable.
+
 ## Remaining controller integration
 
-Wire a bounded background runner and authenticated versioned action HTTP/status
-contracts only after the H4 boundary, real known-good approval and source binding
-are reviewed. Deliver an operator quarantine-resolution procedure and action/IER
+Wire a new-intent/dispatch producer and authenticated action submission only after
+the H4 boundary, real known-good approval and source binding are reviewed. The
+resume-only worker and read API do not satisfy those prerequisites. Deliver an
+operator quarantine-resolution procedure and action/IER
 lifecycle integration without rewriting the analytical RCA contract. Exercise an
 actual bad SentinelOps Payment image deployment with qualified independent RCA,
 proper before-incident approved image and live Kubernetes telemetry. The current
