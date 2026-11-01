@@ -167,3 +167,21 @@ def test_invalid_effectiveness_and_decision_clocks_are_rejected(tmp_path):
     source = RawLedgerFixture(tmp_path, [0])
     with pytest.raises(ValueError): check(source, effective=START + timedelta(minutes=7))
     with pytest.raises(ValueError): check(source, effective=START.replace(tzinfo=None))
+
+
+def test_current_recovery_rejects_an_early_healthy_prefix_followed_by_a_new_breach(tmp_path):
+    source = RawLedgerFixture(tmp_path, [0,0,0,0,12,12])
+    assert check(source, minutes=6)['status'] == 'telemetry_verified'  # Historical prefix only.
+    current = check(source, minutes=6, require_current=True)
+    assert current['status'] == 'pending' and current['support'] == []
+    assert current['verification_version'] == 'post-action-current-slo/v1'
+
+
+def test_current_recovery_requires_latest_due_bucket_not_a_stopped_source(tmp_path):
+    source = RawLedgerFixture(tmp_path, [0] * 5)
+    verdict = asyncio.run(verify_post_action_health(source,effective_at=START,
+        as_of=START+timedelta(minutes=4,seconds=45),expected_environment='fixture',require_current=True))
+    assert verdict['status'] == 'telemetry_verified'
+    assert [item['bucket_end'] for item in verdict['support']] == [timestamp(START+timedelta(minutes=i)) for i in (2,3,4)]
+    stopped = check(source, minutes=6, require_current=True)
+    assert stopped['status'] == 'pending' and stopped['reason'] == 'awaiting-current-accepted-health-bucket'

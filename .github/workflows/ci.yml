@@ -259,6 +259,51 @@ jobs:
         if: always()
         run: docker compose -p sentinelops-control -f docker-compose.control.yml down --volumes --remove-orphans
 
+  remediation-integration:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - run: docker pull postgres:16-alpine
+      - name: Verify optional action journal and actual database outage in an exclusive PostgreSQL
+        run: python -m scripts.check_remediation_store --output artifacts/lane-b/remediation-store-ci.json
+      - name: Verify real local Kubernetes API with explicit software fixtures
+        run: |
+          python - <<'PY'
+          import hashlib, os, subprocess, sys
+          from pathlib import Path
+          import httpx
+          binary=Path(os.environ['RUNNER_TEMP'])/'sentinelops-kind-v0.30.0'
+          with httpx.Client(timeout=60,follow_redirects=True,trust_env=False) as client:
+              response=client.get('https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-amd64')
+              response.raise_for_status()
+          if hashlib.sha256(response.content).hexdigest()!='517ab7fc89ddeed5fa65abf71530d90648d9638ef0c4cde22c2c11f8097b8889':
+              raise RuntimeError('official kind binary checksum mismatch')
+          binary.write_bytes(response.content);binary.chmod(0o755)
+          subprocess.run([str(binary),'version'],check=True)
+          subprocess.run([sys.executable,'-m','scripts.check_rollback_kubernetes','--kind',str(binary),
+                          '--output','artifacts/lane-b/kubernetes-ci'],check=True)
+          PY
+      - name: Preserve bounded software verification output, excluding runtime credentials
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remediation-software-evidence
+          path: |
+            artifacts/lane-b/remediation-store-ci.json
+            artifacts/lane-b/kubernetes-ci/verification.json
+            artifacts/lane-b/kubernetes-ci/diagnostics.json
+            artifacts/lane-b/kubernetes-ci/last-observation.json
+          if-no-files-found: warn
+          retention-days: 7
+
   observability:
     needs: changes
     if: needs.changes.outputs.native == 'true'
@@ -623,7 +668,7 @@ jobs:
 
   ci-summary:
     if: always()
-    needs: [changes, foundation, public-data, incident-storage, observability, multi-fault-development, health-worker-integration, incident-worker-s5, ui]
+    needs: [changes, foundation, public-data, incident-storage, remediation-integration, observability, multi-fault-development, health-worker-integration, incident-worker-s5, ui]
     runs-on: ubuntu-latest
     steps:
       - name: Require every applicable check and report a stable conclusion
@@ -636,7 +681,7 @@ jobs:
           outputs=needs['changes'].get('outputs',{})
           expected={'changes':True,'foundation':True,
               'public-data':outputs.get('public_data')=='true','ui':outputs.get('ui')=='true'}
-          for name in ('incident-storage','observability','multi-fault-development','health-worker-integration','incident-worker-s5'):
+          for name in ('incident-storage','remediation-integration','observability','multi-fault-development','health-worker-integration','incident-worker-s5'):
               expected[name]=outputs.get('native')=='true'
           failures=[]
           for name,required in expected.items():

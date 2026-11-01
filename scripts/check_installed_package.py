@@ -60,6 +60,10 @@ from sentinelops.ml.readiness import audit_readiness
 from sentinelops.workers.model_signals import collect_model_signals
 from sentinelops.public_data.rcaeval_evaluation import diagnose_native
 from sentinelops.remediation.verification import verify_post_action_health
+from sentinelops.remediation.executor import RollbackExecutor
+from sentinelops.remediation.journal import ActionJournal
+from sentinelops.remediation.kubernetes import LocalKubernetes
+from sentinelops.remediation.registry import KnownGoodRegistry
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 assert callable(verify_post_action_health)
@@ -73,7 +77,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'experiment-run', 'dataset-manifest', 'incident-write',
              'incident-envelope', 'incident-list', 'api-error', 'training-data-policy',
              'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result',
-             'rca-policy', 'rca-result', 'training-data-policy-v2', 'lane-b-deployment-lock'):
+             'rca-policy', 'rca-result', 'training-data-policy-v2', 'lane-b-deployment-lock', 'payment-known-good'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 assert 'root_causes_ground_truth' in load_schema('experiment-run.schema.json')['properties']
 policy={'policy_version':'slo-health/local-v1','latency_ms':750.,'error_rate':.05,

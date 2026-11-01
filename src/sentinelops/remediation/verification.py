@@ -6,7 +6,7 @@ accepts recovery, writes an IER, or grants permission to execute an action.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sentinelops.contracts import utc_time
 from sentinelops.telemetry.core import stable_id, timestamp
@@ -18,7 +18,7 @@ TIMEOUT_SECONDS = 600
 
 async def verify_post_action_health(
     source: HealthLedgerReader, *, effective_at: datetime, as_of: datetime,
-    expected_environment: str, max_batches: int = 128,
+    expected_environment: str, max_batches: int = 128, require_current: bool = False,
 ) -> dict:
     """Reproduce a bounded, deterministic verification at an explicit cutoff.
 
@@ -35,6 +35,8 @@ healthy observations. Exceeding the read budget is explicitly inconclusive.
         raise ValueError('verification requires an explicit environment and a cutoff after action effectiveness')
     if type(max_batches) is not int or not 1 <= max_batches <= 10000:
         raise ValueError('verification history budget must be an integer from 1 to 10000')
+    if type(require_current) is not bool:
+        raise ValueError('current verification must be an explicit boolean')
     deadline = effective + timedelta(seconds=TIMEOUT_SECONDS)
     available_by = min(cutoff, deadline)
     policy_hash = stable_id(source.policy)
@@ -43,7 +45,7 @@ healthy observations. Exceeding the read budget is explicitly inconclusive.
 
     def result(status, why):
         return {
-            'verification_version': 'post-action-slo/v1',
+            'verification_version': 'post-action-current-slo/v1' if require_current else 'post-action-slo/v1',
             'service': 'payment-service', 'health_stream_id': source.stream_id,
             'health_policy_sha256': policy_hash, 'environment': expected_environment,
             'effective_at': timestamp(effective), 'as_of': timestamp(cutoff),
@@ -90,8 +92,19 @@ healthy observations. Exceeding the read budget is explicitly inconclusive.
             'batch_ref': row['manifest_ref'], 'signal_id': signal['signal_id'],
             'observation_ref': signal['observation_ref'],
             'recorded_at': timestamp(at(row['recorded_at']))})
+        support[:] = support[-REQUIRED_BUCKETS:]
         if len(support) == REQUIRED_BUCKETS:
-            return result('telemetry_verified', 'three-consecutive-eligible-post-action-buckets')
+            if not require_current:
+                return result('telemetry_verified', 'three-consecutive-eligible-post-action-buckets')
     else:
         return result('inconclusive', 'verified-history-budget-exhausted')
+    if require_current:
+        # This source profile has a verified 30-second watermark. A dead worker
+        # cannot certify current recovery from an old healthy prefix. Continue
+        # through the cutoff so a later UNKNOWN/breach invalidates early success.
+        expected = datetime.fromtimestamp(int((available_by - timedelta(seconds=30)).timestamp()) // 60 * 60, timezone.utc)
+        if last_end == expected and len(support) == REQUIRED_BUCKETS:
+            return result('telemetry_verified', 'three-current-eligible-post-action-buckets')
+        if last_end != expected:
+            reason = 'awaiting-current-accepted-health-bucket'
     return result('inconclusive' if cutoff >= deadline else 'pending', reason)

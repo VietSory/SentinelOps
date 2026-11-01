@@ -1,10 +1,85 @@
 # Controlled Payment rollback — component status
 
 [ADR-009](../adr/ADR-009-payment-rollback-runbook.md) remains the authority for
-`payment-rollback-known-good/v1`. No action endpoint, Kubernetes executor,
-approved known-good ledger, durable action journal or closed-loop acceptance is
-implemented yet. UI remains read-only. No AWS resources are required for this
-local work.
+`payment-rollback-known-good/v1`. Internal policy/known-good verification,
+Kubernetes adapter, PostgreSQL journal and bounded executor are implemented.
+There is **no enabled production H4 provider, approved real known-good release,
+public action endpoint, background action worker or closed-loop acceptance**.
+UI remains read-only. No AWS resources are required for this local work.
+
+## Executor and durable journal
+
+`remediation/executor.py` coordinates server-configured dependencies; a `Request`
+contains only incident ID/revision and idempotency key. Clients cannot choose an
+image, target, policy, authority provider or approval flag. Both policy and kill
+switch default disabled. `NativeH4Authority` actually reproduces accepted native
+RCA evidence but returns no dispatch authority, including when mathematical RCA
+qualification alone passes. An agreed H4 producer/consumer contract and physical
+Kubernetes-to-health source binding are still required before live activation.
+Only software tests inject a qualified fixture authority; no force/demo grant
+exists in a serving route or command.
+
+The local policy `payment-rollback/local-v1` binds exact cluster, namespace and
+Deployment UIDs to `sentinelops-b-actions/payment-service`, container `payment`.
+It permits one replica/existing pod, zero surge, no HPA or paused Deployment,
+600-second verification/cooldown, 180-second evidence freshness and a matching
+observed deployment change within 600 seconds before source incident onset.
+Frozen RCA weights/score/coverage/margin remain unchanged. The adapter uses an
+explicit loopback HTTPS server, CA and private ServiceAccount token; it never
+reads ambient kubeconfig or AWS credentials. JSON Patch tests UID, unmodified
+resourceVersion, generation, replicas, container name and previous image, then
+replaces only that image with a distinct same-repository immutable digest.
+Server-side `dryRun=All` must succeed before arming.
+
+`KnownGoodRegistry` reads a separately operator-selected content-addressed
+`approved-payment-images/v1` ledger under the strict new schema. It does not
+generate approvals. The trusted approver/reference are server configuration;
+checksums are not authentication of arbitrary remote writers. Ready Deployment
+observations must surround a reproducible raw-verified healthy interval with
+unchanged generation/pod UIDs/image, correct target/environment and approval
+before incident onset/change. The registry replays accepted health instead of
+trusting an uploaded success flag. This approves an image only, never dispatch.
+Registry, authority, recovery source/health policy and target bindings must match;
+the intent pins them for later reconciliation. Those identity checks do not
+replace the outstanding H4/source-parity review of actual Kubernetes telemetry.
+The diagnosed deployment change must match the current bad-image generation;
+verification accepts exactly its next generation for the image-only patch.
+An intervening external spec change escalates instead of being attributed to the rollback.
+
+The explicit optional bootstrap migration
+[`005-remediation.sql`](../../infra/control/005-remediation.sql) adds the separate
+`sentinel_remediation` schema/version ledger and NOLOGIN group
+`control_action_writer`. An operator provisions a dedicated login in that group;
+no application password is committed. Existing core migrations remain `[1,2,3]`
+and old API/health/incident roles gain no action access. The action role can read
+core evidence, cannot write IERs or assume owner, and cannot update/delete/truncate
+intent, event or dispatch history. Startup readiness rejects unsafe privileges.
+The migration is not silently mounted/applied by Compose or worker startup.
+
+Intent, target claim and initial event commit atomically. A separate transaction
+arms one immutable dispatch budget per incident/target before HTTP. Hash-linked
+events and a CAS state projection detect missing/rewritten/inconsistent history;
+concurrent status reads use one statement snapshot. Duplicate requests return the
+same action; different contents conflict. Target lock and cooldown are durable.
+An audit failure rolls back dispatch/state/target-clock updates together.
+
+After arming, kill switch, source qualification and incident revision are checked
+again immediately before transport. A crash after arming is conservatively
+ambiguous, even if no packet was sent: retry observes Kubernetes and never sends
+a second automatic patch. A lost response after server commit therefore cannot
+duplicate dispatch. Already sent actions reconcile/verify even after disabling
+the runbook. Known-good image, new ready generation/pod identities and current
+post-action SLO evidence must all qualify before action-journal `recovered`.
+The actual database receipt also enforces the deadline. Failed/inconclusive or
+ambiguous verification escalates and retains target quarantine for operator
+review; there is no automatic known-bad compensation or automatic quarantine
+release. This trades availability for safety and does not claim exactly-once HTTP.
+
+The executor writes no IER lifecycle transitions. Existing natural-recovery
+semantics are unchanged until H4/action integration is agreed. Structured logs
+include action/revision/phase; the bounded OpenTelemetry counter
+`sentinelops_remediation_state_observations_total` counts observations (retries
+included), with phase/runbook labels and no incident/action ID metric labels.
 
 ## Post-action telemetry verifier
 
@@ -43,10 +118,18 @@ transition. `telemetry_verified` only means these SLO observations qualify.
 `recovery_accepted` remain **false** for every result. There is no permission to
 dispatch, no Kubernetes readiness observation and no causal recovery claim.
 
+The executor selects `require_current=True`, yielding
+`post-action-current-slo/v1`: it scans through the cutoff, retains the last three
+clear buckets and requires the latest due accepted bucket for the frozen
+30-second-watermark profile. An early healthy prefix followed by UNKNOWN/breach,
+or a stopped source, cannot certify current recovery. The historical default
+remains backward compatible for bounded interval evidence. Completion crossing a
+new bucket anchor/deadline must wait/escalate rather than backdate qualification.
+
 Run the source-backed codec fixtures:
 
 ```sh
-python -m pytest -q tests/test_remediation_verification.py tests/test_health_source.py
+python -m pytest -q tests/test_remediation*.py tests/test_health_source.py
 ```
 
 The verifier was also run twice against B's actual accepted local health ledger,
@@ -58,17 +141,56 @@ reset, **not** an image rollback or an autonomous recovery. It does not satisfy
 ADR-009 closed-loop acceptance. Machine-local output is retained under the owned
 ignored runtime root, not committed as a PASS report.
 
-## Next controller integration
+## Reproducible storage and Kubernetes API checks
 
-Implement the independent local executor and guard tests under ownership B.
-Keep actual dispatch blocked until H4 qualification and an approved immutable
-known-good image ledger are available. Required pieces still include explicit
-local cluster/namespace/resource UID binding, digest-only image selection,
-resource-version preconditions, allow-list/enable checks, server dry-run,
-blast-radius limits, durable audit-before-patch, idempotency/lock/budget/cooldown,
-crash reconciliation and kill-switch recheck. Kubernetes-ready plus a successful
-patch response is insufficient. Recovery also needs verified target image/pod
-identity and this telemetry check, persisted through the action journal.
+```sh
+python -m scripts.check_remediation_store --output artifacts/lane-b/action-store-new.json
+python -m scripts.check_rollback_kubernetes --kind /path/to/kind --output artifacts/lane-b/kubernetes-api-new
+```
+
+Outputs must be new. The first command requires local `postgres:16-alpine` already
+available, pins its local image ID, creates a labeled private PostgreSQL container
+with an explicit free loopback port and removes only that new container/anonymous
+data. It tests real concurrent proposals/dispatch CAS, append-only ACLs, native
+rejection of manual IER authority, cooldown/quarantine, injected audit rollback,
+atomic status snapshots and actual DB stop/start with exact history preservation.
+Incident/terminal action states in this storage test are explicitly fixtures.
+
+The Kubernetes check requires Docker, kubectl and kind v0.30.0, pins the official
+v1.34.0 node digest, creates a unique local cluster/registry and uses an explicit
+private kubeconfig only for bootstrap. The runtime adapter receives a limited
+ServiceAccount token. The tiny HTTP/failed-start images are **API fixtures, not
+SentinelOps Payment or SLO evidence**. The check actually executes TLS/RBAC,
+server dry-run without image mutation, rejected stale resourceVersion, and one
+image restoration followed by a new ready pod UID/generation. No H4 grant or
+approved known-good ledger is manufactured; telemetry/G6 acceptance remain false.
+Only newly owned cluster/registry resources are removed; credentials are removed
+on cleanup and never included in uploaded evidence. Failed-run diagnostics are
+retained as bounded pod/node status and fixture events. Earlier local failures
+exposed TCP startup/ephemeral-port test-harness issues and containerd-2 registry
+mapping; successful checks retained the original policy/readiness assertions.
+
+CI's `remediation-integration` job repeats both actual database and Kubernetes
+API checks. It verifies the official kind binary SHA-256 before executing it;
+only bounded JSON verification/diagnostics files are uploaded, excluding token
+and bootstrap kubeconfig. Native changes require this job in `ci-summary`.
+
+API semantics and pinning references: [Kubernetes API/dry-run](https://kubernetes.io/docs/reference/using-api/api-concepts/),
+[RBAC resourceNames](https://kubernetes.io/docs/reference/access-authn-authz/rbac/),
+[kind v0.30.0 node digests](https://github.com/kubernetes-sigs/kind/releases/tag/v0.30.0),
+[local registry](https://kind.sigs.k8s.io/docs/user/local-registry/),
+[containerd registry hosts](https://github.com/containerd/containerd/blob/main/docs/hosts.md).
+
+## Remaining controller integration
+
+Wire a bounded background runner and authenticated versioned action HTTP/status
+contracts only after the H4 boundary, real known-good approval and source binding
+are reviewed. Deliver an operator quarantine-resolution procedure and action/IER
+lifecycle integration without rewriting the analytical RCA contract. Exercise an
+actual bad SentinelOps Payment image deployment with qualified independent RCA,
+proper before-incident approved image and live Kubernetes telemetry. The current
+API/storage fixtures and retrospective fault-reset check do not satisfy that
+closed-loop product acceptance. AWS and production authentication remain separate.
 
 Do not change the existing natural-recovery incident consumer to imply an action
 ran. Its analytical RCA contract has `actions_allowed=false`; H4 producer and
