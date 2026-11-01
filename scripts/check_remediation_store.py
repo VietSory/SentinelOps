@@ -55,6 +55,20 @@ async def test_database(name,port,bootstrap_password,runtime_password):
         core=await asyncpg.create_pool(f'postgresql://control_writer:local-control-writer@127.0.0.1:{port}/sentinelops_control',min_size=1,max_size=2)
         journal=ActionJournal(action);repository=IncidentRepository(core)
         await journal.check_ready();await repository.check_ready()
+        await bootstrap.execute('REVOKE INSERT ON sentinel_remediation.events FROM control_action_writer')
+        try:
+            await journal.check_ready()
+            raise AssertionError('readiness accepted a role unable to commit audit')
+        except RuntimeError as exc: assert 'lacks required' in str(exc)
+        await bootstrap.execute('GRANT INSERT ON sentinel_remediation.events TO control_action_writer')
+        await bootstrap.execute('GRANT DELETE ON sentinel_remediation.targets TO control_action_writer')
+        try:
+            await journal.check_ready()
+            raise AssertionError('readiness accepted mutable target lock deletion')
+        except RuntimeError as exc: assert 'delete durable' in str(exc)
+        await bootstrap.execute('REVOKE DELETE ON sentinel_remediation.targets FROM control_action_writer')
+        await journal.check_ready()
+        checks.append('readiness rejects missing audit INSERT and excess durable target DELETE privileges')
         assert await bootstrap.fetchval('SELECT array_agg(version ORDER BY version) FROM sentinel_control.schema_migrations')==[1,2,3]
         checks.append('optional action migration is idempotent and preserves core [1,2,3] readiness')
         async def incident():

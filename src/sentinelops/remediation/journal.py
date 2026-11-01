@@ -34,10 +34,25 @@ class ActionJournal:
             unsafe=await conn.fetchval('''SELECT rolsuper OR rolcreaterole OR rolcreatedb
                 OR pg_has_role(current_user,'control_owner','MEMBER')
                 OR has_schema_privilege('sentinel_remediation','CREATE')
+                OR has_schema_privilege('sentinel_control','CREATE')
                 OR has_table_privilege('sentinel_control.incident_versions','INSERT,UPDATE,DELETE,TRUNCATE')
                 FROM pg_roles WHERE rolname=current_user''')
             if unsafe: raise RuntimeError('action runtime must not own schema or write IER history')
-            for table in ('intents','events','dispatches'):
+            core_writes=await conn.fetchval('''SELECT coalesce(bool_or(has_table_privilege(c.oid,'INSERT,UPDATE,DELETE,TRUNCATE')),false)
+                FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname='sentinel_control' AND c.relkind IN ('r','p')''')
+            if core_writes: raise RuntimeError('action runtime can mutate upstream core evidence')
+            for table in ('intents','events','dispatches','states','targets'):
+                for privilege in ('SELECT','INSERT'):
+                    if not await conn.fetchval('SELECT has_table_privilege($1,$2)','sentinel_remediation.'+table,privilege):
+                        raise RuntimeError('action runtime lacks required journal privileges')
+            for table,columns in (('states',('revision','phase','facts','updated_at')),('targets',('active_action','last_dispatch_at'))):
+                for column in columns:
+                    if not await conn.fetchval("SELECT has_column_privilege($1,$2,'UPDATE')",'sentinel_remediation.'+table,column):
+                        raise RuntimeError('action runtime lacks required projection privileges')
+                if await conn.fetchval("SELECT has_table_privilege($1,'DELETE,TRUNCATE')",'sentinel_remediation.'+table):
+                    raise RuntimeError('action runtime can delete durable projection/target locks')
+            for table in ('intents','events','dispatches','schema_migrations'):
                 if await conn.fetchval("SELECT has_table_privilege($1,'UPDATE,DELETE,TRUNCATE')",'sentinel_remediation.'+table):
                     raise RuntimeError('action runtime can rewrite immutable intent/audit/dispatch history')
 
