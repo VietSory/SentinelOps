@@ -19,6 +19,7 @@ from uuid import uuid4
 from types import SimpleNamespace
 
 import asyncpg
+import httpx
 
 from sentinelops.incidents.domain import IncidentWrite
 from sentinelops.incidents.repository import IncidentRepository
@@ -26,6 +27,10 @@ from sentinelops.remediation.authority import NativeH4Authority
 from sentinelops.remediation.domain import ActionConflict,Blocked,Policy,Request,Target
 from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.executor import RollbackExecutor
+from sentinelops.remediation.reader import ActionReader, decode_cursor
+from sentinelops.remediation.worker import ReconciliationWorker
+from sentinelops.api import create_app
+from sentinelops.api_settings import Settings
 
 PROJECT=Path(__file__).resolve().parents[1]
 OWNER='sentinelops-b-action-tests'
@@ -43,7 +48,7 @@ def require_owned(name):
 
 async def test_database(name,port,bootstrap_password,runtime_password):
     bootstrap=await asyncpg.connect(f'postgresql://control_bootstrap:{bootstrap_password}@127.0.0.1:{port}/sentinelops_control')
-    core=action=None
+    core=action=reader_pool=None
     checks=[]
     try:
         for filename in ('001-local-roles.sql','002-incident-store.sql','003-health-worker.sql',
@@ -51,9 +56,31 @@ async def test_database(name,port,bootstrap_password,runtime_password):
             await bootstrap.execute((PROJECT/'infra/control'/filename).read_text())
         statement=await bootstrap.fetchval("SELECT format('CREATE ROLE remediation_test LOGIN PASSWORD %L IN ROLE control_action_writer NOSUPERUSER NOCREATEDB NOCREATEROLE', $1::text)",runtime_password)
         await bootstrap.execute(statement)
+        statement=await bootstrap.fetchval("SELECT format('CREATE ROLE remediation_reader_test LOGIN PASSWORD %L IN ROLE control_action_reader NOSUPERUSER NOCREATEDB NOCREATEROLE', $1::text)",runtime_password)
+        await bootstrap.execute(statement)
         action=await asyncpg.create_pool(f'postgresql://remediation_test:{runtime_password}@127.0.0.1:{port}/sentinelops_control',min_size=1,max_size=12,command_timeout=10)
+        reader_pool=await asyncpg.create_pool(f'postgresql://remediation_reader_test:{runtime_password}@127.0.0.1:{port}/sentinelops_control',min_size=1,max_size=4,command_timeout=5)
         core=await asyncpg.create_pool(f'postgresql://control_writer:local-control-writer@127.0.0.1:{port}/sentinelops_control',min_size=1,max_size=2)
         journal=ActionJournal(action);repository=IncidentRepository(core)
+        reader=ActionReader(reader_pool)
+        await reader.check_ready()
+        await bootstrap.execute('GRANT UPDATE(facts) ON sentinel_remediation.states TO control_action_reader')
+        try:
+            await reader.check_ready()
+            raise AssertionError('action API accepted column-level writes')
+        except RuntimeError as exc: assert 'read-only' in str(exc)
+        await bootstrap.execute('REVOKE UPDATE(facts) ON sentinel_remediation.states FROM control_action_reader')
+        try:
+            await ActionReader(action).check_ready()
+            raise AssertionError('action API accepted the executor writer credential')
+        except RuntimeError as exc: assert 'read-only' in str(exc)
+        await reader.check_ready()
+        async with reader_pool.acquire() as conn:
+            try:
+                await conn.execute('UPDATE sentinel_remediation.states SET facts=facts')
+                raise AssertionError('action API mutated action state')
+            except asyncpg.InsufficientPrivilegeError: pass
+        checks.append('dedicated action API reader has SELECT only; writer and column-level DML grants fail readiness')
         await journal.check_ready();await repository.check_ready()
         await bootstrap.execute('REVOKE INSERT ON sentinel_remediation.events FROM control_action_writer')
         try:
@@ -192,18 +219,54 @@ async def test_database(name,port,bootstrap_password,runtime_password):
         assert await journal.get(state3['action_id'])==before
         await repository.check_ready()
         checks.append('actual PostgreSQL stop/start preserves exact immutable action history and core readiness')
+        await reader.check_ready()
+        observation=await reader.get(state3['action_id'])
+        assert observation['phase']=='escalated' and len(observation['history'])==4
+        assert observation['history'][-1]['event_hash']==before['last_event_hash']
+        # A fresh worker sees the durable quarantine, without any Kubernetes call.
+        resumed=ReconciliationWorker(journal,SimpleNamespace(journal=journal,policy=replace(third,enabled=False)))
+        assert (await resumed.tick())['status']=='QUARANTINED'
+        fourth=replace(policy,target=replace(target,deployment_uid='resume-prepared-fixture'))
+        prepared_id=await incident()
+        prepared_state=await journal.propose(Request(prepared_id,2,uuid4().hex),fourth,evidence={})
+        resumed=ReconciliationWorker(journal,SimpleNamespace(journal=journal,policy=replace(fourth,enabled=False)))
+        assert (await resumed.tick())['phase']=='blocked'
+        assert await journal.active(fourth.target) is None
+        assert not await action.fetchval('SELECT EXISTS(SELECT FROM sentinel_remediation.dispatches WHERE action_id=$1)',prepared_state['action_id'])
+        assert (await repository.get(prepared_id))['revision']==2
+        checks.append('fresh resume-only worker preserves outage-surviving quarantine and cancels prepared intent without dispatch or IER mutation')
+        old_page=await reader.list(identifier,1,limit=1)
+        assert old_page['items']==[]
+        first=await reader.list(identifier,2,limit=1)
+        assert first['next_cursor'] and len(first['items'])==1
+        second_page=await reader.list(identifier,2,limit=1,after=decode_cursor(first['next_cursor'],identifier,2))
+        assert len(second_page['items'])==1 and first['items'][0]['action_id']!=second_page['items'][0]['action_id']
+        token=secrets.token_hex(24)
+        app=create_app(Settings(api_token=token),repository=repository,action_reader=reader)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://local',
+                                     headers={'Authorization':'Bearer '+token}) as client:
+            response=await client.get('/v1/actions/'+state3['action_id'])
+            assert response.status_code==200 and response.json()==observation
+            assert response.headers['etag']=='"4"'
+            assert (await client.get('/v1/incidents/'+identifier+'/actions',params={'revision':1})).json()['items']==[]
+            assert (await client.get('/ready/actions')).json()['dispatch_enabled'] is False
+            assert (await client.post('/v1/actions/'+state3['action_id'],json={'approved':True})).status_code==405
+        checks.append('actual PostgreSQL read-only action HTTP exposes verified audit, ETag and revision-scoped pagination; no write route')
         return {'status':'PASS','fixture_only':True,'kubernetes_mutated':False,'H4_accepted':False,
                 'core_migrations':[1,2,3],'action_migrations':[1],'checks':checks}
     finally:
         if action: await action.close()
         if core: await core.close()
+        if reader_pool: await reader_pool.close()
         await bootstrap.close()
 
 
 async def run(output):
     if output.exists(): raise ValueError('exclusive action acceptance output already exists')
     hashes={name:hashlib.sha256((PROJECT/name).read_bytes()).hexdigest() for name in (
-        'scripts/check_remediation_store.py','src/sentinelops/remediation/journal.py','infra/control/005-remediation.sql')}
+        'scripts/check_remediation_store.py','src/sentinelops/remediation/journal.py','infra/control/005-remediation.sql',
+        'src/sentinelops/remediation/reader.py','src/sentinelops/remediation/worker.py',
+        'src/sentinelops/api.py','src/sentinelops/api_settings.py','scripts/run_remediation_worker.py')}
     image=docker('image','inspect','postgres:16-alpine','--format','{{.Id}}').decode().strip()
     name='sentinelops-b-actions-'+uuid4().hex[:12]
     password,runtime_password=secrets.token_hex(24),secrets.token_hex(24)

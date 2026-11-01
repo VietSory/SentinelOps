@@ -79,3 +79,40 @@ test('context rejects wrong identity, future history, unsafe revisions and absen
     await assert.rejects(() => client.context('a',3,0),error => error.code==='invalid_response');
   }
 });
+
+const actionPage = (id,revision,cursor=null) => ({observation_version:'action-list/v1',incident_id:id,incident_revision:revision,
+  items:[{observation_version:'action-observation/v1',incident_id:id,incident_revision:revision,action_id:'a'.repeat(64),
+    action_revision:1,phase:'blocked',runbook:'payment-rollback-known-good/v1',history:[{revision:1,phase:'blocked'}]}],next_cursor:cursor});
+
+test('action client rejects wrong scope, later incident revisions, invalid phases and inconsistent audit',async () => {
+  for (const mutate of [x => x.incident_revision=4,x => x.items[0].incident_id='foreign',
+    x => x.items[0].incident_revision=4,x => x.items[0].phase='approved',x => x.items[0].history.push({revision:2,phase:'dispatching'}),
+    x => x.items[0].history[0]=null,x => x.items[0].history[0].phase='recovered']) {
+    const value=actionPage('a',3); mutate(value);
+    const client=new IncidentClient('fixture',async () => new Response(JSON.stringify(value),{status:200}));
+    await assert.rejects(() => client.actions('a',3,null),error => error.code==='invalid_response');
+  }
+});
+
+test('action pagination pins revision, deduplicates IDs and switching incidents rejects late action responses',async () => {
+  const late=deferred(),calls=[];let count=0;
+  const workspace=new Workspace(() => {},() => factory({actions:async (id,revision,cursor) => {
+    calls.push({id,revision,cursor}); if (++count===3) return late.promise;
+    return actionPage(id,revision,cursor ? null : 'opaque-actions');
+  }}));
+  await workspace.connect('fixture');await workspace.select('a',3);
+  await workspace.loadActions();await workspace.loadActions(true);
+  assert.equal(workspace.state.actions.items.length,1);
+  assert.deepEqual(calls[1],{id:'a',revision:3,cursor:'opaque-actions'});
+  const previous=workspace.loadActions();await workspace.select('b',2);
+  late.resolve(actionPage('a',3));await previous;
+  assert.equal(workspace.state.actions,null);assert.equal(workspace.state.actionsLoading,false);
+});
+
+test('unavailable action history retains its error and does not hide a readable incident',async () => {
+  const workspace=new Workspace(() => {},() => factory({actions:async () => {throw new ApiFailure(503,'action_store_unavailable');}}));
+  await workspace.connect('fixture');await workspace.select('a',3);await workspace.loadActions();
+  assert.equal(workspace.state.detail.incident_id,'a');assert.equal(workspace.state.actions,null);
+  assert.match(workspace.state.actionsError.message,/does not establish that no action occurred/);
+  workspace.disconnect();assert.equal(workspace.state.actionsError,null);
+});

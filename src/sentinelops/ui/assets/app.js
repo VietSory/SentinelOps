@@ -65,7 +65,8 @@ function render(state) {
       previous.listLoading !== state.listLoading || previous.listError !== state.listError) renderList(state);
   if (previous.detail !== state.detail || previous.selected !== state.selected || previous.detailLoading !== state.detailLoading ||
       previous.detailError !== state.detailError || previous.historyLoading !== state.historyLoading ||
-      previous.historyError !== state.historyError || previous.session !== state.session) renderDetail(state);
+      previous.historyError !== state.historyError || previous.session !== state.session || previous.actions !== state.actions ||
+      previous.actionsLoading !== state.actionsLoading || previous.actionsError !== state.actionsError) renderDetail(state);
   previous = {...state};
 }
 
@@ -203,6 +204,40 @@ function timeline(detail, state) {
   return target;
 }
 
+function actionHistory(state) {
+  const target = node('div');
+  target.append(node('p',`Action journal through incident revision ${state.detail.revision}. Action phases do not change the incident lifecycle. This view cannot execute or approve a rollback.`,'subtle'));
+  if (state.actionsError) {
+    const error = node('div',null,'inline-error'); error.setAttribute('role','alert'); showError(error,state.actionsError); target.append(error);
+  }
+  if (state.actionsLoading) target.append(node('p','Reading action journal…','subtle'));
+  if (state.actions && !state.actions.items.length) target.append(node('p','No action records were returned through this revision. This does not establish service health or recovery.','subtle'));
+  for (const item of state.actions?.items || []) {
+    const card = node('details',null,'evidence-card'), heading = node('summary');
+    heading.append(node('strong',item.phase),node('code',short(item.action_id)),node('span',`action r${item.action_revision} · incident r${item.incident_revision}`));
+    card.append(heading);
+    const body = node('div',null,'evidence-body');
+    if (item.reason) body.append(node('p',item.reason));
+    body.append(node('p',item.runbook,'subtle'),node('p',`Recorded ${date(item.recorded_at)} · updated ${date(item.updated_at)}`,'subtle'));
+    for (const [label,value] of [['Previous image',item.before_image],['Known-good image',item.known_good_image]]) {
+      body.append(node('span',label,'fact-label'),node('code',value || 'Unavailable','source'));
+    }
+    const events = node('ol',null,'timeline');
+    for (const event of item.history) {
+      const row = node('li'); row.append(node('strong',`r${event.revision} · ${event.phase}`),time(event.recorded_at));
+      if (event.reason) row.append(node('p',event.reason)); events.append(row);
+    }
+    body.append(events); card.append(body); target.append(card);
+  }
+  const refresh = button(state.actionsLoading ? 'Loading action history…' : 'Reload action history',() => workspace.loadActions(),'button secondary');
+  refresh.disabled = state.actionsLoading; target.append(refresh);
+  if (state.actions?.next_cursor) {
+    const more = button('Load more actions',() => workspace.loadActions(true),'button secondary');
+    more.disabled = state.actionsLoading; target.append(more);
+  }
+  return target;
+}
+
 function renderDetail(state) {
   const target = $('#detail-pane'); target.replaceChildren(); target.setAttribute('aria-busy',String(state.detailLoading));
   if (state.detailError) {
@@ -229,11 +264,13 @@ function renderDetail(state) {
   form.addEventListener('submit',event => { event.preventDefault(); if (form.reportValidity()) openIncident(detail.incident_id,Number(input.value)); });
   header.append(form); target.append(header);
   const tabs = node('div',null,'tabs'); tabs.setAttribute('role','group'); tabs.setAttribute('aria-label','Incident sections');
-  for (const [key,label] of [['overview','Overview'],['evidence',`Evidence (${payload.evidence.length})`],['timeline','Timeline']]) {
-    const item = button(label,() => { tab = key; renderDetail(workspace.state); document.querySelector(`[data-tab="${key}"]`)?.focus(); },`tab ${tab === key ? 'active' : ''}`);
+  for (const [key,label] of [['overview','Overview'],['evidence',`Evidence (${payload.evidence.length})`],['timeline','Timeline'],['actions','Actions']]) {
+    const item = button(label,async () => { tab = key; renderDetail(workspace.state);
+      if (key === 'actions' && !workspace.state.actions && !workspace.state.actionsError) await workspace.loadActions();
+      if (tab === key) document.querySelector(`[data-tab="${key}"]`)?.focus(); },`tab ${tab === key ? 'active' : ''}`);
     item.dataset.tab = key; item.setAttribute('aria-pressed',String(tab === key)); tabs.append(item);
   }
-  const content = node('div',null,'detail-content'); content.append(tab === 'evidence' ? evidence(detail) : tab === 'timeline' ? timeline(detail,state) : overview(detail));
+  const content = node('div',null,'detail-content'); content.append(tab === 'evidence' ? evidence(detail) : tab === 'timeline' ? timeline(detail,state) : tab === 'actions' ? actionHistory(state) : overview(detail));
   target.append(tabs,content);
 }
 

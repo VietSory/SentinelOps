@@ -88,12 +88,21 @@ class ActionJournal:
             prior,phase=event['event_hash'],event['phase']
         if (row['revision']!=len(events) or phase!=row['phase'] or facts!=decode(events[-1]['facts'])):
             raise RuntimeError('action state differs from immutable audit')
+        history=[{'revision':e['revision'],'phase':e['phase'],'recorded_at':e['recorded_at'],
+                  'reason':decode(e['facts']).get('reason'),'event_hash':e['event_hash'],
+                  'previous_hash':e['previous_hash']} for e in events]
         return {'action_id':action_id,'request_hash':row['request_hash'],'intent':intent,'revision':row['revision'],
-                'phase':row['phase'],'facts':facts,'last_event_hash':prior,'recorded_at':timestamp(row['recorded_at'])}
+                'phase':row['phase'],'facts':facts,'last_event_hash':prior,'recorded_at':timestamp(row['recorded_at']),
+                'updated_at':events[-1]['recorded_at'],'history':history}
 
     async def get(self,action_id):
         async with self.pool.acquire() as conn,conn.transaction(isolation='repeatable_read',readonly=True):
             return await self._read(conn,action_id)
+
+    async def active(self,target):
+        async with self.pool.acquire() as conn:
+            identifier=await conn.fetchval('SELECT active_action FROM sentinel_remediation.targets WHERE target_key=$1',target.key)
+        return await self.get(identifier) if identifier else None
 
     async def find(self,request,target):
         async with self.pool.acquire() as conn,conn.transaction(isolation='repeatable_read',readonly=True):

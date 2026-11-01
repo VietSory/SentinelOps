@@ -16,7 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from sentinelops.api_http import ApiError, RequestSafetyMiddleware
 from sentinelops.api_settings import Settings
-from sentinelops.contracts import utc_time,validate_payload
+from sentinelops.contracts import utc_time,validate_payload,load_schema
 from sentinelops.demo import demo_incident
 from sentinelops.incidents.domain import IncidentConflict,IncidentNotFound,IncidentWrite
 from sentinelops.incidents.repository import IncidentRepository,RepositoryIntegrityError
@@ -24,6 +24,7 @@ from sentinelops.telemetry.core import stable_id
 from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, IncompatibleFeatures
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.ui.routes import router as ui_router
+from sentinelops.remediation.reader import ActionReader, decode_cursor as decode_action_cursor
 
 logger = logging.getLogger("sentinelops-api")
 STATES = {"degrading","incident","recovering","recovered","escalated"}
@@ -84,7 +85,7 @@ def revision_headers(response: Response,snapshot: dict) -> None:
     response.headers["X-Incident-Revision"] = str(snapshot["revision"])
 
 
-def create_app(settings: Settings | None = None,*,repository=None,model_registry=None) -> FastAPI:
+def create_app(settings: Settings | None = None,*,repository=None,model_registry=None,action_reader=None) -> FastAPI:
     settings = settings or Settings.from_env()
     registry = model_registry if model_registry is not None else ModelRegistry()
     if model_registry is None and settings.model_store:
@@ -92,7 +93,7 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
 
     @asynccontextmanager
     async def lifespan(app):
-        pool = None
+        pool = action_pool = None
         if repository is not None:
             app.state.incident_repository = repository
         elif settings.control_database_url:
@@ -105,14 +106,26 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
             except (ValueError,*STORE_ERRORS):
                 logger.error("control_store_configuration_invalid")
         try:
+            if action_reader is None and settings.action_database_url:
+                try:
+                    action_pool = await asyncpg.create_pool(settings.action_database_url,min_size=0,max_size=4,
+                                                          command_timeout=5,timeout=5)
+                    app.state.action_reader = ActionReader(action_pool)
+                except (ValueError,*STORE_ERRORS):
+                    logger.error("action_reader_configuration_invalid")
             yield
         finally:
-            if pool is not None:
-                await pool.close()
+            try:
+                if action_pool is not None:
+                    await action_pool.close()
+            finally:
+                if pool is not None:
+                    await pool.close()
 
     app = FastAPI(title="SentinelOps API",version="0.2.1",lifespan=lifespan,
                   description="Incident persistence with revision headers. Real inference is unavailable until a model is activated; local demo mode is explicit.")
     app.state.incident_repository = repository
+    app.state.action_reader = action_reader
     app.add_middleware(RequestSafetyMiddleware)
     app.include_router(ui_router)
 
@@ -165,6 +178,25 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
         except STORE_ERRORS:
             raise ApiError(503,"control_store_unavailable","Incident storage is unavailable") from None
 
+    async def require_actions(request: Request):
+        reader = request.app.state.action_reader
+        if reader is None:
+            raise ApiError(503,"action_store_unavailable","Read-only action storage is not configured")
+        try:
+            await reader.check_ready()
+        except (*STORE_ERRORS,RuntimeError):
+            raise ApiError(503,"action_store_unavailable","Action storage is unavailable or lacks safe read-only privileges") from None
+        return reader
+
+    async def read_actions(operation,schema):
+        try:
+            result = await operation
+            if result is not None:
+                validate_payload(schema,result)
+            return result
+        except (*STORE_ERRORS,RuntimeError,ValueError):
+            raise ApiError(503,"stored_action_unavailable","Stored action observation could not be verified") from None
+
     @app.get("/health")
     async def health():
         return {"status":"ok","service":"sentinelops-api","version":"0.2.1"}
@@ -186,6 +218,41 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
     @app.get("/ready/incidents")
     async def incidents_ready(identity=Depends(authorize),repo=Depends(require_repository)):
         return {"status":"ready","component":"incident-store"}
+
+    @app.get("/ready/actions")
+    async def actions_ready(identity=Depends(authorize),reader=Depends(require_actions)):
+        return {"status":"ready","component":"action-observations","dispatch_enabled":False}
+
+    @app.get("/v1/actions/{action_id}",responses={200:{"description":"Verified read-only action journal observation",
+        "content":{"application/json":{"schema":load_schema('action-observation.schema.json')}}}})
+    async def get_action(action_id: str,request: Request,response: Response,
+                         identity=Depends(authorize),reader=Depends(require_actions)):
+        if not re.fullmatch(r'[0-9a-f]{64}',action_id):
+            raise ApiError(422,"invalid_action_id","Action ID must be a SHA-256 identity")
+        result = await read_actions(reader.get(action_id),'action-observation.schema.json')
+        if result is None:
+            raise ApiError(404,"action_not_found","Action was not found")
+        response.headers['ETag'] = '"'+str(result['action_revision'])+'"'
+        response.headers['X-Action-Revision'] = str(result['action_revision'])
+        if request.headers.get('if-none-match')==response.headers['ETag']:
+            response.status_code=304
+            return response
+        return result
+
+    @app.get("/v1/incidents/{incident_id}/actions",responses={200:{"description":"Action observations through the pinned incident revision",
+        "content":{"application/json":{"schema":load_schema('action-list.schema.json')}}}})
+    async def incident_actions(incident_id: str,response: Response,
+                               revision: int | None = Query(None,ge=1,le=2**63-1),
+                               limit: int = Query(10,ge=1,le=25),cursor: str | None = None,
+                               identity=Depends(authorize),repo=Depends(require_repository),reader=Depends(require_actions)):
+        snapshot = await call(repo.get(incident_id,revision))
+        try:
+            after = decode_action_cursor(cursor,incident_id,snapshot['revision'])
+        except ValueError:
+            raise ApiError(422,"invalid_action_cursor","Cursor does not match the pinned incident revision") from None
+        result = await read_actions(reader.list(incident_id,snapshot['revision'],limit=limit,after=after),'action-list.schema.json')
+        revision_headers(response,snapshot)
+        return result
 
     @app.post("/v1/detect")
     async def detect(feature_window: dict,response: Response,request: Request):

@@ -2,7 +2,8 @@ import {ApiFailure, IncidentClient} from './client.js';
 
 const blank = () => ({session:false, filters:{state:'',service:''}, rows:[], nextCursor:null, listLoading:false,
   listError:null, detail:null, detailLoading:false, detailError:null, historyLoading:false, historyError:null,
-  readiness:null, readinessError:null, selected:null, selectedRevision:null, updatedAt:null, notice:null});
+  readiness:null, readinessError:null, selected:null, selectedRevision:null, updatedAt:null, notice:null,
+  actions:null, actionsLoading:false, actionsError:null});
 
 /** Generation guards also reject responses from transports that ignore AbortSignal. */
 export class Workspace {
@@ -49,9 +50,9 @@ export class Workspace {
     },error => { this.state.listError = error; },() => { this.state.listLoading = false; });
   }
   async filter(filters) {
-    this.#cancel('detail'); this.#cancel('history');
+    this.#cancel('detail'); this.#cancel('history'); this.#cancel('actions');
     Object.assign(this.state,{filters:{...filters},rows:[],nextCursor:null,detail:null,selected:null,selectedRevision:null,
-      detailError:null,detailLoading:false,historyLoading:false,historyError:null});
+      detailError:null,detailLoading:false,historyLoading:false,historyError:null,actions:null,actionsLoading:false,actionsError:null});
     return this.loadList();
   }
   async select(id, revision = null) {
@@ -59,9 +60,10 @@ export class Workspace {
     if (revision !== null && (!Number.isSafeInteger(revision) || revision < 1)) {
       this.state.detailError = new ApiFailure(0,'invalid_response'); this.emit(); return;
     }
-    this.#cancel('history');
+    this.#cancel('history'); this.#cancel('actions');
     const client = this.#client;
-    Object.assign(this.state,{selected:id,selectedRevision:revision,detail:null,detailLoading:true,detailError:null,historyError:null,historyLoading:false});
+    Object.assign(this.state,{selected:id,selectedRevision:revision,detail:null,detailLoading:true,detailError:null,historyError:null,
+      historyLoading:false,actions:null,actionsLoading:false,actionsError:null});
     this.emit();
     return this.#run('detail',s => client.context(id,revision,0,s),value => { this.state.detail = value; },
       error => { this.state.detailError = error; },() => { this.state.detailLoading = false; });
@@ -75,5 +77,15 @@ export class Workspace {
       this.state.detail = {...detail,timeline:{events:[...new Map([...detail.timeline.events,...value.timeline.events]
         .map(event => [event.event_id,event])).values()],next_after_revision:value.timeline.next_after_revision}};
     },error => { this.state.historyError = error; },() => { this.state.historyLoading = false; });
+  }
+  async loadActions(append = false) {
+    const detail = this.state.detail;
+    if (!this.#client || !detail || this.state.actionsLoading || append && !this.state.actions?.next_cursor) return;
+    const client = this.#client, cursor = append ? this.state.actions.next_cursor : null;
+    this.state.actionsLoading = true; this.state.actionsError = null; this.emit();
+    return this.#run('actions',s => client.actions(detail.incident_id,detail.revision,cursor,s),value => {
+      const items = append ? [...this.state.actions.items,...value.items] : value.items;
+      this.state.actions = {...value,items:[...new Map(items.map(item => [item.action_id,item])).values()]};
+    },error => { this.state.actionsError = error; },() => { this.state.actionsLoading = false; });
   }
 }

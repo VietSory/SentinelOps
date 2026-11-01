@@ -37,9 +37,23 @@ def fixture_envelope(incident, revision, after=0):
         'timeline':{'events':page,'next_after_revision':page[-1]['revision'] if page and page[-1]['revision']<revision else None}}
 
 
+def fixture_actions(incident, revision, cursor=None):
+    reason='<img src=x onerror="window.__action_xss=true">'
+    item={'observation_version':'action-observation/v1','action_id':('2' if cursor else '1')*64,
+        'incident_id':incident,'incident_revision':2,'action_revision':1,'runbook':'payment-rollback-known-good/v1',
+        'phase':'blocked','recorded_at':'2026-01-01T00:00:00Z','updated_at':'2026-01-01T00:00:00Z',
+        'reason':reason,'before_image':None,'known_good_image':None,
+        'target':{'cluster_uid':'fixture-cluster','namespace':'sentinelops-b-actions','namespace_uid':'fixture-namespace',
+                  'deployment':'payment-service','deployment_uid':'fixture-deployment','container':'payment'},
+        'history':[{'revision':1,'phase':'blocked','recorded_at':'2026-01-01T00:00:00Z','reason':reason,
+                    'event_hash':'a'*64,'previous_hash':None}]}
+    return {'observation_version':'action-list/v1','incident_id':incident,'incident_revision':revision,
+        'items':[item] if revision>=2 else [],'next_cursor':'fixture-actions-2' if revision>=2 and not cursor else None}
+
+
 def exercise_fixtures(page, base, output, expect):
     token = 'fixture-browser-token-not-a-real-secret'*2
-    outage = {'active':False}
+    outage = {'active':False,'actions':False}
     records = [{'incident_id':'INC-FIXTURE-A','revision':3,'state':'escalated','severity':'high','detected_at':'2026-01-01T00:00:00Z',
         'affected_services':['payment-service','checkout-service']},
         {'incident_id':'INC-FIXTURE-B','revision':1,'state':'incident','severity':'medium','detected_at':'2026-01-01T01:00:00Z',
@@ -62,6 +76,10 @@ def exercise_fixtures(page, base, output, expect):
         if url.path.endswith('/context'):
             incident = url.path.split('/')[-2]
             route.fulfill(json=fixture_envelope(incident,int(query.get('revision',['3'])[0]),int(query.get('after_revision',['0'])[0]))); return
+        if url.path.endswith('/actions'):
+            if outage['actions']:
+                route.fulfill(status=503,json={'code':'action_store_unavailable','request_id':'fixture-action-outage'}); return
+            route.fulfill(json=fixture_actions(url.path.split('/')[-2],int(query['revision'][0]),query.get('cursor',[None])[0])); return
         route.fulfill(status=404,json={'code':'not_found','message':'Not found','request_id':'fixture-request'})
     page.route('**/ready',reply); page.route('**/v1/incidents**',reply)
     page.goto(base+'/ui/',wait_until='networkidle')
@@ -92,9 +110,23 @@ def exercise_fixtures(page, base, output, expect):
     page.get_by_role('button',name='Timeline',exact=True).focus(); page.keyboard.press('Enter')
     page.get_by_role('button',name='Load more revisions',exact=True).click()
     expect(page.locator('.timeline li')).to_have_count(3)
+    page.get_by_role('button',name='Actions',exact=True).focus(); page.keyboard.press('Enter')
+    expect(page.locator('.evidence-card')).to_have_count(1)
+    page.locator('.evidence-card summary').click()
+    expect(page.locator('.evidence-body > p').first).to_have_text('<img src=x onerror="window.__action_xss=true">')
+    assert page.evaluate('window.__action_xss') is None and page.locator('#detail-pane img').count()==0
+    page.get_by_role('button',name='Load more actions',exact=True).click()
+    expect(page.locator('.evidence-card')).to_have_count(2)
+    page.screenshot(path=str(output/'fixture-actions-desktop.png'),full_page=True)
+    outage['actions']=True;page.get_by_role('button',name='Reload action history',exact=True).click()
+    expect(page.locator('#detail-pane [role=alert]')).to_contain_text('Action history is unavailable')
+    expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
+    outage['actions']=False
     page.locator('#revision-input').fill('1'); page.get_by_role('button',name='View',exact=True).click()
     expect(page.locator('#revision-input')).to_have_value('1')
     expect(page.locator('.timeline li')).to_have_count(0)  # switching revision returns to Overview
+    page.get_by_role('button',name='Actions',exact=True).click()
+    expect(page.get_by_text('No action records were returned through this revision.',exact=False)).to_be_visible()
     page.get_by_role('button',name='Timeline',exact=True).click(); expect(page.locator('.timeline li')).to_have_count(1)
     page.screenshot(path=str(output/'fixture-desktop.png'),full_page=True)
     page.set_viewport_size({'width':390,'height':844})
@@ -103,6 +135,10 @@ def exercise_fixtures(page, base, output, expect):
     expect(page.locator('#revision-input')).to_have_value('3')
     expect(page.locator('#detail-title')).to_be_in_viewport()
     page.screenshot(path=str(output/'fixture-mobile.png'),full_page=True)
+    page.get_by_role('button',name='Actions',exact=True).click()
+    expect(page.locator('.evidence-card')).to_have_count(1)
+    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+    page.screenshot(path=str(output/'fixture-actions-mobile.png'),full_page=True)
     outage['active'] = True; page.locator('#refresh').click()
     expect(page.locator('#list-error')).to_contain_text('unavailable')
     expect(page.locator('#store-status')).to_have_text('Unavailable')
@@ -112,7 +148,8 @@ def exercise_fixtures(page, base, output, expect):
     assert page.locator('#detail-title').count() == 0
     return {'scope':'fixture-browser-software-test-not-source-or-research-evidence',
         'checks':['authentication','pagination','filters','revision-pinning','timeline-pagination','model-unavailable',
-                  'unknown-context','XSS-safe-facts-and-references','missing-timestamp','mobile-layout','store-outage','logout-clears-data']}
+                  'unknown-context','XSS-safe-facts-and-references','missing-timestamp','mobile-layout','store-outage','logout-clears-data',
+                  'read-only-action-audit','action-pagination','action-revision-scope','action-outage','XSS-safe-action-reason']}
 
 
 def exercise_native(page, base, output, incident, token, expect):

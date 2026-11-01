@@ -11,6 +11,13 @@ def test_browser_fixtures_preserve_the_existing_envelope_contract(revision,after
     validate_payload('incident-envelope.schema.json',fixture_envelope('INC-FIXTURE-A',revision,after))
 
 
+@pytest.mark.parametrize('revision,cursor',[(1,None),(3,None),(3,'fixture-actions-2')])
+def test_action_browser_fixtures_are_explicitly_read_only_and_schema_valid(revision,cursor):
+    from scripts.check_operator_ui import fixture_actions
+    from sentinelops.contracts import validate_payload
+    validate_payload('action-list.schema.json',fixture_actions('INC-FIXTURE-A',revision,cursor))
+
+
 def test_ui_serves_same_origin_without_exposing_token_or_private_incidents():
     token = 'PRIVATE-OPERATOR-TOKEN-'+'x'*32
     with TestClient(create_app(Settings(api_token=token))) as client:

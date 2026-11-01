@@ -133,7 +133,7 @@ Bảng dưới đây phân biệt schema đã tồn tại với các hợp đồ
 | ModelManifest / release ledger | Artifact/calibration checksums, ordered features, provenance, runtime versions/config/seed/thresholds; approval/route refs tách riêng | [Bundle/registry software](../runbooks/MODEL_PIPELINE.md): `sentinelops-model/v1` và `validated-model-release/v1` kiểm bằng code; chưa có JSON Schema riêng, chưa có approved model/G3 acceptance |
 | IncidentEnvelope | Exact IER payload, revision/recorded clock, context/actor/reason/timeline | [Schema](../../contracts/incident-envelope.schema.json), [persistent API](../runbooks/INCIDENT_API.md) và [continuous consumer](../runbooks/INCIDENT_WORKER.md) đã có; không tự cấp action/explanation permissions |
 | ChangeEvent | Target, before/after version/config, observed clock, deployment ref | Chưa có wire contract/ledger deployment tổng quát; bounded operational change evidence không thay thế hợp đồng đích này |
-| ActionExecution/AuditEvent | Runbook/target, actor/policy decision, idempotency/attempt/result/verify/audit | Chưa có execution/audit contract và controller; schema RemediationAction hiện có không chứng minh action đã được thực thi |
+| ActionExecution/AuditEvent | Runbook/target, policy decision, idempotency/attempt/result/verify/audit | Có internal guarded executor, append-only action journal và [read-only action observation/list](../runbooks/CONTROLLED_REMEDIATION.md); H4/new dispatch và IER action lifecycle chưa tích hợp; schema RemediationAction không tự chứng minh execution |
 
 [Feature-envelope sample](../../samples/feature-envelope.sample.json) và [observation-envelope sample](../../samples/observation-envelope.sample.json) được validator kiểm tra. Runtime/schema/package checks và các báo cáo source/runtime được ghi riêng trong [PROJECT_STATUS.md](../PROJECT_STATUS.md). Không gọi các contract đã có là chưa triển khai, cũng không biến model fixture hoặc schema request thành bằng chứng approved model, action execution hay quality acceptance.
 
@@ -402,7 +402,7 @@ Nguồn DDL local hiện hành là [schema v1](../../infra/control/002-incident-
 | `incident_jobs`, `incident_job_evidence`, `incident_episode_recoveries` | Unique group/job/incident, frozen evidence and recovery refs | Đã có: source-derived groups, one accepted evidence capture và natural recovery |
 | `incident_commands`, `incident_command_receipts` | Unique command/ref and job/expected revision; matching receipt | Đã có: stable retry/idempotency qua IER publication |
 | `explanations` | Incident/revision/provider/prompt identity | Chưa có bảng/provider pipeline; target validated projection/fallback |
-| `actions`, `action_events` | Action ID/idempotency, target/runbook và ordered audit | Chưa có bảng/controller/execution verification |
+| `sentinel_remediation.intents/states/events/targets/dispatches` | Action ID/idempotency, target/runbook, CAS và ordered audit | Optional schema riêng, guarded executor/resume-only worker và SELECT-only HTTP; chưa có activated live dispatch hoặc IER action lifecycle |
 | Generic `tasks_outbox` | Task/dedup key, status/lease/attempt | Chưa có generic scheduler contract; local incident outbox/commands ở trên có scope riêng |
 | Database `model_activations` | Environment/service/current bundle + revision | Chưa có bảng; local [model registry](../runbooks/MODEL_PIPELINE.md) đã dùng checksum-pinned artifact release ledger, zero approved models |
 | `change_events` | Event ID, target, immutable version refs | Chưa có bảng deployment/change ledger tổng quát |
@@ -437,7 +437,8 @@ Update current pointer, append version/event và enqueue downstream tasks trong 
 | `POST /v1/incidents/demo` | Explicit demo-only provenance | Đã có; disabled mặc định, không là model/production evidence |
 | `GET /v1/incidents/{id}/explanation` | GroundedExplanation/provider validation/fallback metadata | Chưa triển khai |
 | `POST /v1/internal/windows` | Authenticated envelope ingress/job ID | Chưa triển khai; continuous workers hiện đọc verified local source ledger trực tiếp |
-| `POST /v1/incidents/{id}/actions`, `GET /v1/actions/{id}` | Server policy/runbook target/approval/dry-run/blast radius và execution detail | Chưa triển khai |
+| `POST /v1/incidents/{id}/actions` | Server policy/runbook target/approval/dry-run/blast radius | Chưa triển khai; không có public dispatch hoặc client approval override |
+| `GET /v1/actions/{id}`, `GET /v1/incidents/{id}/actions` | Versioned action observation/audit và revision-scoped pages | Có authenticated SELECT-only API và UI; action phases tách strict IER và không tự cấp quyền execute |
 
 New interfaces MUST có OpenAPI/JSON Schema và producer/consumer fixtures trước integration. Không publish wrapper-shaped response dưới contract cũ. Demo endpoint chỉ bật trong demo profile và payload/record phải có provenance demo bên ngoài frozen IER.
 
