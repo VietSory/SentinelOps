@@ -163,6 +163,8 @@ class RollbackExecutor:
             current=await self.kube.observe()
             current.validate(self.policy,before_dispatch=False)
             if current.image not in (before.image,good): raise Blocked('unexpected-external-image-change')
+            expected_generation=before.generation if current.image==before.image else before.generation+1
+            if current.generation!=expected_generation: raise Blocked('unexpected-external-generation-change')
         except Blocked as exc:
             return self._emit(await self.journal.transition(action_id,state['revision'],'escalated',{**facts,'reason':str(exc)}))
         if current.image==before.image:
@@ -201,6 +203,8 @@ class RollbackExecutor:
                 raise Blocked('invalid-current-recovery-support')
             final=await self.kube.observe()
             final.validate(self.policy,before_dispatch=False)
+            if final.image!=good or final.generation!=before.generation+1:
+                raise Blocked('unexpected-external-generation-change')
             if not final.ready_for(good,prior_generation=before.generation,old_pods=[p.uid for p in before.pods]):
                 return state
             completed=self.clock()

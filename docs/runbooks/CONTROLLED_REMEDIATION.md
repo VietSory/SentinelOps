@@ -42,6 +42,9 @@ trusting an uploaded success flag. This approves an image only, never dispatch.
 Registry, authority, recovery source/health policy and target bindings must match;
 the intent pins them for later reconciliation. Those identity checks do not
 replace the outstanding H4/source-parity review of actual Kubernetes telemetry.
+The diagnosed deployment change must match the current bad-image generation;
+verification accepts exactly its next generation for the image-only patch.
+An intervening external spec change escalates instead of being attributed to the rollback.
 
 The explicit optional bootstrap migration
 [`005-remediation.sql`](../../infra/control/005-remediation.sql) adds the separate

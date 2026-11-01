@@ -25,6 +25,7 @@ from sentinelops.incidents.repository import IncidentRepository
 from sentinelops.remediation.authority import NativeH4Authority
 from sentinelops.remediation.domain import ActionConflict,Blocked,Policy,Request,Target
 from sentinelops.remediation.journal import ActionJournal
+from sentinelops.remediation.executor import RollbackExecutor
 
 PROJECT=Path(__file__).resolve().parents[1]
 OWNER='sentinelops-b-action-tests'
@@ -76,6 +77,15 @@ async def test_database(name,port,bootstrap_password,runtime_password):
         except Blocked as exc:
             assert str(exc)=='incident-has-no-verified-native-job'
         checks.append('actual source query rejects manual IER imports as native action authority')
+        class NoKubernetesCalls:
+            async def observe(self): raise AssertionError('unverified manual IER reached Kubernetes')
+            async def patch(self,*args,**kwargs): raise AssertionError('unverified manual IER reached image patch')
+        executor=RollbackExecutor(journal,NoKubernetesCalls(),native,None,None,policy,
+            json.loads((PROJECT/'configs/rca_policy.json').read_text()),enabled=lambda:True)
+        rejected=await executor.execute(replace(request,idempotency_key=uuid4().hex))
+        assert rejected['phase']=='blocked' and rejected['facts']['reason']=='incident-has-no-verified-native-job'
+        assert (await repository.get(identifier))['revision']==2
+        checks.append('native executor persists blocked manual IER in real PostgreSQL without Kubernetes access or IER mutation')
         proposals=await asyncio.gather(*(journal.propose(request,policy,evidence={'fixture_only':True}) for _ in range(8)))
         state=proposals[0]
         assert all(p==state for p in proposals) and state['phase']=='prepared' and state['revision']==1

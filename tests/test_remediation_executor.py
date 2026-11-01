@@ -50,7 +50,7 @@ def setup():
     rca=evaluate(facts,cards,available)
     request=Request('INC-'+rca['group_id'],2,'fixture-idempotency-0001')
     good=KnownGood(TARGET,GOOD,'artifact://manifests/'+'1'*64+'.json',timestamp(END-timedelta(seconds=120)),())
-    change=Change(TARGET,GOOD,BAD,change_fact['observed_at'],available[change_fact['id']],REF,change_fact['id'])
+    change=Change(TARGET,GOOD,BAD,5,change_fact['observed_at'],available[change_fact['id']],REF,change_fact['id'])
     assessment=Assessment(request.incident_id,2,'RCA_READY','ELIGIBLE',timestamp(clock()),
         'artifact://manifests/'+'2'*64+'.json',rca,change,True,'fixture-only-authority')
     class FixtureAuthority:
@@ -112,7 +112,7 @@ def test_patch_is_verifying_until_new_pod_and_current_post_action_telemetry_succ
     asyncio.run(run())
 
 
-@pytest.mark.parametrize('problem',['disabled','unqualified','abstained','wrong-change','stale','dryrun','revision'])
+@pytest.mark.parametrize('problem',['disabled','unqualified','abstained','wrong-change','wrong-generation','stale','dryrun','revision'])
 def test_policy_rejections_never_dispatch(problem):
     async def run():
         f=setup();a=f.authority.value
@@ -120,6 +120,7 @@ def test_policy_rejections_never_dispatch(problem):
         if problem=='unqualified': f.authority.value=replace(a,dispatch_authority=False,missing_reason='rca-abstained')
         if problem=='abstained': f.authority.value=replace(a,rca=evaluate([],[],{}))
         if problem=='wrong-change': f.authority.value=replace(a,change=replace(a.change,after_image=GOOD))
+        if problem=='wrong-generation': f.authority.value=replace(a,change=replace(a.change,after_generation=6))
         if problem=='stale': f.time[0]+=timedelta(seconds=181)
         if problem=='dryrun': f.kube.deny=True
         if problem=='revision': f.authority.value=replace(a,revision=3)
@@ -258,4 +259,16 @@ def test_minute_anchor_crossing_during_final_kubernetes_read_does_not_backdate_r
         f.kube.observe=delayed
         result=await f.executor.reconcile(sent['action_id'])
         assert calls==2 and result['phase']=='verifying'
+    asyncio.run(run())
+
+
+def test_an_external_spec_change_after_dispatch_is_quarantined_not_accepted_as_our_rollout():
+    async def run():
+        f=setup();sent=await f.executor.execute(f.request)
+        original=f.kube.observe
+        async def foreign_generation(): return replace(await original(),generation=7,observed_generation=7)
+        f.kube.observe=foreign_generation
+        result=await f.executor.reconcile(sent['action_id'])
+        assert result['phase']=='escalated' and result['facts']['reason']=='unexpected-external-generation-change'
+        assert f.kube.calls.count(False)==1
     asyncio.run(run())

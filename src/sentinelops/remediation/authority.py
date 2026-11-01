@@ -19,6 +19,7 @@ class Change:
     target: Target
     before_image: str
     after_image: str
+    after_generation: int
     observed_at: str
     available_at: str
     source_ref: str
@@ -81,6 +82,7 @@ def qualify(assessment, request, before, known_good, policy, rca_policy, *, now:
     change = assessment.change
     if (change is None or change.target != policy.target or change.before_image != known_good.image
         or change.after_image != before.image or known_good.target != policy.target
+        or type(change.after_generation) is not int or change.after_generation!=before.generation
         or not timedelta(0) < onset - utc_time(change.observed_at) <= timedelta(seconds=policy.change_window_seconds)
         or not utc_time(change.observed_at) <= utc_time(change.available_at) <= now
         or not utc_time(known_good.approved_at) <= utc_time(change.observed_at)):
