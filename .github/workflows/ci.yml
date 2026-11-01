@@ -618,7 +618,8 @@ jobs:
   ui:
     needs: changes
     if: needs.changes.outputs.ui == 'true'
-    runs-on: ubuntu-latest
+    # Playwright 1.56 is pinned; ubuntu-latest can move to unsupported 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
