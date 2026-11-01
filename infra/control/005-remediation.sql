@@ -5,10 +5,15 @@ DO $$ BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='control_action_writer') THEN
         CREATE ROLE control_action_writer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
     END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='control_action_reader') THEN
+        CREATE ROLE control_action_reader NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE;
+    END IF;
 END $$;
 CREATE SCHEMA IF NOT EXISTS sentinel_remediation AUTHORIZATION control_owner;
 REVOKE ALL ON SCHEMA sentinel_remediation FROM PUBLIC;
 GRANT CONNECT ON DATABASE sentinelops_control TO control_action_writer;
+GRANT CONNECT ON DATABASE sentinelops_control TO control_action_reader;
+GRANT USAGE ON SCHEMA sentinel_remediation TO control_action_reader;
 GRANT USAGE ON SCHEMA sentinel_control, sentinel_remediation TO control_action_writer;
 GRANT SELECT ON sentinel_control.incidents, sentinel_control.incident_versions TO control_action_writer;
 GRANT SELECT ON sentinel_control.schema_migrations, sentinel_control.health_streams,
@@ -66,6 +71,8 @@ CREATE TABLE IF NOT EXISTS sentinel_remediation.dispatches (
         REFERENCES sentinel_remediation.intents(action_id,target_key,incident_id),
     UNIQUE (incident_id,target_key)
 );
+CREATE INDEX IF NOT EXISTS action_incident_history ON sentinel_remediation.intents(incident_id,recorded_at,action_id);
+GRANT SELECT ON ALL TABLES IN SCHEMA sentinel_remediation TO control_action_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA sentinel_remediation TO control_action_writer;
 GRANT INSERT ON sentinel_remediation.intents, sentinel_remediation.states,
     sentinel_remediation.events, sentinel_remediation.targets, sentinel_remediation.dispatches TO control_action_writer;

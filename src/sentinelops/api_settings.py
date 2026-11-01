@@ -6,6 +6,7 @@ import os
 class Settings:
     environment: str = "local"
     control_database_url: str | None = field(default=None,repr=False)
+    action_database_url: str | None = field(default=None,repr=False)
     api_token: str | None = field(default=None,repr=False)
     demo_mode: bool = False
     model_store: str | None = None
@@ -23,6 +24,7 @@ class Settings:
     def from_env(cls):
         return cls(environment=os.getenv("SENTINELOPS_ENV","local"),
                    control_database_url=os.getenv("CONTROL_DATABASE_URL"),
+                   action_database_url=os.getenv("SENTINELOPS_ACTION_READ_DATABASE_URL"),
                    api_token=os.getenv("SENTINELOPS_API_TOKEN"),
                    demo_mode=os.getenv("SENTINELOPS_ENABLE_DEMO","false").lower()=="true",
                    model_store=os.getenv("SENTINELOPS_MODEL_STORE"),

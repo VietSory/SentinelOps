@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/action-list.schema.json",
+  "title": "Action observations through a pinned incident revision",
+  "type": "object", "additionalProperties": false,
+  "required": ["observation_version", "incident_id", "incident_revision", "items", "next_cursor"],
+  "properties": {
+    "observation_version": {"const": "action-list/v1"},
+    "incident_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "incident_revision": {"type": "integer", "minimum": 1},
+    "items": {"type": "array", "maxItems": 25, "items": {"$ref": "https://sentinelops.local/contracts/action-observation.schema.json"}},
+    "next_cursor": {"type": ["string", "null"], "minLength": 1, "maxLength": 2048}
+  }
+}
