@@ -6,6 +6,8 @@ export class ApiFailure extends Error {
       authentication_unavailable: 'API authentication is not configured for this environment.',
       incident_store_unavailable: 'The incident store is unavailable. Previously loaded data may be stale.',
       incident_not_found: 'This incident or revision could not be found.',
+      action_store_unavailable: 'Action history is unavailable. This does not establish that no action occurred.',
+      stored_action_unavailable: 'Action history could not be verified. Reload when its evidence is available.',
       timeout: 'The API did not respond in time. Try again.',
       network: 'Cannot reach the API. Check the connection and try again.',
       invalid_response: 'The API returned an unsupported response. Refresh or check its version.',
@@ -71,4 +73,21 @@ export class IncidentClient {
     return body;
   }
   readiness(signal) { return this.get('/ready',signal,{allowUnavailable:true}); }
+  async actions(id, revision, cursor, signal) {
+    const query = new URLSearchParams({revision:String(revision),limit:'10'});
+    if (cursor) query.set('cursor',cursor);
+    const body = await this.get(`/v1/incidents/${encodeURIComponent(id)}/actions?${query}`,signal);
+    const phases = ['prepared','blocked','dispatching','verifying','recovered','escalated'];
+    if (body.observation_version !== 'action-list/v1' || body.incident_id !== id || body.incident_revision !== revision ||
+      !Array.isArray(body.items) || body.items.length > 25 ||
+      !(body.next_cursor === null || typeof body.next_cursor === 'string' && body.next_cursor.length > 0) ||
+      body.items.some(item => item?.observation_version !== 'action-observation/v1' || item.incident_id !== id ||
+        !Number.isSafeInteger(item.incident_revision) || item.incident_revision < 1 || item.incident_revision > revision ||
+        !/^[0-9a-f]{64}$/.test(item.action_id) || !phases.includes(item.phase) ||
+        item.runbook !== 'payment-rollback-known-good/v1' || !Number.isSafeInteger(item.action_revision) ||
+        !Array.isArray(item.history) || item.history.length !== item.action_revision || item.history.length < 1 || item.history.length > 100 ||
+        item.history.some((event,index) => !event || event.revision !== index+1 || !phases.includes(event.phase)) ||
+        item.history.at(-1).phase !== item.phase)) throw new ApiFailure(200,'invalid_response');
+    return body;
+  }
 }
