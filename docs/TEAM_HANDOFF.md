@@ -116,6 +116,8 @@ có; public API local bằng static token không phải AWS acceptance.
 
 Explanation và action submission trong technical spec vẫn **planned**. Action
 observation GET đã có với credential SELECT-only riêng; không cấp quyền execute.
+CLI `scripts/review_payment_image.py` thu hồ sơ image/health cho operator review;
+không tự tạo approved known-good ledger hoặc xác nhận physical source binding/H4.
 MVP UI đọc IER thật từ worker/API trên môi trường B. Fixture chỉ dùng unit test
 hoặc demo profile có nhãn, không đếm làm data/model evidence. B không cần raw train
 của A để hoàn thành UI. Luôn hiển thị uncertainty/abstention và missing dependency.

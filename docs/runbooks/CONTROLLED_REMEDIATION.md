@@ -49,6 +49,77 @@ The diagnosed deployment change must match the current bad-image generation;
 verification accepts exactly its next generation for the image-only patch.
 An intervening external spec change escalates instead of being attributed to the rollback.
 
+## Collect image evidence before operator approval
+
+`python -m scripts.review_payment_image` collects an immutable **unapproved** image
+review using the existing Kubernetes observer and accepted health reader. It does
+not generate `approved-payment-images/v1`, approve an image, write the database,
+patch Kubernetes, create an action or grant H4. No HTTP approval endpoint is added.
+`known_good_approved`, `physical_binding_verified` and `action_dispatch_authorized`
+are always false in the new strict review/evidence contracts. Service-name equality
+does not prove that a Prometheus stream observes the selected Kubernetes target.
+That physical source binding and the operator's approval are separate prerequisites.
+
+Use a separately provisioned login with `USAGE` on `sentinel_control` and **SELECT
+only** on `health_streams`, `health_batches`, `health_signals`. Supply its loopback
+DSN via `SENTINELOPS_IMAGE_REVIEW_DATABASE_URL`; do not use the incident/health/action
+writer, migration owner or quarantine resolver. Startup checks actual table/column
+privileges and SECURITY DEFINER execute access, rejecting mutation authority. The
+connection also sets `default_transaction_read_only=on`; this flag alone is not
+the privilege check. Existing core migrations suffice; the collector applies none.
+
+Apply the existing observer RBAC and use its private token/CA, as for quarantine
+review. Choose an existing accepted local health stream/root, the exact target UID
+JSON and a separate B-owned review store. Paths/stream/server below are placeholders
+for operator-selected values, not evidence or credentials:
+
+```sh
+python -m scripts.review_payment_image \
+  --target /owned/b/target.json --health-stream <selected-stream-id> \
+  --source-store /owned/b/accepted-health --review-store /owned/b/image-review \
+  --server https://127.0.0.1:<port> --ca-file /private/ca.crt \
+  --token-file /private/observer.token open
+
+# After at least three whole eligible buckets plus the accepted source watermark:
+python -m scripts.review_payment_image \
+  --target /owned/b/target.json --health-stream <selected-stream-id> \
+  --source-store /owned/b/accepted-health --review-store /owned/b/image-review \
+  --server https://127.0.0.1:<port> --ca-file /private/ca.crt \
+  --token-file /private/observer.token complete --review-ref artifact://manifests/<hash>.json
+```
+
+`open` pins a ready immutable image, target, generation, pod UID/runtime imageID,
+source stream/policy/root and observation clock. `complete` rereads source history
+from its origin, requires three whole **latest due** eligible healthy buckets with
+traffic and takes a final read-only Deployment observation enclosing the decision.
+Generation, image, container index and pod UID/imageID must remain unchanged.
+Review expires after 600 seconds; replacement/rollout drift, missing/UNKNOWN/stale
+telemetry, raw corruption and source outages never produce completed evidence.
+If the watermark advances during the final read, completion remains pending.
+Retry after an outage uses the same immutable opening and recomputes all health;
+there is no saved healthy streak or background polling/release. Open a new review
+after expiry rather than backdating clocks. Stores must not overlap the original
+health root. The trusted local stores/credentials remain operator-controlled;
+hashes detect byte changes, not hostile-writer authentication.
+
+`AWAITING_OPERATOR_REVIEW` returns `payment-image-evidence/v1` with resolvable
+before/after/health refs in the review store. It is deliberately rejected as an
+approved ledger by `KnownGoodRegistry`. A separate operator must inspect the
+physical source binding, image provenance and evidence before selecting any
+approved ledger. The existing registry can reproduce both historical SLO/v1
+certificates and these current-SLO/v1 certificates; it never accepts a success flag
+instead of raw verification. No approved real known-good release or G6 acceptance
+is claimed by software-fixture tests of this collector. Its bounded metric
+`sentinelops_image_review_observations_total` counts operation/status observations,
+including retries, not unique approvals or successful recovery.
+
+Run focused raw-codec tests with
+`python -m pytest -q tests/test_payment_image_review.py tests/test_remediation_registry.py`.
+The existing disposable PostgreSQL check below also exercises actual reader
+privileges, missing SELECT, column-level DML and guarded release-function rejection.
+
+## Durable action ledger
+
 The explicit optional bootstrap migration
 [`005-remediation.sql`](../../infra/control/005-remediation.sql) adds the separate
 `sentinel_remediation` schema/version ledger and NOLOGIN group
