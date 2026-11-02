@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/payment-image-evidence.schema.json",
+  "title": "Unapproved local Payment image evidence; no physical binding or dispatch authority",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "target",
+    "image",
+    "environment",
+    "before_ref",
+    "health_stream_id",
+    "health_policy_sha256",
+    "opened_at",
+    "known_good_approved",
+    "physical_binding_verified",
+    "action_dispatch_authorized",
+    "evidence_version",
+    "review_ref",
+    "completed_at",
+    "after_ref",
+    "health_ref"
+  ],
+  "properties": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cluster_uid",
+        "namespace",
+        "namespace_uid",
+        "deployment",
+        "deployment_uid",
+        "container"
+      ],
+      "properties": {
+        "cluster_uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "namespace": {
+          "const": "sentinelops-b-actions"
+        },
+        "namespace_uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "deployment": {
+          "const": "payment-service"
+        },
+        "deployment_uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "container": {
+          "const": "payment"
+        }
+      }
+    },
+    "image": {
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$"
+    },
+    "environment": {
+      "type": "string",
+      "minLength": 1
+    },
+    "before_ref": {
+      "$ref": "#/$defs/reference"
+    },
+    "health_stream_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "health_policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "opened_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "known_good_approved": {
+      "const": false
+    },
+    "physical_binding_verified": {
+      "const": false
+    },
+    "action_dispatch_authorized": {
+      "const": false
+    },
+    "evidence_version": {
+      "const": "payment-image-evidence/v1"
+    },
+    "review_ref": {
+      "$ref": "#/$defs/reference"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "after_ref": {
+      "$ref": "#/$defs/reference"
+    },
+    "health_ref": {
+      "$ref": "#/$defs/reference"
+    }
+  },
+  "$defs": {
+    "reference": {
+      "type": "string",
+      "pattern": "^artifact://manifests/[0-9a-f]{64}\\.json$"
+    }
+  }
+}

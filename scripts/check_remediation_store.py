@@ -207,6 +207,8 @@ async def test_database(name,port,bootstrap_password,runtime_password):
         quarantine_checks,quarantine_action,quarantine_before=await check_quarantine(
             bootstrap,action,reader_pool,repository,incident,target,port,runtime_password)
         checks.extend(quarantine_checks)
+        from scripts.check_image_review_store import exercise as check_image_review
+        checks.append(await check_image_review(bootstrap,reader_pool,action))
         before=await journal.get(state3['action_id'])
         require_owned(name);docker('stop',name)
         try:
@@ -274,7 +276,10 @@ async def run(output):
         'src/sentinelops/api.py','src/sentinelops/api_settings.py','scripts/run_remediation_worker.py',
         'infra/control/006-quarantine-review.sql','src/sentinelops/remediation/quarantine.py',
         'src/sentinelops/remediation/verification.py','src/sentinelops/remediation/executor.py',
-        'scripts/check_quarantine_store.py','scripts/review_payment_quarantine.py')}
+        'scripts/check_quarantine_store.py','scripts/review_payment_quarantine.py',
+        'scripts/check_image_review_store.py','scripts/review_payment_image.py',
+        'src/sentinelops/remediation/image_review.py','src/sentinelops/remediation/registry.py',
+        'contracts/payment-image-review.schema.json','contracts/payment-image-evidence.schema.json')}
     image=docker('image','inspect','postgres:16-alpine','--format','{{.Id}}').decode().strip()
     name='sentinelops-b-actions-'+uuid4().hex[:12]
     password,runtime_password=secrets.token_hex(24),secrets.token_hex(24)

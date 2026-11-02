@@ -64,8 +64,12 @@ class KnownGoodRegistry:
             or before.image != after.image):
             raise Blocked('known-good-deployment-changed-during-health-interval')
         health = self.store.read(item['health_ref'])
+        version = health.get('verification_version')
+        if version not in ('post-action-slo/v1', 'post-action-current-slo/v1'):
+            raise Blocked('unsupported-known-good-health-evidence')
         actual = await verify_post_action_health(self.source, effective_at=utc_time(health['effective_at']),
-            as_of=utc_time(health['as_of']), expected_environment=self.environment, max_batches=10000)
+            as_of=utc_time(health['as_of']), expected_environment=self.environment, max_batches=10000,
+            require_current=version == 'post-action-current-slo/v1')
         if (health != actual or health['status'] != 'telemetry_verified'
             or not utc_time(before.observed_at) <= utc_time(health['effective_at'])
             or not utc_time(health['as_of']) <= utc_time(after.observed_at) <= utc_time(self.record['approved_at'])):

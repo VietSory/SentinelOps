@@ -64,6 +64,7 @@ from sentinelops.remediation.executor import RollbackExecutor
 from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.kubernetes import LocalKubernetes
 from sentinelops.remediation.registry import KnownGoodRegistry
+from sentinelops.remediation.image_review import ImageEvidenceReview, require_evidence_reader
 from sentinelops.remediation.reader import ActionReader
 from sentinelops.remediation.worker import ReconciliationWorker
 from sentinelops.remediation.quarantine import QuarantineJournal, QuarantineReview
@@ -81,7 +82,8 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'incident-envelope', 'incident-list', 'api-error', 'training-data-policy',
              'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result',
              'rca-policy', 'rca-result', 'training-data-policy-v2', 'lane-b-deployment-lock', 'payment-known-good',
-             'action-observation', 'action-list', 'quarantine-review', 'quarantine-release', 'quarantine-status'):
+             'action-observation', 'action-list', 'quarantine-review', 'quarantine-release', 'quarantine-status',
+             'payment-image-review', 'payment-image-evidence'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 assert 'root_causes_ground_truth' in load_schema('experiment-run.schema.json')['properties']
 policy={'policy_version':'slo-health/local-v1','latency_ms':750.,'error_rate':.05,
