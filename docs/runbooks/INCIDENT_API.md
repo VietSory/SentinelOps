@@ -96,6 +96,14 @@ the pinned incident revision; their action audit stays separate from strict IER
 and incident lifecycle. The UI Actions tab reads these routes; missing storage is
 unavailable, not proof that no action happened. There is no public dispatch API.
 
+After optional action migration 2, `GET /v1/actions/{id}/quarantine` returns
+[quarantine-status/v1](../../contracts/quarantine-status.schema.json), with a
+content ETag independent of the unchanged action revision. It observes the claim
+or explicit operator receipt for that action, never changes the incident lifecycle
+or authorizes dispatch. Missing migration/data is 503. The Actions UI can view the
+receipt but cannot release a lock. Only the separate operator CLI/credential may
+perform [guarded manual review](CONTROLLED_REMEDIATION.md#explicit-operator-quarantine-review).
+
 Requests are bounded to 1MB even for chunked bodies; excessive bodies return 413. Errors use [ApiError](../../contracts/api-error.schema.json), include a server request ID matching `X-Request-ID`, and hide database exceptions/credentials. Responses disable caching by default.
 
 Supplemental schema `$ref`s resolve the original IER from installed package resources through a local-only registry. They do not duplicate its definition or fetch arbitrary network/file URLs. The registry follows the [jsonschema referencing API](https://python-jsonschema.readthedocs.io/en/stable/referencing/).

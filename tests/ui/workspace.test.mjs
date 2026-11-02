@@ -116,3 +116,40 @@ test('unavailable action history retains its error and does not hide a readable 
   assert.match(workspace.state.actionsError.message,/does not establish that no action occurred/);
   workspace.disconnect();assert.equal(workspace.state.actionsError,null);
 });
+
+const quarantinePage=(id,revision) => ({observation_version:'quarantine-status/v1',action_id:id,action_revision:revision,
+  action_phase:'escalated',quarantine_state:'released',resolution:{status:'RELEASED',resolution_id:'d'.repeat(64),
+    action_id:id,operator_actor:'fixture-operator',payload:{release_version:'manual-quarantine-release/v1',
+      action_id:id,action_revision:revision,dispatch_authorized:false,recovery_accepted:false,ier_mutated:false}}});
+
+test('quarantine client rejects foreign/stale/forged recovery claims in an operator receipt',async () => {
+  for (const mutate of [x => x.action_id='b'.repeat(64),x => x.action_revision=4,x => x.quarantine_state='healthy',
+    x => x.action_phase='recovered',x => x.resolution.payload.recovery_accepted=true,x => x.resolution.action_id='b'.repeat(64),
+    x => x.resolution.payload.dispatch_authorized=true]) {
+    const value=quarantinePage('a'.repeat(64),3);mutate(value);
+    const client=new IncidentClient('fixture',async () => new Response(JSON.stringify(value),{status:200}));
+    await assert.rejects(() => client.quarantine('a'.repeat(64),3),error => error.code==='invalid_response');
+  }
+});
+
+test('late quarantine status cannot resurrect an earlier incident or survive logout',async () => {
+  const late=deferred();let requested=null;
+  const workspace=new Workspace(() => {},() => factory({actions:async (id,revision) => actionPage(id,revision),
+    quarantine:(id,revision) => {requested={id,revision};return late.promise;}}));
+  await workspace.connect('fixture');await workspace.select('a',3);await workspace.loadActions();
+  const request=workspace.loadQuarantine('a'.repeat(64));
+  assert.deepEqual(requested,{id:'a'.repeat(64),revision:1});
+  await workspace.select('b',2);late.resolve(quarantinePage('a'.repeat(64),1));await request;
+  assert.deepEqual(workspace.state.quarantines,{});
+  workspace.disconnect();assert.deepEqual(workspace.state.quarantines,{});
+});
+
+test('quarantine 503 remains unavailable while the existing action and incident remain readable',async () => {
+  const workspace=new Workspace(() => {},() => factory({actions:async (id,revision) => actionPage(id,revision),
+    quarantine:async () => {throw new ApiFailure(503,'stored_action_unavailable');}}));
+  await workspace.connect('fixture');await workspace.select('a',3);await workspace.loadActions();
+  await workspace.loadQuarantine('a'.repeat(64));
+  assert.equal(workspace.state.quarantines['a'.repeat(64)].result,null);
+  assert.equal(workspace.state.quarantines['a'.repeat(64)].error.status,503);
+  assert.equal(workspace.state.detail.incident_id,'a');assert.equal(workspace.state.actions.items.length,1);
+});

@@ -66,7 +66,8 @@ function render(state) {
   if (previous.detail !== state.detail || previous.selected !== state.selected || previous.detailLoading !== state.detailLoading ||
       previous.detailError !== state.detailError || previous.historyLoading !== state.historyLoading ||
       previous.historyError !== state.historyError || previous.session !== state.session || previous.actions !== state.actions ||
-      previous.actionsLoading !== state.actionsLoading || previous.actionsError !== state.actionsError) renderDetail(state);
+      previous.actionsLoading !== state.actionsLoading || previous.actionsError !== state.actionsError ||
+      previous.quarantines !== state.quarantines) renderDetail(state);
   previous = {...state};
 }
 
@@ -204,7 +205,7 @@ function timeline(detail, state) {
   return target;
 }
 
-function actionHistory(state) {
+function actionHistory(state,opened) {
   const target = node('div');
   target.append(node('p',`Action journal through incident revision ${state.detail.revision}. Action phases do not change the incident lifecycle. This view cannot execute or approve a rollback.`,'subtle'));
   if (state.actionsError) {
@@ -214,6 +215,7 @@ function actionHistory(state) {
   if (state.actions && !state.actions.items.length) target.append(node('p','No action records were returned through this revision. This does not establish service health or recovery.','subtle'));
   for (const item of state.actions?.items || []) {
     const card = node('details',null,'evidence-card'), heading = node('summary');
+    card.dataset.actionId=item.action_id;card.open=opened.has(item.action_id);
     heading.append(node('strong',item.phase),node('code',short(item.action_id)),node('span',`action r${item.action_revision} · incident r${item.incident_revision}`));
     card.append(heading);
     const body = node('div',null,'evidence-body');
@@ -227,7 +229,32 @@ function actionHistory(state) {
       const row = node('li'); row.append(node('strong',`r${event.revision} · ${event.phase}`),time(event.recorded_at));
       if (event.reason) row.append(node('p',event.reason)); events.append(row);
     }
-    body.append(events); card.append(body); target.append(card);
+    body.append(events);
+    const quarantine=state.quarantines[item.action_id],result=quarantine?.result;
+    body.append(section('Manual quarantine review','Read-only observation'));
+    if (result) {
+      const labels={held:'Quarantine held',released:'Quarantine released by operator',not_held:'No quarantine claim recorded for this action'};
+      body.append(node('strong',labels[result.quarantine_state]),node('p',
+        'This is the latest loaded status for this action. A released lock does not establish recovery or authorize another dispatch.','subtle'));
+      if (result.resolution) {
+        body.append(node('p',`Operator ${result.resolution.operator_actor} · recorded ${date(result.resolution.recorded_at)}`),
+          node('code',result.resolution.resolution_id,'source'));
+      }
+    }
+    if (quarantine?.error) {
+      const error=node('div',null,'inline-error');error.setAttribute('role','alert');showError(error,quarantine.error);body.append(error);
+    }
+    const inspect=button(quarantine?.loading ? 'Reading quarantine…' : result ? 'Reload quarantine status' : 'View quarantine status',
+      async () => {
+        await workspace.loadQuarantine(item.action_id);
+        if (tab==='actions' && workspace.state.detail?.incident_id===state.detail.incident_id &&
+            workspace.state.detail?.revision===state.detail.revision) {
+          document.querySelector(`[data-quarantine-action="${item.action_id}"]`)?.focus();
+        }
+      },'button secondary');
+    inspect.dataset.quarantineAction=item.action_id;
+    inspect.disabled=Boolean(quarantine?.loading);body.append(inspect);
+    card.append(body); target.append(card);
   }
   const refresh = button(state.actionsLoading ? 'Loading action history…' : 'Reload action history',() => workspace.loadActions(),'button secondary');
   refresh.disabled = state.actionsLoading; target.append(refresh);
@@ -239,7 +266,9 @@ function actionHistory(state) {
 }
 
 function renderDetail(state) {
-  const target = $('#detail-pane'); target.replaceChildren(); target.setAttribute('aria-busy',String(state.detailLoading));
+  const target = $('#detail-pane');
+  const opened=new Set([...target.querySelectorAll('details[data-action-id][open]')].map(item => item.dataset.actionId));
+  target.replaceChildren(); target.setAttribute('aria-busy',String(state.detailLoading));
   if (state.detailError) {
     const error = node('div',null,'inline-error'); error.setAttribute('role','alert'); showError(error,state.detailError);
     target.append(error,button('Retry incident',() => openIncident(state.selected,state.selectedRevision),'button secondary')); return;
@@ -270,7 +299,7 @@ function renderDetail(state) {
       if (tab === key) document.querySelector(`[data-tab="${key}"]`)?.focus(); },`tab ${tab === key ? 'active' : ''}`);
     item.dataset.tab = key; item.setAttribute('aria-pressed',String(tab === key)); tabs.append(item);
   }
-  const content = node('div',null,'detail-content'); content.append(tab === 'evidence' ? evidence(detail) : tab === 'timeline' ? timeline(detail,state) : tab === 'actions' ? actionHistory(state) : overview(detail));
+  const content = node('div',null,'detail-content'); content.append(tab === 'evidence' ? evidence(detail) : tab === 'timeline' ? timeline(detail,state) : tab === 'actions' ? actionHistory(state,opened) : overview(detail));
   target.append(tabs,content);
 }
 

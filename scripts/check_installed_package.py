@@ -66,6 +66,7 @@ from sentinelops.remediation.kubernetes import LocalKubernetes
 from sentinelops.remediation.registry import KnownGoodRegistry
 from sentinelops.remediation.reader import ActionReader
 from sentinelops.remediation.worker import ReconciliationWorker
+from sentinelops.remediation.quarantine import QuarantineJournal, QuarantineReview
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 assert callable(verify_post_action_health)
@@ -80,7 +81,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'incident-envelope', 'incident-list', 'api-error', 'training-data-policy',
              'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result',
              'rca-policy', 'rca-result', 'training-data-policy-v2', 'lane-b-deployment-lock', 'payment-known-good',
-             'action-observation', 'action-list'):
+             'action-observation', 'action-list', 'quarantine-review', 'quarantine-release', 'quarantine-status'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 assert 'root_causes_ground_truth' in load_schema('experiment-run.schema.json')['properties']
 policy={'policy_version':'slo-health/local-v1','latency_ms':750.,'error_rate':.05,
@@ -113,6 +114,7 @@ assert client.post('/v1/risk', json=payload).status_code == 503
 assert client.post('/v1/detect', json={}).status_code == 422
 assert client.post('/v1/incidents/demo').status_code == 404
 assert client.get('/v1/actions/'+'a'*64).status_code == 503
+assert client.get('/v1/actions/'+'a'*64+'/quarantine').status_code == 503
 demo = TestClient(create_app(Settings(demo_mode=True)))
 assert demo.post('/v1/detect', json=payload).headers['x-sentinelops-mode'] == 'demo'
 assert demo.post('/v1/incidents/demo').status_code == 200

@@ -1,0 +1,22 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://sentinelops.local/contracts/quarantine-review.schema.json",
+  "title":"Opening observation for explicit operator quarantine review, not an approval",
+  "type":"object","additionalProperties":false,
+  "required":["review_version","review_id","action_id","action_revision","terminal_event_hash","intent_hash","target_key","opened_at","before_ref","health_stream_id","health_policy_sha256","environment"],
+  "properties":{
+    "review_version":{"const":"manual-quarantine-review/v1"},
+    "review_id":{"$ref":"#/$defs/hash"},
+    "action_id":{"$ref":"#/$defs/hash"},
+    "action_revision":{"type":"integer","minimum":1,"maximum":100},
+    "terminal_event_hash":{"$ref":"#/$defs/hash"},
+    "intent_hash":{"$ref":"#/$defs/hash"},
+    "target_key":{"$ref":"#/$defs/hash"},
+    "opened_at":{"type":"string","format":"date-time"},
+    "before_ref":{"type":"string","pattern":"^artifact://observations/[0-9a-f]{64}\\.json$"},
+    "health_stream_id":{"$ref":"#/$defs/hash"},
+    "health_policy_sha256":{"$ref":"#/$defs/hash"},
+    "environment":{"type":"string","minLength":1,"maxLength":64}
+  },
+  "$defs":{"hash":{"type":"string","pattern":"^[0-9a-f]{64}$"}}
+}

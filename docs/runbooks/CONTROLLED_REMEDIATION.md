@@ -5,7 +5,9 @@
 Kubernetes adapter, PostgreSQL journal and bounded executor are implemented.
 There is **no enabled production H4 provider, approved real known-good release,
 public dispatch endpoint or closed-loop acceptance**. A resume-only worker and
-authenticated read-only action observations/UI are available. No process here
+authenticated read-only action observations/UI are available. An explicit local
+operator review can release a quarantined target claim under the conditions below,
+without changing action/incident recovery or dispatch authority. No process here
 creates new actions automatically. No AWS resources are required for this work.
 
 ## Executor and durable journal
@@ -186,6 +188,96 @@ API semantics and pinning references: [Kubernetes API/dry-run](https://kubernete
 [local registry](https://kind.sigs.k8s.io/docs/user/local-registry/),
 [containerd registry hosts](https://github.com/containerd/containerd/blob/main/docs/hosts.md).
 
+## Explicit operator quarantine review
+
+Apply optional [`006-quarantine-review.sql`](../../infra/control/006-quarantine-review.sql)
+using bootstrap. It advances only the action ledger to `[1,2]`; core remains
+`[1,2,3]`. The action writer/reader support both the previous `[1]` and new version.
+The new NOLOGIN `control_action_resolver` group has SELECT and EXECUTE on one
+guarded function, **no raw table DML**. Provision a dedicated operator login;
+do not grant this group to the API, models, incident consumer or action writer.
+Reader readiness rejects a credential with release-function access.
+
+`QuarantineReview` requires an already escalated, armed, still-held action and
+reproduces its original target/source/policy bindings. It waits at least 600 seconds
+after the durable dispatch before opening review. A live observation must show
+the original known-good digest, exact next generation, new ready pod identity and
+changed resourceVersion, invalidating the original patch's CAS preconditions.
+It cannot release a pending/healthy/unrelated incident, select an arbitrary image
+or pretend an old request was delivered exactly once.
+
+Opening records a content-addressed Deployment observation and review card under
+a separate owned B store; writing into/above/below the original source root is
+rejected. Release requires a second matching generation/image/pod/imageID
+observation enclosing **three whole current healthy buckets with adequate traffic**,
+recomputed from the accepted original raw ledger. Missing traffic/UNKNOWN/stale
+source, pod replacement or spec drift keeps the claim. A final live read guards
+against drift during verification. Review expires after 600 seconds; the DB also
+checks cutoff age, current 30-second watermark and original dispatch drain at commit.
+
+The dedicated observer ServiceAccount in
+[`payment-quarantine-observer-rbac.yaml`](../../infra/kubernetes/payment-quarantine-observer-rbac.yaml)
+has no target mutation verbs. Apply it after the existing rollback RBAC. CLI asks
+the authenticated Kubernetes API via SelfSubjectAccessReview to deny patch,
+update, delete, create and deletecollection before observation; a writer token is
+refused. No Deployment/image mutation is made by review.
+
+Export `SENTINELOPS_QUARANTINE_DATABASE_URL` with the dedicated loopback operator
+login. Supply the same verified original stream/root, exact target JSON, local
+HTTPS server and CA as the original controller, but the **observer** token. For example:
+
+```sh
+python -m scripts.review_payment_quarantine \
+  --target /owned/config/payment-target.json --health-stream VERIFIED_STREAM_SHA256 \
+  --source-store /owned/original-health-store --review-store /owned/b-review-store \
+  --server https://127.0.0.1:LOCAL_KUBERNETES_PORT \
+  --ca-file /owned/private/cluster-ca.pem --token-file /owned/private/observer-token \
+  open --action-id ACTION_SHA256
+```
+
+After inspecting the opening card and letting the required real observations
+accumulate, repeat the global arguments with
+`release --review-ref artifact://manifests/REVIEW_SHA256.json --idempotency-key STABLE_OPERATOR_KEY`.
+`PENDING`, `INCONCLUSIVE` or `BLOCKED` means the claim stays held. There is no
+force, actor override, approval boolean, arbitrary-image or automatic-release flag.
+
+One DB transaction appends the immutable receipt and clears only `active_action`,
+with action revision/terminal hash/target CAS. Actor is the authenticated
+`session_user`. Concurrent identical calls and retry after a lost commit response
+return the original receipt. Insert failure leaves the lock held. Action phase,
+IER revisions, original audit, dispatch attempt and cooldown clock remain unchanged;
+the same incident/target still cannot dispatch again. Receipt flags explicitly keep
+`dispatch_authorized`, `recovery_accepted` and `ier_mutated` false. This is manual
+lock release, not accepted autonomous recovery or a new known-good approval.
+
+The resolver credential and owned review/config stores are trusted operator inputs.
+The DB function enforces ACL, shape/time/CAS and atomic receipt rules; it cannot
+authenticate remote Kubernetes/telemetry by itself. Live/raw semantic checks are
+performed by the controlled CLI, and checksums are not authentication of a hostile
+operator. Do not expose the resolver function as a public endpoint. Other image,
+generation, replacement-target or unresolved cases remain quarantined for a
+separately reviewed operator procedure; do not delete a target/history row.
+
+`GET /v1/actions/{id}/quarantine` exposes strict
+[`quarantine-status/v1`](../../contracts/quarantine-status.schema.json) with its own
+content ETag. It requires the optional migration and SELECT-only API credential;
+missing capability is 503, not a fabricated unlocked result. Status is **per action**:
+an old receipt does not mean the target has no newer active action. UI can load the
+receipt/read error on demand, preserving `escalated` and the distinction from
+recovery. It offers no release control. It rejects stale/foreign responses and
+renders operator identity as text. Post-migration record reads remain available
+when the Kubernetes/source dependencies cannot be reached.
+
+The real PostgreSQL acceptance script seeds explicitly synthetic historical
+quarantine fixtures to exercise expiry without waiting ten minutes; synthetic
+image/health references are not claimed as observations. It checks operator/API/
+writer separation, malformed/stale/future/short proofs, concurrent retries,
+receipt failure atomicity, history/attempt preservation, read HTTP and DB restart.
+The actual kind check also proves observer authorization and a denied image patch.
+These checks do not activate H4 or accept product G6. Structured logs and bounded
+`sentinelops_quarantine_review_observations_total` count observations/retries, not
+unique releases or measured recovery success.
+
 ## Resume-only worker
 
 `scripts/run_remediation_worker.py` loads one exact target and its original health
@@ -261,8 +353,8 @@ or invalid audit returns 503; production authentication remains unavailable.
 
 Wire a new-intent/dispatch producer and authenticated action submission only after
 the H4 boundary, real known-good approval and source binding are reviewed. The
-resume-only worker and read API do not satisfy those prerequisites. Deliver an
-operator quarantine-resolution procedure and action/IER
+resume-only worker and read API do not satisfy those prerequisites. Deliver
+broader operator procedures for unsupported quarantines and action/IER
 lifecycle integration without rewriting the analytical RCA contract. Exercise an
 actual bad SentinelOps Payment image deployment with qualified independent RCA,
 proper before-incident approved image and live Kubernetes telemetry. The current

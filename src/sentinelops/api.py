@@ -254,6 +254,20 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
         revision_headers(response,snapshot)
         return result
 
+    @app.get("/v1/actions/{action_id}/quarantine",responses={200:{"description":"Read-only per-action manual quarantine receipt; never a recovery decision",
+        "content":{"application/json":{"schema":load_schema('quarantine-status.schema.json')}}}})
+    async def action_quarantine(action_id: str,request: Request,response: Response,
+                                identity=Depends(authorize),reader=Depends(require_actions)):
+        if not re.fullmatch(r'[0-9a-f]{64}',action_id):
+            raise ApiError(422,"invalid_action_id","Action ID must be a SHA-256 identity")
+        result=await read_actions(reader.quarantine(action_id),'quarantine-status.schema.json')
+        if result is None: raise ApiError(404,"action_not_found","Action was not found")
+        response.headers['ETag']='"'+stable_id(result)+'"'
+        if request.headers.get('if-none-match')==response.headers['ETag']:
+            response.status_code=304
+            return response
+        return result
+
     @app.post("/v1/detect")
     async def detect(feature_window: dict,response: Response,request: Request):
         try:

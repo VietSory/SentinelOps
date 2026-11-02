@@ -18,6 +18,14 @@ def test_action_browser_fixtures_are_explicitly_read_only_and_schema_valid(revis
     validate_payload('action-list.schema.json',fixture_actions('INC-FIXTURE-A',revision,cursor))
 
 
+def test_quarantine_browser_fixture_cannot_claim_recovery_or_dispatch_authority():
+    from scripts.check_operator_ui import fixture_quarantine
+    from sentinelops.contracts import validate_payload
+    result=fixture_quarantine('1'*64)
+    validate_payload('quarantine-status.schema.json',result)
+    assert result['action_phase']=='escalated' and result['resolution']['payload']['recovery_accepted'] is False
+
+
 def test_ui_serves_same_origin_without_exposing_token_or_private_incidents():
     token = 'PRIVATE-OPERATOR-TOKEN-'+'x'*32
     with TestClient(create_app(Settings(api_token=token))) as client:

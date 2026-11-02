@@ -90,4 +90,21 @@ export class IncidentClient {
         item.history.at(-1).phase !== item.phase)) throw new ApiFailure(200,'invalid_response');
     return body;
   }
+  async quarantine(id,revision,signal) {
+    const body=await this.get(`/v1/actions/${encodeURIComponent(id)}/quarantine`,signal);
+    const receipt=body.resolution,payload=receipt?.payload;
+    if (body.observation_version!=='quarantine-status/v1' || body.action_id!==id || body.action_revision!==revision ||
+      !['held','released','not_held'].includes(body.quarantine_state) ||
+      !['prepared','blocked','dispatching','verifying','recovered','escalated'].includes(body.action_phase) ||
+      (body.quarantine_state==='held' && (body.action_phase!=='escalated' || receipt!==null)) ||
+      (body.quarantine_state==='not_held' && receipt!==null) ||
+      (body.quarantine_state==='released' && (body.action_phase!=='escalated' || receipt?.status!=='RELEASED' ||
+        receipt.action_id!==id || !/^[0-9a-f]{64}$/.test(receipt.resolution_id) ||
+        typeof receipt.operator_actor!=='string' || !receipt.operator_actor ||
+        payload?.release_version!=='manual-quarantine-release/v1' || payload.action_id!==id || payload.action_revision!==revision ||
+        payload.dispatch_authorized!==false || payload.recovery_accepted!==false || payload.ier_mutated!==false))) {
+      throw new ApiFailure(200,'invalid_response');
+    }
+    return body;
+  }
 }

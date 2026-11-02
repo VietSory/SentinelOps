@@ -98,6 +98,7 @@ class Sandbox:
               f'[host."http://{self.registry}:5000"]\ncapabilities = ["pull", "resolve"]\n').encode()
         self.docker('exec','-i',self.nodes[0],'cp','/dev/stdin',directory+'/hosts.toml',data=body)
         self.kubectl('apply','-f',str(PROJECT/'infra/kubernetes/payment-rollback-rbac.yaml'))
+        self.kubectl('apply','-f',str(PROJECT/'infra/kubernetes/payment-quarantine-observer-rbac.yaml'))
 
     def fixture_image(self,base,version):
         print(json.dumps({'stage':'building-explicit-software-fixture','variant':version}),flush=True)
@@ -130,6 +131,8 @@ class Sandbox:
         private_file(self.root/'ca.crt',base64.b64decode(selected['certificate-authority-data']))
         token=self.kubectl('-n','sentinelops-b-actions','create','token','payment-rollback','--duration=10m').strip()
         private_file(self.root/'runtime-token',token)
+        observer=self.kubectl('-n','sentinelops-b-actions','create','token','payment-quarantine-observer','--duration=10m').strip()
+        private_file(self.root/'observer-token',observer)
         target=Target(cluster['metadata']['uid'],'sentinelops-b-actions',namespace['metadata']['uid'],
                       'payment-service',deployment['metadata']['uid'],'payment')
         return selected['server'],target
@@ -142,7 +145,7 @@ class Sandbox:
                 command([self.kind,'delete','cluster','--name',self.name,'--kubeconfig',str(self.kubeconfig)])
         if self.registry_created:
             self.require_registry();self.docker('rm','-f','-v',self.registry)
-        for filename in ('runtime-token','kubeconfig'):
+        for filename in ('runtime-token','observer-token','kubeconfig'):
             (self.root/filename).unlink(missing_ok=True)  # Only credentials newly created by this test.
 
     def diagnostics(self):
@@ -162,6 +165,7 @@ class Sandbox:
 
 async def verify(sandbox,endpoint,target,good,bad):
     client=LocalKubernetes(endpoint,target,token_file=sandbox.root/'runtime-token',ca_file=sandbox.root/'ca.crt')
+    observer=LocalKubernetes(endpoint,target,token_file=sandbox.root/'observer-token',ca_file=sandbox.root/'ca.crt')
     policy=Policy(target)
     async def wait_for(image,*,ready,prior=0,old=()):
         last=None;error=None
@@ -180,10 +184,22 @@ async def verify(sandbox,endpoint,target,good,bad):
         raise AssertionError('fixture deployment did not reach requested observed state; diagnostics retained')
     try:
         healthy=await wait_for(good,ready=True)
+        await observer.require_observer()
+        observed=await observer.observe()
+        assert observed.target==target and observed.image==good
+        try:
+            await client.require_observer()
+            raise AssertionError('writer token accepted for manual observer review')
+        except Blocked: pass
         print(json.dumps({'stage':'fixture-ready-testing-real-dryrun-and-CAS'}),flush=True)
         sandbox.kubectl('-n',target.namespace,'set','image','deployment/payment-service','payment='+bad)
         before=await wait_for(bad,ready=False)
         before.validate(policy)
+        try:
+            await observer.patch(before,good,dry_run=False)
+            raise AssertionError('quarantine observer mutated Payment image')
+        except Blocked: pass
+        assert (await client.observe()).image==bad
         assert not before.ready_for(bad,prior_generation=healthy.generation,old_pods=[p.uid for p in healthy.pods])
         await client.patch(before,good,dry_run=True)
         unchanged=await wait_for(bad,ready=False)
@@ -205,10 +221,13 @@ async def verify(sandbox,endpoint,target,good,bad):
             'telemetry_recovery_verified':False,'approved_known_good_ledger_created':False,
             'successful_runtime_image_patches':1,'kind_node':NODE,'good_image':good,'bad_image':bad,
             'target':after.projection()['target'],'before':before.projection(),'after':after.projection(),
-            'checks':['real TLS and scoped ServiceAccount','server dryRun=All leaves bad image unchanged',
+            'checks':['real TLS and scoped ServiceAccount','observer SSAR denies all target mutation verbs; writer token rejected',
+                'observer image PATCH actually rejected by RBAC; bad image unchanged','server dryRun=All leaves bad image unchanged',
                 'stale JSON-patch resourceVersion rejected','secrets/foreign Deployment/foreign namespace denied',
                 'actual image patch replaces pod UID and observes new ready generation']}
-    finally: await client.close()
+    finally:
+        try: await observer.close()
+        finally: await client.close()
 
 
 def main():
@@ -223,7 +242,8 @@ def main():
     root.mkdir(parents=True,exist_ok=False)
     sandbox=Sandbox(root,args.kind)
     hashes={name:hashlib.sha256((PROJECT/name).read_bytes()).hexdigest() for name in (
-        'scripts/check_rollback_kubernetes.py','src/sentinelops/remediation/kubernetes.py')}
+        'scripts/check_rollback_kubernetes.py','src/sentinelops/remediation/kubernetes.py',
+        'infra/kubernetes/payment-rollback-rbac.yaml','infra/kubernetes/payment-quarantine-observer-rbac.yaml')}
     try:
         sandbox.create()
         _,base=sandbox.lock_image('busybox:1.37.0')

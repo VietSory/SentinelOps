@@ -1,0 +1,30 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://sentinelops.local/contracts/quarantine-release.schema.json",
+  "title":"Manual lock release facts; never action recovery or dispatch authority",
+  "type":"object","additionalProperties":false,
+  "required":["release_version","review_ref","action_id","action_revision","terminal_event_hash","target_key","opened_at","observed_at","verification_as_of","last_bucket_end","before_ref","after_ref","health_ref","dispatch_authorized","recovery_accepted","ier_mutated"],
+  "properties":{
+    "release_version":{"const":"manual-quarantine-release/v1"},
+    "review_ref":{"$ref":"#/$defs/manifest"},
+    "action_id":{"$ref":"#/$defs/hash"},
+    "action_revision":{"type":"integer","minimum":1,"maximum":100},
+    "terminal_event_hash":{"$ref":"#/$defs/hash"},
+    "target_key":{"$ref":"#/$defs/hash"},
+    "opened_at":{"type":"string","format":"date-time"},
+    "observed_at":{"type":"string","format":"date-time"},
+    "verification_as_of":{"type":"string","format":"date-time"},
+    "last_bucket_end":{"type":"string","format":"date-time"},
+    "before_ref":{"$ref":"#/$defs/observation"},
+    "after_ref":{"$ref":"#/$defs/observation"},
+    "health_ref":{"$ref":"#/$defs/manifest"},
+    "dispatch_authorized":{"const":false},
+    "recovery_accepted":{"const":false},
+    "ier_mutated":{"const":false}
+  },
+  "$defs":{
+    "hash":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "manifest":{"type":"string","pattern":"^artifact://manifests/[0-9a-f]{64}\\.json$"},
+    "observation":{"type":"string","pattern":"^artifact://observations/[0-9a-f]{64}\\.json$"}
+  }
+}

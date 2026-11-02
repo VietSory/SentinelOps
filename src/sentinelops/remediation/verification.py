@@ -7,13 +7,41 @@ accepts recovery, writes an IER, or grants permission to execute an action.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import re
 
 from sentinelops.contracts import utc_time
 from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.workers.health_source import HealthLedgerReader, at
+from sentinelops.remediation.domain import Blocked
 
 REQUIRED_BUCKETS = 3
 TIMEOUT_SECONDS = 600
+
+
+def validate_current_support(verdict, *, source, environment, effective_at, as_of):
+    """Shared consumer checks; a telemetry verdict is never dispatch/recovery authority."""
+    try:
+        if (verdict['verification_version']!='post-action-current-slo/v1'
+            or verdict['health_stream_id']!=source.stream_id
+            or verdict['health_policy_sha256']!=stable_id(source.policy)
+            or verdict['effective_at']!=effective_at or verdict['as_of']!=timestamp(as_of)
+            or verdict['environment']!=environment or verdict['required_buckets']!=3
+            or len(verdict['support'])!=3
+            or any(verdict[k] is not False for k in ('action_dispatch_authorized','deployment_identity_verified','recovery_accepted'))):
+            raise Blocked('invalid-recovery-verdict')
+        ends=[utc_time(b['bucket_end']) for b in verdict['support']]
+        if (ends[0]-timedelta(seconds=60)<utc_time(effective_at)
+            or ends[1]-ends[0]!=timedelta(seconds=60) or ends[2]-ends[1]!=timedelta(seconds=60)
+            or len({b['signal_id'] for b in verdict['support']})!=3
+            or any(not re.fullmatch(r'[0-9a-f]{64}',b['signal_id'])
+                or not re.fullmatch(r'artifact://manifests/[0-9a-f]{64}\.json',b['batch_ref'])
+                or not re.fullmatch(r'artifact://observations/[0-9a-f]{64}\.json',b['observation_ref'])
+                or not utc_time(b['bucket_end'])<=utc_time(b['recorded_at'])<=as_of for b in verdict['support'])):
+            raise Blocked('invalid-current-recovery-support')
+        return ends
+    except (KeyError,TypeError,AttributeError,ValueError) as exc:
+        if isinstance(exc,Blocked): raise
+        raise Blocked('invalid-recovery-verdict') from None
 
 
 async def verify_post_action_health(
