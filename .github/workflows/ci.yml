@@ -360,6 +360,8 @@ jobs:
           name: host-process-evidence
           path: |
             artifacts/lane-b/host-process-store-ci.json
+            artifacts/lane-b/health/
+            artifacts/lane-b/incidents/
             artifacts/lane-b/host-releases/**/release.json
             artifacts/lane-b/host-releases/**/wheels/*.whl
             artifacts/lane-b/host-releases/**/configs/

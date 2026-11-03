@@ -145,4 +145,7 @@ must emit READY with the same consumer and preserve its prior immutable checkpoi
 It then stops only the roles it created. No healthy observation, model prediction,
 incident fixture, IER recovery or action grant is manufactured. CI repeats it on
 an ephemeral runner user manager; only that runner gets lingering enabled. Its
-artifact excludes private sessions, tokens and the large dependency tree.
+artifact retains the operational health/incident stores for checkpoint references;
+it excludes private sessions, tokens and the large dependency tree. These operational
+observations are not admitted training data. After downloading, use the `health/`
+and `incidents/` store roots separately, as in the existing worker replay tools.
