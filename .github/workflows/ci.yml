@@ -263,7 +263,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.native == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -291,6 +291,11 @@ jobs:
           subprocess.run([sys.executable,'-m','scripts.check_rollback_kubernetes','--kind',str(binary),
                           '--output','artifacts/lane-b/kubernetes-ci'],check=True)
           PY
+      - name: Observe actual Kubernetes business RED, trace and log pod identities
+        run: >-
+          python -m scripts.check_kubernetes_testbed
+          --kind "$RUNNER_TEMP/sentinelops-kind-v0.30.0"
+          --output artifacts/lane-b/business-kubernetes-ci
       - name: Preserve bounded software verification output, excluding runtime credentials
         if: always()
         uses: actions/upload-artifact@v4
@@ -301,6 +306,11 @@ jobs:
             artifacts/lane-b/kubernetes-ci/verification.json
             artifacts/lane-b/kubernetes-ci/diagnostics.json
             artifacts/lane-b/kubernetes-ci/last-observation.json
+            artifacts/lane-b/business-kubernetes-ci/verification.json
+            artifacts/lane-b/business-kubernetes-ci/diagnostics.json
+            artifacts/lane-b/business-kubernetes-ci/images.json
+            artifacts/lane-b/business-kubernetes-ci/manifests.yaml
+            artifacts/lane-b/business-kubernetes-ci/source/
           if-no-files-found: warn
           retention-days: 7
 
