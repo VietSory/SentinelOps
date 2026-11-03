@@ -68,3 +68,22 @@ def test_workflow_summary_requires_requested_jobs_and_allows_only_out_of_scope_s
     needs['changes']['outputs']={'native':'false','public_data':'true','ui':'true'}
     assert execute(needs)==0
     needs['changes']['result']='failure'; assert execute(needs)!=0
+
+
+def test_host_artifact_globs_do_not_match_nested_vendor_cli_or_private_sessions(tmp_path):
+    import glob
+    from pathlib import Path
+    import yaml
+    workflow=yaml.load((Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text(),Loader=yaml.BaseLoader)
+    upload=next(step for step in workflow['jobs']['host-process-integration']['steps']
+                if step.get('uses','').startswith('actions/upload-artifact'))
+    base='artifacts/lane-b/host-releases/fixture-release/'
+    included=[base+p for p in ('release.json','wheels/app.whl','configs/topology.yaml',
+                              'configs/rca_policy.json','cli/scripts/run_health_worker.py','launch.py')]
+    excluded=[base+'dependencies/pip/_internal/cli/main.py',base+'dependencies/setuptools/launch.py',
+              'artifacts/lane-b/host-services/private/session.json']
+    for name in included+excluded:
+        path=tmp_path/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('software fixture')
+    matched={Path(path).relative_to(tmp_path).as_posix() for pattern in upload['with']['path'].splitlines()
+             for path in glob.glob(str(tmp_path/pattern),recursive=True) if Path(path).is_file()}
+    assert set(included)<=matched and not set(excluded)&matched
