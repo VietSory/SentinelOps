@@ -13,6 +13,7 @@ implementation chỉ vì được ghi ở đây.
 | **A** | Capture/training/model/SLO/RCA/evaluation configs; scripts capture/audit/train/evaluate/replay và worker runners tương ứng |
 | **B** | `src/sentinelops/api.py`, `api_http.py`, `api_settings.py`, `main.py`; `incidents/domain.py`, `repository.py`, `validation.py`; **mới** `src/sentinelops/remediation/`, `auth/`, `ui/` |
 | **B** | `services/`, `docker/`, Compose, `infra/`, `observability/`, `.github/`, `pyproject.toml`, `src/sentinelops/contracts.py`, `schema_registry.py`, `scripts/validate_contracts.py`; configs deployment mới |
+| **B** | `scripts/kubernetes_testbed.py`, `scripts/check_kubernetes_testbed.py`: local Kubernetes packaging và source observations; không thay telemetry adapter/profile hay cấp H4 |
 | **Theo module** | Tests/samples/runbook của module; chỉ giữ report data/model/evaluation có nhu cầu dùng lại |
 | **B điều phối** | README, team docs, PROJECT_STATUS, TECHNICAL_SPEC: cập nhật gộp ở mốc integration; cả hai không sửa hằng ngày |
 

@@ -1,12 +1,12 @@
 # SentinelOps — trạng thái triển khai
 
-Cập nhật: **2026-11-01**. Trang này tóm tắt code và khoảng trống sản phẩm.
+Cập nhật: **2026-11-03**. Trang này tóm tắt code và khoảng trống sản phẩm.
 Service có đang chạy/ready hay không phải kiểm tra trên môi trường hiện tại;
 report hoặc CI cũ không thay kết quả đó.
 
 | Phần | Implementation / việc còn thiếu | Cách làm việc hoặc kiểm tra |
 | --- | --- | --- |
-| Workload / observability | Có ba services, commerce PostgreSQL, OTel, Prometheus/Jaeger local | [Testbed](runbooks/LOCAL_TESTBED.md), [observability](runbooks/OBSERVABILITY.md) |
+| Workload / observability | Có ba services, commerce PostgreSQL, OTel, Prometheus/Jaeger local. Có renderer và sandbox kind cho service thật; đã quan sát Checkout/DB, RED bucket và pod UID nhất quán trong API/metric/trace/log. Chưa chấp nhận Kubernetes source parity, known-good hay H4/G6 | [Testbed](runbooks/LOCAL_TESTBED.md), [Kubernetes local](runbooks/KUBERNETES_LOCAL.md), [observability](runbooks/OBSERVABILITY.md) |
 | Telemetry / features | Có raw capture, quality/provenance, 60s buckets / 300s windows và replay | [Telemetry](runbooks/TELEMETRY.md), [timing](architecture/TRACE_TIMING.md) |
 | Data / models | Có prospective HTTP admission, campaign, fitting/bundles/registry guards; **G2/G3 chưa nghiệm thu** | Audit corpus hiện tại theo [corpus runbook](runbooks/LOCAL_HTTP_CORPUS.md); [model lifecycle](runbooks/MODEL_PIPELINE.md) |
 | Incident pipeline | Có health/incident workers, control DB, IER revisions và protected read API | [Health](runbooks/HEALTH_WORKER.md), [incident](runbooks/INCIDENT_WORKER.md), [API](runbooks/INCIDENT_API.md) |

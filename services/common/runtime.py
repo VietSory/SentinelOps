@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
-from services.common.observability import configure, extract_context
+from services.common.observability import configure, extract_context, kubernetes_identity
 
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="unknown")
 request_instance_id_var: ContextVar[str | None] = ContextVar("request_instance_id", default=None)
@@ -34,12 +34,16 @@ def log_event(service: str, event: str, **fields: object) -> None:
         "request_instance_id": request_instance_id_var.get(),
         "trace_id": trace_id,
         "span_id": span_id,
+        **kubernetes_identity(),
         **fields,
     }
     logger.info(json.dumps(payload, default=str, separators=(",", ":")))
 
 
 def install_request_context(app: FastAPI, service_name: str) -> None:
+    identity = kubernetes_identity()
+    metric_identity = ({'k8s_pod_uid': identity['k8s.pod.uid'],
+                        'k8s_namespace_name': identity['k8s.namespace.name']} if identity else {})
     tracer, meter = configure(service_name)
     app.state.tracer = tracer
     request_counter = meter.create_counter(
@@ -100,6 +104,7 @@ def install_request_context(app: FastAPI, service_name: str) -> None:
                         "method": request.method,
                         "route": route_template,
                         "status_code": status_code,
+                        **metric_identity,
                     }
                     request_counter.add(1, attrs)
                     request_duration.record(duration_ms, attrs)
