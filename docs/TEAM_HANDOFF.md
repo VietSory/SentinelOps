@@ -100,6 +100,12 @@ Uvicorn chỉ bật API, không tự dựng DB/workers/models. Theo API runbook:
 khi cô lập ports theo contract. Không reuse volume/secret A. Production auth chưa
 có; public API local bằng static token không phải AWS acceptance.
 
+B có [host releases/user services](runbooks/HOST_PROCESSES.md): wheel/config/CLI
+và dependency được copy, lifecycle do systemd quản lý; source/root/checkpoint giữ
+nguyên. Mặc định không model, credentials private ngoài bundle. Release gắn với
+host Python/OS, không phải portable image hoặc quyền action. Lệnh foreground cũ
+vẫn dùng được; không chạy cùng role foreground và managed song song.
+
 ## 5. API đủ để B làm UI ngay
 
 | Interface đã có | Consumer xử lý |
