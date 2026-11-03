@@ -57,7 +57,10 @@ def build():
     original_runtime = Path(sysconfig.get_paths()['purelib'])
     before_dependencies = inventory(original_runtime)
     shutil.copytree(original_runtime, root / 'dependencies', ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-    if inventory(original_runtime) != before_dependencies:
+    expected_dependencies = {name: value['sha256'] if isinstance(value, dict) else value
+                             for name, value in before_dependencies.items() if not name.endswith('.pyc')}
+    if (inventory(original_runtime) != before_dependencies
+        or inventory(root / 'dependencies') != expected_dependencies):
         raise HostGuard('installed dependencies changed during snapshot')
     record = {'release_version': 'lane-b-host/v2', 'release_id': identifier, 'root': str(root.resolve()),
               'source_commit': commit, 'interpreter': str(Path(sys.executable).resolve()),
