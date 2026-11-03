@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import sysconfig
@@ -101,7 +102,8 @@ def state(role, *, refreshed=False):
     path = Path(values.get('FragmentPath', ''))
     home = (lane_b.ROOT / 'host-services').resolve()
     if (not path.is_absolute() or not path.resolve().is_relative_to(home) or path.name != name
-        or path.lstat().st_uid != os.getuid() or not path.is_file() or path.is_symlink()):
+        or path.lstat().st_uid != os.getuid() or not path.resolve().is_file()
+        or path.resolve().stat().st_uid != os.getuid()):
         raise ValueError('refuse an unowned systemd unit')
     return {'role': role, 'unit': name, 'state': values['ActiveState'], 'substate': values['SubState'],
             'pid': int(values.get('MainPID', 0)), 'exit_status': int(values.get('ExecMainStatus', 0)),
@@ -136,7 +138,6 @@ StartLimitBurst=3
 [Service]
 Type=simple
 ExecStart=:{command}
-WorkingDirectory={quoted(str(root))}
 {env}
 Environment=PYTHONDONTWRITEBYTECODE=1
 UnsetEnvironment=PYTHONPATH PYTHONHOME LD_PRELOAD LD_AUDIT
@@ -149,31 +150,37 @@ NoNewPrivileges=yes
 '''
 
 
-def arguments(role, root, stream):
+def arguments(role, root, stream, model_store=None, model_ref=None):
     if role == 'api': return []
     shared = ['--prometheus', 'http://127.0.0.1:19090', '--metrics-otlp-endpoint', 'http://127.0.0.1:14317',
               '--health-policy' if role == 'incidents' else '--policy', str(root / 'configs/slo_health_policy.json')]
     if role == 'health': return ['--store', str(lane_b.ROOT / 'health'), *shared]
     if not stream or not re.fullmatch('[0-9a-f]{64}', stream): raise ValueError('explicit accepted health stream required')
+    models = ['--model-store', str(model_store), '--model-release-ref', model_ref] if model_store and model_ref else []
     return ['--health-stream', stream, '--source-store', str(lane_b.ROOT / 'health'),
             '--store', str(lane_b.ROOT / 'incidents'), '--project', lane_b.NAME,
             '--jaeger', 'http://127.0.0.1:26686', '--rca-policy', str(root / 'configs/rca_policy.json'),
-            '--topology', str(root / 'configs/topology.yaml'), *shared]
+            '--topology', str(root / 'configs/topology.yaml'), *shared, *models]
 
 
-def start(role, identifier, stream=None):
+def start(role, identifier, stream=None, model_store=None, model_ref=None):
     with locked() as home:
+        if role == 'health' and (model_store or model_ref): raise ValueError('health does not consume models')
         current = state(role)
         root = release(identifier)
+        environment = lane_b.runtime_environment(model_store, model_ref)
         if current['state'] != 'NOT_INSTALLED':
             session = private_json(Path(current['unit_file']).parent / 'session.json')
-            if session['release_id'] != identifier or session['arguments'] != arguments(role, root, stream):
+            if (session['release_id'] != identifier or session['arguments'] != arguments(role, root, stream, model_store, model_ref)
+                or any(session['environment'].get(k) != environment.get(k) for k in ('SENTINELOPS_MODEL_STORE', 'SENTINELOPS_MODEL_RELEASE_REF'))):
                 raise ValueError('stop selected unit before choosing a different release/source')
             validate_selected(role, current)
             if current['state'] != 'active': systemctl('start', current['unit'])
             return state(role)
         if role != 'api': lane_b.require_owned_containers()
-        environment = lane_b.runtime_environment()
+        if role == 'api':
+            with socket.socket() as reservation:
+                reservation.bind(('127.0.0.1', 18000))  # Never stop/adopt a foreground or foreign listener.
         selected = {key: environment[key] for key in ENVIRONMENT if key in environment}
         if role == 'api' and os.getenv('SENTINELOPS_ACTION_READ_DATABASE_URL'):
             reader = os.environ['SENTINELOPS_ACTION_READ_DATABASE_URL'];parsed = urlsplit(reader)
@@ -185,7 +192,7 @@ def start(role, identifier, stream=None):
         folder = home / uuid4().hex;folder.mkdir(mode=0o700)
         session = folder / 'session.json'
         payload = {'role': role, 'release_id': identifier, 'release_manifest_sha256': digest(root / 'release.json'),
-                   'environment': selected, 'arguments': arguments(role, root, stream),
+                   'environment': selected, 'arguments': arguments(role, root, stream, model_store, model_ref),
                    'health_store': str(lane_b.ROOT / 'health')}
         if role != 'api':
             probe = folder / 'probe.json';write_private(probe, payload)
@@ -201,6 +208,8 @@ def start(role, identifier, stream=None):
         write_private(session, payload)
         unit = folder / unit_name(role)
         unit.write_text(unit_text(role, root, session))
+        subprocess.run(['systemd-analyze', '--user', 'verify', str(unit)], check=True,
+                       capture_output=True, text=True)
         systemctl('link', str(unit))
         systemctl('daemon-reload')
         systemctl('start', unit.name)
@@ -229,7 +238,7 @@ def stop(role):
     with locked():
         current = state(role)
         if current['state'] == 'NOT_INSTALLED': return current
-        systemctl('stop', current['unit'])
+        if current['state'] != 'inactive': systemctl('stop', current['unit'])
         # disable removes only this reviewed user link; units have no Install section.
         systemctl('disable', current['unit'])
         systemctl('daemon-reload')
@@ -245,20 +254,33 @@ def restart(role):
         return state(role)
 
 
+def status(role):
+    current = state(role)
+    if current['state'] == 'NOT_INSTALLED': return current
+    session = private_json(Path(current['unit_file']).parent / 'session.json')
+    return {**current, 'release_id': session['release_id'],
+            'release_manifest_sha256': session['release_manifest_sha256'],
+            'health_stream_id': session.get('source_identity', {}).get('health_stream_id'),
+            'readiness': 'NOT_OBSERVED', 'model_activation_authorized_by_release': False}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('operation', choices=('build', 'verify', 'start', 'status', 'stop', 'restart'))
     parser.add_argument('--role', choices=ROLES)
     parser.add_argument('--release-id')
     parser.add_argument('--health-stream')
+    parser.add_argument('--model-store', type=Path)
+    parser.add_argument('--model-release-ref')
     args = parser.parse_args()
     try:
         if args.operation == 'build': result = build()
         elif args.operation == 'verify':
             release(args.release_id or '');result = {'status': 'VERIFIED', 'release_id': args.release_id}
         elif not args.role: parser.error('role is required')
-        elif args.operation == 'status': result = state(args.role)
-        elif args.operation == 'start': result = start(args.role, args.release_id or '', args.health_stream)
+        elif args.operation == 'status': result = status(args.role)
+        elif args.operation == 'start': result = start(args.role, args.release_id or '', args.health_stream,
+                                                     args.model_store, args.model_release_ref)
         elif args.operation == 'stop': result = stop(args.role)
         else: result = restart(args.role)
         print(json.dumps(result, sort_keys=True))

@@ -60,6 +60,7 @@ def test_units_pin_interpreter_session_and_do_not_contain_credentials(tmp_path):
     assert '-I' in text and '-S' in text and host_runtime.digest(session) in text
     assert 'SECRET_FIXTURE' not in text and 'Restart=on-failure' in text
     assert 'KillMode=control-group' in text and 'ExecStart=:' in text
+    assert 'WorkingDirectory=' not in text  # Bootstrap chdir is explicit; this directive does not use argv quoting.
     assert host.quoted('/path with % and $HOME') == '"/path with %% and $HOME"'
     with pytest.raises(ValueError): host.quoted('path\nExecStart=bad')
 
@@ -83,3 +84,14 @@ def test_foreign_unit_is_rejected_before_any_lifecycle_mutation(tmp_path, monkey
     monkeypatch.setattr(host, 'systemctl', systemctl)
     with pytest.raises(ValueError, match='unowned'): host.stop('api')
     assert len(calls) == 1 and calls[0][0] == 'show'
+
+
+def test_systemd_link_resolves_only_to_an_owned_bundle_unit(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(lane_b, 'ROOT', tmp_path / 'b')
+    unit = lane_b.ROOT / 'host-services' / 'session' / host.unit_name('api')
+    unit.parent.mkdir(parents=True);unit.write_text('fixture-unit')
+    link = tmp_path / 'user-config' / unit.name;link.parent.mkdir();link.symlink_to(unit)
+    result = SimpleNamespace(returncode=0, stdout='LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=123\nFragmentPath='+str(link)+'\n')
+    monkeypatch.setattr(host, 'systemctl', lambda *a, **kw: result)
+    assert host.state('api')['unit_file'] == str(unit.resolve())
