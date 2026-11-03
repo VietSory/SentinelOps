@@ -136,6 +136,11 @@ Owner đã nhận lane B/UI; [checklist thực thi B](delivery/DELIVERY_PLAN.md#
 chốt lát cắt local đầu tiên, mapping fields API, isolation và thứ tự commit.
 Các mục là việc cần triển khai, không phải capability đã có.
 
+B có [sandbox Kubernetes cho service thật](runbooks/KUBERNETES_LOCAL.md) và renderer
+image-digest; source observations giữ raw RED, trace/log và pod UID để A review.
+Một bucket và metadata nhất quán không tự cấp source parity, known-good hoặc H4;
+không dùng capture này làm corpus training.
+
 Handoff gồm SHA, cách chạy, giới hạn, artifact URI/hash/version và dependency thật;
 dùng commit/CI và tài liệu hiện có, không tạo report chỉ để ghi service đã PASS.
 Chỉ giữ report riêng cho kết quả data/model/evaluation cần dùng lại. Raw/model binary truyền qua artifact store
