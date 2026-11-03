@@ -11,11 +11,11 @@ from scripts import host_runtime, lane_b_host as host, lane_b
 
 def fixture(tmp_path):
     root = tmp_path / 'release';root.mkdir()
-    site = tmp_path / 'dependencies';site.mkdir();(site / 'dependency.py').write_text('version=1\n')
+    site = root / 'dependencies';site.mkdir();(site / 'dependency.py').write_text('version=1\n')
     (root / 'app.py').write_text('VERSION=1\n')
-    record = {'release_version': 'lane-b-host/v1', 'release_id': 'a' * 32, 'root': str(root.resolve()),
+    record = {'release_version': 'lane-b-host/v2', 'release_id': 'a' * 32, 'root': str(root.resolve()),
         'interpreter': str(Path(sys.executable).resolve()), 'interpreter_sha256': host_runtime.digest(Path(sys.executable).resolve()),
-        'python_version': sys.version, 'site_packages': str(site), 'runtime_files': host_runtime.inventory(site),
+        'python_version': sys.version, 'site_packages': str(site), 'runtime_source': str(tmp_path / 'mutable-dev'),
         'files': host_runtime.inventory(root), 'runtime_environment': {'PATH': '/usr/bin'},
         'model_activation_allowed': False, 'remediation_approval': False, 'portable': False}
     (root / 'release.json').write_text(json.dumps(record))
@@ -51,6 +51,12 @@ def test_private_session_never_accepts_public_or_symlink_credentials(tmp_path):
     with pytest.raises(ValueError): host_runtime.private_json(path)
     path.chmod(0o600);link = tmp_path / 'link';link.symlink_to(path)
     with pytest.raises(ValueError): host_runtime.private_json(link)
+
+
+def test_later_dev_dependency_changes_do_not_replace_copied_release_bytes(tmp_path):
+    root, _, record = fixture(tmp_path)
+    dev = Path(record['runtime_source']);dev.mkdir();(dev / 'dependency.py').write_text('version=999\n')
+    assert host_runtime.verify(root) == record
 
 
 def test_units_pin_interpreter_session_and_do_not_contain_credentials(tmp_path):

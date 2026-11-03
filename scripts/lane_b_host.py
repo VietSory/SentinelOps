@@ -18,7 +18,7 @@ from uuid import uuid4
 from urllib.parse import urlsplit
 
 from scripts import lane_b
-from scripts.host_runtime import digest, inventory, private_json, verify
+from scripts.host_runtime import HostGuard, digest, inventory, private_json, verify
 from sentinelops.telemetry.core import stable_id
 
 ROLES = ('api', 'health', 'incidents')
@@ -35,7 +35,7 @@ def write_private(path, value):
 def build():
     lane_b.init_runtime()
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=lane_b.PROJECT).strip():
-        raise ValueError('commit release inputs before building')
+        raise HostGuard('commit release inputs before building')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=lane_b.PROJECT, text=True).strip()
     identifier = uuid4().hex
     root = lane_b.ROOT / 'host-releases' / identifier
@@ -54,16 +54,21 @@ def build():
     for name in ('slo_health_policy.json', 'rca_policy.json', 'topology.yaml'):
         shutil.copyfile(lane_b.PROJECT / 'configs' / name, config / name)
     shutil.copyfile(lane_b.PROJECT / 'scripts/host_runtime.py', root / 'launch.py')
-    record = {'release_version': 'lane-b-host/v1', 'release_id': identifier, 'root': str(root.resolve()),
+    original_runtime = Path(sysconfig.get_paths()['purelib'])
+    before_dependencies = inventory(original_runtime)
+    shutil.copytree(original_runtime, root / 'dependencies', ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    if inventory(original_runtime) != before_dependencies:
+        raise HostGuard('installed dependencies changed during snapshot')
+    record = {'release_version': 'lane-b-host/v2', 'release_id': identifier, 'root': str(root.resolve()),
               'source_commit': commit, 'interpreter': str(Path(sys.executable).resolve()),
               'interpreter_sha256': digest(Path(sys.executable).resolve()), 'python_version': sys.version,
-              'site_packages': sysconfig.get_paths()['purelib'],
-              'runtime_files': inventory(Path(sysconfig.get_paths()['purelib'])), 'files': inventory(root),
+              'site_packages': str(root.resolve() / 'dependencies'), 'runtime_source': str(original_runtime),
+              'files': inventory(root),
               'runtime_environment': {k: os.environ[k] for k in ('PATH', 'LD_LIBRARY_PATH', 'SSL_CERT_FILE') if k in os.environ},
               'model_activation_allowed': False, 'remediation_approval': False, 'portable': False}
     if (subprocess.check_output(['git', 'status', '--porcelain'], cwd=lane_b.PROJECT).strip()
         or subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=lane_b.PROJECT, text=True).strip() != commit):
-        raise ValueError('release inputs changed during build; incomplete bundle is not selected')
+        raise HostGuard('release inputs changed during build; incomplete bundle is not selected')
     with (root / 'release.json').open('x') as stream: json.dump(record, stream, sort_keys=True)
     verify(root)
     return {'release_id': identifier, 'release_manifest_sha256': digest(root / 'release.json'),
@@ -71,15 +76,15 @@ def build():
 
 
 def release(identifier):
-    if not re.fullmatch('[0-9a-f]{32}', identifier): raise ValueError('invalid release identity')
+    if not re.fullmatch('[0-9a-f]{32}', identifier): raise HostGuard('invalid release identity')
     root = (lane_b.ROOT / 'host-releases' / identifier).resolve()
-    if root.parent != (lane_b.ROOT / 'host-releases').resolve(): raise ValueError('unowned release')
+    if root.parent != (lane_b.ROOT / 'host-releases').resolve(): raise HostGuard('unowned release')
     verify(root)
     return root
 
 
 def unit_name(role):
-    if role not in ROLES: raise ValueError('unsupported role')
+    if role not in ROLES: raise HostGuard('unsupported role')
     tag = stable_id({'project': str(lane_b.PROJECT.resolve()), 'root': str(lane_b.ROOT.resolve())})[:12]
     return 'sentinelops-b-' + tag + '-' + role + '.service'
 
@@ -90,7 +95,7 @@ def systemctl(*args, check=True):
 
 def state(role, *, refreshed=False):
     name = unit_name(role)
-    result = systemctl('show', name, '--property=LoadState,ActiveState,SubState,MainPID,ExecMainStatus,FragmentPath', check=False)
+    result = systemctl('show', name, '--property=LoadState,ActiveState,SubState,MainPID,ExecMainStatus,FragmentPath,NRestarts', check=False)
     if result.returncode:
         raise RuntimeError('user systemd unavailable')
     values = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
@@ -104,9 +109,10 @@ def state(role, *, refreshed=False):
     if (not path.is_absolute() or not path.resolve().is_relative_to(home) or path.name != name
         or path.lstat().st_uid != os.getuid() or not path.resolve().is_file()
         or path.resolve().stat().st_uid != os.getuid()):
-        raise ValueError('refuse an unowned systemd unit')
+        raise HostGuard('refuse an unowned systemd unit')
     return {'role': role, 'unit': name, 'state': values['ActiveState'], 'substate': values['SubState'],
             'pid': int(values.get('MainPID', 0)), 'exit_status': int(values.get('ExecMainStatus', 0)),
+            'automatic_restarts': int(values.get('NRestarts', 0)),
             'unit_file': str(path.resolve())}
 
 
@@ -121,7 +127,7 @@ def locked():
 
 def quoted(value):
     # systemd specifiers expand even in quoted arguments; no shell is involved.
-    if '\n' in value or '\r' in value or '\x00' in value: raise ValueError('invalid unit value')
+    if '\n' in value or '\r' in value or '\x00' in value: raise HostGuard('invalid unit value')
     return json.dumps(value.replace('%', '%%'))
 
 
@@ -155,7 +161,7 @@ def arguments(role, root, stream, model_store=None, model_ref=None):
     shared = ['--prometheus', 'http://127.0.0.1:19090', '--metrics-otlp-endpoint', 'http://127.0.0.1:14317',
               '--health-policy' if role == 'incidents' else '--policy', str(root / 'configs/slo_health_policy.json')]
     if role == 'health': return ['--store', str(lane_b.ROOT / 'health'), *shared]
-    if not stream or not re.fullmatch('[0-9a-f]{64}', stream): raise ValueError('explicit accepted health stream required')
+    if not stream or not re.fullmatch('[0-9a-f]{64}', stream): raise HostGuard('explicit accepted health stream required')
     models = ['--model-store', str(model_store), '--model-release-ref', model_ref] if model_store and model_ref else []
     return ['--health-stream', stream, '--source-store', str(lane_b.ROOT / 'health'),
             '--store', str(lane_b.ROOT / 'incidents'), '--project', lane_b.NAME,
@@ -165,7 +171,7 @@ def arguments(role, root, stream, model_store=None, model_ref=None):
 
 def start(role, identifier, stream=None, model_store=None, model_ref=None):
     with locked() as home:
-        if role == 'health' and (model_store or model_ref): raise ValueError('health does not consume models')
+        if role == 'health' and (model_store or model_ref): raise HostGuard('health does not consume models')
         current = state(role)
         root = release(identifier)
         environment = lane_b.runtime_environment(model_store, model_ref)
@@ -173,9 +179,10 @@ def start(role, identifier, stream=None, model_store=None, model_ref=None):
             session = private_json(Path(current['unit_file']).parent / 'session.json')
             if (session['release_id'] != identifier or session['arguments'] != arguments(role, root, stream, model_store, model_ref)
                 or any(session['environment'].get(k) != environment.get(k) for k in ('SENTINELOPS_MODEL_STORE', 'SENTINELOPS_MODEL_RELEASE_REF'))):
-                raise ValueError('stop selected unit before choosing a different release/source')
+                raise HostGuard('stop selected unit before choosing a different release/source')
             validate_selected(role, current)
-            if current['state'] != 'active': systemctl('start', current['unit'])
+            if current['state'] != 'active':
+                systemctl('reset-failed', current['unit']);systemctl('start', current['unit'])
             return state(role)
         if role != 'api': lane_b.require_owned_containers()
         if role == 'api':
@@ -187,7 +194,7 @@ def start(role, identifier, stream=None, model_store=None, model_ref=None):
             if (parsed.scheme not in ('postgres', 'postgresql') or parsed.hostname != '127.0.0.1'
                 or parsed.port != 15433 or parsed.path != '/sentinelops_control' or parsed.query or parsed.fragment
                 or not parsed.username or not parsed.password):
-                raise ValueError('managed action reader must select B control database')
+                raise HostGuard('managed action reader must select B control database')
             selected['SENTINELOPS_ACTION_READ_DATABASE_URL'] = reader
         folder = home / uuid4().hex;folder.mkdir(mode=0o700)
         session = folder / 'session.json'
@@ -204,7 +211,7 @@ def start(role, identifier, stream=None, model_store=None, model_ref=None):
             finally: probe.unlink()
             payload['source_identity'] = json.loads(result.stdout)
             if role == 'incidents' and stream != payload['source_identity']['health_stream_id']:
-                raise ValueError('incident selection differs from current health identity')
+                raise HostGuard('incident selection differs from current health identity')
         write_private(session, payload)
         unit = folder / unit_name(role)
         unit.write_text(unit_text(role, root, session))
@@ -222,7 +229,7 @@ def validate_selected(role, current):
     root = release(session['release_id'])
     if (session['role'] != role or session['release_manifest_sha256'] != digest(root / 'release.json')
         or path.read_text() != unit_text(role, root, session_path)):
-        raise ValueError('selected unit/session/release changed')
+        raise HostGuard('selected unit/session/release changed')
     if role != 'api':
         lane_b.require_owned_containers()
         record = json.loads((root / 'release.json').read_text())
@@ -230,7 +237,7 @@ def validate_selected(role, current):
             str(session_path), digest(session_path)], capture_output=True, text=True, check=True,
             env=record['runtime_environment'], timeout=60)
         if json.loads(result.stdout) != session['source_identity']:
-            raise ValueError('selected health source changed')
+            raise HostGuard('selected health source changed')
     return session, root
 
 
@@ -248,8 +255,9 @@ def stop(role):
 def restart(role):
     with locked():
         current = state(role)
-        if current['state'] == 'NOT_INSTALLED': raise ValueError('role is not installed')
+        if current['state'] == 'NOT_INSTALLED': raise HostGuard('role is not installed')
         validate_selected(role, current)  # Reject corrupt bytes before stopping a running process.
+        systemctl('reset-failed', current['unit'])
         systemctl('restart', current['unit'])
         return state(role)
 
@@ -261,7 +269,8 @@ def status(role):
     return {**current, 'release_id': session['release_id'],
             'release_manifest_sha256': session['release_manifest_sha256'],
             'health_stream_id': session.get('source_identity', {}).get('health_stream_id'),
-            'readiness': 'NOT_OBSERVED', 'model_activation_authorized_by_release': False}
+            'readiness': 'NOT_OBSERVED', 'release_integrity': 'NOT_CHECKED',
+            'model_activation_authorized_by_release': False}
 
 
 def main():
@@ -273,6 +282,12 @@ def main():
     parser.add_argument('--model-store', type=Path)
     parser.add_argument('--model-release-ref')
     args = parser.parse_args()
+    if args.health_stream and (args.operation != 'start' or args.role != 'incidents'):
+        parser.error('health stream is only selected for incident start')
+    if (args.model_store or args.model_release_ref) and (args.operation != 'start' or args.role not in ('api', 'incidents')):
+        parser.error('explicit H1 selection is only valid for API/incident start')
+    if args.release_id and args.operation not in ('verify', 'start'):
+        parser.error('release identity is only valid for verify/start')
     try:
         if args.operation == 'build': result = build()
         elif args.operation == 'verify':
@@ -284,8 +299,12 @@ def main():
         elif args.operation == 'stop': result = stop(args.role)
         else: result = restart(args.role)
         print(json.dumps(result, sort_keys=True))
+    except HostGuard as exc:
+        print(json.dumps({'status': 'BLOCKED', 'operation': args.operation, 'reason': str(exc)}))
+        raise SystemExit(2) from None
     except Exception as exc:
-        raise SystemExit('host process operation failed: ' + type(exc).__name__) from None
+        print(json.dumps({'status': 'FAILED', 'operation': args.operation, 'error_type': type(exc).__name__}))
+        raise SystemExit(1) from None
 
 
 if __name__ == '__main__': main()
