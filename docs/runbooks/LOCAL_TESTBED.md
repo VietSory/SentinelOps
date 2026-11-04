@@ -25,10 +25,13 @@ guards remain intact. Stop those foreground processes with Ctrl+C separately;
 `down` does not kill arbitrary host processes. Don't run B load/stress alongside
 A's active measurement on a shared host without isolated capacity/scheduling.
 
-The first launch creates `artifacts/lane-b/runtime.json` and a private 0600
-`artifacts/lane-b/api-token`; read that file locally when a client needs its token.
-The launcher never prints the token. You can supply `SENTINELOPS_API_TOKEN` through
-the environment instead. Inherited Compose/model settings are not reused; models
+The first launch creates `artifacts/lane-b/runtime.json` and separate private 0600
+`artifacts/lane-b/operator-token` (read-only UI) and `api-token` (trusted producer)
+files; existing values are preserved. The launcher never prints either token.
+You can supply `SENTINELOPS_OPERATOR_TOKEN` and `SENTINELOPS_API_TOKEN` through
+the environment instead; values must be distinct. Operator credentials can read
+incident/explanation/action observations but receive 403 on IER import/revisions.
+Inherited Compose/model settings are not reused; models
 remain unavailable until separately accepted H1 wiring. Control credentials must
 select B's explicit nonowner loopback database on 15433. API liveness remains
 available during database/model outages; it is not proof those dependencies work.

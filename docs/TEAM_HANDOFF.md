@@ -96,8 +96,10 @@ uvicorn sentinelops.main:app --app-dir src --host 127.0.0.1 --port 18000
 ```
 
 Uvicorn chỉ bật API, không tự dựng DB/workers/models. Theo API runbook: cấp
-`CONTROL_DATABASE_URL` bằng runtime role và `SENTINELOPS_API_TOKEN` ngẫu nhiên
-ít nhất 32 ký tự qua môi trường; `.env` không tự load. Dựng DB/testbed của B sau
+`CONTROL_DATABASE_URL` bằng runtime role, `SENTINELOPS_OPERATOR_TOKEN` cho UI đọc
+và `SENTINELOPS_API_TOKEN` cho producer nhập/sửa IER. Hai token khác nhau, mỗi token
+ít nhất 32 ký tự; `.env` không tự load. Launcher B tạo hai file private riêng và
+không đổi token cũ. Dựng DB/testbed của B sau
 khi cô lập ports theo contract. Không reuse volume/secret A. Production auth chưa
 có; public API local bằng static token không phải AWS acceptance.
 

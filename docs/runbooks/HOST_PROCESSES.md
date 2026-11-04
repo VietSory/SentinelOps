@@ -103,8 +103,22 @@ Credentials are read through the existing B environment validator and written on
 to private session JSON (0600 under a 0700 directory), separately from release files.
 They are not in unit arguments, public status, release manifests or CI artifacts.
 Rotate a credential by explicit stop/start, not by editing a selected session.
+Repeated API start with changed producer/operator configuration is rejected before
+stopping the current process; restart continues using its pinned credential set.
 Inherited model/source/OTel settings from other processes are cleared at bootstrap.
 Changing source/model selection on restart is rejected.
+
+New builds declare `credential_profile=local-operator-read/v1` and pass the
+separate `SENTINELOPS_OPERATOR_TOKEN` to API only. UI uses the private
+`operator-token` file; `api-token` preserves the producer's legacy write scope.
+New health/incident sessions receive neither API credential. Status exposes only
+`operator_read_token_configured`, not token values or authorization proof.
+Existing immutable v2 bundles without that optional profile retain their original
+producer-only environment. The manager does not inject an unsupported variable,
+modify a bundle or silently substitute producer authority for an operator token.
+Use a capable release for read-only operator access; an explicitly selected old
+release still accepts its original producer credential. Unknown profiles fail
+closed. No checkpoint/source migration is involved in this credential change.
 
 Optional H1 is still explicit and paired for API/incident start:
 
