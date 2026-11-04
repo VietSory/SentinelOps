@@ -119,3 +119,71 @@ null with explicit supplemental availability, even if IF still has a valid fresh
 window. The collector/replayer apply the same completion qualification. This
 preserves the approved forecast horizon without backdating an emission. Existing
 strict HTTP contracts and v1 recorded model-signal replay remain unchanged.
+
+## Source-gated development comparison
+
+Run `scripts/evaluate_local_models.py` from the clean committed implementation
+checkout after the nonfinal corpus is source-admitted/frozen and the candidate
+has been fitted. The immutable capture checkout remains separate.
+
+```sh
+python -m scripts.evaluate_local_models \
+  --store /trusted/corpus \
+  --dataset-ref artifact://manifests/DATASET_HASH.json \
+  --models /trusted/candidate \
+  --training-manifest-sha256 TRAINING_MANIFEST_BYTES_SHA256 \
+  --output /new/evaluation-store
+```
+
+The training-manifest checksum is supplied by the operator, not accepted from an
+API upload. The evaluator recomputes original admission and the dataset freeze,
+then checks service/profile/features/policy/row hashes, model checksums/library
+versions and thresholds before prediction. Candidate directories resolve by the
+existing service hash under the trusted root; sender-local absolute paths in the
+training manifest are not followed. No model is fitted, activated or deserialized
+before the original-source gate.
+
+[Protocol v1](../../configs/local_model_evaluation.json) must already exist with
+the same semantic content in each model's fitting commit. It fixes the 1% healthy
+calibration-window budget, two-window entry/three-window exit persistence, 300s
+matching/horizon, risk threshold 0.8 and positive p95-slope control. Changing it
+after fitting is rejected. This shared window budget is not a certificate that
+event-level false-incident rates match; the report exposes measured rates for
+that review.
+
+Development vectors alone produce predictions; outcomes are joined afterward.
+Missing/censored risk labels remain unavailable. Group denominators include
+independently supported gradual runs even when no usable model frames exist.
+Each service reports MAD/IF counterfactual event counts, XGBoost/slope curves,
+precursor recall and selected/undefined counts. For Q-07,
+`precursor_recall_lead_ge_60s` keeps every independently eligible precursor run
+in its denominator and requires at least 60 seconds of counterfactual lead.
+Late detections and misses are reported separately; the existing any-lead
+`precursor_recall` remains unchanged. These remain replay metrics, not live alerts.
+Average precision is the primary
+paired risk comparison, with trapezoidal PR-AUC separately named: these are
+different integrals, and linear interpolation can be optimistic
+([scikit-learn definition](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html)).
+Neither convention silently grants Q-07/G3 acceptance.
+
+Uncertainty resamples complete acquisition groups with replacement, using the
+same sampled groups for each paired comparator (1,000 replicates, seed 42, 95%
+percentile intervals). It reports undefined replicas and requires at least five
+development groups. Overlapping windows and three services do not multiply the
+independent-group denominator; distinct contexts still do not prove IID sampling.
+
+The output is a new content-addressed store containing one prediction table and
+one model/data/protocol/code-pinned report. Keep the original corpus and candidate
+alongside it to resolve source refs; it is not a standalone raw-data archive.
+These are reusable model-comparison artifacts, not service smoke/PASS reports.
+The report's actual `evaluated_at` is separate from its **counterfactual** feature
+decision clocks. Replay assumes instantaneous inference at recorded feature
+cutoffs; its detector delays and precursor leads are not historical model alert
+times, online MTTD or NFR performance measurements. Censored event follow-up is
+reported. Actual timing, matched event-level budgets, source parity, model cards,
+final evaluation and all remaining gates need their own evidence.
+`G3_accepted=false`, `activation_allowed=false` and `holdout_opened=false`
+remain explicit regardless of numerical results. Final data is never read.
+
+Focused software regression:
+`python -m pytest -q tests/test_local_model_evaluation.py tests/test_local_data.py`.

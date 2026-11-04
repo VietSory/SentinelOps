@@ -32,3 +32,10 @@ The legacy IER projection contains no fabricated anomaly/risk signal. It keeps t
 `scripts/check_rca_producer.py --help` describes real-source DB/HTTP acceptance. It requires an empty exclusive local DB; the optional explicitly named DB container is stopped/restarted only after its published port matches the selected DB. Use an explicit stable host port. It consumes test outbox events in that exclusive DB and leaves shared databases alone. CI exercises the same path from a fresh Step 4 capture.
 
 For fresh captures, the replay's virtual cutoff may still be ahead of wall time. The acceptance driver waits at most the local health policy's 60-second lag, in bounded intervals, before preparing an intent. Unexpected farther-future cutoffs fail. Production intent preparation keeps its future-clock rejection; no clock is backdated or assertion removed. Known source receipts after the analytical cutoff remain unavailable even when the actual publication happens later.
+
+## Revision-pinned explanation
+
+The [H2 explanation backend](EXPLANATIONS.md) renders bounded, quoted evidence
+from a validated IncidentEnvelope. Provider selection cannot change ranking,
+metrics, availability or action authority. HTTP/UI integration remains a separate
+consumer boundary.

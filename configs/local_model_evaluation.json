@@ -1,0 +1,22 @@
+{
+  "protocol_version": "local-model-development/v1",
+  "source_profile": "prometheus-increase-60s-5s/v1",
+  "feature_set_version": "http-red-5m/v1",
+  "evaluation_role": "development-validation",
+  "false_alert_budget": 0.01,
+  "entry_windows": 2,
+  "exit_windows": 3,
+  "step_seconds": 60,
+  "event_deadline_seconds": 300,
+  "risk_horizon_seconds": 300,
+  "risk_threshold": 0.8,
+  "slope_feature": "p95_latency_ms_slope_5m",
+  "bootstrap_replicates": 1000,
+  "bootstrap_seed": 42,
+  "confidence_level": 0.95,
+  "clock_mode": "recorded-feature-cutoff-instantaneous-counterfactual",
+  "pr_auc_method": "trapezoidal-precision-recall",
+  "final_access_allowed": false,
+  "activation_allowed": false,
+  "primary_risk_comparison": "average_precision"
+}

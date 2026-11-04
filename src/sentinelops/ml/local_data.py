@@ -378,17 +378,29 @@ def audit_local_corpus(store, *, plan=None, project=PROJECT, now=None):
     return report, all_rows, cases
 
 
-def admitted_local_rows(store, report):
+def _admitted_local_inventory(store, report):
     if report.get('dataset_version') != 'local-http-admission/v1':
         raise DatasetNotReady('not an approved prospective local corpus version')
     if report.get('training_ready') is not True:
         raise DatasetNotReady('prospective corpus/G2 is blocked; no estimator constructed')
     if not isinstance(report.get('created_at'), str):
         raise DatasetNotReady('prospective admission lacks a source audit cutoff')
-    fresh, rows, _ = audit_local_corpus(store, now=utc_time(report['created_at']))
+    fresh, rows, cases = audit_local_corpus(store, now=utc_time(report['created_at']))
     if fresh != report or not fresh['training_ready']:
         raise DatasetNotReady('prospective raw-source/G2 admission is incomplete, changed or self-attested')
+    return rows, cases
+
+
+def admitted_local_rows(store, report):
+    rows, _ = _admitted_local_inventory(store, report)
     return [row for row in rows if row['split'] in ('train','calibration')]
+
+
+def admitted_local_evaluation_rows(store, report):
+    rows, cases = _admitted_local_inventory(store, report)
+    if any(row['split'] not in ('train', 'calibration', 'development-validation') for row in rows):
+        raise DatasetNotReady('evaluation cannot open final or unregistered roles')
+    return rows, cases
 
 
 def freeze_local_corpus(store, report):
