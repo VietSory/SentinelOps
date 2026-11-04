@@ -141,6 +141,11 @@ explanation = fixture.get('/v1/incidents/'+ier['incident_id']+'/explanation?revi
                           headers={'Authorization':'Bearer fixture-wheel-token-'+'x'*32})
 assert explanation.status_code == 200 and explanation.json()['fallback']
 validate_payload('explanation-response.schema.json', explanation.json())
+operator = TestClient(create_app(Settings(operator_token='fixture-wheel-operator-'+'o'*32),repository=ReadOnlyFixture()))
+operator_auth = {'Authorization':'Bearer fixture-wheel-operator-'+'o'*32}
+assert operator.get('/v1/incidents/'+ier['incident_id']+'/explanation?revision=1',headers=operator_auth).status_code == 200
+assert operator.post('/v1/incidents',json={},headers=operator_auth).status_code == 403
+assert operator.post('/v1/incidents/unknown/revisions',json={},headers=operator_auth).status_code == 403
 write['payload']['invented'] = True
 try:
     validate_payload('incident-write.schema.json', write)

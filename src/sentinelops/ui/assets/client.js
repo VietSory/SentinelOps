@@ -4,6 +4,7 @@ export class ApiFailure extends Error {
     const messages = {
       unauthorized: 'Token was rejected. Connect again with your local API token.',
       authentication_unavailable: 'API authentication is not configured for this environment.',
+      authentication_adapter_unavailable: 'Authentication is unavailable for this environment. Check its identity adapter.',
       incident_store_unavailable: 'The incident store is unavailable. Previously loaded data may be stale.',
       incident_not_found: 'This incident or revision could not be found.',
       action_store_unavailable: 'Action history is unavailable. This does not establish that no action occurred.',

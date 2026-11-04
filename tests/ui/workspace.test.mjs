@@ -10,6 +10,13 @@ const envelope = (id, revision, next=null) => ({incident_id:id,revision,context:
 const factory = overrides => ({list:async () => ({items:[],next_cursor:null}),readiness:async () => ({dependencies:{model:false,incident_store:true}}),
   context:async (id,rev) => envelope(id,rev),...overrides});
 
+test('an unavailable identity adapter is displayed as authentication failure rather than store outage',async () => {
+  const client=new IncidentClient('fixture-token',async () => new Response(JSON.stringify({
+    code:'authentication_adapter_unavailable',request_id:'fixture-request'}),{status:503}));
+  await assert.rejects(() => client.list({},null),error => error.status===503 &&
+    error.code==='authentication_adapter_unavailable' && /Authentication is unavailable/.test(error.message));
+});
+
 const explanationPage = (id,revision) => ({schema_version:'1.0',incident_id:id,revision,
   generated_at:'2026-01-01T00:00:00Z',provider:'deterministic-facts/v1',fallback:true,
   payload:{schema_version:'1.0',incident_id:id,summary:'Software fixture, not a verified cause',claims:[]}});
