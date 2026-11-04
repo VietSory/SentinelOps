@@ -86,7 +86,7 @@ flowchart LR
 | Dependency | Chỉ chặn | Trong lúc chờ vẫn làm |
 | --- | --- | --- |
 | H1: chưa có accepted model | B chưa bật inference thật; G3 chưa pass | API/UI xử lý 503, incident/SLO pipeline, packaging/deployment |
-| H2: backend explanation chưa xong | Wiring route explanation cuối | UI đọc IER/evidence/timeline, không cần Bedrock |
+| H2 local đã có backend + HTTP/UI pin revision | Provider cloud/G5 còn cần quyền và evaluation riêng | Dùng deterministic fallback thật, refs thuộc revision; không cần model hay Bedrock |
 | H3: chưa có source AWS thật | A chưa chứng minh AWS parity, B chưa activate model AWS | A làm adapter/tests; B triển khai app/cloud và unavailable state |
 | H4: chưa có RCA/evidence đủ điều kiện action | Auto action thực sự phải giữ blocked | B hoàn thiện executor/local guard tests; A làm evidence/coverage trên development |
 | Budget/quota/region hoặc quyền holdout chưa cấp | Cloud apply/final evaluation tương ứng | Local, code, IaC validation và development report |
@@ -193,8 +193,9 @@ vẫn cho xem ranking/facts. Nếu cần field mới, chốt supplemental contra
 và producer với A; không mở rộng strict IER hoặc đọc trực tiếp corpus/artifact
 riêng của A từ browser. `artifact://` là reference, không mặc định là URL tải được.
 
-B1 là UI **chỉ đọc**. Explanation hiện unavailable cho đến H2 thật; không thêm
-provider giả. Action không có nút execute khi policy/executor chưa triển khai;
+B1 là UI **chỉ đọc**. H2 local đã nối backend A qua wrapper riêng và UI pin
+revision; thiếu provider dùng deterministic fallback thật, không thêm provider giả.
+Action không có nút execute khi policy/executor chưa triển khai;
 không coi lifecycle ghi trong DB là bằng chứng action đã chạy.
 
 **Packaging và isolation:** bổ sung assets vào wheel/image rồi kiểm installed

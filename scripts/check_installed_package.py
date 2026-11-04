@@ -79,7 +79,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'incident-evidence-record', 'explanation', 'remediation-action',
              'observation-envelope', 'feature-envelope', 'infrastructure-observation',
              'experiment-run', 'dataset-manifest', 'incident-write',
-             'incident-envelope', 'incident-list', 'api-error', 'training-data-policy',
+             'incident-envelope', 'incident-list', 'api-error', 'explanation-response', 'training-data-policy',
              'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result',
              'rca-policy', 'rca-result', 'training-data-policy-v2', 'lane-b-deployment-lock', 'payment-known-good',
              'action-observation', 'action-list', 'quarantine-review', 'quarantine-release', 'quarantine-status',
@@ -127,6 +127,20 @@ write = {'schema_version':'1.0','payload':ier,'context':{
         'emitted_at':ier['detected_at'],'source_ref':'fixture://wheel'}]},
     'lifecycle_stage':'OPEN','reason':'installed wheel contract reference validation'}
 validate_payload('incident-write.schema.json', write)
+class ReadOnlyFixture:
+    async def check_ready(self): pass
+    async def get(self, identifier, revision):
+        assert identifier == ier['incident_id'] and revision == 1
+        return {'schema_version':'1.0','incident_id':identifier,'revision':1,'recorded_at':datetime.now(timezone.utc).isoformat(),
+                'payload':ier,'context':{**write['context'],'lifecycle_stage':'OPEN'},'actor':'wheel-fixture','reason':write['reason']}
+    async def history(self, identifier, **kwargs):
+        assert kwargs['max_revision'] == 1
+        return []
+fixture = TestClient(create_app(Settings(api_token='fixture-wheel-token-'+'x'*32),repository=ReadOnlyFixture()))
+explanation = fixture.get('/v1/incidents/'+ier['incident_id']+'/explanation?revision=1',
+                          headers={'Authorization':'Bearer fixture-wheel-token-'+'x'*32})
+assert explanation.status_code == 200 and explanation.json()['fallback']
+validate_payload('explanation-response.schema.json', explanation.json())
 write['payload']['invented'] = True
 try:
     validate_payload('incident-write.schema.json', write)

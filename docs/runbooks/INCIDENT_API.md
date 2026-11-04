@@ -21,7 +21,12 @@ Store/model readiness are independent. Missing model signals stay unavailable,
 UNKNOWN does not become healthy, and a store outage does not become an empty
 successful feed. RCA entries are hypotheses/support; the current API does not
 expose all structured qualification fields, so the console never presents ranking
-as a confirmed cause. Explanation and action execution remain unavailable.
+as a confirmed cause. The Explanation tab reads the pinned revision through the
+real grounded backend, shows provider/fallback and links each claim to this
+revision's evidence. Switching revision/filter or disconnecting clears the old
+result and cancels its request; late responses cannot restore it. Reload errors
+remove the previous explanation while incident/evidence remain readable. Text,
+including quoted logs, is rendered as text. Action execution remains unavailable.
 
 Frontend tests need Node 20+ but the running UI has no Node/build service:
 
@@ -83,9 +88,27 @@ Stored IDs are bounded URI-safe ASCII identifiers (`A–Z`, `a–z`, digits, `.`
 | Same with `If-None-Match` matching ETag | 304 |
 | `GET /v1/incidents/{id}/context` | [IncidentEnvelope](../../contracts/incident-envelope.schema.json), including exact IER, provenance, actor/reason and bounded audit timeline |
 | Context `revision`, `after_revision`, `limit` | Revision-bounded history page; follow `timeline.next_after_revision` |
+| `GET /v1/incidents/{id}/explanation?revision=N` | [ExplanationResponse v1](../../contracts/explanation-response.schema.json), with the unchanged GroundedExplanation nested in `payload`; provider/fallback and generation time outside IER |
 | `GET /v1/incidents?state=…&service=…&limit=…&cursor=…` | [IncidentList](../../contracts/incident-list.schema.json) summaries; follow opaque `next_cursor` |
 
 Limits are 1–100. Incident ordering uses immutable creation time plus ID; cursors bind filters and use keyset pagination. It is a live current-state view: concurrent updates can change which records match a filter; it is not a database snapshot across HTTP pages. Historical context never includes events from later revisions.
+
+Explanation uses the same bearer authentication and repository as incident reads.
+Omitting `revision` resolves current once and pins subsequent history/provider
+work to that immutable revision. Response `X-Incident-Revision` identifies it.
+Responses are `no-store`, without an IER ETag or 304: generation time and optional
+provider selection can vary. The GET neither writes a revision/outbox event nor
+transitions to EXPLAINED. Evidence refs must resolve in the selected IER.
+
+The mounted default app calls A's [backend](EXPLANATIONS.md) without a provider:
+`provider=deterministic-facts/v1`, `fallback=true`. It works while models are 503.
+An explicitly supplied `ExplanationProvider` in `create_app(explanation_provider=...)`
+can select bounded evidence; invalid/timeout selection falls back on the same
+revision. No SDK, AWS credentials, provider environment switch or cloud request is
+enabled automatically. The browser allows 15 seconds for the backend's bounded
+ten-second provider deadline plus HTTP overhead. An absent revision is 404,
+invalid query 422, unavailable DB or unverifiable output 503. A summary of source
+facts is not independent verification, qualified RCA, action authority or G5.
 
 Optional action observations use a **separate SELECT-only** credential via
 `SENTINELOPS_ACTION_READ_DATABASE_URL`, explicit optional migration and

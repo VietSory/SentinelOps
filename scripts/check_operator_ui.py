@@ -38,6 +38,16 @@ def fixture_envelope(incident, revision, after=0):
         'timeline':{'events':page,'next_after_revision':page[-1]['revision'] if page and page[-1]['revision']<revision else None}}
 
 
+def fixture_explanation(incident, revision):
+    """Explicit browser contract fixture, never source/model/provider evidence."""
+    return {'schema_version':'1.0','incident_id':incident,'revision':revision,
+        'generated_at':'2026-01-01T00:00:00Z','provider':'deterministic-facts/v1','fallback':True,
+        'payload':{'schema_version':'1.0','incident_id':incident,
+            'summary':f'Software fixture for revision {revision}; hypotheses are not confirmed causes.',
+            'claims':[{'text':'<img src=x onerror="window.__explanation_xss=true">',
+                       'evidence_refs':['fixture-evidence-1']}]}}
+
+
 def fixture_actions(incident, revision, cursor=None):
     reason='<img src=x onerror="window.__action_xss=true">'
     item={'observation_version':'action-observation/v1','action_id':('2' if cursor else '1')*64,
@@ -70,7 +80,7 @@ def fixture_quarantine(action_id):
 
 def exercise_fixtures(page, base, output, expect):
     token = 'fixture-browser-token-not-a-real-secret'*2
-    outage = {'active':False,'actions':False,'quarantine':False}
+    outage = {'active':False,'actions':False,'quarantine':False,'explanation':False}
     records = [{'incident_id':'INC-FIXTURE-A','revision':3,'state':'escalated','severity':'high','detected_at':'2026-01-01T00:00:00Z',
         'affected_services':['payment-service','checkout-service']},
         {'incident_id':'INC-FIXTURE-B','revision':1,'state':'incident','severity':'medium','detected_at':'2026-01-01T01:00:00Z',
@@ -93,6 +103,11 @@ def exercise_fixtures(page, base, output, expect):
         if url.path.endswith('/context'):
             incident = url.path.split('/')[-2]
             route.fulfill(json=fixture_envelope(incident,int(query.get('revision',['3'])[0]),int(query.get('after_revision',['0'])[0]))); return
+        if url.path.endswith('/explanation'):
+            assert route.request.method == 'GET' and 'revision' in query
+            if outage['explanation']:
+                route.fulfill(status=503,json={'code':'explanation_unavailable','request_id':'fixture-explanation-outage'});return
+            route.fulfill(json=fixture_explanation(url.path.split('/')[-2],int(query['revision'][0])));return
         if url.path.endswith('/actions'):
             if outage['actions']:
                 route.fulfill(status=503,json={'code':'action_store_unavailable','request_id':'fixture-action-outage'}); return
@@ -129,6 +144,21 @@ def exercise_fixtures(page, base, output, expect):
     assert page.locator('#detail-pane img').count() == 0
     assert '1970' not in page.locator('#detail-pane').inner_text()
     assert page.locator('#detail-pane a[href^="javascript:"]').count() == 0
+    page.get_by_role('button',name='Explanation',exact=True).focus();page.keyboard.press('Enter')
+    expect(page.get_by_text('Deterministic fallback',exact=True)).to_be_visible()
+    expect(page.locator('.explanation-summary')).to_contain_text('revision 3')
+    expect(page.locator('.explanation-claim p')).to_have_text('<img src=x onerror="window.__explanation_xss=true">')
+    assert page.evaluate('window.__explanation_xss') is None and page.locator('#detail-pane img').count()==0
+    page.locator('.explanation-claim .reference').click()
+    expect(page.locator('details[data-evidence-id="fixture-evidence-1"]')).to_have_attribute('open','')
+    page.get_by_role('button',name='Explanation',exact=True).click()
+    outage['explanation']=True;page.get_by_role('button',name='Reload explanation',exact=True).click()
+    expect(page.locator('#detail-pane [role=alert]')).to_contain_text('Explanation is unavailable')
+    expect(page.locator('.explanation-summary')).to_have_count(0)
+    expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
+    outage['explanation']=False;page.get_by_role('button',name='Load explanation',exact=True).click()
+    expect(page.locator('.explanation-summary')).to_contain_text('revision 3')
+    expect(page.get_by_role('button',name='Reload explanation',exact=True)).to_be_focused()
     page.get_by_role('button',name='Timeline',exact=True).focus(); page.keyboard.press('Enter')
     page.get_by_role('button',name='Load more revisions',exact=True).click()
     expect(page.locator('.timeline li')).to_have_count(3)
@@ -160,12 +190,17 @@ def exercise_fixtures(page, base, output, expect):
     page.get_by_role('button',name='Actions',exact=True).click()
     expect(page.get_by_text('No action records were returned through this revision.',exact=False)).to_be_visible()
     page.get_by_role('button',name='Timeline',exact=True).click(); expect(page.locator('.timeline li')).to_have_count(1)
+    page.get_by_role('button',name='Explanation',exact=True).click()
+    expect(page.locator('.explanation-summary')).to_contain_text('revision 1')
     page.screenshot(path=str(output/'fixture-desktop.png'),full_page=True)
     page.set_viewport_size({'width':390,'height':844})
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     page.get_by_role('button',name='Open INC-FIXTURE-A, revision 3',exact=True).click()
     expect(page.locator('#revision-input')).to_have_value('3')
     expect(page.locator('#detail-title')).to_be_in_viewport()
+    page.get_by_role('button',name='Explanation',exact=True).click()
+    expect(page.locator('.explanation-summary')).to_contain_text('revision 3')
+    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     page.screenshot(path=str(output/'fixture-mobile.png'),full_page=True)
     page.get_by_role('button',name='Actions',exact=True).click()
     expect(page.locator('.evidence-card')).to_have_count(1)
@@ -185,7 +220,9 @@ def exercise_fixtures(page, base, output, expect):
         'checks':['authentication','pagination','filters','revision-pinning','timeline-pagination','model-unavailable',
                   'unknown-context','XSS-safe-facts-and-references','missing-timestamp','mobile-layout','store-outage','logout-clears-data',
                   'read-only-action-audit','action-pagination','action-revision-scope','action-outage','XSS-safe-action-reason',
-                  'manual-quarantine-receipt-not-recovery','quarantine-outage','quarantine-keyboard-focus','XSS-safe-operator-identity']}
+                  'manual-quarantine-receipt-not-recovery','quarantine-outage','quarantine-keyboard-focus','XSS-safe-operator-identity',
+                  'explanation-revision-pinning','explanation-fallback','explanation-outage-clears-text',
+                  'explanation-reference-navigation','XSS-safe-explanation','explanation-keyboard-focus']}
 
 
 def exercise_native(page, base, output, incident, token, expect):
@@ -198,6 +235,14 @@ def exercise_native(page, base, output, incident, token, expect):
         response = client.get('/v1/incidents/'+incident+'/context'); response.raise_for_status(); original = response.json()
         if not any(item['source']=='slo' for item in original['context']['trigger_sources']):
             raise ValueError('selected incident is not a telemetry-derived SLO incident')
+        explanation_response=client.get('/v1/incidents/'+incident+'/explanation',params={'revision':original['revision']})
+        explanation_response.raise_for_status();explanation=explanation_response.json()
+        from sentinelops.contracts import validate_payload
+        validate_payload('explanation-response.schema.json',explanation)
+        assert explanation['revision']==original['revision'] and explanation['fallback']
+        assert explanation_response.headers['x-incident-revision']==str(original['revision'])
+        known={item['id'] for item in original['payload']['evidence']}
+        assert all(set(claim['evidence_refs'])<=known for claim in explanation['payload']['claims'])
     page.goto(base+'/ui/',wait_until='networkidle')
     page.locator('#api-token').fill(token); page.get_by_role('button',name='Connect',exact=True).click()
     expect(page.locator('[data-testid=incident-row]').first).to_be_visible()
@@ -211,16 +256,28 @@ def exercise_native(page, base, output, incident, token, expect):
     expect(page.locator('#detail-title')).to_have_text(incident)
     expect(page.locator('#revision-input')).to_have_value(str(original['revision']))
     expect(page.locator('#model-status')).to_have_text('Unavailable')
+    page.get_by_role('button',name='Explanation',exact=True).click()
+    expect(page.get_by_text('Deterministic fallback',exact=True)).to_be_visible()
+    expect(page.locator('.explanation-summary')).to_have_text(explanation['payload']['summary'])
+    expect(page.locator('.explanation-claim')).to_have_count(len(explanation['payload']['claims']))
+    page.screenshot(path=str(output/'native-explanation-desktop.png'),full_page=True)
     page.screenshot(path=str(output/'native-desktop.png'),full_page=True)
     page.get_by_role('button',name='Evidence ('+str(len(original['payload']['evidence']))+')',exact=True).click()
     expect(page.locator('.evidence-card')).to_have_count(len(original['payload']['evidence']))
     page.get_by_role('button',name='Timeline',exact=True).click()
     expect(page.locator('.timeline li').first).to_be_visible()
     page.set_viewport_size({'width':390,'height':844})
+    page.get_by_role('button',name='Explanation',exact=True).click()
+    expect(page.locator('.explanation-summary')).to_have_text(explanation['payload']['summary'])
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     page.screenshot(path=str(output/'native-mobile.png'),full_page=True)
+    with httpx.Client(base_url=base,headers={'Authorization':'Bearer '+token},trust_env=False) as client:
+        after=client.get('/v1/incidents/'+incident+'/context',params={'revision':original['revision']})
+        after.raise_for_status();assert after.json()==original
     return {'scope':'actual-source-backed-incident-API-browser-read','incident_id':incident,
         'revision':original['revision'],'evidence_items':len(original['payload']['evidence']),
+        'explanation_provider':explanation['provider'],'explanation_claims':len(explanation['payload']['claims']),
+        'explanation_refs_in_pinned_ier':True,'pinned_ier_unchanged':True,
         'source_refs':original['context']['source_refs'],'diagnostic_accuracy_claim':False}
 
 

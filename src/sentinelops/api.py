@@ -25,6 +25,7 @@ from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, Incompatibl
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.ui.routes import router as ui_router
 from sentinelops.remediation.reader import ActionReader, decode_cursor as decode_action_cursor
+from sentinelops.explanations.service import ExplanationProvider, explain_incident
 
 logger = logging.getLogger("sentinelops-api")
 STATES = {"degrading","incident","recovering","recovered","escalated"}
@@ -85,8 +86,11 @@ def revision_headers(response: Response,snapshot: dict) -> None:
     response.headers["X-Incident-Revision"] = str(snapshot["revision"])
 
 
-def create_app(settings: Settings | None = None,*,repository=None,model_registry=None,action_reader=None) -> FastAPI:
+def create_app(settings: Settings | None = None,*,repository=None,model_registry=None,action_reader=None,
+               explanation_provider: ExplanationProvider | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
+    if explanation_provider is not None and not isinstance(explanation_provider, ExplanationProvider):
+        raise ValueError("explanation provider must use the bounded backend adapter")
     registry = model_registry if model_registry is not None else ModelRegistry()
     if model_registry is None and settings.model_store:
         registry = ModelRegistry.load(ArtifactStore(settings.model_store), settings.model_release_ref)
@@ -374,6 +378,36 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
             response.status_code = 304
             return response
         return stored["payload"]
+
+    @app.get("/v1/incidents/{incident_id}/explanation",responses={200:{
+        "description":"Read-only explanation of a pinned incident revision; no lifecycle or action mutation",
+        "content":{"application/json":{"schema":load_schema('explanation-response.schema.json')}}}})
+    async def explanation(incident_id: str,response: Response,
+                          revision: int | None = Query(None,ge=1,le=2**63-1),
+                          identity=Depends(authorize),repo=Depends(require_repository)):
+        stored = await call(repo.get(incident_id,revision))
+        # Pin subsequent reads to the selected immutable revision, even if a new
+        # current revision commits while this request is being processed.
+        events = await call(repo.history(incident_id,after_revision=0,limit=50,max_revision=stored["revision"]))
+        next_after = events[-1]["revision"] if events and events[-1]["revision"]<stored["revision"] else None
+        envelope = {**stored,"timeline":{"events":events,"next_after_revision":next_after}}
+        try:
+            validate_payload("incident-envelope.schema.json",envelope)
+            rendered = await explain_incident(envelope,provider=explanation_provider)
+            if not isinstance(rendered,dict) or set(rendered)!={"payload","provider","fallback"}:
+                raise ValueError("unsupported explanation backend result")
+            result = {"schema_version":"1.0","incident_id":stored["incident_id"],"revision":stored["revision"],
+                      "generated_at":datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),**rendered}
+            validate_payload("explanation-response.schema.json",result)
+            known = {item["id"] for item in stored["payload"]["evidence"]}
+            if any(not set(claim["evidence_refs"]) <= known for claim in result["payload"]["claims"]):
+                raise ValueError("explanation refers outside the selected revision")
+        except (ValueError,TypeError,KeyError):
+            raise ApiError(503,"explanation_unavailable","Explanation could not be verified for this revision") from None
+        # generated_at/provider selection can vary. Do not use the IER ETag to
+        # promise a cached representation or return 304 for this read-only view.
+        response.headers["X-Incident-Revision"] = str(stored["revision"])
+        return result
 
     @app.get("/v1/incidents/{incident_id}/context")
     async def context(incident_id: str,response: Response,revision: int | None = Query(None,ge=1,le=2**63-1),

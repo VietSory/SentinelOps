@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "incident_id": "INC-EXAMPLE",
+  "revision": 1,
+  "generated_at": "2026-01-01T00:00:00Z",
+  "provider": "deterministic-facts/v1",
+  "fallback": true,
+  "payload": {
+    "schema_version": "1.0",
+    "incident_id": "INC-EXAMPLE",
+    "summary": "Software contract sample. No diagnostic accuracy or action permission is established.",
+    "claims": []
+  }
+}

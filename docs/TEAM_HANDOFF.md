@@ -18,8 +18,9 @@ verify bằng telemetry. Missing data là UNKNOWN, không phải healthy.
 
 **Đã có:** workload/observability, telemetry/features/replay, experiment controller,
 prospective admission, guarded fitting/loading, health/incident workers, persistent
-API và conservative RCA. **Chưa được chấp nhận:** dataset/models G2/G3, RCA quality
-đầy đủ. **Chưa hoàn thành:** UI, explanation/provider, action execution và AWS.
+API và conservative RCA; UI đọc IER thật và H2 explanation/fallback pin revision
+đã có local. **Chưa được chấp nhận:** dataset/models G2/G3, RCA quality đầy đủ,
+G5/provider cloud. **Chưa hoàn thành:** action activation sản phẩm và AWS.
 Không làm lại những module đã có hoặc coi fixture model là model đã được chấp nhận.
 Report cũ có thể ghi active capture; đó là quan sát tại thời điểm report, không
 phải xác nhận controller vẫn sống hôm nay. Kiểm tra trên đúng máy trước khi tiếp tục.
@@ -115,13 +116,16 @@ vẫn dùng được; không chạy cùng role foreground và managed song song.
 | `GET /v1/incidents` | Bearer auth; state/service/limit/cursor; limit 1–100; chưa có time-range filter |
 | `GET /v1/incidents/{id}` | Exact IER, current hoặc `revision`, ETag/revision headers |
 | `GET /v1/incidents/{id}/context` | IncidentEnvelope và timeline phân trang; không nhét field mới vào IER |
+| `GET /v1/incidents/{id}/explanation?revision=N` | Wrapper riêng version 1.0, GroundedExplanation trong payload, provider/fallback, refs thuộc IER đang chọn; GET không ghi EXPLAINED hoặc cấp action |
 | `GET /v1/incidents/{id}/actions`, `/v1/actions/{id}` | Optional SELECT-only action journal, pin incident revision và action ETag; xem [action runbook](runbooks/CONTROLLED_REMEDIATION.md#read-only-action-http-and-ui) |
 | `GET /v1/actions/{id}/quarantine` | Optional migration 2, receipt operator riêng; không biến `escalated` thành recovered, không có HTTP release/dispatch |
 | `POST /v1/detect`, `/v1/risk` | FeatureWindow, source-profile header, approved model; unavailable 503 |
 | Incident writes | Trusted producer/operator; If-Match + Idempotency-Key, không public upload tùy ý |
 
-Explanation và action submission trong technical spec vẫn **planned**. Action
-observation GET đã có với credential SELECT-only riêng; không cấp quyền execute.
+H2 [backend](runbooks/EXPLANATIONS.md) và [API/UI](runbooks/INCIDENT_API.md) đã có
+đường đọc local với deterministic fallback thật khi thiếu model/provider. Không
+tự gọi Bedrock hoặc nghiệm thu G5. Action submission vẫn **planned**; observation
+GET đã có với credential SELECT-only riêng, không cấp quyền execute.
 CLI `scripts/review_payment_image.py` thu hồ sơ image/health cho operator review;
 không tự tạo approved known-good ledger hoặc xác nhận physical source binding/H4.
 MVP UI đọc IER thật từ worker/API trên môi trường B. Fixture chỉ dùng unit test

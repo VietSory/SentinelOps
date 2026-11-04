@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/explanation-response.schema.json",
+  "title": "IncidentExplanationResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "incident_id", "revision", "generated_at", "provider", "fallback", "payload"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "incident_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "provider": {"type": "string", "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},
+    "fallback": {"type": "boolean"},
+    "payload": {"allOf": [
+      {"$ref": "https://sentinelops.local/contracts/explanation.schema.json"},
+      {"properties": {"claims": {"maxItems": 12}}}
+    ]}
+  }
+}

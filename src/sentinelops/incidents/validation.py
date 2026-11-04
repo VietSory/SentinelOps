@@ -4,6 +4,12 @@ from sentinelops.incidents.domain import IncidentWrite
 
 
 def validate_wrapper(name: str,payload: dict) -> None:
+    if name == "explanation-response.schema.json":
+        utc_time(payload["generated_at"])
+        if payload["payload"]["incident_id"] != payload["incident_id"]:
+            raise ValueError("explanation response identity differs from payload")
+        if payload["fallback"] != (payload["provider"] == "deterministic-facts/v1"):
+            raise ValueError("explanation fallback differs from provider identity")
     if name in ("incident-write.schema.json","incident-envelope.schema.json"):
         context = payload["context"]
         stage = payload["lifecycle_stage"] if name=="incident-write.schema.json" else context["lifecycle_stage"]

@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 import asyncpg
 import httpx
 
+from sentinelops.contracts import validate_payload
 from sentinelops.workers.incident_replay import bounded_bytes, json_object, require
 
 
@@ -88,6 +89,7 @@ async def check(runs: list[Path], output: Path) -> dict:
                 assert len(payloads) == 4
                 url = "/v1/incidents/" + identifier
                 assert (await client.get(url)).status_code == 401
+                assert (await client.get(url + "/explanation")).status_code == 401
                 current = await client.get(url, headers=auth)
                 assert current.status_code == 200 and current.json() == payloads[-1] and current.headers["etag"] == '"4"'
                 context = await client.get(url + "/context", headers=auth)
@@ -101,6 +103,15 @@ async def check(runs: list[Path], output: Path) -> dict:
                     historical = await client.get(url + "/context", params={"revision": revision}, headers=auth)
                     assert historical.status_code == 200 and historical.json()["payload"] == payload
                     assert payload["detected_at"] == payloads[0]["detected_at"]
+                    explained = await client.get(url + "/explanation", params={"revision": revision}, headers=auth)
+                    assert explained.status_code == 200 and explained.headers["x-incident-revision"] == str(revision)
+                    explanation = explained.json()
+                    validate_payload("explanation-response.schema.json", explanation)
+                    assert explanation["incident_id"] == identifier and explanation["revision"] == revision
+                    assert explanation["fallback"] and explanation["provider"] == "deterministic-facts/v1"
+                    known = {item["id"] for item in payload["evidence"]}
+                    assert all(set(claim["evidence_refs"]) <= known for claim in explanation["payload"]["claims"])
+                    assert "No action is authorized" in explanation["payload"]["summary"]
                 assert (await client.get(url, headers={**auth, "if-none-match": '"4"'})).status_code == 304
                 first = await client.get(url + "/context", params={"limit": 1}, headers=auth)
                 assert first.status_code == 200 and first.json()["timeline"]["next_after_revision"] == 1
@@ -125,6 +136,8 @@ async def check(runs: list[Path], output: Path) -> dict:
             "current_and_all_historical_payloads_match_immutable_native_snapshots": True,
             "ETag_and_bounded_timeline_verified": True, "pagination_contains_all_native_incidents": True,
             "detected_at_immutable": True, "read_only_side_effect_counts_unchanged": True,
+            "revision_pinned_explanation_fallback_and_references_verified": True,
+            "explanation_revisions_verified": before["versions"],
             "model_ready_503": True, "demo_disabled": True, "actions_allowed": False}
         (output / "acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
         success = True

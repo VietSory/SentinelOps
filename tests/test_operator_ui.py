@@ -26,6 +26,14 @@ def test_quarantine_browser_fixture_cannot_claim_recovery_or_dispatch_authority(
     assert result['action_phase']=='escalated' and result['resolution']['payload']['recovery_accepted'] is False
 
 
+def test_explanation_browser_fixture_is_separate_from_source_or_provider_evidence():
+    from scripts.check_operator_ui import fixture_explanation
+    from sentinelops.contracts import validate_payload
+    result=fixture_explanation('INC-FIXTURE-A',3)
+    validate_payload('explanation-response.schema.json',result)
+    assert result['revision']==3 and result['fallback'] and 'Software fixture' in result['payload']['summary']
+
+
 def test_ui_serves_same_origin_without_exposing_token_or_private_incidents():
     token = 'PRIVATE-OPERATOR-TOKEN-'+'x'*32
     with TestClient(create_app(Settings(api_token=token))) as client:

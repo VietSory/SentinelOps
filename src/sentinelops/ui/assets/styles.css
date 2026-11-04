@@ -676,9 +676,18 @@ td .incident-link:hover{
 }
 .tabs{
   display:flex;
+  flex-wrap:wrap;
   border-bottom:1px solid var(--line);
   padding:0 20px;
-  gap:19px
+  gap:0 19px
+}
+.explanation-summary,.explanation-claim p{
+  white-space:pre-wrap;
+  overflow-wrap:anywhere
+}
+.explanation-claim{
+  border-bottom:1px solid var(--line);
+  padding:12px 0
 }
 .tab{
   border:0;
