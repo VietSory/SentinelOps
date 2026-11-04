@@ -80,12 +80,13 @@ def init_runtime():
         if list(ROOT.iterdir()):
             raise ValueError('refuse to appropriate a nonempty unregistered runtime root')
         with marker.open('x') as stream: json.dump(identity,stream)
-    token = ROOT/'api-token'
-    if not token.exists():
-        fd = os.open(token,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-        with os.fdopen(fd,'w') as stream: stream.write(secrets.token_urlsafe(48)+'\n')
-    if token.is_symlink() or not stat.S_ISREG(token.stat().st_mode) or token.stat().st_mode & 0o077:
-        raise ValueError('lane B API token must be a private regular file')
+    for name in ('api-token','operator-token'):
+        token = ROOT/name
+        if not token.exists():
+            fd = os.open(token,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+            with os.fdopen(fd,'w') as stream: stream.write(secrets.token_urlsafe(48)+'\n')
+        if token.is_symlink() or not stat.S_ISREG(token.stat().st_mode) or token.stat().st_mode & 0o077:
+            raise ValueError('lane B API token must be a private regular file')
     return identity
 
 
@@ -111,7 +112,8 @@ def runtime_environment(model_store=None, release_ref=None):
     return {**environment,'CONTROL_DATABASE_URL':control,
         'COMMERCE_EVIDENCE_DATABASE_URL':'postgresql://sentinel:sentinel@127.0.0.1:15432/sentinelops',
         'SENTINELOPS_ENV':'local','SENTINELOPS_ENABLE_DEMO':'false',
-        'SENTINELOPS_API_TOKEN':os.environ.get('SENTINELOPS_API_TOKEN') or (ROOT/'api-token').read_text().strip()}
+        'SENTINELOPS_API_TOKEN':os.environ.get('SENTINELOPS_API_TOKEN') or (ROOT/'api-token').read_text().strip(),
+        'SENTINELOPS_OPERATOR_TOKEN':os.environ.get('SENTINELOPS_OPERATOR_TOKEN') or (ROOT/'operator-token').read_text().strip()}
 
 
 def launch_arguments(command, stream=None, model_store=None, release_ref=None):

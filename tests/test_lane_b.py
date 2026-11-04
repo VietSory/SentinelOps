@@ -38,8 +38,24 @@ def test_runtime_secret_is_private_idempotent_and_not_returned(tmp_path,monkeypa
     assert len(token) >= 32 and 'api-token' not in json.dumps(identity)
     assert lane_b.init_runtime() == identity and (lane_b.ROOT/'api-token').read_bytes() == token
     assert (lane_b.ROOT/'api-token').stat().st_mode & 0o077 == 0
+    operator = (lane_b.ROOT/'operator-token').read_bytes()
+    assert operator != token and (lane_b.ROOT/'operator-token').stat().st_mode & 0o077 == 0
+    lane_b.init_runtime()
+    assert (lane_b.ROOT/'operator-token').read_bytes() == operator
     monkeypatch.setenv('CONTROL_DATABASE_URL','postgresql://control_writer:SECRET@127.0.0.1:55435/sentinelops_control')
     with pytest.raises(ValueError,match='15433'): lane_b.runtime_environment()
+
+
+@pytest.mark.parametrize('name', ['api-token', 'operator-token'])
+def test_runtime_rejects_public_or_symlink_credentials(tmp_path, monkeypatch, name):
+    monkeypatch.setattr(lane_b, 'ROOT', tmp_path / 'b')
+    lane_b.init_runtime()
+    path = lane_b.ROOT / name
+    path.chmod(0o644)
+    with pytest.raises(ValueError, match='private'): lane_b.init_runtime()
+    path.unlink(); target = tmp_path / 'external'; target.write_text('fixture-secret'); target.chmod(0o600)
+    path.symlink_to(target)
+    with pytest.raises(ValueError, match='private'): lane_b.init_runtime()
 
 
 def test_unknown_runtime_directory_is_never_appropriated(tmp_path,monkeypatch):

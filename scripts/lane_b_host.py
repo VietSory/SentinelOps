@@ -69,6 +69,7 @@ def build():
               'files': inventory(root),
               'runtime_environment': {k: os.environ[k] for k in ('PATH', 'LD_LIBRARY_PATH', 'SSL_CERT_FILE') if k in os.environ},
               'model_activation_allowed': False, 'remediation_approval': False, 'portable': False}
+    record['credential_profile'] = 'local-operator-read/v1'
     if (subprocess.check_output(['git', 'status', '--porcelain'], cwd=lane_b.PROJECT).strip()
         or subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=lane_b.PROJECT, text=True).strip() != commit):
         raise HostGuard('release inputs changed during build; incomplete bundle is not selected')
@@ -172,17 +173,31 @@ def arguments(role, root, stream, model_store=None, model_ref=None):
             '--topology', str(root / 'configs/topology.yaml'), *shared, *models]
 
 
+def process_environment(role, record, environment):
+    selected = {key: environment[key] for key in ENVIRONMENT if key in environment}
+    if role != 'api':
+        selected.pop('SENTINELOPS_API_TOKEN', None)
+    elif record.get('credential_profile') == 'local-operator-read/v1':
+        selected['SENTINELOPS_OPERATOR_TOKEN'] = environment['SENTINELOPS_OPERATOR_TOKEN']
+    # Legacy v2 bootstraps do not accept the new variable. Keep their environment
+    # unchanged rather than modifying immutable bundles or upgrading privileges.
+    return selected
+
+
 def start(role, identifier, stream=None, model_store=None, model_ref=None):
     with locked() as home:
         if role == 'health' and (model_store or model_ref): raise HostGuard('health does not consume models')
         current = state(role)
         root = release(identifier)
         environment = lane_b.runtime_environment(model_store, model_ref)
+        selected = process_environment(role, json.loads((root / 'release.json').read_text()), environment)
         if current['state'] != 'NOT_INSTALLED':
             session = private_json(Path(current['unit_file']).parent / 'session.json')
             if (session['release_id'] != identifier or session['arguments'] != arguments(role, root, stream, model_store, model_ref)
-                or any(session['environment'].get(k) != environment.get(k) for k in ('SENTINELOPS_MODEL_STORE', 'SENTINELOPS_MODEL_RELEASE_REF'))):
-                raise HostGuard('stop selected unit before choosing a different release/source')
+                or any(session['environment'].get(k) != environment.get(k) for k in ('SENTINELOPS_MODEL_STORE', 'SENTINELOPS_MODEL_RELEASE_REF'))
+                or role == 'api' and any(session['environment'].get(k) != selected.get(k)
+                    for k in ('SENTINELOPS_API_TOKEN', 'SENTINELOPS_OPERATOR_TOKEN'))):
+                raise HostGuard('stop selected unit before choosing a different release/source or API credential')
             validate_selected(role, current)
             if current['state'] != 'active':
                 systemctl('reset-failed', current['unit']);systemctl('start', current['unit'])
@@ -191,7 +206,6 @@ def start(role, identifier, stream=None, model_store=None, model_ref=None):
         if role == 'api':
             with socket.socket() as reservation:
                 reservation.bind(('127.0.0.1', 18000))  # Never stop/adopt a foreground or foreign listener.
-        selected = {key: environment[key] for key in ENVIRONMENT if key in environment}
         if role == 'api' and os.getenv('SENTINELOPS_ACTION_READ_DATABASE_URL'):
             reader = os.environ['SENTINELOPS_ACTION_READ_DATABASE_URL'];parsed = urlsplit(reader)
             if (parsed.scheme not in ('postgres', 'postgresql') or parsed.hostname != '127.0.0.1'
@@ -273,6 +287,7 @@ def status(role):
             'release_manifest_sha256': session['release_manifest_sha256'],
             'health_stream_id': session.get('source_identity', {}).get('health_stream_id'),
             'readiness': 'NOT_OBSERVED', 'release_integrity': 'NOT_CHECKED',
+            'operator_read_token_configured': bool(session['environment'].get('SENTINELOPS_OPERATOR_TOKEN')),
             'model_activation_authorized_by_release': False}
 
 

@@ -59,6 +59,25 @@ def test_later_dev_dependency_changes_do_not_replace_copied_release_bytes(tmp_pa
     assert host_runtime.verify(root) == record
 
 
+def test_operator_credentials_are_selected_only_for_capable_api_releases():
+    environment = {'SENTINELOPS_API_TOKEN':'producer-fixture', 'SENTINELOPS_OPERATOR_TOKEN':'operator-fixture',
+                   'CONTROL_DATABASE_URL':'fixture-private-dsn', 'FOREIGN':'not-allowed'}
+    legacy = host.process_environment('api', {}, environment)
+    assert legacy['SENTINELOPS_API_TOKEN'] == 'producer-fixture' and 'SENTINELOPS_OPERATOR_TOKEN' not in legacy
+    capable = host.process_environment('api', {'credential_profile':'local-operator-read/v1'}, environment)
+    assert capable['SENTINELOPS_OPERATOR_TOKEN'] == 'operator-fixture' and 'FOREIGN' not in capable
+    for role in ('health', 'incidents'):
+        selected = host.process_environment(role, {'credential_profile':'local-operator-read/v1'}, environment)
+        assert 'SENTINELOPS_API_TOKEN' not in selected and 'SENTINELOPS_OPERATOR_TOKEN' not in selected
+
+
+def test_unknown_release_credential_profile_is_rejected(tmp_path):
+    root, _, record = fixture(tmp_path)
+    record['credential_profile'] = 'unknown-role-profile/v99'
+    (root / 'release.json').write_text(json.dumps(record))
+    with pytest.raises(ValueError, match='credential profile'): host_runtime.verify(root)
+
+
 def test_units_pin_interpreter_session_and_do_not_contain_credentials(tmp_path):
     root, _, _ = fixture(tmp_path)
     session = tmp_path / 'session.json';host.write_private(session, {'token': 'SECRET_FIXTURE'})

@@ -10,7 +10,9 @@ import asyncio
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
+import secrets
 import subprocess
 import time
 
@@ -70,7 +72,9 @@ def exercise(identifier, output):
     root = host.release(identifier)
     manifest_hash = digest(root / 'release.json')
     environment = lane_b.runtime_environment()
-    headers = {'Authorization': 'Bearer ' + environment['SENTINELOPS_API_TOKEN']}
+    operator_supported = json.loads((root / 'release.json').read_text()).get('credential_profile') == 'local-operator-read/v1'
+    credential = 'SENTINELOPS_OPERATOR_TOKEN' if operator_supported else 'SENTINELOPS_API_TOKEN'
+    headers = {'Authorization': 'Bearer ' + environment[credential]}
     started = []
     result = {'status': 'RUNNING', 'scope': 'actual-local-host-lifecycle', 'release_id': identifier,
               'release_manifest_sha256': manifest_hash, 'checks': [], 'model_activated': False,
@@ -88,6 +92,27 @@ def exercise(identifier, output):
             assert host.start('api', identifier)['pid'] == initial['pid']
             assert client.get('http://127.0.0.1:18000/v1/incidents').status_code == 401
             assert client.get('http://127.0.0.1:18000/ready').status_code == 503
+            if operator_supported:
+                assert client.post('http://127.0.0.1:18000/v1/incidents', headers=headers, json={}).status_code == 403
+                assert client.post('http://127.0.0.1:18000/v1/incidents/unknown/revisions', headers=headers, json={}).status_code == 403
+                assert client.get('http://127.0.0.1:18000/ready/incidents',
+                    headers={'Authorization':'Bearer ' + environment['SENTINELOPS_API_TOKEN']}).status_code == 200
+                result['checks'].append('managed operator token reads and cannot import/revise; legacy producer still reads')
+                previous = os.environ.get('SENTINELOPS_OPERATOR_TOKEN')
+                try:
+                    os.environ['SENTINELOPS_OPERATOR_TOKEN'] = secrets.token_urlsafe(48)
+                    try:
+                        host.start('api', identifier)
+                        raise AssertionError('changed API credential was silently reused')
+                    except host.HostGuard as exc:
+                        assert 'API credential' in str(exc)
+                finally:
+                    if previous is None: os.environ.pop('SENTINELOPS_OPERATOR_TOKEN', None)
+                    else: os.environ['SENTINELOPS_OPERATOR_TOKEN'] = previous
+                assert host.state('api')['pid'] == initial['pid']
+                assert client.get('http://127.0.0.1:18000/ready/incidents', headers=headers).status_code == 200
+                result['checks'].append('changed API credential requires explicit stop/start; running API and pinned credential survive')
+            result['operator_read_scope_verified'] = operator_supported
             listed = client.get('http://127.0.0.1:18000/v1/incidents', headers=headers);listed.raise_for_status()
             pinned = []
             for item in listed.json()['items']:
