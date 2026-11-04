@@ -67,7 +67,8 @@ function render(state) {
       previous.detailError !== state.detailError || previous.historyLoading !== state.historyLoading ||
       previous.historyError !== state.historyError || previous.session !== state.session || previous.actions !== state.actions ||
       previous.actionsLoading !== state.actionsLoading || previous.actionsError !== state.actionsError ||
-      previous.quarantines !== state.quarantines) renderDetail(state);
+      previous.quarantines !== state.quarantines || previous.explanation !== state.explanation ||
+      previous.explanationLoading !== state.explanationLoading || previous.explanationError !== state.explanationError) renderDetail(state);
   previous = {...state};
 }
 
@@ -158,7 +159,7 @@ function overview(detail) {
   for (const trigger of context.trigger_sources) {
     target.append(node('p',`${trigger.source.toUpperCase()} · emitted ${date(trigger.emitted_at)}`,'subtle'),node('code',trigger.source_ref,'source'));
   }
-  target.append(node('p','Explanation and action execution are unavailable. This console does not authorize remediation.','subtle'));
+  target.append(node('p','Open Explanation for a summary of this revision’s recorded evidence. This console does not authorize remediation.','subtle'));
   return target;
 }
 
@@ -202,6 +203,43 @@ function timeline(detail, state) {
       await workspace.loadHistory(); $('#history-more')?.focus();
     },'button secondary'); more.id = 'history-more'; more.disabled = state.historyLoading; target.append(more);
   }
+  return target;
+}
+
+function explanation(state) {
+  const target = node('div'), result = state.explanation;
+  target.setAttribute('aria-busy',String(state.explanationLoading));
+  target.append(node('p',`Evidence summary for incident revision ${state.detail.revision}. Recorded evidence and ranked hypotheses do not establish a confirmed cause or action permission.`,'subtle'));
+  if (state.explanationError) {
+    const error = node('div',null,'inline-error'); error.setAttribute('role','alert'); showError(error,state.explanationError); target.append(error);
+  }
+  if (state.explanationLoading) target.append(node('p','Reading explanation…','subtle'));
+  if (result) {
+    target.append(section(result.fallback ? 'Deterministic fallback' : 'Provider-selected evidence'),
+      node('p',`Provider ${result.provider} · generated ${date(result.generated_at)}`,'subtle'),
+      node('p',result.payload.summary,'explanation-summary'));
+    if (!result.payload.claims.length) target.append(node('p','No bounded evidence claims are available for this revision.','subtle'));
+    for (const claim of result.payload.claims) {
+      const card = node('div',null,'explanation-claim'); card.append(node('p',claim.text));
+      const refs = node('div',null,'reference-list');
+      for (const ref of claim.evidence_refs) {
+        const link = button(short(ref,24),() => {
+          tab = 'evidence'; highlightedEvidence = ref; renderDetail(workspace.state);
+          const item = [...document.querySelectorAll('[data-evidence-id]')].find(value => value.dataset.evidenceId === ref);
+          if (item) { item.open = true; item.scrollIntoView({block:'nearest'}); item.querySelector('summary')?.focus(); }
+        },'reference'); link.title = ref; refs.append(link);
+      }
+      card.append(refs); target.append(card);
+    }
+  }
+  const reload = button(state.explanationLoading ? 'Loading explanation…' : result ? 'Reload explanation' : 'Load explanation',async () => {
+    const {incident_id,revision} = state.detail;
+    await workspace.loadExplanation();
+    if (tab === 'explanation' && workspace.state.detail?.incident_id === incident_id && workspace.state.detail?.revision === revision) {
+      $('#explanation-reload')?.focus();
+    }
+  },'button secondary');
+  reload.id = 'explanation-reload'; reload.disabled = state.explanationLoading; target.append(reload);
   return target;
 }
 
@@ -293,13 +331,14 @@ function renderDetail(state) {
   form.addEventListener('submit',event => { event.preventDefault(); if (form.reportValidity()) openIncident(detail.incident_id,Number(input.value)); });
   header.append(form); target.append(header);
   const tabs = node('div',null,'tabs'); tabs.setAttribute('role','group'); tabs.setAttribute('aria-label','Incident sections');
-  for (const [key,label] of [['overview','Overview'],['evidence',`Evidence (${payload.evidence.length})`],['timeline','Timeline'],['actions','Actions']]) {
+  for (const [key,label] of [['overview','Overview'],['evidence',`Evidence (${payload.evidence.length})`],['timeline','Timeline'],['explanation','Explanation'],['actions','Actions']]) {
     const item = button(label,async () => { tab = key; renderDetail(workspace.state);
       if (key === 'actions' && !workspace.state.actions && !workspace.state.actionsError) await workspace.loadActions();
+      if (key === 'explanation' && !workspace.state.explanation && !workspace.state.explanationError) await workspace.loadExplanation();
       if (tab === key) document.querySelector(`[data-tab="${key}"]`)?.focus(); },`tab ${tab === key ? 'active' : ''}`);
     item.dataset.tab = key; item.setAttribute('aria-pressed',String(tab === key)); tabs.append(item);
   }
-  const content = node('div',null,'detail-content'); content.append(tab === 'evidence' ? evidence(detail) : tab === 'timeline' ? timeline(detail,state) : tab === 'actions' ? actionHistory(state,opened) : overview(detail));
+  const content = node('div',null,'detail-content'); content.append(tab === 'evidence' ? evidence(detail) : tab === 'timeline' ? timeline(detail,state) : tab === 'explanation' ? explanation(state) : tab === 'actions' ? actionHistory(state,opened) : overview(detail));
   target.append(tabs,content);
 }
 

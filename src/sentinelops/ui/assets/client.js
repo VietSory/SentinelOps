@@ -8,6 +8,7 @@ export class ApiFailure extends Error {
       incident_not_found: 'This incident or revision could not be found.',
       action_store_unavailable: 'Action history is unavailable. This does not establish that no action occurred.',
       stored_action_unavailable: 'Action history could not be verified. Reload when its evidence is available.',
+      explanation_unavailable: 'Explanation is unavailable for this revision. The incident and evidence remain readable.',
       timeout: 'The API did not respond in time. Try again.',
       network: 'Cannot reach the API. Check the connection and try again.',
       invalid_response: 'The API returned an unsupported response. Refresh or check its version.',
@@ -21,14 +22,14 @@ export class ApiFailure extends Error {
 export class IncidentClient {
   #token; #fetch;
   constructor(token, fetcher = globalThis.fetch.bind(globalThis)) { this.#token = token; this.#fetch = fetcher; }
-  async get(path, signal, {allowUnavailable = false} = {}) {
+  async get(path, signal, {allowUnavailable = false, timeoutMs = 10000} = {}) {
     if (!path.startsWith('/') || path.startsWith('//')) throw new Error('Only same-origin API paths are allowed');
     const controller = new AbortController();
     let timedOut = false;
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, {once: true});
     if (signal?.aborted) controller.abort();
-    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 10000);
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
     try {
       const response = await this.#fetch(path, {signal:controller.signal, cache:'no-store', credentials:'omit',
         headers:{'Authorization':`Bearer ${this.#token}`, 'Accept':'application/json'}});
@@ -73,6 +74,26 @@ export class IncidentClient {
     return body;
   }
   readiness(signal) { return this.get('/ready',signal,{allowUnavailable:true}); }
+  async explanation(id, revision, evidenceIds, signal) {
+    if (!Number.isSafeInteger(revision) || revision < 1) throw new ApiFailure(0,'invalid_response');
+    // The backend provider has a ten-second total deadline before fallback.
+    // Leave HTTP overhead room so that fallback can reach the browser.
+    const body = await this.get(`/v1/incidents/${encodeURIComponent(id)}/explanation?revision=${revision}`,signal,{timeoutMs:15000});
+    const known = new Set(evidenceIds);
+    if (body.schema_version !== '1.0' || body.incident_id !== id || body.revision !== revision ||
+      typeof body.generated_at !== 'string' || !Number.isFinite(Date.parse(body.generated_at)) ||
+      typeof body.provider !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(body.provider) ||
+      typeof body.fallback !== 'boolean' || body.fallback !== (body.provider === 'deterministic-facts/v1') ||
+      body.payload?.schema_version !== '1.0' || body.payload.incident_id !== id ||
+      typeof body.payload.summary !== 'string' || !Array.isArray(body.payload.claims) || body.payload.claims.length > 12 ||
+      body.payload.claims.some(claim => !claim || typeof claim.text !== 'string' || !claim.text ||
+        !Array.isArray(claim.evidence_refs) || !claim.evidence_refs.length ||
+        new Set(claim.evidence_refs).size !== claim.evidence_refs.length ||
+        claim.evidence_refs.some(ref => typeof ref !== 'string' || !known.has(ref)))) {
+      throw new ApiFailure(200,'invalid_response');
+    }
+    return body;
+  }
   async actions(id, revision, cursor, signal) {
     const query = new URLSearchParams({revision:String(revision),limit:'10'});
     if (cursor) query.set('cursor',cursor);

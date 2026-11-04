@@ -10,6 +10,64 @@ const envelope = (id, revision, next=null) => ({incident_id:id,revision,context:
 const factory = overrides => ({list:async () => ({items:[],next_cursor:null}),readiness:async () => ({dependencies:{model:false,incident_store:true}}),
   context:async (id,rev) => envelope(id,rev),...overrides});
 
+const explanationPage = (id,revision) => ({schema_version:'1.0',incident_id:id,revision,
+  generated_at:'2026-01-01T00:00:00Z',provider:'deterministic-facts/v1',fallback:true,
+  payload:{schema_version:'1.0',incident_id:id,summary:'Software fixture, not a verified cause',claims:[]}});
+
+test('explanation client pins encoded identity/revision and rejects foreign references or provider drift',async () => {
+  for (const mutate of [x => x.revision=2,x => x.incident_id='foreign',x => x.payload.incident_id='foreign',
+    x => x.generated_at='bad',x => x.fallback=false,x => x.provider='unapproved-model',
+    x => x.payload.claims=[{text:'unsupported',evidence_refs:['foreign']}],
+    x => x.payload.claims=[{text:'bad',evidence_refs:['e1','e1']}],x => x.payload.claims=[null]]) {
+    const body=explanationPage('a',1);mutate(body);
+    const client=new IncidentClient('fixture',async () => new Response(JSON.stringify(body)));
+    await assert.rejects(() => client.explanation('a',1,['e1']),e => e.code==='invalid_response');
+  }
+  let requested;
+  const client=new IncidentClient('private-fixture-token',async path => {
+    requested=path; return new Response(JSON.stringify(explanationPage('a&b',3)));
+  });
+  assert.equal((await client.explanation('a&b',3,[])).fallback,true);
+  assert.equal(requested,'/v1/incidents/a%26b/explanation?revision=3');
+  await assert.rejects(() => client.explanation('a&b',Number.MAX_SAFE_INTEGER+1,[]),e => e.code==='invalid_response');
+});
+
+test('late explanation cannot overwrite a newer revision even when transport ignores cancellation',async () => {
+  const old=deferred(),recent=deferred(),calls=[];
+  const workspace=new Workspace(() => {},() => factory({explanation:(id,revision,refs) => {
+    calls.push({id,revision,refs});return revision===1 ? old.promise : recent.promise;
+  }}));
+  await workspace.connect('fixture');await workspace.select('a',1);
+  const first=workspace.loadExplanation();await workspace.select('a',2);
+  const second=workspace.loadExplanation();old.resolve(explanationPage('a',1));await first;
+  assert.equal(workspace.state.explanation,null);assert.equal(workspace.state.explanationLoading,true);
+  recent.resolve(explanationPage('a',2));await second;
+  assert.equal(workspace.state.explanation.revision,2);
+  assert.deepEqual(calls[1],{id:'a',revision:2,refs:[]});
+});
+
+test('explanation reload failure clears old text without hiding the incident or model-unavailable state',async () => {
+  let calls=0;
+  const workspace=new Workspace(() => {},() => factory({explanation:async (id,rev) => {
+    if (++calls>1) throw new ApiFailure(503,'explanation_unavailable');return explanationPage(id,rev);
+  }}));
+  await workspace.connect('fixture');await workspace.select('a',3);await workspace.loadExplanation();
+  assert.equal(workspace.state.explanation.revision,3);
+  await workspace.loadExplanation();assert.equal(workspace.state.explanation,null);
+  assert.equal(workspace.state.explanationError.status,503);assert.equal(workspace.state.detail.revision,3);
+  assert.equal(workspace.state.readiness.dependencies.model,false);
+});
+
+test('filter/logout discard late explanation results and private explanation state',async () => {
+  for (const reset of [workspace => workspace.filter({state:'incident',service:''}),workspace => workspace.disconnect()]) {
+    const late=deferred();
+    const workspace=new Workspace(() => {},() => factory({explanation:() => late.promise}));
+    await workspace.connect('fixture');await workspace.select('a',1);
+    const request=workspace.loadExplanation();await reset(workspace);late.resolve(explanationPage('a',1));await request;
+    assert.equal(workspace.state.explanation,null);assert.equal(workspace.state.explanationLoading,false);
+  }
+});
+
 test('late list response cannot overwrite a newer filter even if transport ignores abort',async () => {
   const slow = deferred(); let calls=0;
   const workspace = new Workspace(() => {},() => factory({list:() => ++calls===1 ? slow.promise : Promise.resolve({items:[{incident_id:'new',revision:1}],next_cursor:null})}));
