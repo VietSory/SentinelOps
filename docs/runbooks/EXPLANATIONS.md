@@ -12,7 +12,8 @@ again and snapshots its input. It returns exactly:
 `payload` follows the existing `explanation.schema.json`. No fields are added to
 IER. The summary identifies the incident/revision, current state, severity,
 availability and uncertainty. Claims quote recorded evidence verbatim with the
-original evidence ID. They describe records, not independently verified causes.
+original evidence ID. The summary reports the displayed and total evidence counts,
+so bounded selection is visible. Claims describe records, not independently verified causes.
 Empty/oversized evidence produces an explicit limited summary, never invented
 claims, a healthy score or action permission.
 
@@ -81,3 +82,41 @@ enabled merely by importing this backend; region/model access, credentials and
 cloud authorization remain separate integration requirements.
 
 Focused regression: `python -m pytest -q tests/test_explanations.py`.
+
+## Bedrock Converse adapter
+
+`sentinelops.explanations.bedrock.bedrock_provider` adapts the
+[AWS Converse protocol](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
+to the same bounded selector. Its factory requires a region, exact model or
+inference-profile ID and an explicitly supplied async operation:
+
+```python
+from sentinelops.explanations.bedrock import bedrock_provider
+
+async def converse(**kwargs):
+    return await runtime_client.converse(**kwargs)
+
+provider = bedrock_provider(region=approved_region, model_id=approved_model_id,
+                            converse=converse)
+result = await explain_incident(envelope, provider=provider)
+```
+
+The application/deployment owns the asynchronous runtime client, its regional
+endpoint, scoped IAM role, lifecycle, response byte limits, network timeouts and
+disabled SDK retries. Do not pass a synchronous SDK method or disguise a blocking
+call with `async def`. No AWS SDK is loaded and no request is sent by the factory.
+The deployment must supply that client; the adapter alone does not demonstrate
+cloud access. Model support/access, region, budget and authorization must be
+checked before enabling it. Its role needs only approved model invocation,
+without infrastructure/action mutation permissions.
+
+The adapter sends system instructions and one metadata-only user message, with a
+512-token output bound and no tool configuration. It accepts one assistant text
+block ending with `end_turn`, parses strict JSON and rejects duplicate keys,
+non-finite constants, extra blocks, tool requests, guardrail/truncated responses
+and markdown. The core selector then checks exact incident/revision/cards. Provider
+identity hashes region/model/prompt/instructions/inference parameters for version
+tracking. Errors use the existing same-revision fallback. Tests of this protocol
+do not prove Bedrock availability, explanation quality or G5 acceptance.
+
+Adapter regression: `python -m pytest -q tests/test_explanation_bedrock.py`.

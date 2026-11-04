@@ -36,6 +36,7 @@ def test_fallback_is_deterministic_immutable_and_quotes_exact_facts_with_refs():
     validate_payload("explanation.schema.json", result["payload"])
     assert "availability=UNKNOWN" in result["payload"]["summary"]
     assert "not confirmed causes" in result["payload"]["summary"]
+    assert len(result["payload"]["claims"]) == len(source["payload"]["evidence"])
     for claim, evidence in zip(result["payload"]["claims"], source["payload"]["evidence"]):
         assert claim["evidence_refs"] == [evidence["id"]]
         assert json.dumps(evidence["fact"], ensure_ascii=False) in claim["text"]
@@ -55,6 +56,7 @@ def test_provider_sees_only_bounded_metadata_and_selects_without_reranking():
     result = run(ExplanationProvider("test/model-v1", invoke), source)
     assert not result["fallback"] and result["provider"] == "test/model-v1"
     assert [c["evidence_refs"] for c in result["payload"]["claims"]] == [["E-001"], ["E-003"]]
+    assert "Showing 2 of 4" in result["payload"]["summary"]
     assert "No action is authorized" in result["payload"]["summary"]
 
 

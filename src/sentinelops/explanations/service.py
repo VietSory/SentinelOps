@@ -146,6 +146,7 @@ def _render(envelope: dict, selected: list[str], cards: dict[str, dict]) -> dict
     summary += ("Ranked RCA hypotheses are not confirmed causes. " if ier["root_cause_ranking"]
                 else "No ranked root-cause hypothesis is available. ")
     summary += "Recorded evidence is quoted, not independently verified. No action is authorized by this explanation."
+    summary += f" Showing {len(selected)} of {len(ier['evidence'])} recorded evidence items."
     if not cards:
         summary += " No bounded evidence cards are available."
     payload = {"schema_version": "1.0", "incident_id": envelope["incident_id"], "summary": summary,
