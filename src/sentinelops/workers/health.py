@@ -19,6 +19,8 @@ from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE
 from sentinelops.telemetry.store import ArtifactStore
 
+DATABASE_TIMEOUT_SECONDS = 10
+
 
 def local_endpoint(endpoint: str) -> str:
     parsed = urlparse(endpoint)
@@ -69,7 +71,7 @@ class HealthWorker:
 
     async def check_ready(self):
         await IncidentRepository(self.pool).check_ready()
-        async with self.pool.acquire() as conn:
+        async with self.pool.acquire(timeout=DATABASE_TIMEOUT_SECONDS) as conn:
             versions = await conn.fetchval("SELECT array_agg(version ORDER BY version) FROM sentinel_control.schema_migrations")
             if versions not in ([1, 2], [1, 2, 3]):
                 raise ValueError("health worker requires explicit additive control migration 2")
@@ -81,7 +83,7 @@ class HealthWorker:
                 raise ValueError("health worker runtime can mutate immutable history/identity")
 
     async def status(self) -> dict:
-        async with self.pool.acquire() as conn:
+        async with self.pool.acquire(timeout=DATABASE_TIMEOUT_SECONDS) as conn:
             row = await conn.fetchrow("""SELECT s.last_bucket_end,s.last_batch_ref,
                 (SELECT count(*) FROM sentinel_control.health_batches WHERE stream_id=$1) AS batches,
                 (SELECT count(*) FROM sentinel_control.health_signals WHERE stream_id=$1) AS signals
@@ -92,7 +94,10 @@ class HealthWorker:
 
     async def tick(self) -> dict:
         started = time.monotonic()
-        async with self.pool.acquire() as conn:
+        # asyncpg inherits this lease timeout when returning/resetting the
+        # connection. command_timeout alone does not bound cancellation drain;
+        # an outage can otherwise strand the heartbeat in __aexit__ indefinitely.
+        async with self.pool.acquire(timeout=DATABASE_TIMEOUT_SECONDS) as conn:
             if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", self.lock_id):
                 return {"status": "BUSY", "stream_id": self.stream_id}
             try:

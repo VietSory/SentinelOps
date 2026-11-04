@@ -314,6 +314,63 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  host-process-integration:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - name: Start the ephemeral runner user manager
+        run: |
+          python - <<'PY'
+          import os,pwd,subprocess
+          uid=os.getuid();user=pwd.getpwuid(uid).pw_name
+          subprocess.run(['sudo','loginctl','enable-linger',user],check=True)
+          subprocess.run(['sudo','systemctl','start',f'user@{uid}.service'],check=True)
+          with open(os.environ['GITHUB_ENV'],'a') as stream:
+              stream.write(f'XDG_RUNTIME_DIR=/run/user/{uid}\nDBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus\n')
+          PY
+      - run: python -m scripts.lane_b up
+      - name: Build an isolated wheel and verify actual managed process recovery
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from scripts.lane_b_host import build
+          from scripts.check_host_processes import exercise
+          selected=build()
+          exercise(selected['release_id'],Path('artifacts/lane-b/host-process-store-ci.json'))
+          PY
+      - name: Stop only owned managed roles and B containers
+        if: always()
+        run: |
+          python - <<'PY'
+          from scripts.lane_b_host import stop,ROLES
+          for role in reversed(ROLES): stop(role)
+          PY
+          python -m scripts.lane_b down
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-process-evidence
+          path: |
+            artifacts/lane-b/host-process-store-ci.json
+            artifacts/lane-b/health/
+            artifacts/lane-b/incidents/
+            artifacts/lane-b/host-releases/*/release.json
+            artifacts/lane-b/host-releases/*/wheels/*.whl
+            artifacts/lane-b/host-releases/*/configs/*.json
+            artifacts/lane-b/host-releases/*/configs/*.yaml
+            artifacts/lane-b/host-releases/*/cli/scripts/*.py
+            artifacts/lane-b/host-releases/*/launch.py
+          if-no-files-found: warn
+          retention-days: 7
+
   observability:
     needs: changes
     if: needs.changes.outputs.native == 'true'
@@ -679,7 +736,7 @@ jobs:
 
   ci-summary:
     if: always()
-    needs: [changes, foundation, public-data, incident-storage, remediation-integration, observability, multi-fault-development, health-worker-integration, incident-worker-s5, ui]
+    needs: [changes, foundation, public-data, incident-storage, remediation-integration, host-process-integration, observability, multi-fault-development, health-worker-integration, incident-worker-s5, ui]
     runs-on: ubuntu-latest
     steps:
       - name: Require every applicable check and report a stable conclusion
@@ -692,7 +749,7 @@ jobs:
           outputs=needs['changes'].get('outputs',{})
           expected={'changes':True,'foundation':True,
               'public-data':outputs.get('public_data')=='true','ui':outputs.get('ui')=='true'}
-          for name in ('incident-storage','remediation-integration','observability','multi-fault-development','health-worker-integration','incident-worker-s5'):
+          for name in ('incident-storage','remediation-integration','host-process-integration','observability','multi-fault-development','health-worker-integration','incident-worker-s5'):
               expected[name]=outputs.get('native')=='true'
           failures=[]
           for name,required in expected.items():

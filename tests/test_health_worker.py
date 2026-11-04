@@ -54,7 +54,7 @@ def test_disconnect_during_capture_is_retryable_but_programming_errors_are_not(t
         async def __aenter__(self): return conn
         async def __aexit__(self, *args): pass
     class Pool:
-        def acquire(self): return Acquire()
+        def acquire(self, *, timeout): return Acquire()
     worker = HealthWorker(Pool(), ArtifactStore(tmp_path), POLICY, endpoint="http://localhost:9090",
                           environment="fixture-connection", configuration_hash="a" * 64)
     worker._locked_tick = AsyncMock(side_effect=asyncpg.InterfaceError("closed or misused connection"))
@@ -71,9 +71,59 @@ def test_processing_budget_includes_returning_the_connection_to_its_pool(tmp_pat
         async def __aenter__(self): return conn
         async def __aexit__(self, *args): await asyncio.sleep(.02)
     class Pool:
-        def acquire(self): return Acquire()
+        def acquire(self, *, timeout): return Acquire()
     worker = HealthWorker(Pool(), ArtifactStore(tmp_path), POLICY, endpoint="http://localhost:9090",
                           environment="fixture-budget", configuration_hash="a" * 64)
     worker._locked_tick = AsyncMock(return_value={"status": "COMMITTED"})
     result = asyncio.run(worker.tick())
     assert result["processing_ms"] >= 15
+
+
+def test_database_lease_bounds_real_asyncpg_cancellation_drain_and_frees_holder(tmp_path):
+    """Exercise pinned driver release code, not just a mock timeout argument.
+
+    The simulated dead server never finishes cancellation. Only the fixture
+    scales ten seconds to ten milliseconds; production timeouts stay unchanged.
+    """
+    from types import SimpleNamespace
+    from asyncpg.pool import PoolConnectionHolder
+    from sentinelops.workers.health import DATABASE_TIMEOUT_SECONDS
+    async def run():
+        drained = asyncio.Event()
+        async def never_drains(): await drained.wait()
+        backend = SimpleNamespace(_generation=0, _reset=None, _queue=asyncio.LifoQueue())
+        holder = PoolConnectionHolder(backend, max_queries=50000, setup=None, max_inactive_time=0)
+        class Connection:
+            closed = False
+            fetchval = AsyncMock(return_value=True)
+            _protocol = SimpleNamespace(queries_count=0, _is_cancelling=lambda: True,
+                                        _wait_for_cancellation=never_drains)
+            def is_closed(self): return self.closed
+            def terminate(self):
+                self.closed = True
+                holder._release_on_close()
+        conn = Connection();holder._con = conn;holder._generation = 0
+        holder._in_use = asyncio.get_running_loop().create_future()
+        class Acquire:
+            def __init__(self, timeout): self.timeout = timeout
+            async def __aenter__(self): return conn
+            async def __aexit__(self, *args):
+                await holder.release(None if self.timeout is None else self.timeout / 1000)
+        class Pool:
+            def acquire(self, *, timeout=None): return Acquire(timeout)
+        worker = HealthWorker(Pool(), ArtifactStore(tmp_path), POLICY, endpoint='http://localhost:9090',
+                              environment='fixture-cancellation', configuration_hash='a' * 64)
+        worker._locked_tick = AsyncMock(return_value={'status': 'COMMITTED'})
+        task = asyncio.create_task(worker.tick())
+        try:
+            done, _ = await asyncio.wait({task}, timeout=1)
+            assert task in done, 'unbounded connection reset stalled the worker heartbeat'
+            with pytest.raises(TimeoutError): await task
+            assert conn.closed and holder._in_use is None and backend._queue.qsize() == 1
+            assert DATABASE_TIMEOUT_SECONDS == 10
+        finally:
+            if not task.done():
+                task.cancel()
+                try: await task
+                except asyncio.CancelledError: pass
+    asyncio.run(run())

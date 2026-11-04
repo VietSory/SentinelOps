@@ -14,6 +14,7 @@ implementation chỉ vì được ghi ở đây.
 | **B** | `src/sentinelops/api.py`, `api_http.py`, `api_settings.py`, `main.py`; `incidents/domain.py`, `repository.py`, `validation.py`; **mới** `src/sentinelops/remediation/`, `auth/`, `ui/` |
 | **B** | `services/`, `docker/`, Compose, `infra/`, `observability/`, `.github/`, `pyproject.toml`, `src/sentinelops/contracts.py`, `schema_registry.py`, `scripts/validate_contracts.py`; configs deployment mới |
 | **B** | `scripts/kubernetes_testbed.py`, `scripts/check_kubernetes_testbed.py`: local Kubernetes packaging và source observations; không thay telemetry adapter/profile hay cấp H4 |
+| **B** | `scripts/lane_b_host.py`, `scripts/host_runtime.py`, `scripts/check_host_processes.py`: wheel/dependency packaging và user-service lifecycle; chỉ snapshot CLI/config của A, không sửa semantics/migration/source authority |
 | **Theo module** | Tests/samples/runbook của module; chỉ giữ report data/model/evaluation có nhu cầu dùng lại |
 | **B điều phối** | README, team docs, PROJECT_STATUS, TECHNICAL_SPEC: cập nhật gộp ở mốc integration; cả hai không sửa hằng ngày |
 
@@ -25,6 +26,14 @@ handoff/commit trước khi sửa, không mặc định hai người cùng sở 
 Cần sửa vùng lane kia thì giao yêu cầu/patch nhỏ cho owner đó. Chỉ item bị ảnh hưởng
 chờ; các item khác tiếp tục. Shared-interface review chỉ xem diff/caller liên quan,
 không bắt review chéo mọi commit hoặc giả là có reviewer khi chỉ self-review.
+
+Patch integration PR #35 cần **A review**: health worker/runner dùng cùng budget
+DB 10 giây cho connection establishment và pool lease, để asyncpg cancellation
+drain/reset không treo heartbeat vô hạn sau DB outage. Regression gọi release code
+của driver thật với cancellation không hoàn tất; bản trước sửa không qua test.
+Không đổi source identity, checkpoint, SLO/RCA policy hoặc native acceptance protocol.
+CI outage trên PostgreSQL thật phải được đối chiếu đúng HEAD; unit test này riêng
+không chứng minh outage recovery đã được xác nhận trên runtime.
 
 ## 2. Cô lập Git, Docker và data
 
