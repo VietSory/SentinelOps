@@ -211,3 +211,32 @@ def test_cli_reports_blocked_without_model_load_or_output(tmp_path):
     assert result["status"] == "BLOCKED" and result["models_fitted"] == 0
     assert not result["holdout_opened"] and not result["activation_allowed"] and not result["G3_accepted"]
     assert not output.exists()
+
+
+@pytest.mark.parametrize("first_true,second,lead,qualified", [
+    (6, 30, 90, True), (7, 0, 60, True), (7, 30, 30, False),
+])
+def test_lead_qualified_recall_matches_the_existing_sixty_second_target(first_true, second, lead, qualified):
+    pytest.importorskip("sklearn")
+    case, rows = case_and_predictions()
+    for row in rows:
+        minute = int(row["window_end"][14:16])
+        row["decision_at"] = at(minute, second)
+        row["xgboost_flag"] = first_true <= minute < 9
+    result = summarize(rows, [case], "payment-service", load_protocol())["risk"]["xgboost"]
+    assert result["precursor_recall"] == 1
+    assert result["per_run"][0]["counterfactual_lead_seconds"] == lead
+    assert result["qualifying_lead_seconds"] == 60
+    assert result["lead_qualified_precursor_runs"] == int(qualified)
+    assert result["precursor_recall_lead_ge_60s"] == int(qualified)
+    assert result["late_precursor_runs"] == int(not qualified)
+    assert result["missed_precursor_runs"] == 0
+
+
+def test_missing_frames_stay_in_lead_qualified_recall_denominator():
+    pytest.importorskip("sklearn")
+    case, _ = case_and_predictions()
+    result = summarize([], [case], "payment-service", load_protocol())["risk"]["xgboost"]
+    assert result["eligible_precursor_runs"] == 1
+    assert result["lead_qualified_precursor_runs"] == result["precursor_recall_lead_ge_60s"] == 0
+    assert result["missed_precursor_runs"] == 1 and result["late_precursor_runs"] == 0

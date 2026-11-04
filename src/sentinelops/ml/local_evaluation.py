@@ -146,9 +146,15 @@ def summarize(records, cases, service, protocol):
     for name in precursor:
         rows = precursor[name]
         count = sum(r["eligible"] for r in rows)
+        detected = sum(r["detected"] for r in rows)
+        qualified = sum(r["eligible"] and r["counterfactual_lead_seconds"] is not None
+                        and r["counterfactual_lead_seconds"] >= 60 for r in rows)
         result["risk"][name] = {**risk_curve([r["risk_label"] for r in eligible], [r[name + "_score"] for r in eligible]),
-            "eligible_precursor_runs": count, "detected_precursor_runs": sum(r["detected"] for r in rows),
-            "precursor_recall": sum(r["detected"] for r in rows)/count if count else None,
+            "eligible_precursor_runs": count, "detected_precursor_runs": detected,
+            "precursor_recall": detected/count if count else None,
+            "qualifying_lead_seconds": 60, "lead_qualified_precursor_runs": qualified,
+            "precursor_recall_lead_ge_60s": qualified/count if count else None,
+            "late_precursor_runs": detected-qualified, "missed_precursor_runs": count-detected,
             "per_run": rows}
     return result
 

@@ -155,7 +155,12 @@ Development vectors alone produce predictions; outcomes are joined afterward.
 Missing/censored risk labels remain unavailable. Group denominators include
 independently supported gradual runs even when no usable model frames exist.
 Each service reports MAD/IF counterfactual event counts, XGBoost/slope curves,
-precursor recall and selected/undefined counts. Average precision is the primary
+precursor recall and selected/undefined counts. For Q-07,
+`precursor_recall_lead_ge_60s` keeps every independently eligible precursor run
+in its denominator and requires at least 60 seconds of counterfactual lead.
+Late detections and misses are reported separately; the existing any-lead
+`precursor_recall` remains unchanged. These remain replay metrics, not live alerts.
+Average precision is the primary
 paired risk comparison, with trapezoidal PR-AUC separately named: these are
 different integrals, and linear interpolation can be optimistic
 ([scikit-learn definition](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html)).
