@@ -14,7 +14,7 @@ import httpx
 
 from sentinelops.telemetry.prometheus import PrometheusSource
 from sentinelops.telemetry.store import ArtifactStore
-from sentinelops.workers.health import HealthWorker, local_endpoint
+from sentinelops.workers.health import DATABASE_TIMEOUT_SECONDS, HealthWorker, local_endpoint
 from sentinelops.workers.metrics import WorkerMetrics
 
 
@@ -52,7 +52,8 @@ async def run_worker(args, metrics):
     finally:
         source.close()
     try:
-        pool = await asyncpg.create_pool(os.environ["CONTROL_DATABASE_URL"], min_size=1, max_size=4, command_timeout=10)
+        pool = await asyncpg.create_pool(os.environ["CONTROL_DATABASE_URL"], min_size=1, max_size=4,
+                                        command_timeout=DATABASE_TIMEOUT_SECONDS, timeout=DATABASE_TIMEOUT_SECONDS)
     except Exception:
         if metrics: metrics.error("database")
         raise

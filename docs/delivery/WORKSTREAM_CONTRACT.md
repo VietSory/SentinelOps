@@ -27,6 +27,14 @@ Cần sửa vùng lane kia thì giao yêu cầu/patch nhỏ cho owner đó. Ch�
 chờ; các item khác tiếp tục. Shared-interface review chỉ xem diff/caller liên quan,
 không bắt review chéo mọi commit hoặc giả là có reviewer khi chỉ self-review.
 
+Patch integration PR #35 cần **A review**: health worker/runner dùng cùng budget
+DB 10 giây cho connection establishment và pool lease, để asyncpg cancellation
+drain/reset không treo heartbeat vô hạn sau DB outage. Regression gọi release code
+của driver thật với cancellation không hoàn tất; bản trước sửa không qua test.
+Không đổi source identity, checkpoint, SLO/RCA policy hoặc native acceptance protocol.
+CI outage trên PostgreSQL thật phải được đối chiếu đúng HEAD; unit test này riêng
+không chứng minh outage recovery đã được xác nhận trên runtime.
+
 ## 2. Cô lập Git, Docker và data
 
 - Hai clone/checkout/virtualenv riêng; không hai writer chung Git index, corpus
