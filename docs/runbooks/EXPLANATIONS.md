@@ -25,11 +25,15 @@ from sentinelops.explanations import explain_incident
 result = await explain_incident(envelope)
 ```
 
-This works without any provider or cloud access. B owns the authenticated HTTP
-route, loading the requested revision and the versioned response wrapper carrying
+This works without any provider or cloud access. B implements the authenticated
+`GET /v1/incidents/{id}/explanation?revision=N`, loading the requested revision and
+the [versioned response wrapper](../../contracts/explanation-response.schema.json) carrying
 `incident_id`, `revision`, `generated_at`, `provider`, `fallback`, `payload`, as
 specified in [H2](../delivery/WORKSTREAM_CONTRACT.md).
-This module does not implement that route, write EXPLAINED lifecycle transitions,
+The [API/UI runbook](INCIDENT_API.md) documents auth, revision headers, failure
+states and the read-only Explanation tab. The default mounted API uses this real
+deterministic fallback, including while models are unavailable. This backend does
+not implement HTTP, write EXPLAINED lifecycle transitions,
 read credentials, cache responses or grant remediation authority. B must not
 label a response from an older revision as current. Render text as text, including
 quoted evidence; source evidence remains untrusted content.

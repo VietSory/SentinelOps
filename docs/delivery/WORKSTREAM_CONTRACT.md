@@ -84,9 +84,11 @@ kiểm soát, giữ previous release; không thêm distributed hot-reload cho MV
 ## 4. H2 — IER sang explanation/UI
 
 **Đã có:** IER, IncidentEnvelope revision/context và GroundedExplanation schema.
-**Chưa có:** provider/service implementation và HTTP explanation route.
+**Đã có H2 local:** service/fallback của A, optional bounded provider adapter;
+B có HTTP wrapper và UI Explanation pin revision. Xem [backend](../runbooks/EXPLANATIONS.md)
+và [API/UI](../runbooks/INCIDENT_API.md). Không tự bật Bedrock hoặc nghiệm thu G5.
 
-Boundary chốt cho implementation mới:
+Boundary producer/consumer hiện có:
 
 1. A cung cấp async entry point
    `sentinelops.explanations.service.explain_incident(envelope, *, provider=None)`.
@@ -94,19 +96,21 @@ Boundary chốt cho implementation mới:
    `{"payload": <GroundedExplanation>, "provider": <id>, "fallback": <bool>}`.
    Provider absent/timeout/invalid phải deterministic fallback. Module chỉ dùng
    facts/refs của revision input, không đọc API token hoặc DB credentials của B.
-2. B sở hữu route planned `GET /v1/incidents/{id}/explanation?revision=N`, auth,
+2. B sở hữu route `GET /v1/incidents/{id}/explanation?revision=N`, auth,
    tải envelope và response wrapper versioned gồm `incident_id`, `revision`,
-   `generated_at`, `provider`, `fallback`, `payload`. B bổ sung JSON Schema/OpenAPI
-   wrapper trước khi coi route delivered. Không trả wrapper dưới schema
+   `generated_at`, `provider`, `fallback`, `payload`. Wrapper có `schema_version=1.0`,
+   JSON Schema/OpenAPI riêng. Không trả wrapper dưới schema
    GroundedExplanation cũ hoặc nhét metadata vào exact IER.
-3. Hai bên test producer/consumer theo boundary này. B wiring sau khi module có;
-   trước đó UI đọc IER và explanation unavailable. Test double chỉ dùng unit test;
-   tính năng final phải chạy trên IER thật/fallback thật.
+3. Producer/consumer được test theo boundary này. UI mặc định gọi fallback thật,
+   kiểm refs thuộc IER đang chọn, hiển thị provider/fallback; đổi revision/filter
+   hoặc logout hủy response cũ. GET không ghi EXPLAINED/revision/outbox. Test double
+   chỉ chứng minh phần mềm; đường thật kiểm trên IER SLO PostgreSQL hiện hữu của B,
+   không coi lời giải thích dữ liệu cũ là live detection hay diagnostic accuracy.
 4. Nếu cache: key incident+revision+prompt/provider version. Không sửa ranking,
    bịa refs/numbers hoặc diễn giải abstention thành root chắc chắn. Response cũ
    không được ghi đè revision mới. LLM không được gọi action.
 
-Boundary này không tự tạo implementation/schema hoặc cấp quyền gọi Bedrock.
+Boundary này không cấp quyền gọi Bedrock hay action; cloud access và G5 riêng.
 
 ## 5. H3 — deployment và nguồn AWS
 

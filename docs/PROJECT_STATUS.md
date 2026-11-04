@@ -1,6 +1,6 @@
 # SentinelOps — trạng thái triển khai
 
-Cập nhật: **2026-11-03**. Trang này tóm tắt code và khoảng trống sản phẩm.
+Cập nhật: **2026-11-04**. Trang này tóm tắt code và khoảng trống sản phẩm.
 Service có đang chạy/ready hay không phải kiểm tra trên môi trường hiện tại;
 report hoặc CI cũ không thay kết quả đó.
 
@@ -14,7 +14,8 @@ report hoặc CI cũ không thay kết quả đó.
 | Operator UI / B1 | Có UI read-only cùng origin `/ui/`: token trong tab, list/filter/cursor, revision-pinned detail/history/evidence, UNKNOWN/503 và model-unavailable. Đã chạy trên incident SLO thật của B, 4 immutable revisions, API/DB restart và browser outage/reconnect | [API/UI](runbooks/INCIDENT_API.md), [runtime B](runbooks/LOCAL_TESTBED.md); không coi ranking là root đã xác nhận |
 | B2 integration / CI | Có explicit paired H1 wiring qua registry sẵn có; mặc định không model, đổi release của consumer hiện hữu cần migration A. Có immutable local image/config locks và host release v2: wheel/config/CLI/dependency copy, checksum guard, user systemd start/stop/restart. Đã kiểm API/auth/unavailable, SIGKILL/READY đúng PID và checkpoint PostgreSQL thật; backlog vẫn UNKNOWN. CI phân scope, browser/JS/host-process checks và always-run summary. Auth hiện local; production auth chưa triển khai | [Host processes](runbooks/HOST_PROCESSES.md), [runtime/lock scope](runbooks/LOCAL_TESTBED.md), [workstream contract](delivery/WORKSTREAM_CONTRACT.md) |
 | B3 guarded executor | Có internal executor, scoped Kubernetes/RBAC, known-good verifier, PostgreSQL action journal, resume-only worker và SELECT-only API/UI. Có CLI thu hồ sơ image trước/sau + current raw health để operator review, không tự phê duyệt hay xác nhận physical source binding. Có operator review hai bước để gỡ quarantine bằng receipt riêng, đúng rollout/healthy buckets; không đổi `escalated`, IER, cooldown hay attempt budget. Đã kiểm guard/browser fixtures, PostgreSQL outage/concurrency/API thật và Kubernetes API/RBAC thật trên workload fixture; chưa nghiệm thu recovery sản phẩm | [Controlled remediation](runbooks/CONTROLLED_REMEDIATION.md); H4 provider thật vẫn không cấp action permission; chưa có approved real known-good release, producer tự tạo/dispatch action hay IER action integration; unsupported quarantines vẫn giữ khóa |
-| Explanation / action activation / AWS | H2 backend chưa có; auto action chưa bật, AWS chưa triển khai. G5–G8 vẫn mở | [Plan hai người](delivery/DELIVERY_PLAN.md), [gates](architecture/CONSTRAINTS_AND_GATES.md) |
+| Explanation / H2 | Có backend A với deterministic fallback và bounded provider adapter; B có authenticated GET/wrapper riêng và UI pin revision, provider/fallback, refs và error states. Đã mở trên IER SLO thật revision 4 trong DB B, 12/13 evidence claims, refs hợp lệ và IER không đổi. Browser fixture chỉ chứng minh phần mềm. Không tự bật Bedrock, ghi EXPLAINED hay cấp action; G5 chưa nghiệm thu | [Backend](runbooks/EXPLANATIONS.md), [API/UI](runbooks/INCIDENT_API.md) |
+| Action activation / AWS | Auto action chưa bật, AWS chưa triển khai; G6–G8 vẫn mở | [Plan hai người](delivery/DELIVERY_PLAN.md), [gates](architecture/CONSTRAINTS_AND_GATES.md) |
 
 [ADR-014](adr/ADR-014-proposed-local-training-evidence.md) và
 [contract v2](../configs/training_data_contract_v2.json) quy định prospective local
