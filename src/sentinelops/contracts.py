@@ -94,7 +94,8 @@ def _semantic_validation(name: str, payload: dict[str, Any]) -> None:
         eligible = payload["eligible_for_features"]
         if eligible != (payload["features"] is not None) or eligible != (payload["quality"]["valid_buckets"] >= 4):
             raise ValueError("resource feature eligibility contradicts values/coverage")
-    if name in ("incident-write.schema.json","incident-envelope.schema.json","incident-list.schema.json"):
+    if name in ("incident-write.schema.json","incident-envelope.schema.json","incident-list.schema.json",
+                "explanation-response.schema.json"):
         from sentinelops.incidents.validation import validate_wrapper
         validate_wrapper(name,payload)
     if name == "feature-window.schema.json":
