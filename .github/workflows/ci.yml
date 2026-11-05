@@ -386,7 +386,8 @@ jobs:
       - run: docker compose config --quiet
       # Fail on a bad rule or an unmounted rule file before building the stack.
       - run: python -m scripts.check_prometheus_rules --output artifacts/observability/ci-rules.json
-      - run: docker compose up --build -d --wait --wait-timeout 120
+      - run: python -m scripts.check_grafana_dashboards --output artifacts/observability/ci-dashboards.json
+      - run: docker compose up --build -d --wait --wait-timeout 180
       - name: Verify the running Prometheus loaded the operator rules
         run: |
           python - <<'PY'
@@ -401,6 +402,8 @@ jobs:
           names = sorted(rule['name'] for rule in rules)
           print(json.dumps({'loaded_rules': names}, indent=2))
           PY
+      - name: Verify the running Grafana loaded the operator console
+        run: python -m scripts.check_grafana_dashboards --base-url http://127.0.0.1:3000 --output artifacts/observability/ci-dashboards-runtime.json
       - run: python scripts/step2_smoke_test.py
       - run: python scripts/step3_smoke_test.py
       - run: python -m scripts.step4_smoke_test --output artifacts/step4/ci
