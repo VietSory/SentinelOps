@@ -30,7 +30,12 @@ def test_locked_override_has_exact_local_images_no_build_or_pull_and_is_immutabl
     monkeypatch.setattr(release.subprocess,'check_output',lambda command,**kwargs:command[-1]+'\n')
     path = release.materialize(config,ref,project=tmp_path,root=root)
     content = path.read_text()
-    assert content.count('pull_policy: never') == 8 and content.count('build: !reset null') == 8
+    # Derive the count from the rendered services so adding one owned container
+    # does not silently weaken this assertion.
+    services = len(config['services'])
+    assert services == len(release.lane_b.PORTS)
+    assert content.count('pull_policy: never') == services
+    assert content.count('build: !reset null') == services
     assert all(image['image_id'] in content for image in record['images'].values())
     assert release.materialize(config,ref,project=tmp_path,root=root) == path
     path.write_text('changed override')

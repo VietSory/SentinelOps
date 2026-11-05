@@ -18,9 +18,9 @@
     },
     "images": {
       "type": "object", "additionalProperties": false,
-      "required": ["prometheus", "otel-collector", "jaeger", "postgres", "control-postgres", "checkout-service", "payment-service", "inventory-service"],
+      "required": ["prometheus", "otel-collector", "jaeger", "grafana", "postgres", "control-postgres", "checkout-service", "payment-service", "inventory-service"],
       "patternProperties": {
-        "^(prometheus|otel-collector|jaeger|postgres|control-postgres|checkout-service|payment-service|inventory-service)$": {
+        "^(prometheus|otel-collector|jaeger|grafana|postgres|control-postgres|checkout-service|payment-service|inventory-service)$": {
           "type": "object", "additionalProperties": false,
           "required": ["image_id", "container_id"],
           "properties": {

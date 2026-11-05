@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: sentinelops
+    orgId: 1
+    type: file
+    # Dashboards come from the committed file, not from UI edits, so what an
+    # operator sees matches what is reviewed in this repository.
+    allowUiUpdates: false
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

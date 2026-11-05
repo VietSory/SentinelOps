@@ -39,6 +39,42 @@ services:
     ports:
       - "127.0.0.1:16686:16686"
 
+  grafana:
+    image: grafana/grafana:12.2.0
+    environment:
+      # Local sandbox console. Anonymous read-only viewing keeps the operator
+      # dashboard usable without inventing a second credential store; this is
+      # NOT production authentication and the service is bound to loopback only.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_VIEWERS_CAN_EDIT: "false"
+      # No outbound calls from an observability console in a sandbox.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      # Individual read-only file binds so the lane B deployment lock hashes each
+      # one; a directory bind would let unhashed files in.
+      - ./observability/grafana/provisioning/datasources/prometheus.yaml:/etc/grafana/provisioning/datasources/prometheus.yaml:ro
+      - ./observability/grafana/provisioning/dashboards/sentinelops.yaml:/etc/grafana/provisioning/dashboards/sentinelops.yaml:ro
+      - ./observability/grafana/dashboards/sentinelops-workers.json:/var/lib/grafana/dashboards/sentinelops-workers.json:ro
+      - sentinelops_grafana:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -133,3 +169,4 @@ services:
 volumes:
   sentinelops_postgres:
   sentinelops_prometheus:
+  sentinelops_grafana:
