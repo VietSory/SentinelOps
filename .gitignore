@@ -18,3 +18,14 @@ artifacts/
 data/raw/
 data/processed/
 models/
+
+# Terraform working state. The provider lock file is committed on purpose: it
+# pins provider hashes. Real tfvars can carry account ids, so only the example
+# is tracked.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
