@@ -46,6 +46,43 @@ tests:
                 as UNKNOWN. This is not evidence that the monitored business
                 services are unhealthy, and not evidence that they are healthy.
 
+  # Absence must raise UNKNOWN rather than fall silent.
+  - interval: 15s
+    name: absent worker telemetry raises UNKNOWN instead of reading as healthy
+    input_series:
+      - series: 'up{job="unrelated"}'
+        values: '1+0x16'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: SentinelOpsWorkerTelemetryAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              signal_meaning: unknown
+            exp_annotations:
+              summary: No worker telemetry is present at all; state is UNKNOWN
+              description: >-
+                Prometheus holds no sentinelops_worker_ready series. Every worker
+                is UNKNOWN: this covers a stopped worker, a broken exporter path
+                and a scrape failure alike, and it is not evidence that the
+                monitored services are healthy. A deliberately stopped worker also
+                raises this, so confirm the intended lifecycle rather than assuming
+                a fault.
+      # A present replica must silence it, even when that replica is not ready.
+      - eval_time: 3m
+        alertname: SentinelOpsWorkerNotReady
+        exp_alerts: []
+
+  - interval: 15s
+    name: present worker telemetry does not raise the absence alert
+    input_series:
+      - series: 'sentinelops_worker_ready{job="sentinelops-health-worker",environment="local",worker_instance="health-0"}'
+        values: '0+0x16'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: SentinelOpsWorkerTelemetryAbsent
+        exp_alerts: []
+
   # The decision guard is the core invariant: an undecided replica must never be
   # reported as having an ineligible source.
   - interval: 15s
