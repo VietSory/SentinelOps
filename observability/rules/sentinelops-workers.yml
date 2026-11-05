@@ -1,0 +1,135 @@
+# Operator monitoring for the existing worker metric surface.
+#
+# Scope: liveness, source eligibility and local progress of the health/incident
+# workers as exported through OTLP -> Collector -> Prometheus. These rules observe
+# worker telemetry only. They are not business/SLO health, not model quality, not
+# RCA accuracy and never authorize a remediation action.
+#
+# Two invariants are deliberately encoded:
+#
+#  1. Missing telemetry is UNKNOWN, never healthy. An absent or stale series
+#     raises an explicit alert instead of silently evaluating as "no problem".
+#  2. `sentinelops_worker_source_available` is only meaningful for a replica that
+#     has committed a local decision. An undecided replica carries no decision of
+#     its own, so its source value must never be read as an unhealthy source.
+#     The guard mirrors `scripts/worker_metrics_evidence.py`.
+#
+# Deliberately NOT alerted: absence of an accepted model. `/ready` returning 503
+# because no model is approved is the expected state of this deployment, so an
+# alert there would be a false positive by design.
+
+groups:
+  # Recording rules exist for dashboard and ad-hoc query reuse. The alerts below
+  # deliberately inline the same expressions instead of reading these series: an
+  # alert that depends on another rule group also depends on rule evaluation
+  # scheduling, which made the rendered value drift between identical runs.
+  - name: sentinelops-worker-derived
+    interval: 15s
+    rules:
+      - record: sentinelops:worker_heartbeat_age_seconds
+        expr: time() - sentinelops_worker_heartbeat_unixtime_seconds
+
+      # Source eligibility restricted to replicas that actually committed a local
+      # decision. Dropping the guard would turn "no decision yet" into "source down".
+      - record: sentinelops:worker_source_available:decided
+        expr: |
+          sentinelops_worker_source_available
+            and on(job, environment, worker_instance) (sentinelops_worker_has_local_decision == 1)
+
+      - record: sentinelops:worker_unknown_decisions:increase5m
+        expr: increase(sentinelops_worker_unknown_decisions_total[5m])
+
+  - name: sentinelops-worker-liveness
+    interval: 15s
+    rules:
+      - alert: SentinelOpsWorkerHeartbeatStale
+        expr: (time() - sentinelops_worker_heartbeat_unixtime_seconds) > 15
+        for: 1m
+        labels:
+          severity: warning
+          signal_meaning: unknown
+        annotations:
+          summary: Worker heartbeat is stale; its state is UNKNOWN
+          description: >-
+            Replica {{ $labels.worker_instance }} ({{ $labels.job }},
+            environment {{ $labels.environment }}) last published a main-loop
+            heartbeat {{ $value | humanizeDuration }} ago. Treat this replica as
+            UNKNOWN. This is not evidence that the monitored business services are
+            unhealthy, and not evidence that they are healthy.
+
+      - alert: SentinelOpsWorkerNotReady
+        expr: sentinelops_worker_ready == 0
+        for: 1m
+        labels:
+          severity: warning
+          signal_meaning: unknown
+        annotations:
+          summary: Worker reports not ready
+          description: >-
+            Replica {{ $labels.worker_instance }} ({{ $labels.job }}) reports
+            readiness 0. A clean shutdown also reports 0, so confirm the intended
+            lifecycle before treating this as a fault.
+
+      - alert: SentinelOpsWorkerErrorsObserved
+        expr: increase(sentinelops_worker_errors_total[5m]) > 0
+        labels:
+          severity: warning
+          signal_meaning: worker-error
+        annotations:
+          summary: Worker recorded errors in component {{ $labels.component }}
+          description: >-
+            Replica {{ $labels.worker_instance }} ({{ $labels.job }}) recorded at
+            least one {{ $labels.component }} error in the last 5 minutes. The
+            component taxonomy is fixed; this counts worker-side failures, not
+            business request failures. No count is quoted here because the range
+            increase is extrapolated and would not be a whole number of errors.
+
+  - name: sentinelops-worker-source
+    interval: 15s
+    rules:
+      - alert: SentinelOpsDecidedSourceIneligible
+        expr: |
+          (sentinelops_worker_source_available
+             and on(job, environment, worker_instance) (sentinelops_worker_has_local_decision == 1)) == 0
+        for: 1m
+        labels:
+          severity: warning
+          signal_meaning: unknown
+        annotations:
+          summary: Source ineligible for {{ $labels.business_service }}; availability UNKNOWN
+          description: >-
+            Replica {{ $labels.worker_instance }} committed a local decision in
+            which {{ $labels.business_service }} was not ELIGIBLE, so that
+            service's availability is UNKNOWN for the decided bucket. UNKNOWN is
+            not a detected incident and not a healthy observation.
+
+      - alert: SentinelOpsWorkerBacklogGrowing
+        expr: sentinelops_worker_bucket_age_seconds > 900
+        for: 2m
+        labels:
+          severity: info
+          signal_meaning: backlog
+        annotations:
+          summary: Worker decision lags its bucket clock
+          description: >-
+            Replica {{ $labels.worker_instance }} last decided a bucket ending
+            {{ $value | humanizeDuration }} ago. A backlogged worker processes
+            overdue buckets as UNKNOWN; this alert does not mean the worker has
+            caught up, and clearing it does not make past buckets healthy.
+
+  - name: sentinelops-incident-consumer
+    interval: 15s
+    rules:
+      - alert: SentinelOpsIncidentConsumerNoProgress
+        expr: sentinelops_incident_has_local_progress == 0
+        for: 5m
+        labels:
+          severity: info
+          signal_meaning: unknown
+        annotations:
+          summary: Incident consumer has made no local progress
+          description: >-
+            Consumer replica {{ $labels.worker_instance }} has not recorded local
+            progress. An idle consumer with no new source steps is expected; this
+            alert only states that no progress was observed, not that correlation
+            or RCA failed.

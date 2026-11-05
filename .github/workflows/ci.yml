@@ -384,7 +384,23 @@ jobs:
           cache: pip
       - run: pip install -e '.[dev]'
       - run: docker compose config --quiet
+      # Fail on a bad rule or an unmounted rule file before building the stack.
+      - run: python -m scripts.check_prometheus_rules --output artifacts/observability/ci-rules.json
       - run: docker compose up --build -d --wait --wait-timeout 120
+      - name: Verify the running Prometheus loaded the operator rules
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          with urllib.request.urlopen('http://127.0.0.1:9090/api/v1/rules', timeout=10) as response:
+              body = json.load(response)
+          assert body['status'] == 'success', body
+          rules = [rule for group in body['data']['groups'] for rule in group['rules']]
+          assert rules, 'the running Prometheus loaded no rules'
+          broken = [(rule.get('name'), rule['health'], rule.get('lastError')) for rule in rules if rule['health'] != 'ok']
+          assert not broken, broken
+          names = sorted(rule['name'] for rule in rules)
+          print(json.dumps({'loaded_rules': names}, indent=2))
+          PY
       - run: python scripts/step2_smoke_test.py
       - run: python scripts/step3_smoke_test.py
       - run: python -m scripts.step4_smoke_test --output artifacts/step4/ci
