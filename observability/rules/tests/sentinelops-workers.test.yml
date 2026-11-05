@@ -1,0 +1,137 @@
+# promtool unit tests for the operator worker rules.
+#
+# These assert rule evaluation only. They use synthetic series and are explicitly
+# not source, model or RCA evidence.
+
+rule_files:
+  - ../sentinelops-workers.yml
+
+evaluation_interval: 15s
+
+tests:
+  # A stale heartbeat must raise UNKNOWN; a replica whose heartbeat tracks the
+  # clock must stay silent.
+  - interval: 15s
+    name: heartbeat staleness separates a stalled replica from a live one
+    input_series:
+      - series: 'sentinelops_worker_heartbeat_unixtime_seconds{job="sentinelops-health-worker",environment="local",worker_instance="health-0"}'
+        values: '0+0x16'
+      - series: 'sentinelops_worker_heartbeat_unixtime_seconds{job="sentinelops-health-worker",environment="local",worker_instance="health-1"}'
+        values: '0+15x16'
+    promql_expr_test:
+      - expr: sentinelops:worker_heartbeat_age_seconds
+        eval_time: 2m
+        exp_samples:
+          - labels: 'sentinelops:worker_heartbeat_age_seconds{job="sentinelops-health-worker",environment="local",worker_instance="health-0"}'
+            value: 120
+          - labels: 'sentinelops:worker_heartbeat_age_seconds{job="sentinelops-health-worker",environment="local",worker_instance="health-1"}'
+            value: 0
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: SentinelOpsWorkerHeartbeatStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              signal_meaning: unknown
+              job: sentinelops-health-worker
+              environment: local
+              worker_instance: health-0
+            exp_annotations:
+              summary: Worker heartbeat is stale; its state is UNKNOWN
+              # Exactly 2m because the alert computes the age inline rather than
+              # reading a recording rule one evaluation interval behind.
+              description: >-
+                Replica health-0 (sentinelops-health-worker, environment local)
+                last published a main-loop heartbeat 2m 0s ago. Treat this replica
+                as UNKNOWN. This is not evidence that the monitored business
+                services are unhealthy, and not evidence that they are healthy.
+
+  # The decision guard is the core invariant: an undecided replica must never be
+  # reported as having an ineligible source.
+  - interval: 15s
+    name: source eligibility is only read for a replica that committed a decision
+    input_series:
+      - series: 'sentinelops_worker_source_available{job="sentinelops-health-worker",environment="local",worker_instance="health-0",business_service="payment-service"}'
+        values: '0+0x16'
+      - series: 'sentinelops_worker_has_local_decision{job="sentinelops-health-worker",environment="local",worker_instance="health-0"}'
+        values: '1+0x16'
+      - series: 'sentinelops_worker_source_available{job="sentinelops-health-worker",environment="local",worker_instance="health-1",business_service="payment-service"}'
+        values: '0+0x16'
+      - series: 'sentinelops_worker_has_local_decision{job="sentinelops-health-worker",environment="local",worker_instance="health-1"}'
+        values: '0+0x16'
+    promql_expr_test:
+      # Only the decided replica survives the guard, even though both report 0.
+      - expr: sentinelops:worker_source_available:decided
+        eval_time: 2m
+        exp_samples:
+          - labels: 'sentinelops:worker_source_available:decided{job="sentinelops-health-worker",environment="local",worker_instance="health-0",business_service="payment-service"}'
+            value: 0
+      # Without the guard an undecided replica would be indistinguishable.
+      - expr: count(sentinelops_worker_source_available == 0)
+        eval_time: 2m
+        exp_samples:
+          - labels: '{}'
+            value: 2
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: SentinelOpsDecidedSourceIneligible
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              signal_meaning: unknown
+              job: sentinelops-health-worker
+              environment: local
+              worker_instance: health-0
+              business_service: payment-service
+            exp_annotations:
+              summary: Source ineligible for payment-service; availability UNKNOWN
+              description: >-
+                Replica health-0 committed a local decision in which
+                payment-service was not ELIGIBLE, so that service's availability
+                is UNKNOWN for the decided bucket. UNKNOWN is not a detected
+                incident and not a healthy observation.
+
+  # An eligible source on a decided replica must stay silent.
+  - interval: 15s
+    name: an eligible decided source raises nothing
+    input_series:
+      - series: 'sentinelops_worker_source_available{job="sentinelops-health-worker",environment="local",worker_instance="health-0",business_service="payment-service"}'
+        values: '1+0x16'
+      - series: 'sentinelops_worker_has_local_decision{job="sentinelops-health-worker",environment="local",worker_instance="health-0"}'
+        values: '1+0x16'
+    promql_expr_test:
+      - expr: sentinelops:worker_source_available:decided
+        eval_time: 2m
+        exp_samples:
+          - labels: 'sentinelops:worker_source_available:decided{job="sentinelops-health-worker",environment="local",worker_instance="health-0",business_service="payment-service"}'
+            value: 1
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: SentinelOpsDecidedSourceIneligible
+        exp_alerts: []
+
+  # Worker-side errors are counted per fixed component.
+  - interval: 15s
+    name: worker errors raise per component
+    input_series:
+      - series: 'sentinelops_worker_errors_total{job="sentinelops-health-worker",environment="local",worker_instance="health-0",component="database"}'
+        values: '0+1x16'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: SentinelOpsWorkerErrorsObserved
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              signal_meaning: worker-error
+              job: sentinelops-health-worker
+              environment: local
+              worker_instance: health-0
+              component: database
+            exp_annotations:
+              summary: Worker recorded errors in component database
+              description: >-
+                Replica health-0 (sentinelops-health-worker) recorded at least one
+                database error in the last 5 minutes. The component taxonomy is
+                fixed; this counts worker-side failures, not business request
+                failures. No count is quoted here because the range increase is
+                extrapolated and would not be a whole number of errors.
