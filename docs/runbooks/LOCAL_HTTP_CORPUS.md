@@ -182,3 +182,49 @@ campaign plan registration and runs each replacement kind in its new context.
 It never chooses an additional replacement automatically. A failed replacement
 stops again for investigation. Keep all prior raw data/volumes; do not rename old
 captures into the replacement, concatenate groups or open final data.
+
+### Invalid client UTC intervals
+
+A client completion before its own recorded UTC start is invalid source evidence,
+even when its separately sampled monotonic duration is positive. Never repair the
+UTC timestamp, drop the attempt or relabel its affected buckets as healthy. The
+prospective oracle continues to reject these inputs. The runner now latches such
+a failure and raises `ClientClockDiscontinuity` from its load loop, retaining
+original outcomes and restoring fault settings through its existing cleanup.
+It also rejects a client start before the recorded prospective run start. This
+observes invalid intervals; it neither converts clocks nor proves host-clock
+stability or the cause of a clock adjustment.
+
+After investigating a stopped campaign, a clean committed implementation checkout
+can explicitly exclude the **whole** clock-invalid group and reserve an unused
+same-role replacement within the original maximum:
+
+```sh
+python -m scripts.close_clock_invalid_group --root /absolute/corpus/root \
+  --role train --group 4 --replacement-group 5
+```
+
+Both acquisition/controller locks must be free. The command recomputes an invalid
+UTC witness from the original content-addressed client ledger, verifies its
+registration, source/code/recipe/truth identities, checks completed source inputs
+and observes the original owned container epoch. A partial attempt is eligible
+only when its original producer failed with `ClientClockDiscontinuity`, has
+clock-guard implementation provenance and contains an actual invalid client
+interval. Generic incomplete/failed sources, forged failure flags, unrelated
+corruption, valid groups selected by model outcomes, changed containers, later
+partitions, frozen corpora and used/out-of-budget replacements are refused.
+
+The immutable clock disposition stores original-source proof, observer identity
+and an inventory of every original group file. Audit rechecks all of them. Every
+kind in the group, including earlier valid healthy/Payment/Inventory captures,
+supplies zero healthy, precursor, fitting or independent-group support afterward.
+This is exclusion of invalid acquisition evidence, never admission or G2 PASS.
+The original plan, chronology, minimum counts and final-access restriction stay
+unchanged. Existing host-interruption dispositions retain their separate rules.
+
+The command stops no container and changes no raw/result file. After the explicit
+closure, stop only the identified old group containers, retain every volume and
+source checkout, and continue the existing campaign from a new clean immutable
+checkout. It follows only the recorded replacement chain; it never automatically
+allocates another ordinal or retries a failed slot. A new failure stops again for
+investigation. New groups require fresh contexts and original source verification.
