@@ -750,9 +750,40 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  iac:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -e '.[dev]'
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.0
+          terraform_wrapper: false
+      # No AWS credentials are configured for this job on purpose: validation
+      # must never be able to reach an account or create a resource.
+      - run: terraform -chdir=infra/aws init -backend=false -input=false
+      - run: python -m scripts.check_aws_iac --output artifacts/iac/ci-aws.json
+      - name: Confirm no AWS credentials were available
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          leaked = [name for name in ('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN',
+                                      'AWS_ROLE_ARN', 'AWS_WEB_IDENTITY_TOKEN_FILE') if os.environ.get(name)]
+          assert not leaked, 'IaC validation must run without AWS credentials: ' + ', '.join(leaked)
+          print('no AWS credentials present')
+          PY
+
   ci-summary:
     if: always()
-    needs: [changes, foundation, public-data, incident-storage, remediation-integration, host-process-integration, observability, multi-fault-development, health-worker-integration, incident-worker-s5, ui]
+    needs: [changes, foundation, public-data, incident-storage, remediation-integration, host-process-integration, observability, multi-fault-development, health-worker-integration, incident-worker-s5, ui, iac]
     runs-on: ubuntu-latest
     steps:
       - name: Require every applicable check and report a stable conclusion
@@ -765,7 +796,7 @@ jobs:
           outputs=needs['changes'].get('outputs',{})
           expected={'changes':True,'foundation':True,
               'public-data':outputs.get('public_data')=='true','ui':outputs.get('ui')=='true'}
-          for name in ('incident-storage','remediation-integration','host-process-integration','observability','multi-fault-development','health-worker-integration','incident-worker-s5'):
+          for name in ('incident-storage','remediation-integration','host-process-integration','observability','multi-fault-development','health-worker-integration','incident-worker-s5','iac'):
               expected[name]=outputs.get('native')=='true'
           failures=[]
           for name,required in expected.items():

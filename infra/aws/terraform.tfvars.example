@@ -1,0 +1,32 @@
+# Copy to terraform.tfvars and fill in owner-confirmed values. Real tfvars files
+# are gitignored because they carry account ids.
+#
+# Filling this in does NOT authorize an apply. Region, quota, budget, model
+# access and apply permission are confirmed by the owner first; see
+# docs/runbooks/AWS_BASELINE.md.
+
+region              = "eu-central-1"
+allowed_account_ids = ["000000000000"]
+environment         = "prod"
+
+# Cost envelope. Keep the cluster small until the demo path is actually used.
+node_instance_types = ["t3.large"]
+node_desired_size   = 2
+node_max_size       = 4
+
+# Private by default. Only enable with explicit operator CIDRs; 0.0.0.0/0 is
+# rejected by variable validation.
+cluster_public_access       = false
+cluster_public_access_cidrs = []
+
+# Retention: bounded, and long enough that a report still resolves its evidence.
+log_retention_days                 = 30
+database_backup_retention_days     = 7
+artifact_noncurrent_retention_days = 90
+
+# Leave empty until Bedrock model access is granted. Empty means the explanation
+# role receives no invoke permission at all.
+bedrock_model_ids = []
+
+monthly_budget_usd         = 300
+budget_notification_emails = ["owner@example.invalid"]

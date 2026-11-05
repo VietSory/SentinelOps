@@ -50,8 +50,11 @@ def test_workflow_summary_requires_requested_jobs_and_allows_only_out_of_scope_s
     summary=workflow['jobs']['ci-summary']
     assert summary['if']=='always()' and 'workflow_dispatch' in workflow['on']
     code='\n'.join(summary['steps'][0]['run'].splitlines()[1:-1])
-    names=['changes','foundation','public-data','ui','incident-storage','remediation-integration','host-process-integration','observability','multi-fault-development','health-worker-integration','incident-worker-s5']
-    assert 'remediation-integration' in summary['needs']
+    # Derive the job names from the workflow itself: a hardcoded list silently
+    # breaks the summary with a KeyError whenever a job is added.
+    names=summary['needs']
+    assert 'remediation-integration' in names and 'iac' in names
+    assert set(names)=={name for name in workflow['jobs'] if name!='ci-summary'}
     def execute(needs):
         return subprocess.run([sys.executable,'-c',code],env={**os.environ,'NEEDS_JSON':json.dumps(needs)},capture_output=True).returncode
     needs={name:{'result':'success'} for name in names}
