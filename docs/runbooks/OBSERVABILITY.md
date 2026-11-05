@@ -123,6 +123,61 @@ Logs stay on the services' stdout/stderr; there is no Collector log-export
 pipeline in this milestone. The smoke test reads them with `docker compose logs`,
 so it needs access to the Docker daemon as well as the local HTTP ports.
 
+## Operator worker rules
+
+`observability/rules/sentinelops-workers.yml` holds the operator monitoring for
+the existing worker metric surface: heartbeat staleness, readiness, worker-side
+errors per fixed component, source eligibility, decision backlog and incident
+consumer progress. Prometheus loads it through an explicit `rule_files` entry.
+
+These rules observe **worker telemetry only**. They are not business/SLO health,
+model quality or RCA accuracy, and no alert authorizes a remediation action.
+Every UNKNOWN-meaning alert carries `signal_meaning: unknown`.
+
+Two invariants are encoded deliberately:
+
+1. Missing telemetry is UNKNOWN, never healthy. A stale or absent heartbeat
+   raises an explicit alert rather than evaluating as "no problem".
+2. `sentinelops_worker_source_available` is read **only** for a replica that
+   committed a local decision, guarded by
+   `and on(job, environment, worker_instance) (sentinelops_worker_has_local_decision == 1)`.
+   Without that guard a replica that has not decided yet would be reported as
+   having an unavailable source. The guard mirrors `scripts/worker_metrics_evidence.py`.
+
+Alerts inline their expressions instead of reading the recording rules in the
+same file. An alert that depends on another rule group also depends on rule
+evaluation scheduling, which made a rendered annotation value drift between
+otherwise identical runs. The recording rules remain for dashboards and ad-hoc
+queries.
+
+Absence of an accepted model is **not** alerted. `/ready` returning 503 because
+no model is approved is this deployment's expected steady state.
+
+Validate rules without starting the stack:
+
+```sh
+python -m scripts.check_prometheus_rules
+python -m pytest -q tests/test_prometheus_rules.py
+```
+
+The checker runs `promtool` from the same pinned Prometheus image Compose runs,
+so rules are never validated by a different version than the one that loads them.
+It verifies that every referenced rule file is really bind-mounted read-only at
+its declared container path — a referenced but unmounted file would stop
+Prometheus from starting — rejects globs, since a glob would load files the
+deployment lock never hashed, and requires every rule file to have passing
+promtool unit tests. Inspect what the running Prometheus actually loaded:
+
+```sh
+curl -s http://127.0.0.1:19090/api/v1/rules
+curl -s http://127.0.0.1:19090/api/v1/alerts
+```
+
+Each rule file is a new owned read-only bind input, so an existing lane B
+deployment lock taken before these rules no longer matches the current
+configuration and bind bytes. That mismatch is correct: take a new
+`lane_b snapshot` instead of editing or reusing the old lock.
+
 ## Automated checks
 
 - In-memory SDK tests exercise the real service handlers, trace propagation,
