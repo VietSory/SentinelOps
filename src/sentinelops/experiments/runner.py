@@ -19,6 +19,7 @@ from uuid import uuid4
 
 import httpx
 
+from sentinelops.experiments.client_clock import ClientClockGuard
 from sentinelops.contracts import validate_payload
 from sentinelops.experiments.labels import SLOConfig, measure_slo
 from sentinelops.experiments.diagnostics import failure_context
@@ -186,6 +187,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         run["parameters"]["s5_protocol_sha256"]=protocol_hash
         run["parameters"]["role"]="local-RCA-development-or-heldout-only"
     failure = None
+    client_clock = ClientClockGuard()
     async with httpx.AsyncClient(timeout=12.,trust_env=False) as client:
         async def set_fault(url,mode,delay=0):
             response = await client.post(url+"/internal/faults",json={"mode":mode,"delay_ms":delay})
@@ -213,9 +215,11 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                 except (httpx.HTTPError,ValueError):
                     status = "transport_error"
                 counts[str(status)] += 1
-                outcomes.append({"phase":phase,"started_at":began,"completed_at":timestamp(datetime.now(timezone.utc)),
-                                 "status":status,"trace_id":trace_id,"correlation_id":correlation,"request_entry_service":entry,
-                                 "client_duration_ms":round((time.perf_counter()-began_monotonic)*1000, 3)})
+                outcome = {"phase":phase,"started_at":began,"completed_at":timestamp(datetime.now(timezone.utc)),
+                           "status":status,"trace_id":trace_id,"correlation_id":correlation,"request_entry_service":entry,
+                           "client_duration_ms":round((time.perf_counter()-began_monotonic)*1000, 3)}
+                outcomes.append(outcome)
+                client_clock.observe(outcome, run["started_at"])
                 recent.append({"trace_id":trace_id,"completed_at":time.time(),"correlation_id":correlation,"entry_service":entry})
 
         def capture_trace(probe):
@@ -265,6 +269,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             scheduled,next_ramp = time.monotonic(),time.monotonic()
             print(f"PHASE {identifier} {phase} duration={duration}s split={config.split}",flush=True)
             while time.monotonic() < deadline:
+                client_clock.check()
                 if collector and collector.done():
                     collector.result()
                 if ramp and time.monotonic() >= next_ramp:
@@ -280,6 +285,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                 scheduled = max(scheduled,time.monotonic())
                 await asyncio.sleep(max(0.,scheduled-time.monotonic()))
             if active: await asyncio.gather(*tuple(active))
+            client_clock.check()
             run["phase_intervals"].append({"phase":phase,"start_at":timestamp(begin),"end_at":timestamp(datetime.now(timezone.utc))})
             truth.write("manifests",run)
 
@@ -319,6 +325,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             if collector and not collector.done():
                 collector.cancel();await asyncio.gather(collector,return_exceptions=True)
             if active: await asyncio.gather(*tuple(active),return_exceptions=True)
+            if failure == "ClientClockDiscontinuity":
+                ended = datetime.now(timezone.utc)
             for url,original in originals.items():
                 try: await set_fault(url,original["mode"],original["delay_ms"])
                 except Exception as exc:

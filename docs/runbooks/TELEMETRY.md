@@ -87,3 +87,88 @@ This local PostgreSQL evidence does not certify an AWS RDS/CloudWatch adapter. S
 Inspect the current command result and capture quality for incomplete buckets or
 source errors. Retain raw/evaluation artifacts when required for reproducibility;
 routine smoke PASS needs no additional Markdown report.
+
+
+## CloudWatch HTTP RED adapter preparation
+
+The read-only adapter in \`sentinelops.telemetry.cloudwatch\` implements the
+technical spec's log-rollup path. It has no SDK dependency or default AWS client,
+credentials, endpoint or metric-name discovery. Instantiate \`CloudWatchSource\`
+with explicitly configured Logs/CloudWatch clients and an operator catalog:
+
+```python
+catalog = {
+    "catalog_version": "cloudwatch-http-red/v1",
+    "service": "payment-service", "environment": "aws-development",
+    "log_group_arn": "arn:aws:logs:REGION:ACCOUNT:log-group:GROUP",
+    "namespace": "DEPLOYED_CUSTOM_NAMESPACE",
+    "request_metric": "DEPLOYED_REQUEST_METRIC",
+    "error_metric": "DEPLOYED_ERROR_METRIC",
+    "dimensions": {"service": "service", "environment": "environment",
+                   "method": "method", "route": "route"},
+    "counter_semantics": "per-request-count/v1",
+}
+source = CloudWatchSource(logs_client, metrics_client, catalog)
+capture = source.capture(minute_aligned_utc_end)
+ref = trusted_store.write("raw", capture)
+```
+
+Import \`CloudWatchSource\` from \`sentinelops.telemetry.cloudwatch\`. Catalog
+placeholders must be replaced by the deployed publisher's verified mapping,
+including actual dimension names. Both clients' configured region must match the
+log-group ARN; metric queries pin its account. The publisher must provide
+per-business-request count samples, summed per UTC minute, with observed zero
+errors when appropriate. Existing cumulative exporter counters/statistic sets
+are not accepted as this catalog. These are deployment prerequisites, not a
+claim that this publisher or an AWS environment is currently available.
+
+Clients require operator-configured connect/read/retry bounds. The adapter bounds
+capture to 20 pages / 20 MiB / 200,000 events and retains partial/API failures for
+quarantine without SDK exception text. Cloud calls need their separate authorized
+scope; constructing/importing the adapter makes no call.
+
+\`FilterLogEvents\` continues through empty pages while a token exists. The query
+uses milliseconds and an inclusive end of \`bucket_end - 1 ms\`, preserving
+\`[start,end)\`. Events must contain the original application completion JSON,
+with CloudWatch's event timestamp equal to \`timestamp_unix_ms\`; ingestion and
+actual receipt clocks are verified separately. A wrapped/transformed log format
+or a collector using another event clock needs an explicitly validated adapter.
+Only the three business route templates are accepted. Dedup uses source event ID
+and application request-instance ID; shared correlation IDs/content do not merge
+separate requests. Conflicting duplicates fail.
+
+The adapter calculates the linear sample p95 from all deduplicated completion
+\`duration_ms\` values. It never averages pod p95 values or asks CloudWatch for a
+percentile of arbitrary statistic sets. Independent \`GetMetricData\` queries
+must be \`Count / Sum / 60s\`, complete, with exactly one bucket and matching log
+request/error totals. Missing metric data is unknown, not an observed zero.
+Missing/mismatched records, partial pagination, clock/units errors and low traffic
+cannot produce a healthy payload. No-traffic buckets retain undefined p95/error
+ratio. A service cannot mix catalogs within a replay manifest.
+
+Replay already captured objects without credentials or network calls:
+
+```sh
+python -m scripts.replay_cloudwatch --store /trusted/source \
+  --capture-ref artifact://raw/CAPTURE_HASH.json --environment aws-development \
+  --output /new/exclusive/replay
+```
+
+Repeat \`--capture-ref\` for multiple buckets (maximum 1,000). Raw captures,
+observations, quarantine and five-feature windows use the existing artifact
+store and schemas. Original receipts control feature availability; reprocessing
+never backdates an observation. New results remain separate immutable artifacts.
+
+\`cloudwatch-log-rollup-60s/v1\` is a **development source profile**, with the
+spec's proposed 120-second watermark and exact sample quantile rather than the
+local Prometheus histogram interpolation. It is not implicitly compatible with
+local models; current registry guards reject that profile mismatch. Numerical
+feature eligibility is not model/risk availability: this watermark exceeds the
+current local forecast-anchor minute deadline. Deployment mapping, observed lag,
+original source completeness, cost, source parity and a compatible release need
+actual H3/G7 evidence before activation. No AWS/model/G7 acceptance is inferred
+from software fixtures, and the default local worker remains Prometheus-only.
+
+API semantics: [FilterLogEvents pagination](https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_FilterLogEvents.html),
+[GetMetricData units and timestamps](https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/API_GetMetricData.html),
+[percentile restrictions](https://docs.aws.amazon.com/AmazonCloudWatch/latest/APIReference/API_GetMetricStatistics.html).

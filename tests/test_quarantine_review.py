@@ -152,7 +152,11 @@ def test_review_recomputes_actual_raw_lineage_and_never_counts_missing_traffic_a
         evidence['health_stream_id']=source.stream_id;evidence['health_policy_sha256']=stable_id(source.policy)
         opened=await review.open(f.journal.state['action_id']);f.time[0]+=timedelta(minutes=4)
         if problem=='corrupt':
-            next((tmp_path/'verified-source'/'raw').glob('*.json')).write_text('{}')
+            # Corrupt Payment evidence in a post-action bucket used by this review,
+            # rather than an arbitrary file that may belong to a future bucket.
+            batch=source.store.read(source.rows[1]['manifest_ref'])
+            raw_ref=next(ref for ref in batch['current_raw_refs'] if source.store.read(ref)['service']=='payment-service')
+            (source.store.root/raw_ref.removeprefix('artifact://')).write_text('{}')
             with pytest.raises(ValueError,match='checksum'): await review.release(opened['review_ref'],key='raw-review-idempotency-0001')
         else:
             result=await review.release(opened['review_ref'],key='raw-review-idempotency-0001')

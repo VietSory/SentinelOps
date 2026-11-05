@@ -200,7 +200,9 @@ def require_role_order(store, plan, role):
     if any(ROLES.index(s['role']) > index for s in sessions):
         raise ValueError('cannot acquire earlier-role data after a later role has begun')
     if index:
-        earlier = [s for s in sessions if s['role'] == ROLES[index-1]]
+        from sentinelops.experiments.local_recovery import read_abandonment
+        earlier = [s for s in sessions if s['role'] == ROLES[index-1]
+                   and read_abandonment(store, s, plan) is None]
         if len(earlier) < plan['minimum_groups'][ROLES[index-1]]:
             raise ValueError('previous acquisition role has insufficient registered groups')
         for session in earlier:
@@ -217,7 +219,8 @@ def close_completed_sessions(store, *, except_group):
             continue
         closure = store.root / 'sessions' / group / 'closed.json'
         if closure.exists():
-            read_binding(store, closure)
+            from sentinelops.experiments.local_recovery import read_abandonment
+            read_abandonment(store, session, load_plan())
             continue
         for kind in KINDS:
             result = store.root / 'runs' / (group + '-' + kind) / 'result.json'
@@ -242,6 +245,8 @@ def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=Fal
     source = clean_source(project)
     require_role_order(store, plan, role)
     path = registration_path(store, group)
+    if (path.parent / 'closed.json').exists():
+        raise ValueError('closed acquisition group cannot receive new traffic')
     compose_project = configure_compose(project, store.root, group)
     if path.exists():
         reference, saved = read_binding(store, path)

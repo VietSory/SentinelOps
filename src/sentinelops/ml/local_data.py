@@ -283,6 +283,7 @@ def audit_local_corpus(store, *, plan=None, project=PROJECT, now=None):
     created = now or datetime.now(timezone.utc)
     cases, pending, failed, quarantine, sessions = [], [], [], [], []
     all_rows, intervals, owners = [], defaultdict(list), set()
+    excluded_groups = []
     source_contexts = set()
     for path in sorted((store.root / 'sessions').glob('*/registration.json')):
         _, session = read_binding(store, path)
@@ -299,6 +300,15 @@ def audit_local_corpus(store, *, plan=None, project=PROJECT, now=None):
             raise ValueError('acquisition groups reuse a source container epoch')
         source_contexts.update(context_ids)
         sessions.append(session)
+        from sentinelops.experiments.local_recovery import read_abandonment
+        abandoned = read_abandonment(store, session, plan, project=project, as_of=created)
+        if abandoned is not None:
+            ref, closure = abandoned
+            excluded_groups.append({'group_id':session['group_id'], 'closure_ref':ref,
+                'reason':closure['reason'], 'replacement_group_id':closure['replacement_group_id'],
+                'excluded_whole_group':True})
+            intervals[session['role']].append((utc_time(session['registered_at']), utc_time(closure['closed_at'])))
+            continue
         for kind in KINDS:
             slot = session['group_id'] + '-' + kind
             root = store.root / 'runs' / slot
@@ -375,6 +385,8 @@ def audit_local_corpus(store, *, plan=None, project=PROJECT, now=None):
             'Fresh context/source integrity is not a general proof of statistical IID independence.',
             'Current source registration alone cannot admit a model or a healthy interval.',
             'Development outcomes are audited for readiness; only train/calibration rows may enter fitting.']}
+    if excluded_groups:
+        report['excluded_groups'] = excluded_groups
     return report, all_rows, cases
 
 

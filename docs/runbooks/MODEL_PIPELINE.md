@@ -187,3 +187,42 @@ remain explicit regardless of numerical results. Final data is never read.
 
 Focused software regression:
 `python -m pytest -q tests/test_local_model_evaluation.py tests/test_local_data.py`.
+
+## Portable H1 candidate preparation
+
+After admitted fitting and development evaluation, create a new handoff directory:
+
+```sh
+python -m scripts.export_model_candidate \
+  --store /trusted/corpus --dataset-ref artifact://manifests/DATASET_HASH.json \
+  --models /trusted/candidate --training-manifest-sha256 TRAINING_MANIFEST_BYTES_SHA256 \
+  --evaluation-store /trusted/evaluation --evaluation-ref artifact://manifests/EVALUATION_HASH.json \
+  --output /new/handoff
+```
+
+The source freeze is reverified before model/evaluation assets are accessed.
+Training/evaluation/model versions, row provenance, source/profile/policy and
+byte checksums must agree. Existing bundle verification checks library versions
+and model artifacts. All roots are trusted operator inputs; this CLI is not an
+API upload handler. Output is exclusive and original inputs remain unchanged.
+
+- `runtime/models/<service-hash>/` contains the three unchanged v2 bundles.
+- `audit/` contains the original training-manifest bytes, frozen source report,
+  pinned evaluation/predictions and content-addressed machine model cards.
+- `handoff.json` lists relative runtime paths, hashes and card refs. Historical
+  absolute paths inside the original training manifest are provenance; use the
+  relative handoff entries when materializing on B's host.
+
+Copy the whole tree and verify its hashes after transport. Keep `audit/` with
+the operator; mount the `runtime/` tree for serving only after the existing
+approval gates are met. The descriptor is `unapproved-model-candidate/v1`;
+the registry rejects it as a serving release. Separate operator validation
+produces the existing `validated-model-release/v1` ledger and its approved
+evaluation refs. Export creates no approval or activation ledger.
+
+Original corpus/Git objects remain required for full source replay and are
+declared external dependencies. This candidate package contains no raw/final
+data and makes no source-parity or model-quality acceptance claim. Actual H1
+readiness still requires G2/G3/parity evidence and B's consumer verification.
+Model cards/evaluation artifacts are retained for review and reproduction;
+no service smoke/PASS report is generated.

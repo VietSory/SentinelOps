@@ -128,7 +128,8 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False):
         _event(store,{'status':'CONTROLLER_RESUMED','controller_ref':controller_ref})
         previous_role = None
         try:
-            for role, ordinal, kind in planned_slots(plan):
+            from sentinelops.experiments.local_recovery import effective_slots
+            for role, ordinal, kind in effective_slots(store, plan, planned_slots(plan), project=project):
                 if previous_role is not None and role != previous_role:
                     report, _, _ = audit_local_corpus(store,plan=plan,project=project)
                     require_completed_role_admission(report,previous_role)

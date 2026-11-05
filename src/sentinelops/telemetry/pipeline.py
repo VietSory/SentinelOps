@@ -10,6 +10,11 @@ from sentinelops.telemetry.store import ArtifactStore
 
 
 def process_captures(captures: list[dict[str, Any]], store: ArtifactStore, *, environment: str = "local") -> dict[str, Any]:
+    return _process_captures(captures, store, environment=environment,
+                             decoder=decode_capture, default_profile=SOURCE_PROFILE)
+
+
+def _process_captures(captures, store, *, environment, decoder, default_profile):
     observations = []
     raw_refs, observation_refs, feature_refs, quarantine_refs = [], [], [], []
     seen = set()
@@ -20,7 +25,7 @@ def process_captures(captures: list[dict[str, Any]], store: ArtifactStore, *, en
         seen.add(raw_ref)
         raw_refs.append(raw_ref)
         try:
-            item = decode_capture(capture, environment=environment)
+            item = decoder(capture, environment=environment)
         except (ValueError, KeyError, TypeError) as exc:
             quarantine_refs.append(store.write("quarantine", {"raw_ref": raw_ref, "reason": str(exc)}))
             continue
@@ -30,7 +35,7 @@ def process_captures(captures: list[dict[str, Any]], store: ArtifactStore, *, en
     profiles = {item["source_profile"] for item in observations}
     if len(profiles) > 1:
         raise ValueError("a capture manifest cannot mix source profiles")
-    profile = next(iter(profiles), SOURCE_PROFILE)
+    profile = next(iter(profiles), default_profile)
     as_of = max((utc_time(item["available_at"]) for item in observations), default=None)
     eligible = 0
     by_service = {service:{} for service in BUSINESS_ROUTES}
