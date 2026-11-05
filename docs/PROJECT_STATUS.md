@@ -33,6 +33,19 @@ mới truyền hai credential vào API, không truyền cho workers; bundle v2 c
 cấu hình producer-only. Production identity vẫn fail closed. Xem
 [API scopes](runbooks/INCIDENT_API.md) và [host credentials](runbooks/HOST_PROCESSES.md).
 
+Có [demo guide local](runbooks/DEMO_LOCAL.md) cho đường chạy B hiện tại: stack 9
+container, API/worker, ba loại readiness khác nhau, ranh giới operator/producer,
+UI pin revision, explanation fallback thật và Grafana console. Guide ghi rõ phần
+**không** demo được (model, RCA accuracy, Bedrock, auto rollback, AWS) và một
+bước đang bị chặn kèm lý do, không che.
+
+**Lưu ý nguồn:** health worker lấy source identity từ hash **toàn bộ** running
+Prometheus config, nên thêm `rule_files` cho alert rules đã fork health stream dù
+`scrape_configs`/`global` không đổi (`44c63e2c…` vs `06dce0d4…`). Stream cũ
+`0b6f3101…` và checkpoint còn nguyên, stream mới đang chạy; hệ quả là có hai
+consumer nên `check_lane_b_live` từ chối chạy. Theo stream mới bằng consumer cũ
+cần migration protocol của A; `telemetry/prometheus.py` thuộc A nên B không sửa.
+
 ## Việc tiếp theo
 
 - **A:** admission/capture → models/evaluation → RCA/explanation → source parity.
