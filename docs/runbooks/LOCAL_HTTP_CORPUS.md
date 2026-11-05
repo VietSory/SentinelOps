@@ -144,3 +144,41 @@ Before a later partition starts, the prior role's measured per-service admission
 must pass. Otherwise the controller stops while additional whole earlier-role
 groups can still be collected within the predeclared maximum; it cannot silently
 make a deficient train/calibration split unrepairable by advancing chronology.
+
+
+### Terminal host interruption
+
+An interrupted workload is never resumed in its original slot after the host
+context changes. Preserve the group, including its completed captures and every
+partial raw file. When the registered host boot has changed and all seven original
+owned containers are stopped without a restart, an operator can explicitly close
+the whole group and reserve an unused ordinal beyond the plan's minimum, within
+its maximum:
+
+```sh
+python -m scripts.close_interrupted_group --root /absolute/corpus/root \
+  --role train --group 1 --replacement-group 4
+```
+
+Run from a clean committed implementation checkout. Both controller and capture
+locks must be free. The operation observes original Docker identities/state and
+host boot, verifies any completed captures, hashes all original group files and
+writes immutable observation/inventory/closure refs. It changes no container,
+volume, raw file or result. A complete group, changed original source, frozen
+corpus, later partition or already reserved replacement is refused. Other failure
+modes require investigation; this command does not infer a host interruption from
+a missing process or timeout alone.
+
+The entire closed group contributes **zero** fitting/evaluation rows, including
+its previously completed healthy or gradual captures. Audit retains its explicit
+exclusion and original bytes and checks its time span against later groups. All
+original support floors, chronological roles and maximum ordinals still apply.
+An exclusion is not a source/model approval and cannot hide corrupt completed
+captures. The closed group cannot receive new traffic.
+
+Restart the existing campaign from a clean immutable worktree after the explicit
+closure. It follows the recorded same-role replacement, preserves the original
+campaign plan registration and runs each replacement kind in its new context.
+It never chooses an additional replacement automatically. A failed replacement
+stops again for investigation. Keep all prior raw data/volumes; do not rename old
+captures into the replacement, concatenate groups or open final data.
