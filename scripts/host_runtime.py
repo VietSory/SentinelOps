@@ -41,6 +41,8 @@ def verify(root):
     if (root / 'no-bytecode').exists() or any('__pycache__' in p.parts or p.suffix == '.pyc' for p in root.rglob('*')):
         raise HostGuard('release bytecode cache is not allowed')
     record = json.loads((root / 'release.json').read_text())
+    if record.get('credential_profile') not in (None, 'local-operator-read/v1'):
+        raise HostGuard('unsupported release credential profile')
     if (record['release_version'] != 'lane-b-host/v2' or record['root'] != str(root.resolve())
         or record['interpreter'] != str(Path(sys.executable).resolve())
         or digest(Path(sys.executable).resolve()) != record['interpreter_sha256']
@@ -100,6 +102,7 @@ def main():
             or (role != 'probe' and session['role'] != role) or session['release_id'] != record['release_id']):
             raise HostGuard('session release/role mismatch')
         allowed = {'CONTROL_DATABASE_URL', 'COMMERCE_EVIDENCE_DATABASE_URL', 'SENTINELOPS_API_TOKEN',
+                   'SENTINELOPS_OPERATOR_TOKEN',
                    'SENTINELOPS_ENV', 'SENTINELOPS_ENABLE_DEMO', 'SENTINELOPS_MODEL_STORE', 'SENTINELOPS_MODEL_RELEASE_REF',
                    'SENTINELOPS_ACTION_READ_DATABASE_URL'}
         if set(session['environment']) - allowed:

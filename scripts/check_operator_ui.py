@@ -287,7 +287,7 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--fixtures',action='store_true')
     parser.add_argument('--incident-id')
-    parser.add_argument('--token-file',type=Path,default=Path('artifacts/lane-b/api-token'))
+    parser.add_argument('--token-file',type=Path,default=Path('artifacts/lane-b/operator-token'))
     parser.add_argument('--browser-executable',default=os.getenv('SENTINELOPS_CHROME'),
                         help='Use an existing Chrome executable; otherwise use Playwright Chromium.')
     args = parser.parse_args()
@@ -307,7 +307,8 @@ def main():
             page.on('pageerror',lambda error:errors.append(type(error).__name__))
             result = exercise_fixtures(page,args.base_url.rstrip('/'),args.output,expect) if args.fixtures else exercise_native(
                 page,args.base_url.rstrip('/'),args.output,args.incident_id,
-                os.environ.get('SENTINELOPS_API_TOKEN') or args.token_file.read_text().strip(),expect)
+                os.environ.get('SENTINELOPS_OPERATOR_TOKEN') or os.environ.get('SENTINELOPS_API_TOKEN') or
+                args.token_file.read_text().strip(),expect)
             if errors: raise ValueError('browser emitted unhandled script errors')
             result.update(status='PASS',page_errors=errors,
                 verifier_commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),

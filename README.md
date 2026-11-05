@@ -39,7 +39,8 @@ và [local testbed](docs/runbooks/LOCAL_TESTBED.md) để chạy đầy đủ tr
 
 Lane B: `python -m scripts.lane_b up`, rồi chạy `python -m scripts.lane_b serve`
 ở terminal riêng và mở **http://127.0.0.1:18000/ui/**. Token local nằm trong
-`artifacts/lane-b/api-token` (0600); không gửi token qua URL hoặc commit vào Git.
+`artifacts/lane-b/operator-token` (0600, chỉ đọc); `api-token` dành cho producer
+nhập/sửa IER. Không gửi token qua URL hoặc commit vào Git.
 Theo [runtime B](docs/runbooks/LOCAL_TESTBED.md#lane-b-isolated-application-runtime)
 để chạy các workers/source riêng. Không cần model để xem incident; UI chỉ đọc.
 

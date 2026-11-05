@@ -62,9 +62,11 @@ async def check(runs: list[Path], output: Path) -> dict:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
         token = secrets.token_urlsafe(32)
+        operator_token = secrets.token_urlsafe(32)
         environment = os.environ.copy()
         environment.pop("DATABASE_URL", None)
-        environment.update(CONTROL_DATABASE_URL=dsn, SENTINELOPS_API_TOKEN=token, SENTINELOPS_ENABLE_DEMO="false")
+        environment.update(CONTROL_DATABASE_URL=dsn, SENTINELOPS_API_TOKEN=token,
+                           SENTINELOPS_OPERATOR_TOKEN=operator_token, SENTINELOPS_ENABLE_DEMO="false")
         stream = (output / "api.log").open("xb")
         server = subprocess.Popen([sys.executable, "-m", "uvicorn", "sentinelops.main:app",
             "--host", "127.0.0.1", "--port", str(port)], env=environment, stdout=stream, stderr=subprocess.STDOUT)
@@ -80,14 +82,19 @@ async def check(runs: list[Path], output: Path) -> dict:
                 require(server.poll() is None and asyncio.get_running_loop().time() <= deadline,
                         "native incident API did not start within its bound")
                 await asyncio.sleep(.2)
-            auth = {"authorization": "Bearer " + token}
+            producer_auth = {"authorization": "Bearer " + token}
+            auth = {"authorization": "Bearer " + operator_token}
             assert (await client.get("/ready/incidents")).status_code == 401
             assert (await client.get("/ready/incidents", headers=auth)).status_code == 200
+            assert (await client.get("/ready/incidents", headers=producer_auth)).status_code == 200
             assert (await client.get("/ready")).status_code == 503
             assert (await client.post("/v1/incidents/demo")).status_code == 404
             for identifier, payloads in expected.items():
                 assert len(payloads) == 4
                 url = "/v1/incidents/" + identifier
+                denied = {**auth, 'if-match':'"0"', 'idempotency-key':'operator-denied-' + identifier}
+                assert (await client.post('/v1/incidents', headers=denied, json=payloads[0])).status_code == 403
+                assert (await client.post(url + '/revisions', headers=denied, json={})).status_code == 403
                 assert (await client.get(url)).status_code == 401
                 assert (await client.get(url + "/explanation")).status_code == 401
                 current = await client.get(url, headers=auth)
@@ -138,6 +145,7 @@ async def check(runs: list[Path], output: Path) -> dict:
             "detected_at_immutable": True, "read_only_side_effect_counts_unchanged": True,
             "revision_pinned_explanation_fallback_and_references_verified": True,
             "explanation_revisions_verified": before["versions"],
+            "operator_read_scope_verified": True, "operator_writes_denied": 2 * len(expected),
             "model_ready_503": True, "demo_disabled": True, "actions_allowed": False}
         (output / "acceptance.json").write_text(json.dumps(report, indent=2) + "\n")
         success = True

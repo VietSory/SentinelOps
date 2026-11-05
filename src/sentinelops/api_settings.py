@@ -11,10 +11,15 @@ class Settings:
     model_store: str | None = None
     model_release_ref: str | None = None
     action_database_url: str | None = field(default=None,repr=False)
+    operator_token: str | None = field(default=None,repr=False)
 
     def __post_init__(self):
         if self.api_token is not None and len(self.api_token)<32:
             raise ValueError("SENTINELOPS_API_TOKEN must contain at least 32 characters")
+        if self.operator_token is not None and (not isinstance(self.operator_token,str) or len(self.operator_token)<32):
+            raise ValueError("SENTINELOPS_OPERATOR_TOKEN must contain at least 32 characters")
+        if self.api_token is not None and self.operator_token == self.api_token:
+            raise ValueError("operator and producer credentials must be distinct")
         if self.demo_mode and self.environment not in ("local","test"):
             raise ValueError("demo mode is restricted to local/test environments")
         if bool(self.model_store) != bool(self.model_release_ref):
@@ -26,6 +31,7 @@ class Settings:
                    control_database_url=os.getenv("CONTROL_DATABASE_URL"),
                    action_database_url=os.getenv("SENTINELOPS_ACTION_READ_DATABASE_URL"),
                    api_token=os.getenv("SENTINELOPS_API_TOKEN"),
+                   operator_token=os.getenv("SENTINELOPS_OPERATOR_TOKEN"),
                    demo_mode=os.getenv("SENTINELOPS_ENABLE_DEMO","false").lower()=="true",
                    model_store=os.getenv("SENTINELOPS_MODEL_STORE"),
                    model_release_ref=os.getenv("SENTINELOPS_MODEL_RELEASE_REF"))

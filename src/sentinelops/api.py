@@ -150,13 +150,21 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
     async def authorize(request: Request) -> str:
         if settings.environment not in ("local","test"):
             raise ApiError(503,"authentication_adapter_unavailable","Production identity adapter is not configured")
-        if not settings.api_token:
+        if not (settings.api_token or settings.operator_token):
             raise ApiError(503,"authentication_unavailable","Incident API authentication is not configured")
         value = request.headers.get("authorization","")
         scheme,_,token = value.partition(" ")
-        if scheme.lower()!="bearer" or not secrets.compare_digest(token.encode(),settings.api_token.encode()):
+        producer = bool(settings.api_token) and secrets.compare_digest(token.encode(),settings.api_token.encode())
+        operator = bool(settings.operator_token) and secrets.compare_digest(token.encode(),settings.operator_token.encode())
+        if scheme.lower()!="bearer" or not (producer or operator):
             raise ApiError(401,"unauthorized","A valid bearer token is required")
-        return "local-trusted-producer"
+        return "local-trusted-producer" if producer else "local-read-only-operator"
+
+    async def authorize_producer(request: Request) -> str:
+        identity = await authorize(request)
+        if identity != "local-trusted-producer":
+            raise ApiError(403,"read_only_credential","Operator credentials cannot import or revise incidents")
+        return identity
 
     async def require_repository(request: Request):
         repo = request.app.state.incident_repository
@@ -214,7 +222,7 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
         except ApiError:
             pass
         dependencies = {"incident_store": storage,
-            "authentication": bool(settings.api_token) and settings.environment in ("local","test"), "model": registry.available}
+            "authentication": bool(settings.api_token or settings.operator_token) and settings.environment in ("local","test"), "model": registry.available}
         ready = all(dependencies.values())
         return JSONResponse({"status":"ready" if ready else "not_ready","dependencies":dependencies,
             "demo_mode":settings.demo_mode},status_code=200 if ready else 503)
@@ -319,7 +327,7 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
 
     @app.post("/v1/incidents",status_code=201)
     async def create_incident(payload: dict,request: Request,response: Response,
-                              identity=Depends(authorize),repo=Depends(require_repository)):
+                              identity=Depends(authorize_producer),repo=Depends(require_repository)):
         validate_ier(payload)
         revision = expected_revision(request,create=True)
         digest = stable_id(payload)
@@ -336,7 +344,7 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
 
     @app.post("/v1/incidents/{incident_id}/revisions")
     async def update_incident(incident_id: str,body: dict,request: Request,response: Response,
-                              identity=Depends(authorize),repo=Depends(require_repository)):
+                              identity=Depends(authorize_producer),repo=Depends(require_repository)):
         try:
             validate_payload("incident-write.schema.json",body)
         except ValueError as exc:

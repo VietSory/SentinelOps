@@ -17,7 +17,7 @@ from uuid import uuid4
 import httpx
 
 
-async def exercise(client: httpx.AsyncClient,token: str,*,restart_database: bool):
+async def exercise(client: httpx.AsyncClient,token: str,*,restart_database: bool,operator_token: str | None = None):
     auth={"authorization":"Bearer "+token}
     assert (await client.get("/health")).status_code==200
     assert (await client.get("/ready/incidents")).status_code==401
@@ -62,6 +62,15 @@ async def exercise(client: httpx.AsyncClient,token: str,*,restart_database: bool
     assert page["timeline"]["next_after_revision"]==1
     page2=(await client.get("/v1/incidents/"+prefix+"/context",params={"after_revision":1},headers=auth)).json()
     assert [event["revision"] for event in page2["timeline"]["events"]]==[2]
+    if operator_token:
+        read_auth = {"authorization":"Bearer " + operator_token}
+        assert (await client.get('/v1/incidents/' + prefix, headers=read_auth)).json() == payload
+        assert (await client.get('/v1/incidents/' + prefix + '/explanation?revision=1', headers=read_auth)).status_code == 200
+        assert (await client.post('/v1/incidents', json=payload, headers={**headers, **read_auth})).status_code == 403
+        assert (await client.post('/v1/incidents/' + prefix + '/revisions', json=update,
+                                 headers={**update_headers, **read_auth})).status_code == 403
+        unchanged = (await client.get('/v1/incidents/' + prefix + '/context', headers=read_auth)).json()
+        assert unchanged['revision'] == 2 and unchanged['payload'] == payload and len(unchanged['timeline']['events']) == 2
     for index in range(2):
         item={**payload,"incident_id":prefix+"-"+str(index)}
         response=await client.post("/v1/incidents",json=item,headers={**headers,"idempotency-key":uuid4().hex})
@@ -97,7 +106,8 @@ async def exercise(client: httpx.AsyncClient,token: str,*,restart_database: bool
         "checks":["protected-read-write","no-model-503","no-default-demo","persisted-legacy-IER-body",
             "idempotent-import","changed-key-conflict","ETag-conditional-read","CAS-update","stale-write-conflict",
             "historical-context","bounded-timeline","filtered-keyset-list","cursor-filter-binding",
-            "body-stream-limit","unintegrated-lifecycle-denied"]+(["DB-outage-503","liveness-during-outage","pool-reconnect-after-restart"] if restart_database else [])}
+            "body-stream-limit","unintegrated-lifecycle-denied"]+(["operator-read-scope","operator-import-revision-403"] if operator_token else [])+
+            (["DB-outage-503","liveness-during-outage","pool-reconnect-after-restart"] if restart_database else [])}
 
 
 async def main(output: Path,restart_database: bool):
@@ -107,9 +117,11 @@ async def main(output: Path,restart_database: bool):
         raise ValueError("CONTROL_DATABASE_URL must select the dedicated local control sandbox")
     output.parent.mkdir(parents=True,exist_ok=True)
     token=secrets.token_urlsafe(32)
+    operator_token=secrets.token_urlsafe(32)
     with socket.socket() as listener:
         listener.bind(("127.0.0.1",0));port=listener.getsockname()[1]
-    env={**os.environ,"SENTINELOPS_API_TOKEN":token,"SENTINELOPS_ENV":"test","SENTINELOPS_ENABLE_DEMO":"false"}
+    env={**os.environ,"SENTINELOPS_API_TOKEN":token,"SENTINELOPS_OPERATOR_TOKEN":operator_token,
+         "SENTINELOPS_ENV":"test","SENTINELOPS_ENABLE_DEMO":"false"}
     with (output.parent/"api-server.log").open("w") as logs:
         process=subprocess.Popen([sys.executable,"-m","uvicorn","sentinelops.main:app","--host","127.0.0.1","--port",str(port)],env=env,stdout=logs,stderr=logs)
         try:
@@ -123,7 +135,7 @@ async def main(output: Path,restart_database: bool):
                     except httpx.HTTPError: pass
                     await asyncio.sleep(.2)
                 else: raise RuntimeError("API startup timed out")
-                report=await exercise(client,token,restart_database=restart_database)
+                report=await exercise(client,token,restart_database=restart_database,operator_token=operator_token)
                 output.write_text(json.dumps(report,indent=2))
                 print("INCIDENT API NETWORK ACCEPTANCE: PASS "+str(output),flush=True)
         finally:

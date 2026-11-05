@@ -26,6 +26,13 @@ Source authorization không đồng nghĩa dataset/model được accepted.
 đúng SHA. Liveness, DB/model readiness, corpus admission và quality gates là các
 trạng thái khác nhau. Raw/model artifacts nằm trên môi trường tương ứng, ngoài Git.
 
+Auth local B2 có credential operator chỉ đọc riêng với producer nhập/sửa IER;
+UI dùng file private `operator-token`, producer cũ giữ scope tương thích. Operator
+không được ghi revision; credential không cấp model/action authority. Host release
+mới truyền hai credential vào API, không truyền cho workers; bundle v2 cũ giữ
+cấu hình producer-only. Production identity vẫn fail closed. Xem
+[API scopes](runbooks/INCIDENT_API.md) và [host credentials](runbooks/HOST_PROCESSES.md).
+
 ## Việc tiếp theo
 
 - **A:** admission/capture → models/evaluation → RCA/explanation → source parity.

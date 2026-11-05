@@ -15,8 +15,8 @@
     <div class="workspace-label"><span class="status-dot neutral"></span>LOCAL WORKSPACE<span class="version">v0.2</span></div>
     <p class="nav-label">OPERATIONS</p>
     <a class="nav-item active" href="#workspace" aria-current="page"><span aria-hidden="true">▤</span> Incidents<span class="nav-count" id="nav-count">—</span></a>
-    <div class="nav-item muted"><span aria-hidden="true">◇</span> Explanations <span class="soon">Unavailable</span></div>
-    <div class="nav-item muted"><span aria-hidden="true">↗</span> Actions <span class="soon">Unavailable</span></div>
+    <div class="nav-item muted"><span aria-hidden="true">◇</span> Explanations <span class="soon">In detail</span></div>
+    <div class="nav-item muted"><span aria-hidden="true">↗</span> Action history <span class="soon">In detail</span></div>
     <div class="sidebar-bottom"><span class="small-mark" aria-hidden="true">◎</span><strong>Evidence first.</strong><p>Observe what happened.<br>Keep uncertainty visible.</p><span class="read-only">READ-ONLY CONSOLE</span></div>
   </aside>
   <div class="app-shell">
@@ -24,7 +24,7 @@
     <main id="workspace" tabindex="-1">
       <div class="page-heading"><div><p class="eyebrow">RELIABILITY WORKSPACE</p><h1>Incidents<span class="heading-dot">.</span></h1><p class="subtitle">Every signal has a source. Every decision has evidence.</p></div><button id="refresh" class="button secondary" disabled><span aria-hidden="true">↻</span> Refresh</button></div>
       <section class="connection-card" id="connection" aria-labelledby="connect-title">
-        <div class="connection-symbol" aria-hidden="true">⌘</div><div class="connection-copy"><h2 id="connect-title">Connect to your workspace</h2><p>Use your local API token to read persisted incidents. It stays in this tab only.</p></div>
+        <div class="connection-symbol" aria-hidden="true">⌘</div><div class="connection-copy"><h2 id="connect-title">Connect to your workspace</h2><p>Use your local operator token to read persisted incidents. It stays in this tab only.</p></div>
         <form id="connect-form"><label class="sr-only" for="api-token">Local API token</label><input id="api-token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste local API token" required minlength="32"><button class="button primary" type="submit">Connect <span aria-hidden="true">→</span></button></form>
       </section>
       <div id="notice" class="alert error" role="alert" hidden></div>

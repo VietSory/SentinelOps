@@ -4,7 +4,7 @@
 
 The API serves the operator console at `/ui/` from packaged same-origin assets.
 For lane B, follow [the isolated runtime](LOCAL_TESTBED.md#lane-b-isolated-application-runtime)
-and open `http://127.0.0.1:18000/ui/`. Enter the local API token from the private
+and open `http://127.0.0.1:18000/ui/`. Enter the local operator token from the private
 runtime file or your configured environment. Tokens stay in tab memory, are
 cleared from the input after connecting and are never persisted in browser storage.
 Disconnect clears incident state. No incident writes, fault controls or action
@@ -59,6 +59,31 @@ The HTTP incident endpoints now use the [real control repository](INCIDENT_STORE
 Start the dedicated control database as described in the storage guide. Export `CONTROL_DATABASE_URL` using the nonowner runtime role and set `SENTINELOPS_API_TOKEN` to a random local secret of at least 32 characters. Start `uvicorn sentinelops.main:app --host 127.0.0.1 --port 8000`. Environment variables are read from the process; the API does not automatically source `.env` files.
 
 All incident read/write endpoints require `Authorization: Bearer TOKEN`. This adapter is for local/test only. Other environments fail closed until a production identity adapter is implemented; a static sandbox token is not an AWS authentication acceptance. The server supplies the actor identity; a request cannot choose an audit actor. Tokens/DSNs are not returned in errors or logged by request error handling.
+
+Two distinct local credentials are supported:
+
+| Environment variable | Allowed incident operations |
+| --- | --- |
+| `SENTINELOPS_OPERATOR_TOKEN` | Read incident list/detail/context/explanation and optional action observations/readiness |
+| `SENTINELOPS_API_TOKEN` | Existing trusted producer: the same reads, plus IER import/revision writes under existing preconditions and lifecycle restrictions |
+
+Each configured credential needs at least 32 characters; equal operator/producer
+values are rejected. An operator-only API is supported: reads work, producer
+writes remain forbidden. A valid operator attempting either incident write gets
+403 `read_only_credential` before repository access; missing/wrong bearer identity
+is 401. Caller-supplied role/actor headers cannot change scope. No credential
+approves models, qualifies RCA or grants remediation authority. Stateless inference
+and explicit demo routes retain their existing contracts and model/demo gates.
+
+The B launcher creates separate private 0600 `artifacts/lane-b/operator-token`
+and `api-token` files, preserving existing values. Use the operator file for UI;
+the producer token retains its legacy read/write scope. Explicit environment
+overrides select the respective credential. No token is included in bundles,
+public status or browser storage. These remain static local credentials: rotate
+them by restarting the API with the new configuration and reconnect the tab.
+Managed releases require explicit stop/start to resnapshot credentials; a normal
+restart reuses the pinned private session. Production authentication remains
+unavailable for both credentials.
 
 `/health` is liveness. `/ready/incidents` checks authenticated storage readiness, schema version and runtime privileges. `/ready` remains 503 while the real model dependency is missing, even when incident storage is ready. A database outage returns 503 while liveness stays 200; the pool reconnects after restoration.
 
