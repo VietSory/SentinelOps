@@ -143,3 +143,37 @@ def test_client_clock_failure_is_propagated_by_load_and_preserves_failed_raw_and
     assert run['status']=='failed' and run['failure_reason']=='ClientClockDiscontinuity'
     assert posts[-2:]==list(originals.items()) and closed==[True]
     assert ArtifactStore(root/'truth').read(run['request_outcomes_ref'])['outcomes']==[]
+
+
+def test_clock_failure_closes_capture_interval_after_inflight_client_drain(monkeypatch,tmp_path):
+    from sentinelops.contracts import utc_time
+    from sentinelops.experiments.client_clock import ClientClockDiscontinuity
+    monkeypatch.setattr(runner,'checkout_identity',lambda project:('a'*40,False,{}))
+    monkeypatch.setattr(runner,'image_identity',lambda project:{s:'sha256:'+'b'*64 for s in BUSINESS_ROUTES})
+    monkeypatch.setattr(runner,'serving_logs',lambda *args:([],[]))
+    originals={runner.PAYMENT:{'mode':'healthy','delay_ms':0},runner.INVENTORY:{'mode':'healthy','delay_ms':0}}
+    async def handle(request):
+        base=str(request.url).removesuffix('/internal/faults')
+        if request.method=='GET' and request.url.path=='/internal/faults':return httpx.Response(200,json=originals[base])
+        if request.url.path=='/v1/checkout':
+            await asyncio.sleep(.25)
+            return httpx.Response(200,headers={'x-correlation-id':request.headers['x-correlation-id'],
+                'x-trace-id':request.headers['traceparent'].split('-')[1]})
+        return httpx.Response(200,json={'status':'ready'})
+    real_client=httpx.AsyncClient
+    monkeypatch.setattr(runner.httpx,'AsyncClient',lambda **kwargs:real_client(transport=httpx.MockTransport(handle),**kwargs))
+    monkeypatch.setattr(runner.PrometheusSource,'verify_configuration',lambda self:{'scrape_interval':'5s'})
+    monkeypatch.setattr(runner.PrometheusSource,'close',lambda self:None)
+    class Guard:
+        calls=0
+        def observe(self,*args):pass
+        def check(self):
+            self.calls+=1
+            if self.calls==2:raise ClientClockDiscontinuity('fixture failure with request in flight')
+    monkeypatch.setattr(runner,'ClientClockGuard',Guard)
+    with pytest.raises(RuntimeError,match='partial evidence saved'):
+        asyncio.run(runner.execute(runner.ExperimentConfig('S0','train',rps=10.),project=tmp_path,output=tmp_path/'runs'))
+    root=next((tmp_path/'runs').iterdir());run=json.loads((root/'run.json').read_bytes())
+    attempts=ArtifactStore(root/'truth').read(run['request_outcomes_ref'])['outcomes']
+    assert run['failure_reason']=='ClientClockDiscontinuity' and attempts
+    assert all(utc_time(r['completed_at'])<=utc_time(run['ended_at']) for r in attempts)

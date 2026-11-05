@@ -325,6 +325,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             if collector and not collector.done():
                 collector.cancel();await asyncio.gather(collector,return_exceptions=True)
             if active: await asyncio.gather(*tuple(active),return_exceptions=True)
+            if failure == "ClientClockDiscontinuity":
+                ended = datetime.now(timezone.utc)
             for url,original in originals.items():
                 try: await set_fault(url,original["mode"],original["delay_ms"])
                 except Exception as exc:
