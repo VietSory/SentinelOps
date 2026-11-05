@@ -15,6 +15,9 @@ import argparse
 import json
 from pathlib import Path
 import subprocess
+import time
+import urllib.error
+import urllib.request
 
 import yaml
 
@@ -81,7 +84,46 @@ def promtool(image: str, mounts: list[tuple[Path, str]], *arguments: str) -> str
     return completed.stdout
 
 
-def exercise(output: Path | None) -> dict:
+def verify_running(base_url: str, expected: set[str], *, timeout: float = 90.) -> dict:
+    """Confirm a running Prometheus loaded and actually evaluated every rule.
+
+    A rule reports health `unknown` until its first evaluation, and the group
+    interval means that is the normal state immediately after startup. Only
+    `err` is a real failure, so poll until every rule has evaluated.
+    """
+    deadline, pending, last = time.monotonic()+timeout, None, None
+    while time.monotonic() < deadline:
+        with urllib.request.urlopen(base_url.rstrip('/')+'/api/v1/rules', timeout=10) as response:
+            body = json.load(response)
+        if body.get('status') != 'success':
+            raise ValueError('Prometheus rules API did not succeed: '+json.dumps(body)[:300])
+        rules = [rule for group in body['data']['groups'] for rule in group['rules']]
+        last = {rule['name']: rule['health'] for rule in rules}
+        failed = [(rule['name'], rule.get('lastError')) for rule in rules if rule['health'] == 'err']
+        if failed:
+            raise ValueError('Prometheus reported failing rules: '+json.dumps(failed))
+        missing = expected - set(last)
+        if missing:
+            raise ValueError('the running Prometheus did not load: '+', '.join(sorted(missing)))
+        pending = sorted(name for name, health in last.items() if health != 'ok')
+        if not pending:
+            return {'rules_loaded': sorted(last), 'all_evaluated': True,
+                    'groups': len(body['data']['groups'])}
+        time.sleep(3)
+    raise ValueError('rules never finished a first evaluation within '
+                     + str(int(timeout))+'s: '+json.dumps(pending or last))
+
+
+def declared_rule_names() -> set[str]:
+    names = set()
+    for path in sorted(RULES.glob('*.yml')):
+        for group in yaml.safe_load(path.read_text())['groups']:
+            for rule in group['rules']:
+                names.add(rule.get('record') or rule['alert'])
+    return names
+
+
+def exercise(output: Path | None, base_url: str | None = None) -> dict:
     compose = yaml.safe_load((PROJECT/'docker-compose.yml').read_text())
     image = prometheus_image(compose)
     rule_files = mounted_rule_files(compose, yaml.safe_load(CONFIG.read_text()))
@@ -115,6 +157,11 @@ def exercise(output: Path | None) -> dict:
               'unit_tests': test_output.strip().splitlines(),
               'source_evidence': False, 'model_evidence': False,
               'rca_quality_evidence': False, 'actions_allowed': False}
+    if base_url:
+        try:
+            result['runtime'] = verify_running(base_url, declared_rule_names())
+        except (urllib.error.URLError, OSError) as error:
+            raise SystemExit('could not reach Prometheus at '+base_url+': '+str(error))
     if output is not None:
         write_report(result, output)
     return result
@@ -131,7 +178,9 @@ def write_report(result: dict, output: Path) -> None:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path)
-    print(json.dumps(exercise(parser.parse_args().output), indent=2), flush=True)
+    parser.add_argument('--base-url', help='Verify a running Prometheus, for example http://127.0.0.1:19090')
+    arguments = parser.parse_args()
+    print(json.dumps(exercise(arguments.output, arguments.base_url), indent=2), flush=True)
     print('PROMETHEUS RULE VALIDATION: PASS', flush=True)
 
 
