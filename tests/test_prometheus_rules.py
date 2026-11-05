@@ -1,12 +1,13 @@
 """Guards for the operator Prometheus rule wiring; no stack or promtool needed."""
 from __future__ import annotations
 
-from pathlib import Path
+import json
 
 import pytest
 import yaml
 
-from scripts.check_prometheus_rules import CONFIG, PROJECT, RULES, TESTS, mounted_rule_files, prometheus_image
+from scripts.check_prometheus_rules import (
+    CONFIG, PROJECT, RULES, TESTS, mounted_rule_files, prometheus_image, write_report)
 
 COMPOSE = yaml.safe_load((PROJECT/'docker-compose.yml').read_text())
 PROMETHEUS_CONFIG = yaml.safe_load(CONFIG.read_text())
@@ -54,6 +55,15 @@ def test_glob_rule_reference_is_rejected():
 def test_absent_rule_configuration_is_rejected():
     with pytest.raises(ValueError, match='no Prometheus rule files'):
         mounted_rule_files(COMPOSE, {})
+
+
+def test_report_creates_its_directory_and_never_overwrites(tmp_path):
+    """CI passes a nested --output path that does not exist yet."""
+    output = tmp_path/'observability'/'ci-rules.json'
+    write_report({'status': 'PASS'}, output)
+    assert json.loads(output.read_text())['status'] == 'PASS'
+    with pytest.raises(ValueError, match='must be new'):
+        write_report({'status': 'PASS'}, output)
 
 
 def test_every_rule_file_has_unit_tests():

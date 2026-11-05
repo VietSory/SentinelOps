@@ -116,10 +116,16 @@ def exercise(output: Path | None) -> dict:
               'source_evidence': False, 'model_evidence': False,
               'rca_quality_evidence': False, 'actions_allowed': False}
     if output is not None:
-        if output.exists():
-            raise ValueError('rule validation output must be new')
-        output.write_text(json.dumps(result, indent=2)+'\n')
+        write_report(result, output)
     return result
+
+
+def write_report(result: dict, output: Path) -> None:
+    """Never overwrite an earlier report, and create the directory it needs."""
+    if output.exists():
+        raise ValueError('rule validation output must be new')
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, indent=2)+'\n')
 
 
 def main():
