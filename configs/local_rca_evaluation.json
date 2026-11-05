@@ -1,0 +1,15 @@
+{
+  "protocol_version": "local-rca-development/v1",
+  "evaluation_role": "development-validation",
+  "source_profile": "prometheus-increase-60s-5s/v1",
+  "rca_policy_sha256": "62ee6f9ed87a1dddcef3ef30cf45e662da887ce0f532a2638c6f4d9d5eab052e",
+  "health_policy_sha256": "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560",
+  "topology_sha256": "ef83d6691437734bbec3c8de806e41d30a178b5ed219a1e0f4be0c4f496e87bd",
+  "analysis_cutoff": "maximum-operational-receipt-and-correlation-cutoff/v1",
+  "group_selection": "earliest-onset-then-group-id/v1",
+  "denominator": "all-registered-development-trials/v1",
+  "minimum_whole_groups": 5,
+  "model_outputs_available": false,
+  "final_access_allowed": false,
+  "activation_allowed": false
+}

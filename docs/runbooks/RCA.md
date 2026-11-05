@@ -39,3 +39,52 @@ The [H2 explanation backend](EXPLANATIONS.md) renders bounded, quoted evidence
 from a validated IncidentEnvelope. Provider selection cannot change ranking,
 metrics, availability or action authority. HTTP/UI integration remains a separate
 consumer boundary.
+
+## Prospective HTTP development trials
+
+After the entire nonfinal corpus passes G2 and its exact admission is frozen,
+run the no-model analytical baseline from a clean committed checkout over
+**every** development group:
+
+```bash
+python -m scripts.evaluate_local_rca \
+  --store /absolute/corpus/root \
+  --dataset-ref artifact://manifests/<frozen-admission-sha256>.json \
+  --output /absolute/new-evaluation-directory
+```
+
+The [versioned protocol](../../configs/local_rca_evaluation.json) pins the
+existing health/RCA policies, topology, forensic cutoff and group-selection rule.
+Original raw-source admission and the exact freeze are recomputed before replay
+or output creation. Blocked source exits with status 2 and creates no output.
+The destination must be new and outside the source corpus. Source pointers and
+paths are checked again; sealed-final, train and calibration trials are not
+selected for diagnostic evaluation. Every selected whole group must retain its
+three original healthy/Payment-gradual/Inventory-gradual trials.
+
+This reuses the existing raw-verified health, correlation and RCA replay chain.
+Only operational source references and policies reach diagnosis. Expected
+intervention roots and independent SLO confirmations are used afterward for
+evaluation. The decision clock is the maximum correlation cutoff and operational
+receipt time, so this is retrospective forensic analysis. No historical alert,
+online latency, MTTD or causal ordering is established.
+
+When a trial has several groups, the earliest onset wins, with group ID breaking
+a tie; the evaluator never selects a later group because its answer matches the
+expected root. Missing incident groups, abstentions, wrong roots and fault trials
+without an independent confirmed SLO remain visible. All fault interventions are
+the denominator of descriptive trial-level top-1/top-3 counts; conditional
+qualified top-1 has a separate denominator and is null when none qualify. Healthy
+trials with an incident group are reported separately. These are not the
+incident-level Q-04/Q-05 metrics. Trials within a whole source context are
+correlated; no IID confidence interval or quality promotion is claimed.
+
+The output contains `evaluation.json` and per-run health/correlation/RCA archives.
+Original corpus objects and Git history are still needed to recompute admission.
+A failed replay leaves its partial output for investigation and does not produce
+a successful evaluation. The software baseline excludes model outputs; it does
+not replace the model-integrated worker evaluation. G4/final/activation/action
+authority remain false regardless of descriptive results. Actual admitted-corpus
+execution waits for G2; fixture checks establish only software behavior.
+
+Focused checks: `python -m pytest -q tests/test_local_rca_evaluation.py`.
