@@ -159,12 +159,18 @@ assuming a fault.
 Absence of an accepted model is **not** alerted. `/ready` returning 503 because
 no model is approved is this deployment's expected steady state.
 
-Validate rules without starting the stack:
+Validate rules without starting the stack, and verify a running Prometheus:
 
 ```sh
 python -m scripts.check_prometheus_rules
+python -m scripts.check_prometheus_rules --base-url http://127.0.0.1:19090
 python -m pytest -q tests/test_prometheus_rules.py
 ```
+
+`--base-url` asserts every rule declared here is loaded and has actually
+evaluated. It polls, because Prometheus reports a rule's health as `unknown`
+until its first evaluation and the group interval makes that the normal state
+immediately after startup; only `err` is a real failure.
 
 The checker runs `promtool` from the same pinned Prometheus image Compose runs,
 so rules are never validated by a different version than the one that loads them.
