@@ -51,6 +51,10 @@ cần migration protocol của A; `telemetry/prometheus.py` thuộc A nên B kh�
 - **A:** admission/capture → models/evaluation → RCA/explanation → source parity.
 - **B:** UI/API local → packaging/auth/monitoring → controlled rollback → AWS.
 
+[Lane B checkpoint](delivery/LANE_B_CHECKPOINT.md) chốt mức bằng chứng từng
+capability (runtime-verified / fixture-tested / code-only / blocked), commit và CI
+đúng head, hai mục cần A quyết định, và thứ tự bước tiếp theo kèm blocker thật.
+
 Theo [ownership/interfaces](delivery/WORKSTREAM_CONTRACT.md). Cập nhật trang này
 khi capability/gap thay đổi; kiểm tra thông thường ghi ở commit/CI, không thêm
 nhật ký PASS hoặc report riêng cho mỗi lane.
