@@ -57,6 +57,24 @@ groups:
             UNKNOWN. This is not evidence that the monitored business services are
             unhealthy, and not evidence that they are healthy.
 
+      # Staleness only fires while the series still exists. Once Prometheus drops
+      # it past its staleness window, silence would read as health, so absence
+      # gets its own alert.
+      - alert: SentinelOpsWorkerTelemetryAbsent
+        expr: absent(sentinelops_worker_ready)
+        for: 2m
+        labels:
+          severity: warning
+          signal_meaning: unknown
+        annotations:
+          summary: No worker telemetry is present at all; state is UNKNOWN
+          description: >-
+            Prometheus holds no sentinelops_worker_ready series. Every worker is
+            UNKNOWN: this covers a stopped worker, a broken exporter path and a
+            scrape failure alike, and it is not evidence that the monitored
+            services are healthy. A deliberately stopped worker also raises this,
+            so confirm the intended lifecycle rather than assuming a fault.
+
       - alert: SentinelOpsWorkerNotReady
         expr: sentinelops_worker_ready == 0
         for: 1m

@@ -20,7 +20,7 @@ NAME = 'sentinelops-b'
 ROOT = PROJECT/'artifacts/lane-b'
 PORTS = {
     'prometheus':{19090:9090},'otel-collector':{14317:4317,14318:4318,18889:8889,23133:13133},
-    'jaeger':{26686:16686},'postgres':{15432:5432},'control-postgres':{15433:5432},
+    'jaeger':{26686:16686},'grafana':{13000:3000},'postgres':{15432:5432},'control-postgres':{15433:5432},
     'checkout-service':{18001:8000},'payment-service':{18002:8000},'inventory-service':{18003:8000}}
 
 

@@ -386,21 +386,14 @@ jobs:
       - run: docker compose config --quiet
       # Fail on a bad rule or an unmounted rule file before building the stack.
       - run: python -m scripts.check_prometheus_rules --output artifacts/observability/ci-rules.json
-      - run: docker compose up --build -d --wait --wait-timeout 120
-      - name: Verify the running Prometheus loaded the operator rules
-        run: |
-          python - <<'PY'
-          import json, urllib.request
-          with urllib.request.urlopen('http://127.0.0.1:9090/api/v1/rules', timeout=10) as response:
-              body = json.load(response)
-          assert body['status'] == 'success', body
-          rules = [rule for group in body['data']['groups'] for rule in group['rules']]
-          assert rules, 'the running Prometheus loaded no rules'
-          broken = [(rule.get('name'), rule['health'], rule.get('lastError')) for rule in rules if rule['health'] != 'ok']
-          assert not broken, broken
-          names = sorted(rule['name'] for rule in rules)
-          print(json.dumps({'loaded_rules': names}, indent=2))
-          PY
+      - run: python -m scripts.check_grafana_dashboards --output artifacts/observability/ci-dashboards.json
+      - run: docker compose up --build -d --wait --wait-timeout 180
+      # Polls rather than asserting immediately: a rule reports health "unknown"
+      # until its first evaluation, which is the normal state right after startup.
+      - name: Verify the running Prometheus loaded and evaluated the operator rules
+        run: python -m scripts.check_prometheus_rules --base-url http://127.0.0.1:9090 --output artifacts/observability/ci-rules-runtime.json
+      - name: Verify the running Grafana loaded the operator console
+        run: python -m scripts.check_grafana_dashboards --base-url http://127.0.0.1:3000 --output artifacts/observability/ci-dashboards-runtime.json
       - run: python scripts/step2_smoke_test.py
       - run: python scripts/step3_smoke_test.py
       - run: python -m scripts.step4_smoke_test --output artifacts/step4/ci

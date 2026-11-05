@@ -1,0 +1,17 @@
+# Provisioned datasource. Read-only in the UI so an operator cannot silently
+# repoint a panel at a different source than the one the dashboard claims.
+apiVersion: 1
+
+datasources:
+  - name: SentinelOps-Prometheus
+    uid: sentinelops-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Must match the Prometheus scrape interval so rate() windows are honest.
+      timeInterval: 5s
+      httpMethod: POST
+      manageAlerts: false

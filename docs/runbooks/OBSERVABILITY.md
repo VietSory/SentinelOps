@@ -150,15 +150,27 @@ evaluation scheduling, which made a rendered annotation value drift between
 otherwise identical runs. The recording rules remain for dashboards and ad-hoc
 queries.
 
+Staleness only fires while the series still exists. Once Prometheus drops it past
+its staleness window, silence would read as health, so `SentinelOpsWorkerTelemetryAbsent`
+covers total absence separately. It treats a stopped worker, a broken exporter
+path and a scrape failure alike — confirm the intended lifecycle rather than
+assuming a fault.
+
 Absence of an accepted model is **not** alerted. `/ready` returning 503 because
 no model is approved is this deployment's expected steady state.
 
-Validate rules without starting the stack:
+Validate rules without starting the stack, and verify a running Prometheus:
 
 ```sh
 python -m scripts.check_prometheus_rules
+python -m scripts.check_prometheus_rules --base-url http://127.0.0.1:19090
 python -m pytest -q tests/test_prometheus_rules.py
 ```
+
+`--base-url` asserts every rule declared here is loaded and has actually
+evaluated. It polls, because Prometheus reports a rule's health as `unknown`
+until its first evaluation and the group interval makes that the normal state
+immediately after startup; only `err` is a real failure.
 
 The checker runs `promtool` from the same pinned Prometheus image Compose runs,
 so rules are never validated by a different version than the one that loads them.
@@ -177,6 +189,56 @@ Each rule file is a new owned read-only bind input, so an existing lane B
 deployment lock taken before these rules no longer matches the current
 configuration and bind bytes. That mismatch is correct: take a new
 `lane_b snapshot` instead of editing or reusing the old lock.
+
+## Operator console
+
+Grafana serves the provisioned worker dashboard. For lane B it is published on
+loopback `13000` (`http://127.0.0.1:13000`), reserved by the team contract:
+
+```sh
+python -m scripts.lane_b up
+python -m scripts.check_grafana_dashboards
+python -m scripts.check_grafana_dashboards --base-url http://127.0.0.1:13000
+python -m pytest -q tests/test_grafana_dashboards.py
+```
+
+Everything is provisioned from committed files: the datasource is `editable:
+false`, the dashboard provider sets `allowUiUpdates: false`, and the dashboard
+itself is `editable: false`. What an operator sees is what is reviewed here, and
+a panel cannot be silently repointed at another source.
+
+Anonymous access with the `Viewer` role, sign-up disabled, basic auth disabled,
+loopback only. **This is a local sandbox console, not production authentication** —
+the same boundary as the local API tokens. It exposes no fault control, no
+incident write and no action execution. Grafana's own update checks, plugin
+fetches and news feed are disabled so an observability console makes no outbound
+calls from the sandbox.
+
+`scripts/check_grafana_dashboards.py` validates the console definition and,
+with `--base-url`, a running instance. It checks that every panel query names a
+metric or recording rule that actually exists (a typo renders an empty panel that
+looks like no problem), that **no panel reads source availability without the
+decision guard**, that state panels declare what absent data means and never
+present it as healthy, that every mapped value carries text so state is never
+colour alone, that no panel introduces a second y-axis or a per-series unit
+override, and that every plotted panel shows a legend. Against a running Grafana
+it confirms each dashboard is reported `provisioned`, the datasource is present,
+and **every expression actually evaluates on the real Prometheus** — static name
+checking cannot catch an invalid function or aggregation.
+
+`tests/test_grafana_dashboards.py` proves each guard rejects a violation by
+mutating a copy of the real dashboard.
+
+One panel detail worth keeping: "Replicas with a stale heartbeat" uses
+`count(... > 15) or (count(...) * 0)`. The bare `count(... > 15)` returns an
+empty result both when nothing is stale *and* when no replica reports at all, so
+the panel would have displayed "none stale" for a dead worker. The `or` branch
+makes zero mean *observed and fresh*, and total absence falls through to
+`UNKNOWN — no replica reporting`.
+
+Adding Grafana makes nine owned B containers and three more read-only bind files,
+so a deployment lock taken before it no longer matches; take a new
+`lane_b snapshot` rather than reusing the old lock.
 
 ## Automated checks
 

@@ -19,7 +19,9 @@ python -m scripts.lane_b incidents --health-stream <stream_id>
 ```
 
 API listens on `127.0.0.1:18000`; B commerce/control DB ports are 15432/15433,
-Prometheus 19090, Jaeger 26686 and OTLP 14317/14318. All published ports, not just
+Prometheus 19090, Jaeger 26686, Grafana 13000 and OTLP 14317/14318. The Grafana
+console is read-only and anonymous `Viewer` on loopback; see the
+[operator console](OBSERVABILITY.md#operator-console). All published ports, not just
 PostgreSQL, are replaced. Workers stay host processes so their loopback ownership
 guards remain intact. Stop those foreground processes with Ctrl+C separately;
 `down` does not kill arbitrary host processes. Don't run B load/stress alongside
@@ -60,7 +62,7 @@ integration evidence, not admitted training data or RCA accuracy. Output under
 
 ### Pin observed B container images and configuration
 
-From a clean committed checkout with all eight B containers running, execute
+From a clean committed checkout with all nine B containers running, execute
 `python -m scripts.lane_b snapshot`. It returns an immutable content-addressed
 `deployment_ref` under `artifacts/lane-b/releases`. The observer records actual
 local image/container IDs, the rendered Compose configuration hash and hashes of
