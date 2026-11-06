@@ -21,6 +21,7 @@ import yaml
 from sentinelops.contracts import utc_time
 from sentinelops.incidents.rca import validate_policy
 from sentinelops.incidents.rca_source import epoch_ns, reject_control
+from sentinelops.telemetry.prometheus import matches_source_configuration
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.infrastructure import PostgresInfrastructureSource
 from sentinelops.trace_query import decode_v3_trace
@@ -221,7 +222,7 @@ class NativeIncidentEvidence:
                 owned["prometheus"]["configuration_available"] = False
             else:
                 if (config.get("status") != "success"
-                    or stable_id(yaml.safe_load(config["data"]["yaml"])) != identity["prometheus_configuration_hash"]):
+                    or not matches_source_configuration(yaml.safe_load(config["data"]["yaml"]), identity["prometheus_configuration_hash"])):
                     raise ValueError("native source configuration changed since its accepted health identity")
                 owned["prometheus"]["configuration_available"] = True
         return owned

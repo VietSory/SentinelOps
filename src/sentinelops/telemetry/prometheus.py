@@ -16,6 +16,25 @@ SOURCE_PROFILE = "prometheus-increase-60s-5s/v1"
 SOURCE_INTERVALS = {"prometheus-increase-60s/v1": 15, SOURCE_PROFILE: 5}
 
 
+def source_configuration_hash(config: dict) -> str:
+    """Versioned local-query identity; rules/alert delivery do not define scrapes.
+
+    All other fields (including unknown future source settings) remain pinned.
+    Rules are trusted operator configuration, not an integrity/authentication
+    boundary; raw source queries do not consume the worker recording rules.
+    """
+    if not isinstance(config, dict) or not isinstance(config.get("scrape_configs"), list):
+        raise ValueError("invalid Prometheus source configuration")
+    return stable_id({"identity_version": "prometheus-source-config/v2", "configuration": {
+        key: value for key, value in config.items() if key not in ("rule_files", "alerting")}})
+
+
+def matches_source_configuration(config: dict, expected: str) -> bool:
+    # Legacy streams keep their original full-config identity. Never translate
+    # an old checkpoint into the new stream or accept legacy alert-config drift.
+    return expected in (source_configuration_hash(config), stable_id(config))
+
+
 class BucketNotReady(ValueError):
     """The UTC source watermark has not actually elapsed yet."""
 
@@ -110,7 +129,7 @@ class PrometheusSource:
         interval = jobs[0].get("scrape_interval",config.get("global",{}).get("scrape_interval")) if len(jobs)==1 else None
         if interval != "5s":
             raise ValueError("Prometheus scrape configuration does not match the 5s source profile")
-        return {"scrape_interval":interval,"configuration_hash":stable_id(config)}
+        return {"scrape_interval":interval,"configuration_hash":source_configuration_hash(config)}
 
     def capture(self, service: str, end: datetime, *, now: datetime | None = None) -> dict[str, Any]:
         current = now or datetime.now(timezone.utc)

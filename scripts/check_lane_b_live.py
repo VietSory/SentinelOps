@@ -20,6 +20,11 @@ import httpx
 
 from scripts import lane_b
 from sentinelops.contracts import validate_payload
+from sentinelops.telemetry.core import stable_id
+from sentinelops.telemetry.prometheus import PrometheusSource
+from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.workers.health import HealthWorker
+import yaml
 
 URLS = {'checkout-service':'http://127.0.0.1:18001/v1/checkout',
         'payment-service':'http://127.0.0.1:18002/v1/payments/charge',
@@ -28,6 +33,49 @@ BODY = {'sku':'sku-001','quantity':1,'amount':10.0,'currency':'USD'}
 
 
 def now(): return datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
+
+
+def select_current_consumer(rows, identity):
+    """One exact current source, retaining every historical consumer/checkpoint."""
+    stream = stable_id(identity)
+    selected = [row for row in rows if row["health_stream_id"] == stream]
+    if len(selected) != 1:
+        raise ValueError("start exactly one native B consumer for the current health source")
+    row = selected[0]
+    decode = lambda value: json.loads(value) if isinstance(value, str) else value
+    health, consumer = decode(row["health_identity"]), decode(row["identity"])
+    expected_id = stable_id({"consumer_version": "continuous-incident/v1", "health_stream_id": stream})
+    profile = consumer.get("evidence_profile", {})
+    if (health != identity or row["consumer_id"] != expected_id
+        or consumer.get("health_stream_id") != stream
+        or consumer.get("consumer_version") != "continuous-incident/v1"
+        or consumer.get("health_policy_sha256") != identity["policy_sha256"]
+        or consumer.get("artifact_root_hash") != stable_id({"root": str((lane_b.ROOT/"incidents").resolve())})
+        or consumer.get("topology_sha256") != stable_id(yaml.safe_load((lane_b.PROJECT/"configs/topology.yaml").read_text()))
+        or consumer.get("rca_policy_sha256") != stable_id(json.loads((lane_b.PROJECT/"configs/rca_policy.json").read_text()))
+        or profile.get("compose_project") != lane_b.NAME
+        or profile.get("profile_version") != "native-incident-evidence/v1"
+        or profile.get("prometheus_endpoint") != "http://127.0.0.1:19090"
+        or profile.get("jaeger_endpoint") != "http://127.0.0.1:26686"):
+        raise ValueError("current B consumer/source identity differs from the selected runtime")
+    return row["consumer_id"]
+
+
+async def current_consumer(connection):
+    source = PrometheusSource("http://127.0.0.1:19090")
+    try:
+        configuration = await asyncio.to_thread(source.verify_configuration)
+    finally:
+        source.close()
+    policy = json.loads((lane_b.PROJECT/"configs/slo_health_policy.json").read_text())
+    identity = HealthWorker(None, ArtifactStore(lane_b.ROOT/"health"), policy,
+        endpoint="http://127.0.0.1:19090", environment="local",
+        configuration_hash=configuration["configuration_hash"]).identity
+    rows = await connection.fetch("""SELECT c.consumer_id,c.health_stream_id,c.identity,s.identity AS health_identity
+        FROM sentinel_control.incident_consumers c
+        JOIN sentinel_control.health_streams s ON s.stream_id=c.health_stream_id
+        WHERE c.identity->'evidence_profile'->>'compose_project'=$1""", lane_b.NAME)
+    return select_current_consumer(rows, identity)
 
 
 async def run():
@@ -51,9 +99,7 @@ async def run():
         response = await client.get('http://127.0.0.1:18000/ready/incidents',headers=protected); response.raise_for_status()
         connection = await asyncpg.connect(environment['CONTROL_DATABASE_URL'])
         try:
-            consumers = await connection.fetch("SELECT consumer_id FROM sentinel_control.incident_consumers WHERE identity->'evidence_profile'->>'compose_project'=$1",lane_b.NAME)
-            if len(consumers) != 1: raise ValueError('start exactly one native B consumer before this workload')
-            consumer = consumers[0]['consumer_id']
+            consumer = await current_consumer(connection)
             before = {row['incident_id'] for row in await connection.fetch(
                 'SELECT incident_id FROM sentinel_control.incident_jobs WHERE consumer_id=$1',consumer)}
             original = (await client.get('http://127.0.0.1:18002/internal/faults')).json()
@@ -108,6 +154,8 @@ async def run():
                 measured.append({'incident_id':row['incident_id'],'revisions':row['revisions'],'api_revision':envelope['revision'],
                     'availability':envelope['context']['availability'],'lifecycle':envelope['context']['lifecycle_stage']})
             if not measured or any(item['revisions']<2 for item in measured): raise ValueError('no new enriched source-backed B incident reached the API')
+            if await current_consumer(connection) != consumer:
+                raise ValueError('current health source changed during B workload; results preserved')
             metadata.update(status='PASS',ended_at=now(),consumer_id=consumer,incidents=measured,
                 model_dependency=(await client.get('http://127.0.0.1:18000/ready')).json()['dependencies']['model'])
         except BaseException as exc:
