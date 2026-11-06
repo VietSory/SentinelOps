@@ -481,3 +481,25 @@ log identities and trace resource identities. Missing/multiple Pods, changed ima
 unknown requests or inventory rollover fail closed. These observations do not approve
 model source parity, known-good images or dispatch. H4/G4/G6 still require their actual
 model, change, RCA and controlled action evidence.
+
+
+Add `--deployment-change-store <original-change-store>` to that Kubernetes incident
+worker to select the immutable receipts emitted by `open-change` / `complete-change`.
+The feed is bounded to 1,024 manifests and one matching Payment transition per job;
+older events do not become experiment truth or repeated independent support.
+Capture v5 adds original change evidence to v3; v6 adds the separately validated
+model release. Existing v1–v4 replay remains supported. A matching fact requires
+both image/generation/UID agreement and an entirely pre-incident mutation interval,
+with a wholly post-change accepted HTTP bucket. The fact records the interval upper
+bound explicitly; it does not invent an exact mutation time.
+
+`NativeH4Authority(journal)` now supplies an internal assessment only from a
+journal-verified v6 result, an available validated model registry, a matching
+observed change and non-abstained RCA. B can use this producer with the existing
+`RollbackExecutor`; no HTTP/client/provider flag grants this authority. The normal
+known-good approval, enabled policy/kill switch, exact current incident revision,
+180-second freshness, dry-run, durable one-attempt journal, CAS and post-action
+verification still apply. Known-good approval must predate the **entire** mutation
+interval. The shipped resume-only worker still creates no new action intents.
+Actual H4 and G6 remain pending real qualified H1/G3/RCA evidence and an observed
+controlled rollback; software/native fixture CI does not satisfy those outcomes.

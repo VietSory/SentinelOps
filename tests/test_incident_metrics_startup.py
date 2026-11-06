@@ -41,7 +41,8 @@ def test_startup_db_failure_is_observable_and_closes_private_metrics(monkeypatch
     metrics.close.assert_called_once()
 
 
-def test_database_retry_refreshes_real_loop_heartbeat_while_remaining_not_ready(monkeypatch, tmp_path):
+@pytest.mark.parametrize('source_outage',[False,True])
+def test_dependency_retry_refreshes_real_loop_heartbeat_while_remaining_not_ready(monkeypatch, tmp_path, source_outage):
     args = settings(monkeypatch)
     args.__dict__.update(health_policy=Path('configs/slo_health_policy.json'), source_store=tmp_path / 'source',
                          health_stream='fixture-stream', project='fixture-project', jaeger='http://127.0.0.1:16686',
@@ -69,6 +70,8 @@ def test_database_retry_refreshes_real_loop_heartbeat_while_remaining_not_ready(
 
     async def tick():
         tick_number[0] += 1
+        if source_outage:
+            raise cli.KubernetesUnavailable('Kubernetes source unavailable')
         raise ConnectionError('database unavailable')
 
     monkeypatch.setattr(cli, 'IncidentWorker', Mock(return_value=SimpleNamespace(tick=tick)))
@@ -77,5 +80,6 @@ def test_database_retry_refreshes_real_loop_heartbeat_while_remaining_not_ready(
     assert (1, False) in heartbeats, 'a live retry loop needs a fresh not-ready heartbeat after the first failure'
     assert not any(ready for _, ready in heartbeats)
     assert metrics.error.call_count == 2
+    metrics.error.assert_called_with("source" if source_outage else "database")
     pool.close.assert_awaited_once()
     collector.close.assert_awaited_once()

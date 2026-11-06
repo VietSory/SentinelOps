@@ -24,6 +24,7 @@ from sentinelops.workers.incident_journal import IncidentJournal
 from sentinelops.workers.model_signals import ModelIncidentEvidence
 from sentinelops.ml.registry import ModelRegistry
 from sentinelops.workers.metrics import IncidentWorkerMetrics
+from sentinelops.remediation.domain import KubernetesUnavailable
 
 
 async def run(args):
@@ -70,6 +71,9 @@ async def run(args):
         else:
             collector = NativeIncidentEvidence(args.project, jaeger_endpoint=args.jaeger,
                 prometheus_endpoint=args.prometheus, commerce_dsn=os.environ.get("COMMERCE_EVIDENCE_DATABASE_URL"))
+        if getattr(args, 'deployment_change_store', None):
+            from sentinelops.workers.deployment_evidence import DeploymentIncidentEvidence
+            collector = DeploymentIncidentEvidence(collector, source, ArtifactStore(args.deployment_change_store))
         registry = ModelRegistry.load(ArtifactStore(args.model_store), args.model_release_ref) if args.model_store else None
         if registry is not None:
             collector = ModelIncidentEvidence(collector, registry)
@@ -103,6 +107,12 @@ async def run(args):
             if metrics: metrics.heartbeat(ready=ready)
             try:
                 result = await worker.tick()
+            except KubernetesUnavailable as exc:
+                ready = False
+                if metrics:
+                    metrics.error("source")
+                    metrics.heartbeat(ready=False)
+                print(json.dumps({"status": "SOURCE_UNAVAILABLE", "error_type": type(exc).__name__}), flush=True)
             except (asyncpg.PostgresConnectionError, asyncpg.CannotConnectNowError, ConnectionError, TimeoutError) as exc:
                 ready = False
                 if metrics:
@@ -151,6 +161,7 @@ def main():
     parser.add_argument("--store", type=Path, required=True)
     parser.add_argument("--project", required=True, help="Owned Compose project; ignored for explicit Kubernetes source")
     parser.add_argument("--kubernetes-config", type=Path, help="Private explicit local API, token/CA, target and three Deployment UIDs")
+    parser.add_argument("--deployment-change-store", type=Path, help="Original immutable observed image-transition store; Kubernetes source only")
     parser.add_argument("--health-policy", type=Path, default=Path("configs/slo_health_policy.json"))
     parser.add_argument("--rca-policy", type=Path, default=Path("configs/rca_policy.json"))
     parser.add_argument("--topology", type=Path, default=Path("configs/topology.yaml"))
@@ -168,6 +179,8 @@ def main():
         parser.error("poll interval or tick bound is outside supported limits")
     if bool(args.model_store) != bool(args.model_release_ref) or args.status and args.metrics_otlp_endpoint:
         parser.error("model activation requires store and release; status cannot export metrics")
+    if args.deployment_change_store and not args.kubernetes_config:
+        parser.error("deployment changes require the explicit Kubernetes source")
     try:
         asyncio.run(run(args))
     except Exception as exc:

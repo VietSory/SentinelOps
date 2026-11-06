@@ -36,13 +36,15 @@ def derive_continuous(store, *, intent_ref: str, intent: dict, closed: dict, cap
     group = next(g for g in correlation["groups"] if g["group_id"] == intent["group_id"])
     capture = store.read(capture_ref)
     version = capture.get("capture_version")
-    has_models = version in ("continuous-incident-evidence/v2", "continuous-incident-evidence/v4")
-    kubernetes = version in ("continuous-incident-evidence/v3", "continuous-incident-evidence/v4")
+    has_models = version in ("continuous-incident-evidence/v2", "continuous-incident-evidence/v4", "continuous-incident-evidence/v6")
+    kubernetes = version in ("continuous-incident-evidence/v3", "continuous-incident-evidence/v4", "continuous-incident-evidence/v5", "continuous-incident-evidence/v6")
+    has_changes = version in ("continuous-incident-evidence/v5", "continuous-incident-evidence/v6")
     if (set(capture) != ({"capture_version", "job_id", "intent_ref", "profile", "health_stream_id", "window_start",
                          "window_end", "analyzed_at", "evidence_refs", "source_containers", "missing_counts", "actions_allowed"}
-                         | ({"model_evidence"} if has_models else set()) | ({"physical_binding"} if kubernetes else set()))
+                         | ({"model_evidence"} if has_models else set()) | ({"physical_binding"} if kubernetes else set()) | ({"deployment_changes"} if has_changes else set()))
         or capture["capture_version"] not in ("continuous-incident-evidence/v1", "continuous-incident-evidence/v2",
-                                               "continuous-incident-evidence/v3", "continuous-incident-evidence/v4")
+                                               "continuous-incident-evidence/v3", "continuous-incident-evidence/v4",
+                                               "continuous-incident-evidence/v5", "continuous-incident-evidence/v6")
         or capture["job_id"] != intent["job_id"] or capture["intent_ref"] != intent_ref
         or capture["health_stream_id"] != stable_id(health_identity)
         or capture["profile"] != profile or capture["actions_allowed"] is not False):
@@ -128,4 +130,8 @@ def derive_continuous(store, *, intent_ref: str, intent: dict, closed: dict, cap
         signals = verify_model_evidence(store, capture, model_registry)
         derived = add_model_support(store, derived, signals, policy=policy, as_of=decision)
         derived["model_signals"] = signals
+    if has_changes:
+        from sentinelops.workers.deployment_evidence import verify_deployment_evidence, add_deployment_support
+        changes = verify_deployment_evidence(store, capture, health_identity, health_policy, group)
+        derived = add_deployment_support(store, derived, changes, policy=policy, as_of=decision)
     return derived

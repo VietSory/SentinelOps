@@ -136,6 +136,13 @@ phải regression. Cần A hoặc owner rerun. Thuộc scope A, B không chạm.
 | **H1 model** | Ba service bundle, `training-manifest.json`, dataset/policy refs, checksums, library/code versions, evaluation/model card, source-parity status; URI materialize được, không phải path máy A | Wiring đã xong; model thiếu thì `/v1/detect` 503 và UI vẫn đọc incident |
 | **H4 action eligibility** | IER/revision kèm RCA/evidence có scope, freshness, coverage, confidence/abstention thật | Executor/guard/journal/RBAC đã có; auto action giữ blocked |
 
+Phần mềm H4 hiện có producer `NativeH4Authority(journal)` cho nguồn Kubernetes
+đã được journal xác minh, model được chấp nhận và sự kiện đổi image thật; cấu hình
+nguồn và feed theo [runbook](../runbooks/CONTROLLED_REMEDIATION.md#kubernetes-incident-evidence-source).
+B có thể tích hợp producer với executor, chuẩn bị known-good ledger và policy ngay.
+Đầu ra H1/G3 và incident H4 đủ điều kiện thực tế vẫn chưa được bàn giao; code và
+kiểm tra Kubernetes không thay thế hai đầu ra này.
+
 B không cần raw train của A để hoàn thành UI. Chỉ bước **bật inference thật** và
 **rollback sản phẩm thật** chờ hai boundary trên.
 

@@ -1,8 +1,8 @@
-"""H4 boundary: current native RCA is evidence, never an action permission.
+"""H4 producer from journal-verified, UID-bound Kubernetes/model/change evidence.
 
-A future approved H4 producer can implement the internal Assessment provider.
-Only software tests inject a qualified fixture provider today. No HTTP payload,
-LLM response, explanation or client boolean can select/replace this provider.
+Docker evidence alone remains observational. An internal qualified assessment
+still needs the executor's policy, approved known-good ledger and action guards.
+No HTTP/LLM/client flag selects or replaces this producer.
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ class Change:
     available_at: str
     source_ref: str
     fact_id: str
+    not_before: str | None = None
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,7 @@ class Assessment:
 
 
 class NativeH4Authority:
-    """Actually reproduce native evidence, while preserving its authority limit."""
+    """Reproduce the accepted journal before considering scoped H4 qualification."""
     def __init__(self, journal):
         self.journal = journal
         self.health_stream_id = journal.source.stream_id
@@ -55,10 +56,20 @@ class NativeH4Authority:
         snapshot = await self.journal.repository.get(request.incident_id)
         _, state = await self.journal.checkpoint()
         result = derived['rca']
+        value = derived.get('deployment_change')
+        qualified = False
+        if value is not None:
+            capture = self.journal.store.read(accepted['capture_ref'])
+            registry = self.journal.model_registry
+            qualified = (capture['capture_version'] == 'continuous-incident-evidence/v6'
+                and registry is not None and registry.available and not result['abstained'])
+        change = Change(**{**value, 'target': Target(**value['target'])}) if qualified else None
+        reason = ('rca-abstained' if result['abstained'] else
+                  'native-h4-contract-not-activated' if value is None else
+                  'validated-model-and-physical-deployment-change-required')
         return Assessment(request.incident_id, snapshot['revision'], snapshot['context']['lifecycle_stage'],
-            snapshot['context']['availability'], state['last_bucket_end'], accepted['result_ref'], result, None,
-            dispatch_authority=False,
-            missing_reason='rca-abstained' if result['abstained'] else 'native-h4-contract-not-activated')
+            snapshot['context']['availability'], state['last_bucket_end'], accepted['result_ref'], result, change,
+            dispatch_authority=qualified, missing_reason=reason)
 
 
 def qualify(assessment, request, before, known_good, policy, rca_policy, *, now: datetime):
@@ -87,6 +98,15 @@ def qualify(assessment, request, before, known_good, policy, rca_policy, *, now:
         or not utc_time(change.observed_at) <= utc_time(change.available_at) <= now
         or not utc_time(known_good.approved_at) <= utc_time(change.observed_at)):
         raise Blocked('no-matching-pre-incident-deployment-change')
+    # New observed changes have an uncertainty interval. The entire interval
+    # must predate the incident, follow known-good approval and fit the original
+    # 600-second recency bound; its upper bound is not an exact mutation time.
+    if change.not_before is not None:
+        lower, upper = utc_time(change.not_before), utc_time(change.observed_at)
+        if (not timedelta(0) < upper-lower <= timedelta(seconds=180)
+            or not utc_time(known_good.approved_at) <= lower
+            or not onset-timedelta(seconds=policy.change_window_seconds) <= lower <= upper < onset):
+            raise Blocked('deployment-change-interval-not-qualified')
     candidate = next(c for c in result['candidates'] if c['service'] == 'payment-service')
     support = candidate['components']['recent_change_support']
     facts = {f['id']:f for f in result['evidence']}

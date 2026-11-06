@@ -177,7 +177,8 @@ def test_full_readonly_collector_and_replay_pin_original_health_and_pod_logs(tmp
     asyncio.run(run())
 
 @pytest.mark.parametrize('with_model',[False,True])
-def test_continuous_rca_replays_kubernetes_versions_without_docker_identity_alias(with_model,tmp_path):
+@pytest.mark.parametrize('with_feed',[False,True])
+def test_continuous_rca_replays_kubernetes_versions_without_docker_identity_alias(with_model,with_feed,tmp_path):
     from test_incident_evidence import continuous_fixture
     from sentinelops.ml.registry import ModelRegistry
     from sentinelops.workers.incident_rca import derive_continuous
@@ -229,7 +230,26 @@ def test_continuous_rca_replays_kubernetes_versions_without_docker_identity_alia
     if with_model:
         registry=ModelRegistry();profile['model_release_ref']=registry.identity
         captured['model_evidence']={'release_ref':registry.identity,'source_state_ref':state,'feature_batch_ref':batch,'signals':[]}
+    if with_feed:
+        captured['capture_version']='continuous-incident-evidence/v6' if with_model else 'continuous-incident-evidence/v5'
+        captured['deployment_changes']=[]
     result=derive_continuous(store,intent_ref=intent_ref,intent=intent,closed=closed,
         capture_ref=store.write('manifests',captured),profile=profile,health_identity=identity,
         health_policy=HEALTH_POLICY,model_registry=registry)
     assert result['rca']['abstained'] is True
+
+
+def test_transient_telemetry_outage_is_unavailable_not_a_partial_trace_or_capture(tmp_path):
+    from sentinelops.remediation.domain import KubernetesUnavailable
+    async def run():
+        kube=type('Kube',(),{'target':TARGET,'close':lambda self:asyncio.sleep(0)})()
+        source=KubernetesIncidentEvidence(kube,{s:s+'-uid' for s in BUSINESS_ROUTES},
+            prometheus_endpoint='http://127.0.0.1:9090',jaeger_endpoint='http://127.0.0.1:16686')
+        await source.client.aclose()
+        source.client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request:httpx.Response(503)))
+        try:
+            with pytest.raises(KubernetesUnavailable):await source._http('http://127.0.0.1:9090/api/v1/query',limit=100)
+            assert await source._trace('1'*32,'payment-service',ArtifactStore(tmp_path))==(None,'kubernetes-trace-source-unavailable')
+        finally:await source.close()
+    asyncio.run(run())
+    assert not list(tmp_path.rglob('*.json'))

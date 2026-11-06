@@ -1,7 +1,8 @@
 """Bounded one-attempt rollback with durable intent-before-side-effect.
 
-No public dispatch endpoint or enabled production H4 adapter is installed. The
-current NativeH4Authority always preserves abstention/missing action authority.
+No public dispatch endpoint or enabled production action policy is installed.
+The internal H4 provider must replay accepted Kubernetes/model/change evidence;
+Docker-only or unqualified evidence remains blocked.
 """
 from __future__ import annotations
 

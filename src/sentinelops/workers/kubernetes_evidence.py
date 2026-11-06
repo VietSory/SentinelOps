@@ -16,7 +16,7 @@ import yaml
 
 from sentinelops.contracts import utc_time
 from sentinelops.incidents.rca_source import reject_control
-from sentinelops.remediation.domain import Target, image_digest
+from sentinelops.remediation.domain import Target, KubernetesUnavailable, image_digest
 from sentinelops.remediation.kubernetes import _owner
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.prometheus import REQUESTS, matches_source_configuration, decode_capture
@@ -155,6 +155,12 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
             target=dict(vars(kubernetes.target)), deployment_uids=self.deployment_uids)
         self.profile.pop('compose_project')
 
+    async def _http(self, path, *, limit):
+        try:
+            return await super()._http(path, limit=limit)
+        except (httpx.HTTPError, TimeoutError):
+            raise KubernetesUnavailable('kubernetes-telemetry-http-unavailable') from None
+
     async def close(self):
         try: await super().close()
         finally: await self.kube.close()
@@ -178,7 +184,10 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
             if rs.get('metadata', {}).get('continue') or ps.get('metadata', {}).get('continue'):
                 raise ValueError('Kubernetes inventory pagination exceeds bounded source scope')
             sets[service], pods[service] = rs['items'], ps['items']
-        owned = project_inventory(deployments, sets, pods, target=self.kube.target, deployment_uids=self.deployment_uids)
+        try:
+            owned = project_inventory(deployments, sets, pods, target=self.kube.target, deployment_uids=self.deployment_uids)
+        except ValueError:
+            raise KubernetesUnavailable('kubernetes-business-inventory-not-currently-usable') from None
         config = json.loads(await self._http(self.prometheus_endpoint + '/api/v1/status/config', limit=TRACE_BYTES))
         if config.get('status') != 'success' or not matches_source_configuration(
                 yaml.safe_load(config['data']['yaml']), identity['prometheus_configuration_hash']):
@@ -200,18 +209,29 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
                     for c in p.get('status',{}).get('containerStatuses',[])]}} for p in pods[service]]
         return {**owned, 'jaeger': {'running': True}, 'prometheus': {'running': True}, 'kubernetes_api': api}
 
+    async def _trace(self, trace_id, entry, store):
+        try:
+            return await super()._trace(trace_id, entry, store)
+        except KubernetesUnavailable:
+            return None, 'kubernetes-trace-source-unavailable'
+
     async def _logs(self, identity, lower, upper):
         path = '/api/v1/namespaces/' + identity['namespace'] + '/pods/' + identity['pod_name'] + '/log'
         params = {'container': identity['service'].removesuffix('-service'), 'sinceTime': timestamp(lower),
                   'limitBytes': LOG_BYTES + 1, 'timestamps': 'false', 'previous': 'false'}
         pieces, size = [], 0
-        async with asyncio.timeout(8):
-            async with self.kube.client.stream('GET', path, params=params) as response:
-                response.raise_for_status()
-                async for piece in response.aiter_bytes():
-                    size += len(piece)
-                    if size > LOG_BYTES: raise ValueError('Kubernetes log response exceeds byte budget')
-                    pieces.append(piece)
+        try:
+            async with asyncio.timeout(8):
+                async with self.kube.client.stream('GET', path, params=params) as response:
+                    if response.status_code >= 500:
+                        raise KubernetesUnavailable('kubernetes-pod-logs-unavailable')
+                    response.raise_for_status()
+                    async for piece in response.aiter_bytes():
+                        size += len(piece)
+                        if size > LOG_BYTES: raise ValueError('Kubernetes log response exceeds byte budget')
+                        pieces.append(piece)
+        except (httpx.TransportError, TimeoutError):
+            raise KubernetesUnavailable('kubernetes-pod-log-transport-unavailable') from None
         body = b''.join(pieces);received = now()
         rows, originals, counts = kubernetes_completions(body, identity, lower, upper, received)
         return rows, {**identity, 'collected_at': timestamp(received), 'selection': counts,
@@ -235,7 +255,7 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
                                  'response': body, 'collected_at': timestamp(now())})
         after = await self.verify_source(kwargs['health_identity'])
         if any(after[s] != inventory[s] for s in BUSINESS_ROUTES):
-            raise ValueError('Kubernetes Pod or image changed during operational capture')
+            raise KubernetesUnavailable('kubernetes-pod-or-image-changed-during-capture')
         for reference in base['evidence_refs']['traces']:
             trace_pods(store.read(reference)['body'], inventory)
         base.update(capture_version='continuous-incident-evidence/v3',

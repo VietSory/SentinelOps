@@ -275,9 +275,17 @@ def _replay(root, expected_health, expected_incident, model_registry=None):
         require(len(rows) == 1 and rows[0]["job_id"] == job["job_id"], "job needs one immutable operational capture")
         evidence = rows[0]
         capture = store.read(evidence["capture_ref"])
-        if capture["capture_version"] == "continuous-incident-evidence/v2":
-            require(capture["model_evidence"]["source_state_ref"] in {s["state_ref"] for s in journal["incident_consumer_steps"]},
-                    "model capture feature state is not an accepted raw-verified consumer step")
+        packs = []
+        if capture['capture_version'] in ('continuous-incident-evidence/v2','continuous-incident-evidence/v4','continuous-incident-evidence/v6'):
+            packs.append(capture['model_evidence'])
+        if capture['capture_version'] in ('continuous-incident-evidence/v3','continuous-incident-evidence/v4','continuous-incident-evidence/v5','continuous-incident-evidence/v6'):
+            packs.append(capture['physical_binding'])
+        if len(packs) == 2:
+            require(all(packs[0][k] == packs[1][k] for k in ('source_state_ref','feature_batch_ref')),
+                    'model and physical binding select different accepted source steps')
+        for pack in packs:
+            require(pack['source_state_ref'] in {s['state_ref'] for s in journal['incident_consumer_steps']},
+                    'operational feature/binding state is not an accepted raw-verified consumer step')
         derived = derive_continuous(store, intent_ref=job["intent_ref"], intent=intent, closed=scope,
             capture_ref=evidence["capture_ref"], profile=identity["evidence_profile"],
             health_identity=health_identity, health_policy=health_policy, model_registry=model_registry)

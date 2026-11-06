@@ -375,9 +375,9 @@ class IncidentJournal:
     async def _verify_model_capture(self, capture_ref):
         capture = self.store.read(capture_ref)
         packs = []
-        if capture['capture_version'] in ('continuous-incident-evidence/v2','continuous-incident-evidence/v4'):
+        if capture['capture_version'] in ('continuous-incident-evidence/v2','continuous-incident-evidence/v4','continuous-incident-evidence/v6'):
             packs.append(capture['model_evidence'])
-        if capture['capture_version'] in ('continuous-incident-evidence/v3','continuous-incident-evidence/v4'):
+        if capture['capture_version'] in ('continuous-incident-evidence/v3','continuous-incident-evidence/v4','continuous-incident-evidence/v5','continuous-incident-evidence/v6'):
             packs.append(capture['physical_binding'])
         if len(packs) == 2 and any(packs[0][k] != packs[1][k] for k in ('source_state_ref','feature_batch_ref')):
             raise ValueError('model and physical binding select different accepted source steps')
