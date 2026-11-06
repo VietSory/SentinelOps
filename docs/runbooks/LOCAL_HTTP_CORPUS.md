@@ -47,6 +47,15 @@ hashes and capture receipts must match that frozen checkout. The CLI owns only
 business/Prometheus/OTel/Jaeger ports are the existing local testbed ports.
 Existing projects/volumes are never deleted to satisfy admission.
 
+On WSL, inspect host/guest time synchronization before opening a group. With
+`hv_utils.timesync_implicit=1`, Ubuntu 24.04 and earlier can run a competing
+`systemd-timesyncd` client; [Canonical recommends disabling that guest service](https://ubuntu.com/wsl/docs/stable/explanation/time-sync/)
+when Windows/Hyper-V supplies time (`sudo systemctl disable --now systemd-timesyncd.service`).
+Make clock configuration changes only with no active capture, then check clock
+continuity before opening a fresh group. This preflight does not certify absolute
+UTC accuracy. An invalid interval still requires the whole-group disposition below;
+never adjust recorded timestamps or restart its failed measurement in place.
+
 ```sh
 python scripts/capture_local_corpus.py --root artifacts/local-http-corpus-v1 \
   --role train --group 1 --kind healthy --prepare
