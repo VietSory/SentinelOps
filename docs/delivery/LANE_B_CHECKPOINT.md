@@ -64,6 +64,13 @@ Hai mục, đều thuộc code/semantics của A. B **không** sửa.
 
 ### Cập nhật xử lý A — 2026-11-06
 
+Bản sửa source `1cc7da4` + publisher `23a015e` đã có
+[CI đúng head 23a015e](https://github.com/VietSory/SentinelOps/actions/runs/42149412823)
+**success 14/14**: native/public-data/observability/S5/remediation đều chạy thật.
+Local regression 1.313 test, contracts và installed wheel đã pass. Đây là bằng
+chứng phần mềm/source integration của bản sửa, không phải xác nhận đã nâng
+release trên máy B hay H1/H4/G3/G4/G6 đã nghiệm thu.
+
 - **§3.1 có bản sửa:** identity source v2 bỏ riêng `rule_files`/`alerting`, giữ
   source settings; native evidence dùng cùng phép kiểm. B live checker chọn duy
   nhất consumer khớp nguồn hiện hành và kiểm identity/policy/root, giữ nguyên các
@@ -139,14 +146,17 @@ Không có mục nào của B còn lại mà B tự làm được không cần q
 1. **A quyết định §3.1** (phạm vi `configuration_hash`) → mở lại đường nghiệm thu
    B1 end-to-end `check_lane_b_live`. Đây là blocker gần nhất và rẻ nhất.
 2. **A/owner rerun `public-data`** (§3.2) để main xanh lại.
-3. **A giao H4** → B chạy rollback Payment thật trên Kubernetes local với
+3. **A giao H1 local** → B activate model theo release đã duyệt, pin release và
+   restart có kiểm soát, giữ release trước để rollback. H1 cần model/evaluation
+   thật; job thu thập và fitting có điều kiện đã chạy lại dưới systemd
+   trên máy A, chưa phải một model được chấp nhận hay artifact B tải được.
+4. **A giao H4** → B chạy rollback Payment thật trên Kubernetes local với
    known-good digest, policy/dry-run/approval, idempotency/lock/audit, verify bằng
-   telemetry và escalation. Đây là G6.
-4. **Owner cấp region/quota/budget/quyền apply** (§6 dưới) → B apply AWS baseline,
-   giao workload manifest pin theo digest, rồi giao H3 live source cho A verify
-   parity. Đây là G7.
-5. **A giao H1** → B activate model theo release đã duyệt, pin release và restart
-   có kiểm soát, giữ release trước để rollback.
+   telemetry và escalation. Đây là G6; thiếu source/qualified RCA/approval vẫn block.
+5. **AWS để cuối**, theo owner ngày 2026-11-06: chỉ sau khi hoàn tất các mục local
+   ở trên mới chốt region/quota/budget/quyền apply (§6), apply baseline, giao
+   workload manifest pin theo digest và H3 live source cho A verify parity (G7).
+   Không tự apply trong lúc chờ H1/H4.
 
 ## 6. Điều kiện owner phải xác nhận trước khi apply AWS
 

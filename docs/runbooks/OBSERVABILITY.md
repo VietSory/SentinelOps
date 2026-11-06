@@ -134,7 +134,8 @@ this identity is not authentication or proof of rule-file integrity. Adding a
 business recording-rule dependency requires a new source/profile review.
 
 Changing only operator rules or alert delivery no longer forks a **v2** health
-stream. Changing source inputs still creates a distinct stream. Native evidence
+stream. Source-semantics changes require an explicit worker stop/start; an active
+stream identity is never rewritten. Changing source inputs still creates a distinct stream. Native evidence
 uses the same hash; legacy full-config identities remain accepted only against
 their exact original running config. Old captures, stream IDs, consumer IDs,
 checkpoints and incident history are never rewritten or merged into v2.
@@ -142,8 +143,8 @@ checkpoints and incident history are never rewritten or merged into v2.
 The first upgrade from legacy hashing intentionally creates one new stream:
 
 1. On B, preserve the existing DB/health/incident stores. Stop the old incident
-   and health sessions explicitly (`lane_b_host stop --role incidents`, then
-   `--role health`). Do not delete consumer rows, copy cursors or edit bundles.
+   and health sessions explicitly (`python -m scripts.lane_b_host stop --role incidents`, then
+   `python -m scripts.lane_b_host stop --role health`). Do not delete consumer rows, copy cursors or edit bundles.
 2. Build/verify a new immutable host release from this code. Start its health
    role with the original B health-store path. Read its exact READY `stream_id`;
    wait for new commits, which do not inherit old episode/window state.
@@ -157,7 +158,8 @@ The first upgrade from legacy hashing intentionally creates one new stream:
    ambiguous, foreign or stale-configuration selections fail before fault load.
    The checker revalidates source selection after the workload as well.
 
-For foreground launchers use `lane_b health` and `lane_b incidents --health-stream`
+For foreground launchers use `python -m scripts.lane_b health` and
+`python -m scripts.lane_b incidents --health-stream`
 with the same explicit stop/start sequence. A software rollback uses the old
 release and exact original config/stream; an altered legacy config cannot resume
 another stream. No SQL/schema migration, history retirement or reset is needed.
