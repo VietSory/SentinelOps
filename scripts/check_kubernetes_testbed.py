@@ -28,7 +28,9 @@ from scripts.kubernetes_testbed import NAMESPACE, SERVICES, render
 from sentinelops.contracts import utc_time
 from sentinelops.remediation.domain import Policy
 from sentinelops.remediation.kubernetes import LocalKubernetes, _owner
-from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
+from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
+from sentinelops.workers.health import HealthWorker
+from sentinelops.workers.kubernetes_evidence import KubernetesIncidentEvidence, verify_kubernetes_binding
 from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import PrometheusSource, REQUESTS
 from sentinelops.telemetry.store import ArtifactStore
@@ -231,7 +233,32 @@ async def verify(sandbox, endpoint, target, images):
                 raise ValueError('Payment rollout changed during source observations')
             if inventory != await asyncio.to_thread(sandbox.inventory):
                 raise ValueError('business pod inventory changed during observations')
+            # Exercise the production read-only collector against these actual
+            # services/API/metric counters. This source-only fixture has no PG
+            # acceptance step and cannot grant model/action authority.
+            policy = json.loads((PROJECT / 'configs/slo_health_policy.json').read_text())
+            health = HealthWorker(None, store, policy, endpoint=prometheus, environment='local',
+                                  configuration_hash=configuration['configuration_hash'])
+            batch_ref = store.write('manifests', {'identity':health.identity, 'stream_id':health.stream_id,
+                'bucket_end':timestamp(end), 'normalization_manifest_ref':manifest['manifest_ref']})
+            state_ref = store.write('manifests', {'last_batch_ref':batch_ref})
+            incident_kube = LocalKubernetes(endpoint, target, token_file=sandbox.root / 'observer-token',
+                                           ca_file=sandbox.root / 'ca.crt')
+            collector = KubernetesIncidentEvidence(incident_kube, {s:inventory[s]['deployment_uid'] for s in SERVICES},
+                prometheus_endpoint=prometheus, jaeger_endpoint=jaeger)
+            try:
+                captured_ref = await collector.capture(store, source_state_ref=state_ref,
+                    job_id=stable_id({'source-only':target.key}), intent_ref=state_ref,
+                    group={'first_onset_at':timestamp(end-timedelta(seconds=60))},
+                    policy=json.loads((PROJECT / 'configs/rca_policy.json').read_text()),
+                    health_identity=health.identity, latency_ms=policy['latency_ms'])
+                verified = verify_kubernetes_binding(store, store.read(captured_ref), health.identity)
+                if any(verified[s]['pod_uid'] != inventory[s]['pod_uid'] for s in SERVICES):
+                    raise ValueError('incident collector selected different physical business Pods')
+            finally:
+                await collector.close()
             return {'status': 'PASS', 'scope': 'actual-local-kubernetes-business-observations', 'images': images,
+                'incident_capture_ref':captured_ref, 'accepted_incident_journal':False,
                 'source_profile': captures[0]['source_profile'], 'prometheus_configuration': configuration,
                 'request_count': len(requests), 'request_ref': request_ref, 'bucket_end': timestamp(end),
                 'normalization_manifest_ref': manifest['manifest_ref'], 'pod_metric_refs': pod_refs,

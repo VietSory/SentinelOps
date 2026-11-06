@@ -54,8 +54,22 @@ async def run(args):
             loop.add_signal_handler(name, stop.set)
         health_policy = json.loads(args.health_policy.read_text())
         source = HealthLedgerReader(pool, ArtifactStore(args.source_store), args.health_stream, health_policy)
-        collector = NativeIncidentEvidence(args.project, jaeger_endpoint=args.jaeger,
-            prometheus_endpoint=args.prometheus, commerce_dsn=os.environ.get("COMMERCE_EVIDENCE_DATABASE_URL"))
+        if getattr(args, 'kubernetes_config', None):
+            from sentinelops.remediation.domain import Target
+            from sentinelops.remediation.kubernetes import LocalKubernetes
+            from sentinelops.workers.kubernetes_evidence import KubernetesIncidentEvidence
+            config = json.loads(args.kubernetes_config.read_text())
+            kube = LocalKubernetes(config['server'], Target(**config['target']),
+                token_file=Path(config['token_file']), ca_file=Path(config['ca_file']))
+            try:
+                collector = KubernetesIncidentEvidence(kube, config['deployment_uids'],
+                    prometheus_endpoint=args.prometheus, jaeger_endpoint=args.jaeger)
+            except BaseException:
+                await kube.close()
+                raise
+        else:
+            collector = NativeIncidentEvidence(args.project, jaeger_endpoint=args.jaeger,
+                prometheus_endpoint=args.prometheus, commerce_dsn=os.environ.get("COMMERCE_EVIDENCE_DATABASE_URL"))
         registry = ModelRegistry.load(ArtifactStore(args.model_store), args.model_release_ref) if args.model_store else None
         if registry is not None:
             collector = ModelIncidentEvidence(collector, registry)
@@ -135,7 +149,8 @@ def main():
     parser.add_argument("--health-stream", required=True)
     parser.add_argument("--source-store", type=Path, required=True)
     parser.add_argument("--store", type=Path, required=True)
-    parser.add_argument("--project", required=True)
+    parser.add_argument("--project", required=True, help="Owned Compose project; ignored for explicit Kubernetes source")
+    parser.add_argument("--kubernetes-config", type=Path, help="Private explicit local API, token/CA, target and three Deployment UIDs")
     parser.add_argument("--health-policy", type=Path, default=Path("configs/slo_health_policy.json"))
     parser.add_argument("--rca-policy", type=Path, default=Path("configs/rca_policy.json"))
     parser.add_argument("--topology", type=Path, default=Path("configs/topology.yaml"))

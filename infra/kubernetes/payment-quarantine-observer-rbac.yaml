@@ -13,7 +13,7 @@ metadata:
 rules:
   - apiGroups: [apps]
     resources: [deployments]
-    resourceNames: [payment-service]
+    resourceNames: [checkout-service, payment-service, inventory-service]
     verbs: [get]
   - apiGroups: [apps]
     resources: [replicasets]
@@ -21,6 +21,9 @@ rules:
   - apiGroups: ['']
     resources: [pods]
     verbs: [get, list]
+  - apiGroups: ['']
+    resources: [pods/log]
+    verbs: [get]
   - apiGroups: [autoscaling]
     resources: [horizontalpodautoscalers]
     verbs: [get, list]

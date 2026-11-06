@@ -68,7 +68,8 @@ class ModelIncidentEvidence:
         await self.collector.close()
 
     async def capture(self, store, *, source_state_ref, **kwargs):
-        reference = await self.collector.capture(store, **kwargs)
+        reference = await self.collector.capture(store, **kwargs, **(
+            {"source_state_ref": source_state_ref} if getattr(self.collector, "requires_source_state", False) else {}))
         capture = store.read(reference)
         state = store.read(source_state_ref)
         batch = store.read(state["last_batch_ref"])
@@ -78,7 +79,8 @@ class ModelIncidentEvidence:
         import asyncio
         signals = await asyncio.to_thread(collect_model_signals, store, selected,
             bucket_end=batch["bucket_end"], registry=self.model_registry)
-        capture.update(capture_version="continuous-incident-evidence/v2", profile=self.profile,
+        capture.update(capture_version=("continuous-incident-evidence/v4" if capture["capture_version"] ==
+            "continuous-incident-evidence/v3" else "continuous-incident-evidence/v2"), profile=self.profile,
             analyzed_at=timestamp(datetime.now(timezone.utc)), model_evidence={"release_ref": self.model_registry.identity,
                 "source_state_ref": source_state_ref, "feature_batch_ref": state["last_batch_ref"], "signals": signals})
         return store.write("manifests", capture)

@@ -35,16 +35,22 @@ def derive_continuous(store, *, intent_ref: str, intent: dict, closed: dict, cap
         raise ValueError("continuous RCA job differs from its verified accepted source scope")
     group = next(g for g in correlation["groups"] if g["group_id"] == intent["group_id"])
     capture = store.read(capture_ref)
-    has_models = capture.get("capture_version") == "continuous-incident-evidence/v2"
+    version = capture.get("capture_version")
+    has_models = version in ("continuous-incident-evidence/v2", "continuous-incident-evidence/v4")
+    kubernetes = version in ("continuous-incident-evidence/v3", "continuous-incident-evidence/v4")
     if (set(capture) != ({"capture_version", "job_id", "intent_ref", "profile", "health_stream_id", "window_start",
                          "window_end", "analyzed_at", "evidence_refs", "source_containers", "missing_counts", "actions_allowed"}
-                         | ({"model_evidence"} if has_models else set()))
-        or capture["capture_version"] not in ("continuous-incident-evidence/v1", "continuous-incident-evidence/v2")
+                         | ({"model_evidence"} if has_models else set()) | ({"physical_binding"} if kubernetes else set()))
+        or capture["capture_version"] not in ("continuous-incident-evidence/v1", "continuous-incident-evidence/v2",
+                                               "continuous-incident-evidence/v3", "continuous-incident-evidence/v4")
         or capture["job_id"] != intent["job_id"] or capture["intent_ref"] != intent_ref
         or capture["health_stream_id"] != stable_id(health_identity)
         or capture["profile"] != profile or capture["actions_allowed"] is not False):
         raise ValueError("operational capture belongs to another accepted job/profile/source")
     reject_control(capture)
+    if kubernetes:
+        from sentinelops.workers.kubernetes_evidence import verify_kubernetes_binding
+        verify_kubernetes_binding(store, capture, health_identity)
     decision = utc_time(capture["analyzed_at"])
     lower, upper = utc_time(capture["window_start"]), utc_time(capture["window_end"])
     if (lower != utc_time(group["first_onset_at"]) or upper < lower
@@ -72,7 +78,8 @@ def derive_continuous(store, *, intent_ref: str, intent: dict, closed: dict, cap
         raise ValueError("completion receipt coverage or cutoff differs from the actual capture")
     for service, receipt in receipts.items():
         expected = capture["source_containers"][service]
-        if any(receipt.get(key) != expected[key] for key in ("service", "container_id", "compose_project", "running")):
+        if any(receipt.get(key) != expected[key] for key in (("service", "pod_uid", "deployment_uid", "namespace", "running") if kubernetes
+                                                          else ("service", "container_id", "compose_project", "running"))):
             raise ValueError("business completion receipt differs from its owned source")
         records = [r for r in logs["records"] if r["service"] == service]
         rebuilt, _ = completion_records(b"\n".join(json.dumps(r, separators=(",", ":"), allow_nan=False).encode() for r in records),

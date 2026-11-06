@@ -51,6 +51,7 @@ from sentinelops.workers.health import HealthWorker, latest_bucket
 from sentinelops.workers.health_source import HealthLedgerReader
 from sentinelops.workers.incident_state import advance_groups
 from sentinelops.workers.incident_evidence import NativeIncidentEvidence, completion_records
+from sentinelops.workers.kubernetes_evidence import KubernetesIncidentEvidence, verify_kubernetes_binding
 from sentinelops.workers.incident_rca import derive_continuous
 from sentinelops.workers.incident_journal import IncidentJournal
 from sentinelops.workers.incident import IncidentWorker

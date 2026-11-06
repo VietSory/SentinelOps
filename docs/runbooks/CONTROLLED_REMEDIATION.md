@@ -460,3 +460,24 @@ Do not change the existing natural-recovery incident consumer to imply an action
 ran. Its analytical RCA contract has `actions_allowed=false`; H4 producer and
 consumer need an explicitly agreed supplemental boundary before action authority
 can be integrated. H4 absence blocks dispatch, not independent executor work.
+
+
+### Kubernetes incident evidence source
+
+`python -m scripts.run_incident_worker` now accepts `--kubernetes-config <private.json>`
+with `server`, `token_file`, `ca_file`, `target` (the existing pinned Payment target),
+and `deployment_uids` mapping all three business service names to actual Deployment UIDs.
+Keep `--health-stream`, `--source-store`, `--store`, `--prometheus`, `--jaeger` and
+`--project` explicit; Compose ownership is used only when the Kubernetes option is absent.
+The quarantine observer role can GET those three Deployments and Pod logs; it cannot mutate them.
+The worker uses the explicit loopback TLS API and private observer credential, never ambient kubeconfig.
+
+The new captures are `continuous-incident-evidence/v3` (Kubernetes) and `v4`
+(Kubernetes plus separately validated models). Existing Docker v1/v2 remain supported.
+A new source requires its own accepted health stream and consumer identity: do not
+relabel the old Docker checkpoint. Replay checks the accepted source step, original
+HTTP request denominator, exact Pod UID/namespace, Deployment/ReplicaSet ownership,
+log identities and trace resource identities. Missing/multiple Pods, changed images,
+unknown requests or inventory rollover fail closed. These observations do not approve
+model source parity, known-good images or dispatch. H4/G4/G6 still require their actual
+model, change, RCA and controlled action evidence.

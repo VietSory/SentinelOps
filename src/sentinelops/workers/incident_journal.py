@@ -339,7 +339,7 @@ class IncidentJournal:
         health_identity = checkpoint["source"]["health_identity"]
         capture_ref = await collector.capture(self.store, job_id=job["job_id"], intent_ref=job["intent_ref"],
             group=group, policy=self.rca_policy, health_identity=health_identity,
-            latency_ms=self.source.policy["latency_ms"], **({"source_state_ref": state_ref} if self.model_registry is not None else {}))
+            latency_ms=self.source.policy["latency_ms"], **({"source_state_ref": state_ref} if self.model_registry is not None or getattr(collector, "requires_source_state", False) else {}))
         await self._verify_model_capture(capture_ref)
         derived = await asyncio.to_thread(derive_continuous, self.store, intent_ref=job["intent_ref"],
             intent=intent, closed=closed, capture_ref=capture_ref, profile=collector.profile,
@@ -374,17 +374,23 @@ class IncidentJournal:
 
     async def _verify_model_capture(self, capture_ref):
         capture = self.store.read(capture_ref)
-        if capture["capture_version"] != "continuous-incident-evidence/v2":
-            return
-        state_ref = capture["model_evidence"]["source_state_ref"]
-        async with self.pool.acquire() as conn:
-            end = await conn.fetchval("SELECT bucket_end FROM sentinel_control.incident_consumer_steps WHERE consumer_id=$1 AND state_ref=$2",
-                                      self.consumer_id, state_ref)
-        if end is None:
-            raise ValueError("model inference has no accepted raw-verified consumer source step")
-        verified, _ = await self._verified_step(end)
-        if verified["accepted_row"]["manifest_ref"] != capture["model_evidence"]["feature_batch_ref"]:
-            raise ValueError("model inference feature batch differs from accepted raw source")
+        packs = []
+        if capture['capture_version'] in ('continuous-incident-evidence/v2','continuous-incident-evidence/v4'):
+            packs.append(capture['model_evidence'])
+        if capture['capture_version'] in ('continuous-incident-evidence/v3','continuous-incident-evidence/v4'):
+            packs.append(capture['physical_binding'])
+        if len(packs) == 2 and any(packs[0][k] != packs[1][k] for k in ('source_state_ref','feature_batch_ref')):
+            raise ValueError('model and physical binding select different accepted source steps')
+        for pack in packs:
+            state_ref = pack['source_state_ref']
+            async with self.pool.acquire() as conn:
+                end = await conn.fetchval("SELECT bucket_end FROM sentinel_control.incident_consumer_steps WHERE consumer_id=$1 AND state_ref=$2",
+                                          self.consumer_id, state_ref)
+            if end is None:
+                raise ValueError("operational inference/binding has no accepted raw-verified consumer source step")
+            verified, _ = await self._verified_step(end)
+            if verified['accepted_row']['manifest_ref'] != pack['feature_batch_ref']:
+                raise ValueError("operational inference/binding differs from accepted raw source")
 
     async def project_one(self) -> dict | None:
         """Advance one source-derived lifecycle step; never execute an action."""
