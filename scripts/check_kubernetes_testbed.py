@@ -255,10 +255,21 @@ async def verify(sandbox, endpoint, target, images):
                 verified = verify_kubernetes_binding(store, store.read(captured_ref), health.identity)
                 if any(verified[s]['pod_uid'] != inventory[s]['pod_uid'] for s in SERVICES):
                     raise ValueError('incident collector selected different physical business Pods')
+                expired_ref = await collector.capture(store, source_state_ref=state_ref,
+                    job_id=stable_id({'source-only-expired':target.key}), intent_ref=state_ref,
+                    group={'first_onset_at':timestamp(end-timedelta(minutes=10))},
+                    policy=json.loads((PROJECT / 'configs/rca_policy.json').read_text()),
+                    health_identity=health.identity, latency_ms=policy['latency_ms'])
+                expired = store.read(expired_ref)
+                if (expired['capture_version'] != 'continuous-incident-evidence/v7'
+                    or expired['unavailable_source']['feature_batch_ref'] != batch_ref
+                    or expired['actions_allowed'] is not False):
+                    raise ValueError('expired source-only incident did not preserve explicit unavailability')
             finally:
                 await collector.close()
             return {'status': 'PASS', 'scope': 'actual-local-kubernetes-business-observations', 'images': images,
-                'incident_capture_ref':captured_ref, 'accepted_incident_journal':False,
+                'incident_capture_ref':captured_ref, 'expired_incident_capture_ref':expired_ref,
+                'accepted_incident_journal':False,
                 'source_profile': captures[0]['source_profile'], 'prometheus_configuration': configuration,
                 'request_count': len(requests), 'request_ref': request_ref, 'bucket_end': timestamp(end),
                 'normalization_manifest_ref': manifest['manifest_ref'], 'pod_metric_refs': pod_refs,

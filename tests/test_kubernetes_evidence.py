@@ -253,3 +253,34 @@ def test_transient_telemetry_outage_is_unavailable_not_a_partial_trace_or_captur
         finally:await source.close()
     asyncio.run(run())
     assert not list(tmp_path.rglob('*.json'))
+
+
+
+def test_expired_kubernetes_job_does_not_poison_queue_with_current_source_bucket(tmp_path,monkeypatch):
+    """A real backlog can outlive the fixed evidence window; no live API read can fix it."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from sentinelops.workers import kubernetes_evidence
+    from test_rca_replay import POLICY
+    store=ArtifactStore(tmp_path)
+    identity={'environment':'local','source_profile':SOURCE_PROFILE,
+              'endpoint_hash':stable_id({'endpoint':'http://127.0.0.1:9090'})}
+    batch=store.write('manifests',{'bucket_end':timestamp(END),'identity':identity,'stream_id':stable_id(identity)})
+    state=store.write('manifests',{'last_batch_ref':batch})
+    monkeypatch.setattr(kubernetes_evidence,'now',lambda:END+timedelta(seconds=35))
+    async def run():
+        kube=SimpleNamespace(target=TARGET,close=AsyncMock())
+        source=KubernetesIncidentEvidence(kube,{s:s+'-uid' for s in BUSINESS_ROUTES},
+            prometheus_endpoint='http://127.0.0.1:9090',jaeger_endpoint='http://127.0.0.1:16686')
+        source.verify_source=AsyncMock(side_effect=AssertionError('expired job still attempts live capture'))
+        try:
+            ref=await source.capture(store,source_state_ref=state,job_id=stable_id('stale-job'),intent_ref=state,
+                group={'first_onset_at':timestamp(END-timedelta(minutes=10))},policy=POLICY,
+                health_identity=identity,latency_ms=HEALTH_POLICY['latency_ms'])
+            captured=store.read(ref)
+            assert captured['capture_version']=='continuous-incident-evidence/v7'
+            assert captured['unavailable_source']['missing_reason']=='accepted-source-past-evidence-window'
+            assert captured['actions_allowed'] is False and 'model_evidence' not in captured
+            source.verify_source.assert_not_awaited()
+        finally:await source.close()
+    asyncio.run(run())

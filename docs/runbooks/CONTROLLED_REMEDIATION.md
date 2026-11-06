@@ -503,3 +503,13 @@ verification still apply. Known-good approval must predate the **entire** mutati
 interval. The shipped resume-only worker still creates no new action intents.
 Actual H4 and G6 remain pending real qualified H1/G3/RCA evidence and an observed
 controlled rollback; software/native fixture CI does not satisfy those outcomes.
+
+
+If the selected accepted health bucket has already advanced beyond an old job's
+fixed RCA evidence window, capture v7 records `accepted-source-past-evidence-window`.
+It contains the authenticated source-state/batch references and no Kubernetes,
+model or deployment-change observations. Replay preserves the original opening
+health facts and produces missing operational support/abstention. This lets the
+consumer finish that expired job and process later incidents; it does not widen
+the old window, treat current Pods as historical evidence or allow rollback.
+Existing v1–v6 captures retain their original replay behavior.

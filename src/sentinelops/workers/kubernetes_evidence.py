@@ -6,6 +6,7 @@ from a service name. A capture is observational; model/action approvals are sepa
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 import hashlib
 import json
 import math
@@ -16,6 +17,7 @@ import yaml
 
 from sentinelops.contracts import utc_time
 from sentinelops.incidents.rca_source import reject_control
+from sentinelops.incidents.rca import validate_policy
 from sentinelops.remediation.domain import Target, KubernetesUnavailable, image_digest
 from sentinelops.remediation.kubernetes import _owner
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
@@ -238,6 +240,24 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
             'response_sha256': hashlib.sha256(body).hexdigest(), 'identity_records': originals}
 
     async def capture(self, store, *, source_state_ref, **kwargs):
+        validate_policy(kwargs['policy'])
+        state = store.read(source_state_ref)
+        batch = store.read(state['last_batch_ref'])
+        lower = utc_time(kwargs['group']['first_onset_at'])
+        end = lower + timedelta(seconds=kwargs['policy']['evidence_window_seconds'])
+        if utc_time(batch['bucket_end']) > end:
+            # A current Pod query cannot bind a source bucket from outside the
+            # incident window. Persist explicit missingness; never poison the
+            # oldest pending job or widen its immutable evidence scope.
+            return store.write('manifests', {
+                'capture_version':'continuous-incident-evidence/v7', 'job_id':kwargs['job_id'],
+                'intent_ref':kwargs['intent_ref'], 'profile':self.profile,
+                'health_stream_id':stable_id(kwargs['health_identity']),
+                'window_start':timestamp(lower), 'window_end':timestamp(end),
+                'analyzed_at':timestamp(now()), 'actions_allowed':False,
+                'unavailable_source':{'source_state_ref':source_state_ref,
+                    'feature_batch_ref':state['last_batch_ref'],
+                    'missing_reason':'accepted-source-past-evidence-window'}})
         base = store.read(await super().capture(store, **kwargs))
         inventory = {s:base['source_containers'][s] for s in BUSINESS_ROUTES}
         state = store.read(source_state_ref);batch = store.read(state['last_batch_ref'])

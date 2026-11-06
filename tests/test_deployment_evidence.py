@@ -91,6 +91,7 @@ def test_known_good_must_predate_entire_observed_mutation_interval(offset):
     ('continuous-incident-evidence/v6',False,False,False),
     ('continuous-incident-evidence/v5',True,False,False),
     ('continuous-incident-evidence/v2',True,False,False),
+    ('continuous-incident-evidence/v7',True,False,False),
     ('continuous-incident-evidence/v6',True,True,False),
 ])
 def test_native_h4_requires_verified_kubernetes_model_change_combination(tmp_path,version,model,abstained,expected):
@@ -114,4 +115,25 @@ def test_native_h4_requires_verified_kubernetes_model_change_combination(tmp_pat
         actual=await NativeH4Authority(journal).assess(f.request,TARGET,now=f.clock())
         assert actual.dispatch_authority is expected
         assert (actual.change is not None) is expected
+    asyncio.run(run())
+
+
+def test_expired_source_passes_through_model_and_change_wrappers_without_using_them(tmp_path):
+    from sentinelops.workers.model_signals import ModelIncidentEvidence
+    async def run():
+        store=ArtifactStore(tmp_path/'journal')
+        class Collector:
+            profile={'profile_version':'kubernetes-incident-evidence/v1'}
+            async def capture(self,store,**kwargs):
+                return store.write('manifests',{'capture_version':'continuous-incident-evidence/v7',
+                    'profile':self.profile,'actions_allowed':False})
+        source=SimpleNamespace(store=ArtifactStore(tmp_path/'source'))
+        wrapped=DeploymentIncidentEvidence(Collector(),source,ArtifactStore(tmp_path/'changes'))
+        registry=SimpleNamespace(identity='fixture-pinned-release-only')
+        modeled=ModelIncidentEvidence(wrapped,registry)
+        ref=await modeled.capture(store,source_state_ref='no-source-model-read-allowed')
+        result=store.read(ref)
+        assert result['capture_version']=='continuous-incident-evidence/v7' and result['profile']==modeled.profile
+        assert result['actions_allowed'] is False
+        assert 'model_evidence' not in result and 'deployment_changes' not in result
     asyncio.run(run())

@@ -36,6 +36,9 @@ def derive_continuous(store, *, intent_ref: str, intent: dict, closed: dict, cap
     group = next(g for g in correlation["groups"] if g["group_id"] == intent["group_id"])
     capture = store.read(capture_ref)
     version = capture.get("capture_version")
+    if version == 'continuous-incident-evidence/v7':
+        return _derive_expired_kubernetes(store, capture, capture_ref, intent_ref, intent,
+            closed, profile, health_identity, health_policy, group)
     has_models = version in ("continuous-incident-evidence/v2", "continuous-incident-evidence/v4", "continuous-incident-evidence/v6")
     kubernetes = version in ("continuous-incident-evidence/v3", "continuous-incident-evidence/v4", "continuous-incident-evidence/v5", "continuous-incident-evidence/v6")
     has_changes = version in ("continuous-incident-evidence/v5", "continuous-incident-evidence/v6")
@@ -106,19 +109,7 @@ def derive_continuous(store, *, intent_ref: str, intent: dict, closed: dict, cap
             raise ValueError("infrastructure source/receipt differs from the selected profile")
     allowed = {intent_ref, intent["scope_ref"], intent["correlation_ref"], capture_ref,
                refs["logs"], *refs["traces"], *refs["infrastructure"]}
-    signals = {}
-    for item in closed["opening_objects"]:
-        ref, signal = item["signal_ref"], item["signal"]
-        if store.read(ref) != signal:
-            raise ValueError("verified opening artifact changed during RCA derivation")
-        signals[signal["signal_id"]] = (ref, signal)
-        allowed.add(ref)
-        for observation_ref in signal["evidence_refs"]:
-            observation = store.read(observation_ref)
-            allowed.add(observation_ref)
-            for raw_ref in observation["provenance"]["source_refs"]:
-                store.read(raw_ref)
-                allowed.add(raw_ref)
+    signals = _opening_sources(store, closed, allowed)
     scope = {"correlation": correlation, "correlation_ref": intent["correlation_ref"],
         "health": {"policy": health_policy}, "signals": signals, "allowed_refs": sorted(allowed),
         "source": {"environment": health_identity["environment"]}, "refs": refs, "logs": logs,
@@ -134,4 +125,58 @@ def derive_continuous(store, *, intent_ref: str, intent: dict, closed: dict, cap
         from sentinelops.workers.deployment_evidence import verify_deployment_evidence, add_deployment_support
         changes = verify_deployment_evidence(store, capture, health_identity, health_policy, group)
         derived = add_deployment_support(store, derived, changes, policy=policy, as_of=decision)
+    return derived
+
+
+def _opening_sources(store, closed, allowed):
+    signals = {}
+    for item in closed["opening_objects"]:
+        ref, signal = item["signal_ref"], item["signal"]
+        if store.read(ref) != signal:
+            raise ValueError("verified opening artifact changed during RCA derivation")
+        signals[signal["signal_id"]] = (ref, signal)
+        allowed.add(ref)
+        for observation_ref in signal["evidence_refs"]:
+            observation = store.read(observation_ref)
+            allowed.add(observation_ref)
+            for raw_ref in observation["provenance"]["source_refs"]:
+                store.read(raw_ref)
+                allowed.add(raw_ref)
+    return signals
+
+
+def _derive_expired_kubernetes(store, capture, capture_ref, intent_ref, intent,
+                               closed, profile, health_identity, health_policy, group):
+    expected={'capture_version','job_id','intent_ref','profile','health_stream_id',
+              'window_start','window_end','analyzed_at','actions_allowed','unavailable_source'}
+    pack=capture.get('unavailable_source',{})
+    if (set(capture)!=expected or set(pack)!={'source_state_ref','feature_batch_ref','missing_reason'}
+        or profile.get('profile_version')!='kubernetes-incident-evidence/v1'
+        or capture['profile']!=profile or capture['job_id']!=intent['job_id']
+        or capture['intent_ref']!=intent_ref or capture['health_stream_id']!=stable_id(health_identity)
+        or capture['actions_allowed'] is not False
+        or pack['missing_reason']!='accepted-source-past-evidence-window'):
+        raise ValueError('unavailable Kubernetes capture differs from its accepted job/profile')
+    reject_control(capture)
+    policy=intent['rca_policy'];decision=utc_time(capture['analyzed_at'])
+    lower,upper=utc_time(capture['window_start']),utc_time(capture['window_end'])
+    state=store.read(pack['source_state_ref']);batch=store.read(pack['feature_batch_ref'])
+    if (state['last_batch_ref']!=pack['feature_batch_ref'] or batch['identity']!=health_identity
+        or batch['stream_id']!=stable_id(health_identity)
+        or lower!=utc_time(group['first_onset_at'])
+        or upper!=lower+timedelta(seconds=policy['evidence_window_seconds'])
+        or not upper < utc_time(batch['bucket_end']) <= decision
+        or decision<max(utc_time(intent['detected_at']),utc_time(closed['correlation']['as_of']))):
+        raise ValueError('unavailable Kubernetes reason does not reproduce from accepted source progress')
+    allowed={intent_ref,intent['scope_ref'],intent['correlation_ref'],capture_ref,
+             pack['source_state_ref'],pack['feature_batch_ref']}
+    signals=_opening_sources(store,closed,allowed)
+    scope={'correlation':closed['correlation'],'correlation_ref':intent['correlation_ref'],
+        'health':{'policy':health_policy},'signals':signals,'allowed_refs':sorted(allowed),
+        'source':{'environment':health_identity['environment']},'logs':{'records':[]},
+        'refs':{'logs':capture_ref,'traces':[],'infrastructure':[]},'traces':[],'infrastructure':[]}
+    rows,lookup,counts=business_logs(scope)
+    derived=derive_group(store,scope,group,policy,decision,rows,lookup,counts,
+                         clock_mode='actual-health-decision')
+    derived['source_counts'][pack['missing_reason']]=1
     return derived

@@ -58,6 +58,9 @@ class DeploymentIncidentEvidence:
 
     async def capture(self,store,*,source_state_ref,**kwargs):
         captured=store.read(await self.collector.capture(store,source_state_ref=source_state_ref,**kwargs))
+        if captured['capture_version']=='continuous-incident-evidence/v7':
+            captured['profile']=self.profile
+            return store.write('manifests',captured)
         inventory=captured['source_containers'];target=Target(**self.profile['target'])
         identity=kwargs['health_identity'];source=_source(self.profile,identity,self.source.policy)
         state=store.read(source_state_ref);batch=store.read(state['last_batch_ref'])

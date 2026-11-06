@@ -71,6 +71,9 @@ class ModelIncidentEvidence:
         reference = await self.collector.capture(store, **kwargs, **(
             {"source_state_ref": source_state_ref} if getattr(self.collector, "requires_source_state", False) else {}))
         capture = store.read(reference)
+        if capture['capture_version'] == 'continuous-incident-evidence/v7':
+            capture['profile'] = self.profile
+            return store.write('manifests', capture)
         state = store.read(source_state_ref)
         batch = store.read(state["last_batch_ref"])
         normalization = store.read(batch["normalization_manifest_ref"])

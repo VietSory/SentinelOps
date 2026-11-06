@@ -203,3 +203,67 @@ def test_hash_valid_capture_cannot_escape_accepted_job_receipts_or_source_select
         point["source_ref"] = "postgres-stat://another:5432"
         capture["evidence_refs"]["infrastructure"] = [store.write("observations", point)]
     with pytest.raises(ValueError): derive(fixture)
+
+
+def test_expired_kubernetes_capture_replays_as_missing_not_newer_operational_facts(tmp_path):
+    fixture=continuous_fixture(tmp_path)
+    store,intent_ref,intent,closed,_,profile,identity=fixture
+    profile['profile_version']='kubernetes-incident-evidence/v1'
+    group=closed['correlation']['groups'][0]
+    from sentinelops.contracts import utc_time
+    lower=utc_time(group['first_onset_at']);upper=lower+timedelta(seconds=POLICY['evidence_window_seconds'])
+    batch=store.write('manifests',{'identity':identity,'stream_id':stable_id(identity),
+                                  'bucket_end':timestamp(upper+timedelta(minutes=1))})
+    state=store.write('manifests',{'last_batch_ref':batch})
+    capture={'capture_version':'continuous-incident-evidence/v7','profile':profile,'job_id':intent['job_id'],
+        'intent_ref':intent_ref,'health_stream_id':stable_id(identity),'window_start':timestamp(lower),
+        'window_end':timestamp(upper),'analyzed_at':timestamp(upper+timedelta(minutes=2)),
+        'actions_allowed':False,'unavailable_source':{'source_state_ref':state,'feature_batch_ref':batch,
+            'missing_reason':'accepted-source-past-evidence-window'}}
+    def evaluate(body):
+        return derive_continuous(store,intent_ref=intent_ref,intent=intent,closed=closed,
+            capture_ref=store.write('manifests',body),profile=profile,health_identity=identity,health_policy=HEALTH_POLICY)
+    result=evaluate(capture)
+    assert result['rca']['abstained'] is True and result['rca']['actions_allowed'] is False
+    assert 'model_signals' not in result and 'deployment_change' not in result
+    assert result['source_counts']['accepted-source-past-evidence-window']==1
+    assert all(f['type'] in ('timeline','topology') for f in result['rca']['evidence'])
+    for candidate in result['rca']['candidates']:
+        for key in ('anomaly_strength','log_support','dependency_trace_relevance','recent_change_support'):
+            assert candidate['components'][key]['value'] is None
+    for problem in ('actions','model','change','not-expired','future','wrong-state','widened-window'):
+        bad=deepcopy(capture)
+        if problem=='actions':bad['actions_allowed']=True
+        if problem=='model':bad['model_evidence']={'inference':'must-not-be-used'}
+        if problem=='change':bad['deployment_changes']=['fixture://not-approved']
+        if problem=='not-expired':bad['unavailable_source']['feature_batch_ref']=store.write('manifests',{
+            'identity':identity,'stream_id':stable_id(identity),'bucket_end':timestamp(upper)})
+        if problem=='future':bad['analyzed_at']=timestamp(upper)
+        if problem=='wrong-state':bad['unavailable_source']['source_state_ref']=store.write('manifests',{'last_batch_ref':'wrong'})
+        if problem=='widened-window':bad['window_end']=timestamp(upper+timedelta(seconds=1))
+        with pytest.raises(ValueError):evaluate(bad)
+
+
+@pytest.mark.parametrize('membership',['absent','different-batch','accepted'])
+def test_expired_capture_requires_the_original_raw_verified_source_step(tmp_path,membership):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from contextlib import asynccontextmanager
+    from sentinelops.workers.incident_journal import IncidentJournal
+    from sentinelops.telemetry.store import ArtifactStore
+    store=ArtifactStore(tmp_path)
+    pack={'source_state_ref':'fixture-state','feature_batch_ref':'fixture-batch',
+          'missing_reason':'accepted-source-past-evidence-window'}
+    reference=store.write('manifests',{'capture_version':'continuous-incident-evidence/v7','unavailable_source':pack})
+    @asynccontextmanager
+    async def acquire():
+        yield SimpleNamespace(fetchval=AsyncMock(return_value=None if membership=='absent' else END))
+    verified={'accepted_row':{'manifest_ref':'fixture-batch' if membership=='accepted' else 'another-batch'}}
+    journal=SimpleNamespace(store=store,pool=SimpleNamespace(acquire=acquire),consumer_id='fixture',
+                            _verified_step=AsyncMock(return_value=(verified,[])))
+    async def run():
+        if membership=='accepted':
+            await IncidentJournal._verify_model_capture(journal,reference)
+        else:
+            with pytest.raises(ValueError):await IncidentJournal._verify_model_capture(journal,reference)
+    asyncio.run(run())

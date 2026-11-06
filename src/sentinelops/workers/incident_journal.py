@@ -375,6 +375,8 @@ class IncidentJournal:
     async def _verify_model_capture(self, capture_ref):
         capture = self.store.read(capture_ref)
         packs = []
+        if capture['capture_version'] == 'continuous-incident-evidence/v7':
+            packs.append(capture['unavailable_source'])
         if capture['capture_version'] in ('continuous-incident-evidence/v2','continuous-incident-evidence/v4','continuous-incident-evidence/v6'):
             packs.append(capture['model_evidence'])
         if capture['capture_version'] in ('continuous-incident-evidence/v3','continuous-incident-evidence/v4','continuous-incident-evidence/v5','continuous-incident-evidence/v6'):
