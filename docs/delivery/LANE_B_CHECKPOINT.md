@@ -141,21 +141,24 @@ B không cần raw train của A để hoàn thành UI. Chỉ bước **bật in
 
 ## 5. Bước tiếp theo, theo thứ tự
 
-Không có mục nào của B còn lại mà B tự làm được không cần quyền hoặc handoff.
+A đã chốt và sửa §3.1; lỗi `public-data` cũ cũng đã rerun thành công (§3.2).
+B hiện có thể thực hiện bước 1 mà không chờ model hoặc AWS. Các bước sau cần
+handoff thật, không chỉ một bản code/fixture đã pass.
 
-1. **A quyết định §3.1** (phạm vi `configuration_hash`) → mở lại đường nghiệm thu
-   B1 end-to-end `check_lane_b_live`. Đây là blocker gần nhất và rẻ nhất.
-2. **A/owner rerun `public-data`** (§3.2) để main xanh lại.
-3. **A giao H1 local** → B activate model theo release đã duyệt, pin release và
+1. **B áp dụng bản sửa source v2:** nâng immutable host release, stop/start
+   health và incident theo [rollover runbook](../runbooks/OBSERVABILITY.md#prometheus-source-identity-and-stream-rollover),
+   chọn đúng READY stream rồi chạy lại `check_lane_b_live`. Giữ DB/checkpoint
+   lịch sử; không cần A ra thêm quyết định về hash.
+2. **A giao H1 local** → B activate model theo release đã duyệt, pin release và
    restart có kiểm soát, giữ release trước để rollback. H1 cần model/evaluation
-   thật; job thu thập và fitting có điều kiện đã chạy lại dưới systemd
-   trên máy A, chưa phải một model được chấp nhận hay artifact B tải được.
-4. **A giao H4** → B chạy rollback Payment thật trên Kubernetes local với
+   thật; job thu thập và fitting có điều kiện đã chạy lại dưới systemd trên máy A,
+   chưa phải một model được chấp nhận hay artifact B tải được.
+3. **A giao H4** → B chạy rollback Payment thật trên Kubernetes local với
    known-good digest, policy/dry-run/approval, idempotency/lock/audit, verify bằng
    telemetry và escalation. Đây là G6; thiếu source/qualified RCA/approval vẫn block.
-5. **AWS để cuối**, theo owner ngày 2026-11-06: chỉ sau khi hoàn tất các mục local
-   ở trên mới chốt region/quota/budget/quyền apply (§6), apply baseline, giao
-   workload manifest pin theo digest và H3 live source cho A verify parity (G7).
+4. **AWS để cuối**, theo owner ngày 2026-11-06: chỉ sau khi hoàn tất các mục local
+   mới chốt region/quota/budget/quyền apply (§6), apply baseline, giao workload
+   manifest pin theo digest và H3 live source cho A verify parity (G7).
    Không tự apply trong lúc chờ H1/H4.
 
 ## 6. Điều kiện owner phải xác nhận trước khi apply AWS
