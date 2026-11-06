@@ -220,6 +220,21 @@ the registry rejects it as a serving release. Separate operator validation
 produces the existing `validated-model-release/v1` ledger and its approved
 evaluation refs. Export creates no approval or activation ledger.
 
+When A supplies a local handoff archive, receive its matching `SHA256SUMS` over
+the agreed trusted transfer channel. In the directory containing both files:
+
+```sh
+sha256sum -c SHA256SUMS
+mkdir handoff
+# Replace PATH_TO_ARCHIVE.tar.gz with the exact verified archive filename.
+tar --no-same-owner -xzf PATH_TO_ARCHIVE.tar.gz -C handoff
+```
+
+The extracted root contains `handoff.json`, `runtime/` and `audit/`; B uses these
+relative paths rather than A's original absolute training paths. The checksum
+checks transport integrity; source replay, model quality and activation remain
+separate gates. Preparing this package locally does not publish model/audit data.
+
 Original corpus/Git objects remain required for full source replay and are
 declared external dependencies. This candidate package contains no raw/final
 data and makes no source-parity or model-quality acceptance claim. Actual H1

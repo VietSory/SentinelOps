@@ -158,8 +158,12 @@ handoff thật, không chỉ một bản code/fixture đã pass.
    lịch sử; không cần A ra thêm quyết định về hash.
 2. **A giao H1 local** → B activate model theo release đã duyệt, pin release và
    restart có kiểm soát, giữ release trước để rollback. H1 cần model/evaluation
-   thật; job thu thập và fitting có điều kiện đã chạy lại dưới systemd trên máy A,
-   chưa phải một model được chấp nhận hay artifact B tải được.
+   thật; pipeline thu thập → kiểm tra nguồn → fitting/đánh giá → đóng gói đang
+   chạy độc lập phiên chat trên máy A, có runner Windows giữ WSL hoạt động và
+   xử lý gián đoạn theo đúng giới hạn nhóm thay thế. Lịch gốc gồm 10 nhóm với
+   **19,5 giờ đo tối thiểu**, chưa tính khởi tạo/kiểm tra nguồn; máy phải giữ nguồn.
+   Gói được tạo cục bộ trước khi chia sẻ, chưa phải model được chấp nhận hay URI
+   B tải được cho đến khi artifact thật hoàn thành và được duyệt chia sẻ.
 3. **A giao H4** → B chạy rollback Payment thật trên Kubernetes local với
    known-good digest, policy/dry-run/approval, idempotency/lock/audit, verify bằng
    telemetry và escalation. Đây là G6; thiếu source/qualified RCA/approval vẫn block.
