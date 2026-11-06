@@ -62,6 +62,25 @@ verify release của mình theo runbook; path trên máy người gửi không �
 
 Hai mục, đều thuộc code/semantics của A. B **không** sửa.
 
+### Cập nhật xử lý A — 2026-11-06
+
+- **§3.1 có bản sửa:** identity source v2 bỏ riêng `rule_files`/`alerting`, giữ
+  source settings; native evidence dùng cùng phép kiểm. B live checker chọn duy
+  nhất consumer khớp nguồn hiện hành và kiểm identity/policy/root, giữ nguyên các
+  consumer/checkpoint lịch sử. B cần nâng host release và stop/start sang stream
+  mới đúng [quy trình rollover](../runbooks/OBSERVABILITY.md#prometheus-source-identity-and-stream-rollover).
+  Đây là bản sửa phần mềm, chưa phải xác nhận đã apply trên máy B hay B1/G4 PASS.
+- **§3.2:** main `694e9df` đã có CI `42061564345` success; lỗi cũ `42041999448`
+  đã rerun **failed jobs** và **success ở attempt 2**, không chạy lại mọi job. Metadata GAMMA
+  thêm tối đa hai retry cho transport/408/429/5xx tạm thời; auth/not-found,
+  invalid JSON, byte budget và version/checksum/lock mismatch vẫn fail closed.
+  CI/head mới và kết quả rerun phải kiểm riêng, không lấy status cũ làm bằng chứng.
+- **H1/H4 vẫn cần evidence thật:** chưa có model được chấp nhận hoặc authority
+  deployment-change được chứng minh. Không bật model/action từ bản sửa identity.
+  AWS vẫn chờ các quyết định cụ thể ở §6; không có `terraform apply` trong sửa này.
+
+Phần mô tả §3.1 bên dưới giữ lại để giải thích môi trường legacy đã tạo ra blocker.
+
 ### 3.1 `configuration_hash` quá rộng làm fork health stream
 
 `src/sentinelops/telemetry/prometheus.py:113` lấy source identity từ

@@ -11,6 +11,9 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import time
+
+import httpx
 from threading import Lock
 from urllib.parse import quote
 from zipfile import BadZipFile, ZipFile
@@ -56,7 +59,7 @@ def publish_bytes(path: Path, data: bytes) -> str:
     return digest
 
 
-def _json(client, url: str, *, params=None, budget: int = 2_000_000):
+def _json_once(client, url: str, *, params=None, budget: int = 2_000_000):
     parts = []
     length = 0
     with client.stream("GET", url, params=params) as response:
@@ -70,6 +73,25 @@ def _json(client, url: str, *, params=None, budget: int = 2_000_000):
     if not isinstance(value, dict):
         raise ValueError("invalid GAMMA metadata response")
     return value
+
+
+def _json(client, url: str, *, params=None, budget: int = 2_000_000):
+    """Retry only transient publisher reads, with unchanged URL/params/byte limits.
+
+    At most three attempts (one original and two retries), 1s/2s backoff.
+    Auth/not-found, invalid JSON, byte limits and downstream source/lock mismatch
+    remain fatal. Each attempt retains the existing metadata response byte cap.
+    """
+    for attempt in range(3):
+        try:
+            return _json_once(client, url, params=params, budget=budget)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (408, 429, 500, 502, 503, 504) or attempt == 2:
+                raise
+        except httpx.TransportError:
+            if attempt == 2:
+                raise
+        time.sleep(attempt + 1)
 
 
 def publisher_metadata(client, policy: dict) -> dict:
