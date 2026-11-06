@@ -14,6 +14,7 @@ from scripts.run_remediation_worker import validate_configuration
 from sentinelops.remediation.domain import Blocked
 from sentinelops.remediation.image_review import ImageEvidenceReview, require_evidence_reader
 from sentinelops.remediation.kubernetes import LocalKubernetes
+from sentinelops.telemetry.deployment_changes import DeploymentChangeReview
 from sentinelops.telemetry.core import stable_id
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.health_source import HealthLedgerReader, validate_stream
@@ -38,8 +39,9 @@ async def run(args):
             raise Blocked('image-review-source-root-or-environment-mismatch')
         source = HealthLedgerReader(pool, ArtifactStore(args.source_store), args.health_stream, policy)
         kube = LocalKubernetes(args.server, target, token_file=args.token_file, ca_file=args.ca_file)
-        review = ImageEvidenceReview(source, kube, ArtifactStore(args.review_store), target)
-        result = await review.open() if args.operation == 'open' else await review.complete(args.review_ref)
+        review_type = DeploymentChangeReview if args.operation in ('open-change', 'complete-change') else ImageEvidenceReview
+        review = review_type(source, kube, ArtifactStore(args.review_store), target)
+        result = await review.open() if args.operation in ('open', 'open-change') else await review.complete(args.review_ref)
         print(json.dumps(result, sort_keys=True), flush=True)
     finally:
         try:
@@ -61,6 +63,9 @@ def main():
     operations.add_parser('open')
     complete = operations.add_parser('complete')
     complete.add_argument('--review-ref', required=True)
+    operations.add_parser('open-change')
+    change = operations.add_parser('complete-change')
+    change.add_argument('--review-ref', required=True)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     try:

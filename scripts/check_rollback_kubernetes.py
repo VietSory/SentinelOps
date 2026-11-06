@@ -18,13 +18,16 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+from types import SimpleNamespace
 from uuid import uuid4
 
 import yaml
 
 from sentinelops.remediation.domain import Blocked,KubernetesUnavailable,Policy,Target
+from sentinelops.telemetry.deployment_changes import DeploymentChangeReview, verify_change
+from sentinelops.telemetry.core import stable_id, timestamp
+from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.remediation.kubernetes import LocalKubernetes
-from sentinelops.telemetry.core import timestamp
 
 PROJECT=Path(__file__).resolve().parents[1]
 NODE='kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a'
@@ -187,6 +190,14 @@ async def verify(sandbox,endpoint,target,good,bad):
         await observer.require_observer()
         observed=await observer.observe()
         assert observed.target==target and observed.image==good
+        # Actual read-only Kubernetes observation, but this tiny workload/health
+        # descriptor is a software fixture, never approved product source/H4.
+        unaccepted_source=SimpleNamespace(stream_id=stable_id({'fixture_target':target.key}),
+            policy=json.loads(Path('configs/slo_health_policy.json').read_text()),
+            store=ArtifactStore(sandbox.root/'fixture-health-source'))
+        changes=DeploymentChangeReview(unaccepted_source,observer,
+            ArtifactStore(sandbox.root/'deployment-changes'),target)
+        change_baseline=await changes.open()
         try:
             await client.require_observer()
             raise AssertionError('writer token accepted for manual observer review')
@@ -195,6 +206,13 @@ async def verify(sandbox,endpoint,target,good,bad):
         sandbox.kubectl('-n',target.namespace,'set','image','deployment/payment-service','payment='+bad)
         before=await wait_for(bad,ready=False)
         before.validate(policy)
+        change_event=await changes.complete(change_baseline['baseline_ref'])
+        assert change_event['status']=='CHANGE_OBSERVED'
+        assert change_event['action_dispatch_authorized'] is False
+        assert change_event['rca_support_authorized'] is False
+        observed_change=verify_change(changes.store,change_event['change_ref'],
+            source=unaccepted_source,target=target,as_of=datetime.now(timezone.utc))
+        assert observed_change['before'].image==good and observed_change['after'].image==bad
         try:
             await observer.patch(before,good,dry_run=False)
             raise AssertionError('quarantine observer mutated Payment image')
@@ -219,6 +237,7 @@ async def verify(sandbox,endpoint,target,good,bad):
         return {'status':'PASS','scope':'local-kubernetes-API-software-fixture',
             'workload':'tiny-HTTP-fixture-NOT-SentinelOps-Payment','H4_accepted':False,'G6_accepted':False,
             'telemetry_recovery_verified':False,'approved_known_good_ledger_created':False,
+            'deployment_change_ref':change_event['change_ref'],
             'successful_runtime_image_patches':1,'kind_node':NODE,'good_image':good,'bad_image':bad,
             'target':after.projection()['target'],'before':before.projection(),'after':after.projection(),
             'checks':['real TLS and scoped ServiceAccount','observer SSAR denies all target mutation verbs; writer token rejected',

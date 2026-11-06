@@ -65,6 +65,7 @@ from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.kubernetes import LocalKubernetes
 from sentinelops.remediation.registry import KnownGoodRegistry
 from sentinelops.remediation.image_review import ImageEvidenceReview, require_evidence_reader
+from sentinelops.telemetry.deployment_changes import DeploymentChangeReview, verify_change
 from sentinelops.remediation.reader import ActionReader
 from sentinelops.remediation.worker import ReconciliationWorker
 from sentinelops.remediation.quarantine import QuarantineJournal, QuarantineReview
@@ -83,9 +84,27 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result',
              'rca-policy', 'rca-result', 'training-data-policy-v2', 'lane-b-deployment-lock', 'payment-known-good',
              'action-observation', 'action-list', 'quarantine-review', 'quarantine-release', 'quarantine-status',
-             'payment-image-review', 'payment-image-evidence'):
+             'payment-image-review', 'payment-image-evidence', 'payment-deployment-baseline', 'payment-deployment-change'):
     assert load_schema(name + '.schema.json')['type'] == 'object'
 assert 'root_causes_ground_truth' in load_schema('experiment-run.schema.json')['properties']
+
+change_baseline={'record_version':'payment-deployment-baseline/v1','target':{
+    'cluster_uid':'wheel-cluster','namespace':'sentinelops-b-actions','namespace_uid':'wheel-namespace',
+    'deployment':'payment-service','deployment_uid':'wheel-deployment','container':'payment'},
+    'environment':'local','health_stream_id':'a'*64,'health_policy_sha256':'b'*64,
+    'source_root_sha256':'c'*64,'observer_boot_sha256':'d'*64,
+    'before_ref':'artifact://manifests/'+'e'*64+'.json',
+    'opened_at':'2026-01-01T00:00:00Z','recorded_at':'2026-01-01T00:00:01Z',
+    'known_good_approved':False,'physical_binding_verified':False,
+    'rca_support_authorized':False,'action_dispatch_authorized':False}
+validate_payload('payment-deployment-baseline.schema.json',change_baseline)
+try:
+    validate_payload('payment-deployment-baseline.schema.json',{**change_baseline,'action_dispatch_authorized':True})
+except ValueError:
+    pass
+else:
+    raise AssertionError('installed baseline contract allowed observation to become dispatch authority')
+
 policy={'policy_version':'slo-health/local-v1','latency_ms':750.,'error_rate':.05,
     'minimum_requests':30,'minimum_coverage':.8,'entry_buckets':2,'recovery_buckets':3,'maximum_lag_seconds':60}
 health=advance_health(None,None,service='payment-service',environment='test',source_profile='wheel/v1',

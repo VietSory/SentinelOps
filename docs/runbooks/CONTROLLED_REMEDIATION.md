@@ -113,6 +113,30 @@ is claimed by software-fixture tests of this collector. Its bounded metric
 `sentinelops_image_review_observations_total` counts operation/status observations,
 including retries, not unique approvals or successful recovery.
 
+## Observe an image transition for H4 preparation
+
+The same SELECT-only health credential, explicit target, TLS observer credential
+and separate review store can collect `open-change` / `complete-change` receipts
+through `python -m scripts.review_payment_image` (use the same global flags as
+above). Open the baseline **before** an operator's deployment change; complete
+with `--review-ref <baseline_ref>` after observing the image transition.
+
+A settled baseline and exactly the next generation at a different immutable image
+are required. No change returns `PENDING`; missed generations, changed source/
+target/host epoch, corrupt refs, unavailable API, future/backwards clocks or an
+interval over 180 seconds fail closed. Both original deployment projections are
+preserved. The event is bounded from before the baseline API request to the later
+receipt, not an invented exact mutation clock. Replay recomputes scope, clocks,
+generations and images from those original snapshots.
+
+`CHANGE_OBSERVED` is an **unapproved observation**, not H4 acceptance. Its strict
+contracts keep physical binding, known-good, RCA-support authorization and action
+permission false. It cannot be selected as `approved-payment-images/v1`. A later
+source-binding/RCA consumer must validate the actual Kubernetes/HTTP association
+and availability cutoff before using this observation as support. Injection
+schedules, a service-name match and an operator's success flag are insufficient.
+This command does not patch Kubernetes, score RCA, publish a model or dispatch.
+
 Run focused raw-codec tests with
 `python -m pytest -q tests/test_payment_image_review.py tests/test_remediation_registry.py`.
 The existing disposable PostgreSQL check below also exercises actual reader

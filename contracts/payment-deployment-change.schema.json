@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sentinelops.local/contracts/payment-deployment-change.schema.json",
+  "title": "Unapproved observed Payment deployment change; no source/known-good/action authority",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "record_version",
+    "target",
+    "environment",
+    "health_stream_id",
+    "health_policy_sha256",
+    "source_root_sha256",
+    "observer_boot_sha256",
+    "before_ref",
+    "opened_at",
+    "recorded_at",
+    "known_good_approved",
+    "physical_binding_verified",
+    "rca_support_authorized",
+    "action_dispatch_authorized",
+    "baseline_ref",
+    "after_ref",
+    "change_not_before",
+    "change_not_after"
+  ],
+  "properties": {
+    "record_version": {
+      "const": "payment-deployment-change/v1"
+    },
+    "target": {
+      "$ref": "https://sentinelops.local/contracts/payment-image-review.schema.json#/properties/target"
+    },
+    "environment": {
+      "const": "local"
+    },
+    "health_stream_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "health_policy_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_root_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "observer_boot_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "before_ref": {
+      "type": "string",
+      "pattern": "^artifact://manifests/[0-9a-f]{64}\\.json$"
+    },
+    "opened_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "known_good_approved": {
+      "const": false
+    },
+    "physical_binding_verified": {
+      "const": false
+    },
+    "rca_support_authorized": {
+      "const": false
+    },
+    "action_dispatch_authorized": {
+      "const": false
+    },
+    "baseline_ref": {
+      "type": "string",
+      "pattern": "^artifact://manifests/[0-9a-f]{64}\\.json$"
+    },
+    "after_ref": {
+      "type": "string",
+      "pattern": "^artifact://manifests/[0-9a-f]{64}\\.json$"
+    },
+    "change_not_before": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "change_not_after": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
