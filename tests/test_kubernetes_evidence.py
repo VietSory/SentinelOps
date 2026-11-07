@@ -276,6 +276,61 @@ def test_transient_telemetry_outage_is_unavailable_not_a_partial_trace_or_captur
 
 
 
+@pytest.mark.parametrize('case', ['incomplete', 'quarantined', 'missed', 'unverified', 'foreign-profile'])
+def test_ineligible_health_batch_defers_without_live_reads(tmp_path, case):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from sentinelops.remediation.domain import KubernetesUnavailable
+    from sentinelops.telemetry.pipeline import process_captures
+    from test_rca_replay import POLICY
+
+    store = ArtifactStore(tmp_path)
+    identity = {'environment': 'local', 'source_profile': SOURCE_PROFILE}
+    captures = [raw_capture(service) for service in BUSINESS_ROUTES]
+    payment = next(raw for raw in captures if raw['service'] == 'payment-service')
+    if case == 'incomplete':
+        payment['queries']['series_scrapes']['response']['data']['result'][0]['value'][1] = '7'
+    elif case in ('quarantined', 'unverified'):
+        payment['queries']['scrapes']['response'] = {'status': 'error'}
+    elif case == 'foreign-profile':
+        payment['source_profile'] = 'prometheus-increase-60s/v1'
+    elif case == 'missed':
+        captures = []
+    normalization = process_captures(captures, store) if case != 'foreign-profile' else {
+        'raw_refs': [store.write('raw', raw) for raw in captures],
+    }
+    if case == 'unverified':
+        normalization['quarantine_refs'] = []
+    batch = store.write('manifests', {
+        'identity': identity, 'stream_id': stable_id(identity), 'bucket_end': timestamp(END),
+        'source_status': 'missed-decision-deadline' if case == 'missed' else 'queried',
+        'current_raw_refs': normalization['raw_refs'],
+        'normalization_manifest_ref': store.write('manifests', normalization),
+    })
+    state = store.write('manifests', {'last_batch_ref': batch})
+
+    async def run():
+        source = KubernetesIncidentEvidence(
+            SimpleNamespace(target=TARGET, close=AsyncMock()), {s: s+'-uid' for s in BUSINESS_ROUTES},
+            prometheus_endpoint='http://127.0.0.1:9090', jaeger_endpoint='http://127.0.0.1:16686',
+        )
+        source.verify_source = AsyncMock(side_effect=AssertionError('unusable batch attempted live reads'))
+        try:
+            if case in ('unverified', 'foreign-profile'):
+                error, match = ValueError, 'Prometheus query failed|lacks three accepted HTTP buckets'
+            else:
+                error, match = KubernetesUnavailable, 'kubernetes-accepted-http-bucket-unavailable'
+            with pytest.raises(error, match=match):
+                await source.capture(store, source_state_ref=state, job_id='test', intent_ref=state,
+                    group={'first_onset_at': timestamp(END-timedelta(minutes=4))},
+                    policy=POLICY, health_identity=identity, latency_ms=750.)
+            source.verify_source.assert_not_awaited()
+        finally:
+            await source.close()
+
+    asyncio.run(run())
+
+
 def test_expired_kubernetes_job_does_not_poison_queue_with_current_source_bucket(tmp_path,monkeypatch):
     """A real backlog can outlive the fixed evidence window; no live API read can fix it."""
     from types import SimpleNamespace

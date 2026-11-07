@@ -272,15 +272,34 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
                 'unavailable_source':{'source_state_ref':source_state_ref,
                     'feature_batch_ref':state['last_batch_ref'],
                     'missing_reason':'accepted-source-past-evidence-window'}})
+        if batch.get('source_status') == 'missed-decision-deadline':
+            if batch['current_raw_refs']:
+                raise ValueError('Kubernetes missed health bucket contains unexpected captures')
+            raise KubernetesUnavailable('kubernetes-accepted-http-bucket-unavailable')
+        normalization = store.read(batch['normalization_manifest_ref'])
+        current = []
+        for reference in normalization['raw_refs']:
+            raw = store.read(reference)
+            if raw['bucket_end'] == batch['bucket_end']:
+                current.append((reference, raw))
+        if (len(current) != len(BUSINESS_ROUTES)
+            or {raw['service'] for _, raw in current} != set(BUSINESS_ROUTES)
+            or any(raw['source_profile'] != kwargs['health_identity']['source_profile'] for _, raw in current)
+            or ('current_raw_refs' in batch and sorted(batch['current_raw_refs']) != sorted(ref for ref, _ in current))):
+            raise ValueError('Kubernetes binding lacks three accepted HTTP buckets')
+        quarantined = {store.read(ref)['raw_ref'] for ref in normalization.get('quarantine_refs', [])}
+        observations = [decode_capture(raw) for ref, raw in current if ref not in quarantined]
+        if len(observations) != len(current) or any(not o['quality']['eligible_for_inference'] for o in observations):
+            # The health ledger may accept UNKNOWN. Retry on its next bucket;
+            # after the fixed evidence window, the expiry path above closes the job.
+            raise KubernetesUnavailable('kubernetes-accepted-http-bucket-unavailable')
+
         # The elapsed health watermark gives recent log completions time to reach Jaeger.
         base = store.read(await super().capture(store, trace_completed_by=bucket_end, **kwargs))
         inventory = {s:base['source_containers'][s] for s in BUSINESS_ROUTES}
-        normalization = store.read(batch['normalization_manifest_ref'])
-        raw_refs = [r for r in normalization['raw_refs'] if store.read(r)['bucket_end'] == batch['bucket_end']]
-        if len(raw_refs) != 3: raise ValueError('Kubernetes binding lacks three accepted HTTP buckets')
         pod_counters = []
-        for reference in sorted(raw_refs):
-            raw = store.read(reference);service = raw['service']
+        for reference, raw in sorted(current):
+            service = raw['service']
             url = self.prometheus_endpoint + '/api/v1/query?' + urlencode({
                 'query': pod_query(service), 'time': bucket_end.timestamp()})
             body = json.loads(await self._http(url, limit=TRACE_BYTES))
