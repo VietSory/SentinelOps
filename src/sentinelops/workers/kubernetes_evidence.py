@@ -83,14 +83,27 @@ def verify_pod_counter(body, expected, raw):
     if body.get('status') != 'success' or body.get('warnings') or body.get('data', {}).get('resultType') != 'vector':
         raise ValueError('Kubernetes per-Pod counter is unavailable')
     rows = body['data']['result']
-    if len(rows) != 1:
-        raise ValueError('Kubernetes request denominator spans missing or multiple Pods')
-    row = rows[0]; clock, value = row['value']; labels = row['metric']
-    count = float(value)
+    # The collector can keep a terminated Pod's counter series. Only positive
+    # increases contribute requests, but every returned row must still be valid.
+    active, seen = [], set()
+    for row in rows:
+        clock, value = row['value']
+        labels = row['metric']
+        uid = labels.get('k8s_pod_uid')
+        count = float(value)
+        if (not isinstance(uid, str) or not uid or uid in seen
+                or labels != {'k8s_pod_uid': uid, 'k8s_namespace_name': expected['namespace']}
+                or float(clock) != end.timestamp() or not math.isfinite(count) or count < 0):
+            raise ValueError('Kubernetes Pod counter has invalid identity, clock or increase')
+        seen.add(uid)
+        if count > 0:
+            active.append((uid, count))
+    if len(active) != 1:
+        raise ValueError('Kubernetes request denominator spans missing or multiple serving Pods')
+    uid, count = active[0]
     original = raw['queries']['requests']['response']['data']['result']
-    if (labels != {'k8s_pod_uid': expected['pod_uid'], 'k8s_namespace_name': expected['namespace']}
-        or float(clock) != end.timestamp() or not math.isfinite(count) or count <= 0
-        or len(original) != 1 or not math.isclose(count, float(original[0]['value'][1]), rel_tol=1e-8, abs_tol=1e-8)):
+    if (uid != expected['pod_uid'] or len(original) != 1
+            or not math.isclose(count, float(original[0]['value'][1]), rel_tol=1e-8, abs_tol=1e-8)):
         raise ValueError('Kubernetes Pod counter differs from accepted HTTP source/clock/denominator')
 
 

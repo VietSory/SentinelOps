@@ -86,6 +86,24 @@ def test_pod_binding_rejects_other_identity_or_missing_traffic_instead_of_health
     with pytest.raises(ValueError):verify_pod_counter(body,pod,raw_capture('payment-service'))
 
 
+@pytest.mark.parametrize('count', [1, -1])
+def test_pod_binding_rejects_other_pod_with_nonzero_increase(count):
+    pod = projected()['payment-service']
+    body = pod_response(pod)
+    old_pod = pod_response({**pod, 'pod_uid': 'previous-payment-pod'}, count)
+    body['data']['result'].extend(old_pod['data']['result'])
+    with pytest.raises(ValueError):
+        verify_pod_counter(body, pod, raw_capture('payment-service'))
+
+
+def test_pod_binding_accepts_zero_increase_from_previous_pod():
+    pod = projected()['payment-service']
+    body = pod_response(pod)
+    old_pod = pod_response({**pod, 'pod_uid': 'previous-payment-pod'}, 0)
+    body['data']['result'] = old_pod['data']['result'] + body['data']['result']
+    verify_pod_counter(body, pod, raw_capture('payment-service'))
+
+
 def original_log(pod):
     return completion(pod['service'], timestamp_unix_ms=int(END.timestamp())*1000,duration_ms=100.,
         **{'k8s.pod.uid':pod['pod_uid'],'k8s.pod.name':pod['pod_name'],'k8s.namespace.name':pod['namespace']})
