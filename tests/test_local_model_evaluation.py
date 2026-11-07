@@ -83,6 +83,30 @@ def test_counterfactual_events_and_sustained_risk_keep_misses_and_counts():
     assert metrics["risk_target_unavailable_windows"] == 2
 
 
+def test_risk_curves_use_the_same_labelled_on_time_windows_for_both_models():
+    pytest.importorskip("sklearn")
+    gradual, rows = case_and_predictions()
+    healthy = deepcopy(gradual)
+    healthy["run_id"] = "healthy"
+    healthy["gradual_control_verified"] = False
+    healthy["oracle"]["services"]["payment-service"]["first_violation_at"] = None
+    on_time_negative = {**rows[0], "run_id": "healthy", "risk_label": 0,
+                        "xgboost_score": .1, "slope_score": .01, "xgboost_flag": False}
+    late_negative = {**on_time_negative, "window_end": at(6), "decision_at": at(7),
+                     "xgboost_score": .99, "slope_score": .99,
+                     "xgboost_flag": None, "slope_flag": None}
+    rows[0].update(decision_at=at(6), xgboost_score=.01, slope_score=.001,
+                   xgboost_flag=None, slope_flag=None)
+    metrics = summarize([*rows, on_time_negative, late_negative], [gradual, healthy],
+                        "payment-service", load_protocol())
+    for name in ("xgboost", "slope"):
+        curve = metrics["risk"][name]
+        assert (curve["windows"], curve["positives"], curve["average_precision"]) == (4, 3, 1)
+    assert metrics["risk_target_unavailable_windows"] == 2
+    assert metrics["risk_labelled_prediction_unavailable_windows"] == 2
+    assert metrics["risk"]["xgboost"]["eligible_precursor_runs"] == 1
+
+
 def test_missing_predictor_frames_do_not_remove_true_precursor_from_denominator():
     pytest.importorskip("sklearn")
     case, _ = case_and_predictions()

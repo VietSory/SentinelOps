@@ -138,9 +138,11 @@ precursor recall and selected/undefined counts. For Q-07,
 in its denominator and requires at least 60 seconds of counterfactual lead.
 Late detections and misses are reported separately; the existing any-lead
 `precursor_recall` remains unchanged. These remain replay metrics, not live alerts.
-Average precision is the primary
-paired risk comparison, with trapezoidal PR-AUC separately named: these are
-different integrals, and linear interpolation can be optimistic
+Both risk curves use the same windows with a verified label and an available
+prediction at the recorded counterfactual cutoff. The report counts labelled
+windows that missed the prediction deadline separately. Average precision is
+the primary paired risk comparison, with trapezoidal PR-AUC reported separately.
+They use different integrals, and linear interpolation can be optimistic
 ([scikit-learn definition](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.average_precision_score.html)).
 Neither convention silently grants Q-07/G3 acceptance.
 

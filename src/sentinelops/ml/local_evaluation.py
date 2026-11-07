@@ -140,9 +140,11 @@ def summarize(records, cases, service, protocol):
     censored = sum(bool(c["oracle"]["services"][service]["first_violation_at"]) and
         utc_time(c["ended_at"]) < utc_time(c["oracle"]["services"][service]["first_violation_at"]) +
         timedelta(seconds=protocol["event_deadline_seconds"]) for c in cases)
+    labelled = [r for r in records if type(r["risk_label"]) is int and r["risk_label"] in (0, 1)]
+    eligible = [r for r in labelled if r["xgboost_flag"] is not None and r["slope_flag"] is not None]
     result = {"event_followup_censored_runs": censored, "counterfactual_detector_events": {name: event_metrics(rows) for name, rows in detectors.items()},
-              "risk_target_unavailable_windows": sum(r["risk_label"] is None for r in records), "risk": {}}
-    eligible = [r for r in records if type(r["risk_label"]) is int and r["risk_label"] in (0, 1)]
+              "risk_target_unavailable_windows": sum(r["risk_label"] is None for r in records),
+              "risk_labelled_prediction_unavailable_windows": len(labelled) - len(eligible), "risk": {}}
     for name in precursor:
         rows = precursor[name]
         count = sum(r["eligible"] for r in rows)
