@@ -49,7 +49,9 @@ pickle. Training writes `activation_allowed=false`, never the serving release le
 `ModelRegistry.load` consumes a separate operator-controlled content-addressed
 `validated-model-release/v1` with bundle directory/hash and validation ref per route.
 The validation must bind the same model and separately accepted G2/G3, live source
-parity and evaluation refs. Fixture origin is rejected even with forged PASS flags.
+parity and evaluation refs. The registry checks those approvals and pinned metadata
+for every route before loading model weights. Fixture origin is rejected even with
+forged PASS flags.
 No endpoint writes approvals. Environment configuration uses both
 `SENTINELOPS_MODEL_STORE` and `SENTINELOPS_MODEL_RELEASE_REF`; absent configuration
 leaves the registry empty and `/v1/detect` returns 503. Invalid configured artifacts
@@ -100,8 +102,8 @@ producer for the new local source; the historical GAMMA limitations above remain
 unchanged. See [source verification, oracle and collection](LOCAL_HTTP_CORPUS.md).
 The source verifier must pass every per-service healthy/precursor/group/split
 condition and bind an immutable dataset freeze before `train_local_http` constructs
-estimators. The current in-progress corpus is BLOCKED, so no source-backed fit or
-research model metric is claimed.
+estimators. Determine the corpus state by auditing the selected original artifact
+store and its freeze.
 
 Admitted fitting reuses the existing numerical primitives and registry, with an
 explicit `sentinelops-model/v2` bundle. It stores the v2 policy, original dataset

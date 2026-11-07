@@ -195,7 +195,7 @@ def test_registry_rejects_wrong_route_or_feature_semantics_even_with_version_str
                 'provenance': {'service': service, 'feature_set_version': 'http-red-5m/v1',
                     'training_policy': policy, 'training_data_policy_hash': policy_hash(policy),
                     'source_profile': policy['sources']['local_http']['source_profile'], 'dataset_ref': 'fixture://routing-test'}}
-    monkeypatch.setattr(models, 'load_bundle', lambda *a, **k: (manifest, None, None))
+    monkeypatch.setattr(models, 'read_bundle_manifest', lambda *a, **k: manifest)
     evidence = store.write('manifests', {'fixture': True})
     validation = store.write('manifests', {'model_version': 'fixture', 'G2': 'PASS', 'G3': 'PASS',
         'source_parity': 'PASS', 'activation_allowed': True, 'evaluation_refs': [evidence],
@@ -203,6 +203,41 @@ def test_registry_rejects_wrong_route_or_feature_semantics_even_with_version_str
     release = store.write('manifests', {'release_version': 'validated-model-release/v1', 'models': [
         {'bundle_directory': 'fixture', 'manifest_sha256': 'fixture', 'validation_ref': validation}]})
     with pytest.raises(IncompatibleFeatures):
+        ModelRegistry.load(store, release)
+
+
+def test_registry_preflights_all_routes_before_loading_weights(tmp_path, monkeypatch):
+    from sentinelops.ml import models
+    from sentinelops.public_data.policy import load_training_policy, policy_hash
+
+    store = ArtifactStore(tmp_path)
+    policy = load_training_policy()
+    digest = policy_hash(policy)
+    dataset_ref = 'fixture://routing-test'
+    model_metadata = {
+        'origin': 'admitted-local-http', 'bundle_version': 'sentinelops-model/v2',
+        'model_version': 'fixture', 'ordered_features': list(FEATURE_KEYS),
+        'provenance': {'feature_set_version': 'http-red-5m/v1',
+            'training_policy': policy, 'training_data_policy_hash': digest,
+            'source_profile': policy['sources']['local_http']['source_profile'], 'dataset_ref': dataset_ref},
+    }
+
+    def read_manifest(directory, **kwargs):
+        return {**model_metadata, 'provenance': {**model_metadata['provenance'], 'service': directory.name}}
+
+    monkeypatch.setattr(models, 'read_bundle_manifest', read_manifest)
+    monkeypatch.setattr(models, 'load_bundle', lambda *a, **k: pytest.fail('rejected release loaded weights'))
+    evidence = store.write('manifests', {'fixture': True})
+    approval = {'model_version': 'fixture', 'G2': 'PASS', 'G3': 'PASS',
+        'source_parity': 'PASS', 'activation_allowed': True, 'evaluation_refs': [evidence],
+        'dataset_ref': dataset_ref, 'training_data_policy_hash': digest}
+    rows = [
+        {'bundle_directory': service, 'manifest_sha256': 'fixture',
+         'validation_ref': store.write('manifests', {**approval, 'G3': g3})}
+        for service, g3 in (('checkout-service', 'PASS'), ('payment-service', 'PENDING'))
+    ]
+    release = store.write('manifests', {'release_version': 'validated-model-release/v1', 'models': rows})
+    with pytest.raises(ModelUnavailable, match='separately accepted G2/G3'):
         ModelRegistry.load(store, release)
 
 

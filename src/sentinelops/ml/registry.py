@@ -51,13 +51,16 @@ class ModelRegistry:
         release = store.read(release_ref)
         if release.get("release_version") != "validated-model-release/v1":
             raise ValueError("unsupported model release ledger")
-        registry = cls()
-        from sentinelops.ml.models import load_bundle
+        from sentinelops.ml.models import load_bundle, read_bundle_manifest
+
+        # Check every route before loading any estimator. One invalid approval
+        # rejects the release without deserializing even an earlier valid route.
+        approved = {}
         for item in release["models"]:
             directory = (store.root / item["bundle_directory"]).resolve()
             if not directory.is_relative_to(store.root):
                 raise ValueError("model path escapes trusted store")
-            manifest, detector, risk = load_bundle(directory, expected_manifest_sha256=item["manifest_sha256"])
+            manifest = read_bundle_manifest(directory, expected_manifest_sha256=item["manifest_sha256"])
             approval = store.read(item["validation_ref"])
             if (manifest["origin"] != "admitted-local-http" or manifest.get("bundle_version") != "sentinelops-model/v2"
                 or approval.get("model_version") != manifest["model_version"]
@@ -74,12 +77,17 @@ class ModelRegistry:
             if provenance.get("training_data_policy_hash") != policy_hash(provenance["training_policy"]):
                 raise IncompatibleFeatures("model training source differs from its approved contract")
             service = provenance["service"]
-            if (service not in BUSINESS_ROUTES or service in registry._models
+            if (service not in BUSINESS_ROUTES or service in approved
                 or provenance["feature_set_version"] != FEATURE_SET
                 or set(manifest["ordered_features"]) != set(FEATURE_KEYS)
                 or provenance.get("source_profile") != provenance["training_policy"]["sources"]["local_http"]["source_profile"]):
                 raise IncompatibleFeatures("duplicate model route or incompatible live feature set")
-            registry._models[service] = (manifest, detector, risk, item["validation_ref"])
+            approved[service] = (directory, item["manifest_sha256"], item["validation_ref"])
+
+        registry = cls()
+        for service, (directory, checksum, validation_ref) in approved.items():
+            manifest, detector, risk = load_bundle(directory, expected_manifest_sha256=checksum)
+            registry._models[service] = (manifest, detector, risk, validation_ref)
         registry.identity = release_ref
         return registry
 

@@ -140,8 +140,8 @@ def save_bundle(output: Path, detector: Detector, *, provenance: dict, risk=None
     return manifest
 
 
-def load_bundle(output: Path, *, expected_manifest_sha256: str):
-    """Only trusted, checksum-pinned local artifacts; no API-supplied pickle."""
+def read_bundle_manifest(output: Path, *, expected_manifest_sha256: str) -> dict:
+    """Validate the pinned metadata without deserializing model artifacts."""
     path = output / "manifest.json"
     data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != expected_manifest_sha256:
@@ -164,6 +164,12 @@ def load_bundle(output: Path, *, expected_manifest_sha256: str):
             raise ValueError("local bundle dataset identity/admission differs")
     elif manifest["origin"] == "admitted-local-http":
         raise ValueError("local HTTP model requires its explicit v2 bundle format")
+    return manifest
+
+
+def load_bundle(output: Path, *, expected_manifest_sha256: str):
+    """Only trusted, checksum-pinned local artifacts; no API-supplied pickle."""
+    manifest = read_bundle_manifest(output, expected_manifest_sha256=expected_manifest_sha256)
     if set(manifest["artifacts"]) not in ({"detector.joblib"}, {"detector.joblib", "risk.json"}):
         raise ValueError("unknown model artifacts")
     for name, digest in manifest["artifacts"].items():
