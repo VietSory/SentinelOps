@@ -80,6 +80,18 @@ def test_trace_selection_preserves_direct_sibling_samples_without_guessing_share
         assert set(selected) == {stable_id([service, index])[:32] for index in (2, 3, 4)}
 
 
+def test_trace_selection_applies_cutoff_to_the_whole_trace_group():
+    cutoff_ms = int(END.timestamp()) * 1000
+    crossing, mature = "1" * 32, "2" * 32
+    rows = [
+        completion("payment-service", trace_id=crossing, timestamp_unix_ms=cutoff_ms - 1),
+        completion("checkout-service", trace_id=crossing, timestamp_unix_ms=cutoff_ms + 1),
+        completion("payment-service", trace_id=mature, timestamp_unix_ms=cutoff_ms),
+    ]
+    assert select_traces(rows, 750.) == [(crossing, "checkout-service"), (mature, "payment-service")]
+    assert select_traces(rows, 750., completed_by=END) == [(mature, "payment-service")]
+
+
 @pytest.mark.parametrize("url", ["http://example.com:16686", "https://localhost:16686", "http://localhost",
     "http://localhost:16686/api", "http://dummy:dummy@localhost:16686", "http://localhost:16686?token=dummy"])
 def test_native_source_rejects_external_or_credential_bearing_endpoints(url):

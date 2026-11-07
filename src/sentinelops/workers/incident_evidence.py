@@ -127,19 +127,24 @@ def completion_records(body: bytes, service: str, lower: datetime, upper: dateti
     return rows, dict(counts)
 
 
-def select_traces(rows: list[dict], latency_ms: float) -> list[tuple[str, str]]:
+def select_traces(rows: list[dict], latency_ms: float, *,
+                  completed_by: datetime | None = None) -> list[tuple[str, str]]:
     """Choose traces by observed completion violations, with equal entry budgets."""
+    cutoff_ms = epoch_ns(completed_by) // 1_000_000 if completed_by is not None else None
     grouped = defaultdict(list)
     for row in rows:
         grouped[row["trace_id"]].append(row)
     candidates = defaultdict(list)
     for trace_id, records in grouped.items():
+        latest = max(r["timestamp_unix_ms"] for r in records)
+        if cutoff_ms is not None and latest > cutoff_ms:
+            continue
         if not any(r["status_code"] >= 500 or r["duration_ms"] > latency_ms for r in records):
             continue
         services = {r["service"] for r in records}
         entry = "checkout-service" if "checkout-service" in services else next(iter(services)) if len(services) == 1 else None
         if entry is not None:
-            candidates[entry].append((max(r["timestamp_unix_ms"] for r in records), trace_id))
+            candidates[entry].append((latest, trace_id))
     return [(trace_id, entry) for entry in sorted(candidates)
             for _, trace_id in sorted(candidates[entry], reverse=True)[:TRACES_PER_ENTRY]]
 
@@ -249,7 +254,8 @@ class NativeIncidentEvidence:
             return None, "unavailable-or-unsupported-bounded-trace"
 
     async def capture(self, store, *, job_id: str, intent_ref: str, group: dict, policy: dict,
-                      health_identity: dict, latency_ms: float) -> str:
+                      health_identity: dict, latency_ms: float,
+                      trace_completed_by: datetime | None = None) -> str:
         validate_policy(policy)
         owned = await self.verify_source(health_identity)
         lower = utc_time(group["first_onset_at"])
@@ -267,7 +273,8 @@ class NativeIncidentEvidence:
         async def trace(selected):
             async with semaphore:
                 return await self._trace(*selected, store) if owned["jaeger"]["running"] else (None, "jaeger-unavailable")
-        traces = await asyncio.gather(*(trace(selected) for selected in select_traces(records, latency_ms)))
+        selection = select_traces(records, latency_ms, completed_by=trace_completed_by)
+        traces = await asyncio.gather(*(trace(selected) for selected in selection))
         infra_refs, missing = [], Counter(error for _, error in traces if error)
         if self.infrastructure and owned["postgres"]["running"]:
             try:

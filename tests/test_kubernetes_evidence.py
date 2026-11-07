@@ -180,10 +180,12 @@ def test_full_readonly_collector_and_replay_pin_original_health_and_pod_logs(tmp
             captured=store.read(ref)
             assert captured['capture_version']=='continuous-incident-evidence/v3'
             assert captured['actions_allowed'] is False
+            assert captured['physical_binding']['trace_completed_by'] == timestamp(END)
             assert verify_kubernetes_binding(store,captured,identity)==pods
-            for problem in ('state','counter','log','inventory'):
+            for problem in ('state','counter','log','inventory','trace-cutoff'):
                 bad=deepcopy(captured)
                 if problem=='state':bad['physical_binding']['feature_batch_ref']=state
+                if problem=='trace-cutoff':bad['physical_binding']['trace_completed_by']=timestamp(END+timedelta(seconds=1))
                 if problem=='counter':bad['physical_binding']['pod_counters'][0]['response']['data']['result'][0]['value'][1]='1'
                 if problem=='inventory':bad['source_containers']['payment-service']['pod_uid']='forged'
                 if problem=='log':

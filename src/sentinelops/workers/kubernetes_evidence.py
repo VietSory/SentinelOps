@@ -256,9 +256,10 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
         validate_policy(kwargs['policy'])
         state = store.read(source_state_ref)
         batch = store.read(state['last_batch_ref'])
+        bucket_end = utc_time(batch['bucket_end'])
         lower = utc_time(kwargs['group']['first_onset_at'])
         end = lower + timedelta(seconds=kwargs['policy']['evidence_window_seconds'])
-        if utc_time(batch['bucket_end']) > end:
+        if bucket_end > end:
             # A current Pod query cannot bind a source bucket from outside the
             # incident window. Persist explicit missingness; never poison the
             # oldest pending job or widen its immutable evidence scope.
@@ -271,9 +272,9 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
                 'unavailable_source':{'source_state_ref':source_state_ref,
                     'feature_batch_ref':state['last_batch_ref'],
                     'missing_reason':'accepted-source-past-evidence-window'}})
-        base = store.read(await super().capture(store, **kwargs))
+        # The elapsed health watermark gives recent log completions time to reach Jaeger.
+        base = store.read(await super().capture(store, trace_completed_by=bucket_end, **kwargs))
         inventory = {s:base['source_containers'][s] for s in BUSINESS_ROUTES}
-        state = store.read(source_state_ref);batch = store.read(state['last_batch_ref'])
         normalization = store.read(batch['normalization_manifest_ref'])
         raw_refs = [r for r in normalization['raw_refs'] if store.read(r)['bucket_end'] == batch['bucket_end']]
         if len(raw_refs) != 3: raise ValueError('Kubernetes binding lacks three accepted HTTP buckets')
@@ -281,7 +282,7 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
         for reference in sorted(raw_refs):
             raw = store.read(reference);service = raw['service']
             url = self.prometheus_endpoint + '/api/v1/query?' + urlencode({
-                'query': pod_query(service), 'time': utc_time(raw['bucket_end']).timestamp()})
+                'query': pod_query(service), 'time': bucket_end.timestamp()})
             body = json.loads(await self._http(url, limit=TRACE_BYTES))
             verify_pod_counter(body, inventory[service], raw)
             pod_counters.append({'raw_ref': reference, 'expression': pod_query(service),
@@ -294,14 +295,15 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
         base.update(capture_version='continuous-incident-evidence/v3',
             analyzed_at=timestamp(now()), physical_binding={'source_state_ref': source_state_ref,
                 'feature_batch_ref': state['last_batch_ref'], 'pod_counters': pod_counters,
-                'inventory_after': after['kubernetes_api']})
+                'inventory_after': after['kubernetes_api'], 'trace_completed_by': batch['bucket_end']})
         return store.write('manifests', base)
 
 
 def verify_kubernetes_binding(store, capture, health_identity):
     """Reproduce original UID/denominator/log/trace binding after journal authentication."""
     pack, profile = capture['physical_binding'], capture['profile']
-    if (set(pack) != {'source_state_ref','feature_batch_ref','pod_counters','inventory_after'}
+    required = {'source_state_ref', 'feature_batch_ref', 'pod_counters', 'inventory_after'}
+    if (set(pack) not in (required, required | {'trace_completed_by'})
         or profile['profile_version'] != 'kubernetes-incident-evidence/v1'
         or health_identity['environment'] != 'local'
         or health_identity['endpoint_hash'] != stable_id({'endpoint':profile['prometheus_endpoint']})):
@@ -314,7 +316,8 @@ def verify_kubernetes_binding(store, capture, health_identity):
         raise ValueError('Kubernetes capture inventory differs from original API projections')
     state = store.read(pack['source_state_ref']);batch = store.read(pack['feature_batch_ref'])
     if (state['last_batch_ref'] != pack['feature_batch_ref'] or batch['identity'] != health_identity
-        or batch['stream_id'] != stable_id(health_identity)):
+        or batch['stream_id'] != stable_id(health_identity)
+        or ('trace_completed_by' in pack and pack['trace_completed_by'] != batch['bucket_end'])):
         raise ValueError('Kubernetes binding selects a different accepted health batch')
     normalization = store.read(batch['normalization_manifest_ref'])
     expected = {r for r in normalization['raw_refs'] if store.read(r)['bucket_end'] == batch['bucket_end']}

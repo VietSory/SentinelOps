@@ -92,7 +92,9 @@ def derive_continuous(store, *, intent_ref: str, intent: dict, closed: dict, cap
         if rebuilt != records or records and (receipt.get("unavailable") or "quarantined-service-log-capture" in receipt.get("selection", {})):
             raise ValueError("completion projection contains unavailable, unsafe or out-of-window records")
     traces = [(ref, store.read(ref)) for ref in refs["traces"]]
-    selection = set(select_traces(logs["records"], health_policy["latency_ms"]))
+    cutoff = capture["physical_binding"].get("trace_completed_by") if kubernetes else None
+    selection = set(select_traces(logs["records"], health_policy["latency_ms"],
+                                  completed_by=utc_time(cutoff) if cutoff is not None else None))
     seen = set()
     for _, trace in traces:
         key = (trace["trace_id"], trace["request_entry_service"])
