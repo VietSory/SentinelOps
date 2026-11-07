@@ -1,31 +1,19 @@
-# Guarded offline model software
+# Model training, review and serving
 
-Owner-approved ADR-014 and `training-data/v2` now authorize prospectively registered
-local HTTP observations as primary training data. Original source/health/precursor
-evidence is still required before admission. RCAEval cannot fit models, preprocessors
-or thresholds. No new dataset/model is accepted while those gates remain blocked.
-The GAMMA interfaces/counts below describe immutable historical v1 reproduction;
-the measured resource report is not a current admission certificate.
+The [accepted local HTTP source](../adr/ADR-014-proposed-local-training-evidence.md)
+is the primary source for prospective fitting under `training-data/v2`.
+Use the [corpus runbook](LOCAL_HTTP_CORPUS.md) to register acquisitions and audit
+original observations with `scripts.audit_local_corpus`. The source verifier
+checks per-service healthy and precursor evidence, independent groups and
+chronological splits. `scripts.train_models` verifies the admitted dataset and
+immutable freeze before constructing estimators. Audit the selected original
+store to determine its readiness.
 
-`scripts.audit_model_readiness` recomputes exact accounting from the committed
-grouped report, identifies its historical scope, and records zero certified live
-business-service health/precursor support. It never opens raw or final data.
-
-`scripts.train_models` rejects unready reports **before estimator construction,
-table access or output creation**. The proposed internal
-`gamma-verified-training/v1` table reader has structural group/chronology/count
-checks, but no accepted source-backed health/precursor certificate verifier exists.
-Previously, caller-authored PASS flags and arbitrary existing evidence references
-could enter this reader. Admission now explicitly rejects self-attested reports,
-including reports claiming every gate passed. Content hashes prove byte integrity,
-not workload health, outcome truth or scientific approval.
-
-Enabling source-backed training requires implementing and reviewing a verifier
-that binds traffic completeness, objective SLO health/outcomes, native identities,
-independent groups and precursor chronology to approved original observations.
-Changing booleans cannot unlock training. The dormant row reader is not a certified
-admission pipeline. Actual numerical fit/serialization/inference primitives remain
-fixture-tested separately; no valid source-admission integration is claimed.
+`scripts.audit_model_readiness` describes historical GAMMA v1 reproduction.
+Its grouped resource report has zero certified live business-service health or
+precursor support and remains ineligible for fitting. RCAEval is reserved for
+RCA evaluation. Caller-written PASS flags and arbitrary evidence references
+cannot authorize fitting or serving.
 
 Numerical primitives implement actual train-only RobustScaler/IsolationForest,
 median/MAD control and XGBoost binary risk. Per-service matrices preserve native
@@ -91,19 +79,7 @@ canonical and legacy replay use the same validator. Unsupported versions and
 forged status/clock combinations fail closed. The strict HTTP prediction payloads,
 source contract, model admission and activation gates are unchanged.
 
-[Accepted ADR-014](../adr/ADR-014-proposed-local-training-evidence.md) records explicit
-owner approval on 2026-10-31. The [new capture protocol](LOCAL_HTTP_CORPUS.md) describes
-prospective registration; source authorization does not pass admission or activate models.
-
-## Owner-approved prospective v2 implementation
-
-`scripts.audit_local_corpus` now implements the original-observation certificate
-producer for the new local source; the historical GAMMA limitations above remain
-unchanged. See [source verification, oracle and collection](LOCAL_HTTP_CORPUS.md).
-The source verifier must pass every per-service healthy/precursor/group/split
-condition and bind an immutable dataset freeze before `train_local_http` constructs
-estimators. Determine the corpus state by auditing the selected original artifact
-store and its freeze.
+## Admitted local HTTP bundles
 
 Admitted fitting reuses the existing numerical primitives and registry, with an
 explicit `sentinelops-model/v2` bundle. It stores the v2 policy, original dataset
