@@ -30,7 +30,7 @@ import httpx
 import yaml
 
 from scripts.check_kubernetes_testbed import BusinessSandbox
-from scripts.check_rollback_kubernetes import PROJECT
+from scripts.check_rollback_kubernetes import PROJECT, private_file
 from scripts.kubernetes_testbed import NAMESPACE, SERVICES, render
 from sentinelops.experiments.traffic import PATHS
 from sentinelops.ml.registry import ModelRegistry
@@ -53,6 +53,7 @@ OWNER_LABEL = 'sentinelops.s2-h4'
 WRITER_DSN_PREFIX = 'postgresql://control_writer:local-control-writer@127.0.0.1:'
 PAYMENT = 'payment-service'
 POST_CHANGE_MINUTES = 8
+TOKEN_DURATION = '60m'  # sandbox identity() issues 10m tokens; this run can exceed that
 
 
 def clock():
@@ -223,6 +224,11 @@ async def run(sandbox, bad, dsn, registry, release):
         finally:
             source.close()
         endpoint, target = await asyncio.to_thread(sandbox.identity)
+        observer_token = sandbox.root / 'observer-token'
+        token = (await asyncio.to_thread(sandbox.kubectl, '-n', NAMESPACE, 'create', 'token', 'payment-quarantine-observer',
+                                         '--duration=' + TOKEN_DURATION)).strip()
+        observer_token.unlink()
+        private_file(observer_token, token)
         pool = await connect_pool(dsn)
         kube = LocalKubernetes(endpoint, target, token_file=sandbox.root / 'observer-token', ca_file=sandbox.root / 'ca.crt')
         collector = None
