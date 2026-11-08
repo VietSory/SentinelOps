@@ -210,10 +210,20 @@ mkdir handoff
 tar --no-same-owner -xzf PATH_TO_ARCHIVE.tar.gz -C handoff
 ```
 
-The extracted root contains `handoff.json`, `runtime/` and `audit/`; B uses these
-relative paths rather than A's original absolute training paths. The checksum
-checks transport integrity; source replay, model quality and activation remain
-separate gates. Preparing this package locally does not publish model/audit data.
+The extracted root contains `handoff.json`, `runtime/` and `audit/`. From the
+implementation checkout, verify the received candidate using the ID supplied
+by the trusted sender:
+
+```sh
+python -m scripts.verify_model_candidate --candidate handoff --expected-id CANDIDATE_ID
+```
+
+The default check verifies the file inventory, route identities, hashes and
+review metadata without loading the model weights. For a trusted candidate, add
+`--replay` in the target environment with the bundle's pinned library versions
+to reproduce all stored development scores and flags. The result includes the
+three event denominators for review. Target telemetry parity, G3 approval and
+activation remain separate decisions. Keep the audit tree with the operator.
 
 Original corpus/Git objects remain required for full source replay and are
 declared external dependencies. This candidate package contains no raw/final
