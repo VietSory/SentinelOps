@@ -278,7 +278,7 @@ chạy khi không có corpus capture nào đang chạy trên host (các script t
 | --- | --- | --- | --- |
 | 1 | A | `scripts/audit_detector_events.py --root <det-root> --output … --freeze` | Epoch `READY_FOR_EVALUATION`, đã freeze |
 | 2 | A | `scripts/evaluate_detector_events.py … --detector-report-ref <ref> --output <v2-store>` | `report_ref` của báo cáo v2 |
-| 3 | A | `scripts/g3_review_packet.py --candidate <handoff> --v2-store <v2-store> --v2-report-ref <report_ref> --output packet.md` | Hồ sơ G3 ghi rõ báo cáo cần duyệt |
+| 3 | A | `scripts/g3_review_packet.py --candidate <handoff> --expected-id <ID> --v2-store <v2-store> --v2-report-ref <report_ref> --output packet.md` | Hồ sơ G3 ghi rõ báo cáo cần duyệt |
 | 4a | A | `scripts/export_source_shapes.py --corpus <frozen corpus> --output shapes.json` | Manifest hình dạng nguồn (không có observation thô) + SHA-256, gửi B qua kênh riêng |
 | 4 | B | `scripts/check_model_source_parity.py --kind <kind-v0.30.0> --candidate <handoff> --expected-id <ID> --source-shapes shapes.json --source-shapes-sha256 <SHA> --environment <tên> --verified-by <tên> --output …` | `parity.json` (`PASS` hoặc `FAIL`) kèm `verification.json` được ghim bằng hash |
 | 5 | Owner | Đọc hồ sơ G3 và quyết định | Quyết định G3 gắn với candidate và `report_ref` |

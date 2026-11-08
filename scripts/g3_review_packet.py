@@ -13,6 +13,7 @@ import argparse
 import json
 from pathlib import Path
 
+from scripts.verify_model_candidate import verify_candidate
 from sentinelops.ml.local_data import _inside
 from sentinelops.ml.release import _audit, validate_v2_report
 from sentinelops.telemetry.core import FEATURE_KEYS
@@ -51,8 +52,9 @@ def scaler_diagnostic(candidate, index, v1):
     return result
 
 
-def render(candidate, v2, report_ref):
+def render(candidate, expected_id, v2, report_ref):
     candidate = Path(candidate).resolve(strict=True)
+    verify_candidate(candidate, expected_id)
     index = json.loads(_inside(candidate, "handoff.json").read_bytes())
     v1 = _audit(candidate, index["evaluation_ref"])
     validate_v2_report(v2, v1, report_ref)
@@ -94,12 +96,13 @@ def render(candidate, v2, report_ref):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", type=Path, required=True)
+    parser.add_argument("--expected-id", required=True, help="Candidate ID from the trusted handoff channel")
     parser.add_argument("--v2-store", type=Path, required=True, help="Output store from evaluate_detector_events")
     parser.add_argument("--v2-report-ref", required=True, help="Report reference emitted by evaluate_detector_events")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     report = ArtifactStore(args.v2_store).read(args.v2_report_ref)
-    text, _ = render(args.candidate, report, args.v2_report_ref)
+    text, _ = render(args.candidate, args.expected_id, report, args.v2_report_ref)
     with args.output.open("x") as stream:
         stream.write(text)
     print(str(args.output))

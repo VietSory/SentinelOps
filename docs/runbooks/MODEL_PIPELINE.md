@@ -259,15 +259,16 @@ Each service reports:
 The gradual groups were already inspected, so their re-accounting is not
 independent evidence.
 
-Use the evaluator's printed `report_ref` and the same output store to render
-the owner's review packet:
+Use the candidate ID from the trusted handoff channel and the evaluator's
+printed `report_ref` to render the owner's review packet.
 
 ```sh
-python -m scripts.g3_review_packet --candidate /verified/handoff \
+python -m scripts.g3_review_packet --candidate /verified/handoff --expected-id CANDIDATE_ID \
   --v2-store /new/evaluation --v2-report-ref artifact://manifests/REPORT_HASH.json \
   --output packet.md
 ```
 
+The renderer verifies the entire candidate inventory before loading any model.
 The packet records the exact v2 report reference for the owner decision. It
 adds a source diagnostic: the training healthy p95 centre/IQR compared with the
 development healthy spread. IF is invariant to per-feature affine scaling, so a

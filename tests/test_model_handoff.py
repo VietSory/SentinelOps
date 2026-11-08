@@ -90,6 +90,24 @@ def test_candidate_descriptor_never_counts_as_serving_release(tmp_path):
         ModelRegistry.load(store,ref)
 
 
+def test_g3_packet_rejects_untrusted_candidate_before_loading_models(tmp_path, monkeypatch):
+    from scripts import g3_review_packet
+    from sentinelops.telemetry.core import stable_id
+
+    index = {"handoff_version": "unapproved-model-candidate/v1", "activation_allowed": False,
+             "holdout_opened": False, "original_corpus_included": False, "source_parity": "not-accepted",
+             "runtime_root": "runtime", "audit_root": "audit"}
+    (tmp_path / "handoff.json").write_text(json.dumps({**index, "candidate_id": stable_id(index)}))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("review accessed audit or model files for the wrong candidate")
+
+    monkeypatch.setattr(g3_review_packet, "_audit", forbidden)
+    monkeypatch.setattr(g3_review_packet, "scaler_diagnostic", forbidden)
+    with pytest.raises(ValueError, match="candidate identity"):
+        g3_review_packet.render(tmp_path, "0" * 64, {}, "unused")
+
+
 def test_export_cli_reports_real_source_gate_before_missing_assets(tmp_path):
     source=ArtifactStore(tmp_path/"source")
     ref=source.write("manifests",{"dataset_version":"local-http-admission/v1","training_ready":False})
