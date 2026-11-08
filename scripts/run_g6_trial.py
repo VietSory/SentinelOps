@@ -299,6 +299,8 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                             (root / 'action-journal.json').write_text(json.dumps(report['action'], indent=2, default=str) + '\n')
                     except Exception as recovery:
                         report['failure']['journal_recovery_error_type'] = type(recovery).__name__
+                # An intent may exist that could not be exported: keep the private DB instead.
+                report['retain_control_db'] = pending['request'] is not None and 'action' not in report
                 (root / 'failure-receipt.json').write_text(json.dumps(report, indent=2, default=str) + '\n')
                 if not isinstance(exc, Exception):
                     raise
@@ -340,6 +342,7 @@ def main():
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
     sandbox = BusinessSandbox(root, args.kind)
     owned = []
+    retain_db = False
     emit('sandbox-owned', cluster=sandbox.name, commit=commit, policy_enabled=args.enable_rollback_policy)
 
     def terminate(signum, frame):
@@ -351,6 +354,7 @@ def main():
         port, password = control_db(sandbox, images['postgres'], owned)
         dsn = WRITER_DSN_PREFIX + port + '/sentinelops_control'
         report = asyncio.run(trial(sandbox, dsn, port, password, bad, registry, args))
+        retain_db = bool(report.get('retain_control_db'))
         result = {'version': 'g6-local-trial/v1', 'source_commit': commit, 'healthy_image': images['application'],
                   'bad_image': bad, 'model_release_ref': args.model_release_ref, **report,
                   'policy_enabled': args.enable_rollback_policy, 'G6_accepted': False}
@@ -365,7 +369,10 @@ def main():
         raise
     finally:
         try:
-            if owned:
+            if owned and retain_db:
+                emit('control-db-retained-for-audit', container=owned[0],
+                     note='an action intent may exist that was not exported; inspect, then remove manually')
+            elif owned:
                 label = sandbox.docker('inspect', '--format', '{{index .Config.Labels "' + OWNER_LABEL + '"}}', owned[0]).decode().strip()
                 if label == sandbox.name:
                     sandbox.docker('rm', '-f', '-v', owned[0])
