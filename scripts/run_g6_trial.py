@@ -14,13 +14,15 @@ Order on a single owned sandbox that stays alive for the whole trial:
    `--enable-rollback-policy`; creating `<output>/KILL_SWITCH` blocks dispatch)
    and is reconciled until recovered, escalated or blocked.
 
-Nothing here approves an image or a model by itself. All owned resources are
-removed on exit; the journal, evidence and verification are kept in `<output>`.
+Nothing here approves an image or a model by itself. The journal, evidence and
+verification are kept in `<output>`. Cleanup keeps the private control DB when
+a rollback attempt may have written an intent that has yet to be exported.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+from dataclasses import asdict
 from datetime import timedelta
 import json
 import os
@@ -64,6 +66,7 @@ WRITER_DSN_PREFIX = 'postgresql://control_writer:local-control-writer@127.0.0.1:
 APPROVAL_WAIT_SECONDS = 1800
 ACTION_DEADLINE_SECONDS = 900
 TERMINAL = ('recovered', 'escalated', 'blocked')
+PENDING_AUDIT = 'action-audit-pending.json'
 
 
 def control_db(sandbox, postgres, owned):
@@ -138,6 +141,7 @@ async def resilient_traffic(client, sandbox, urls, stop_event, phase):
 
 async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
     root = sandbox.root
+    pending_audit = root / PENDING_AUDIT
     urls = {s: sandbox.forward(s, 8000) for s in SERVICES}
     prometheus, jaeger = sandbox.forward('prometheus', 9090), sandbox.forward('jaeger', 16686)
     report = {'phases': []}
@@ -192,7 +196,14 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
 
             consumer = asyncio.create_task(consume())
             traffic = asyncio.create_task(resilient_traffic(client, sandbox, urls, stop, phase))
-            pending = {'request': None}
+            pending_request = None
+
+            def export_action(action):
+                if action is None:
+                    raise RuntimeError('action journal missing during export')
+                (root / 'action-journal.json').write_text(json.dumps(action, indent=2, default=str) + '\n')
+                pending_audit.unlink()
+                report['action'] = action
 
             def require_alive():
                 for name, task in (('consumer', consumer), ('traffic', traffic)):
@@ -269,7 +280,10 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                         report['h4'] = {'dispatch_authority': assessment.dispatch_authority,
                                         'missing_reason': assessment.missing_reason, 'revision': assessment.revision}
                         require_alive()
-                        pending['request'] = request
+                        pending_request = request
+                        # Leave durable cleanup state before the executor can create an intent.
+                        with pending_audit.open('x') as stream:
+                            json.dump({'request': asdict(request), 'target': asdict(target)}, stream)
                         state = await executor.execute(request)
                         phase['bad'] = state['phase'] not in ('blocked',)
                         emit('action-state', phase=state['phase'], action_id=state['action_id'])
@@ -283,24 +297,22 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                     report['action_outcome'] = 'NO_ACTION_ATTEMPTED_BEFORE_DEADLINE'
                 else:
                     # Keep the verified journal (intent, history, hash chain) before the DB is deleted.
-                    report['action'] = await actions.get(state['action_id'])
+                    export_action(await actions.get(state['action_id']))
                     report['action_outcome'] = state['phase'] if state['phase'] in TERMINAL else 'NONTERMINAL_TIMEOUT'
-                    (root / 'action-journal.json').write_text(json.dumps(report['action'], indent=2, default=str) + '\n')
             except BaseException as exc:
                 # Bounded, redacted receipt; recover any recorded intent before the DB is deleted.
                 # BaseException: SIGTERM/SIGINT arrive as cancellation and must not skip the audit.
                 report['failure'] = {'error_type': type(exc).__name__}
                 report['action_outcome'] = 'TRIAL_FAILED'
-                if pending['request'] is not None:
+                if pending_request is not None and pending_audit.exists():
                     try:
-                        found = await actions.find(pending['request'], target)
+                        found = await actions.find(pending_request, target)
                         if found is not None:
-                            report['action'] = await actions.get(found['action_id'])
-                            (root / 'action-journal.json').write_text(json.dumps(report['action'], indent=2, default=str) + '\n')
+                            export_action(found)
                     except Exception as recovery:
                         report['failure']['journal_recovery_error_type'] = type(recovery).__name__
                 # An intent may exist that could not be exported: keep the private DB instead.
-                report['retain_control_db'] = pending['request'] is not None and 'action' not in report
+                report['retain_control_db'] = pending_audit.exists()
                 (root / 'failure-receipt.json').write_text(json.dumps(report, indent=2, default=str) + '\n')
                 if not isinstance(exc, Exception):
                     raise
@@ -342,7 +354,6 @@ def main():
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
     sandbox = BusinessSandbox(root, args.kind)
     owned = []
-    retain_db = False
     emit('sandbox-owned', cluster=sandbox.name, commit=commit, policy_enabled=args.enable_rollback_policy)
 
     def terminate(signum, frame):
@@ -354,7 +365,6 @@ def main():
         port, password = control_db(sandbox, images['postgres'], owned)
         dsn = WRITER_DSN_PREFIX + port + '/sentinelops_control'
         report = asyncio.run(trial(sandbox, dsn, port, password, bad, registry, args))
-        retain_db = bool(report.get('retain_control_db'))
         result = {'version': 'g6-local-trial/v1', 'source_commit': commit, 'healthy_image': images['application'],
                   'bad_image': bad, 'model_release_ref': args.model_release_ref, **report,
                   'policy_enabled': args.enable_rollback_policy, 'G6_accepted': False}
@@ -369,11 +379,7 @@ def main():
         raise
     finally:
         try:
-            receipt = root / 'failure-receipt.json'
-            if receipt.exists():
-                # Also covers cancellation, where trial() re-raised before main saw a report.
-                retain_db = retain_db or bool(json.loads(receipt.read_text()).get('retain_control_db'))
-            if owned and retain_db:
+            if owned and (root / PENDING_AUDIT).exists():
                 emit('control-db-retained-for-audit', container=owned[0],
                      note='an action intent may exist that was not exported; inspect, then remove manually')
             elif owned:

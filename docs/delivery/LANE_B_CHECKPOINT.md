@@ -308,6 +308,8 @@ suốt trial:
 - Executor chỉ patch khi có cờ `--enable-rollback-policy` và không có file
   `KILL_SWITCH`.
 - Script cần một release H1 hợp lệ.
+- Nếu còn `action-audit-pending.json` sau khi trial dừng, script giữ control DB
+  để operator truy xuất journal theo request trong file đó trước khi dọn DB.
 - Đã kiểm CLI và chữ ký ghép nối; **chưa chạy native**.
 
 ## 8. Những gì checkpoint này KHÔNG tuyên bố
