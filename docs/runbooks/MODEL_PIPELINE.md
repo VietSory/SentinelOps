@@ -261,8 +261,9 @@ independent evidence.
 
 Render the owner's review packet with `python -m scripts.g3_review_packet --candidate
 /verified/handoff --v2-report /evaluation/v2-report.json --output packet.md`. It
-adds a source diagnostic: the training RobustScaler p95 centre/IQR compared with
-the development healthy spread. It decides nothing. Risk/XGBoost evidence stays on the v1 gradual protocol.
+adds a source diagnostic: the training healthy p95 centre/IQR compared with the
+development healthy spread. IF is invariant to per-feature affine scaling, so a
+narrow training range, not the scaler, explains drift flags. It decides nothing. Risk/XGBoost evidence stays on the v1 gradual protocol.
 The report keeps `G3_accepted=false` and `activation_allowed=false`. G3 remains
 an owner/reviewer decision over all of these results.
 

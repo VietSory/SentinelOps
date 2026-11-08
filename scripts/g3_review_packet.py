@@ -1,8 +1,10 @@
 """Render the owner's G3 review packet from pinned v1/v2 reports; decides nothing.
 
 Inputs are the candidate handoff (v1 development report and bundles) and the
-ADR-015 v2 report. The packet adds one source diagnostic: each route's training
-RobustScaler centre/IQR against development healthy feature spread. The output
+ADR-015 v2 report. The packet adds one source diagnostic: each route's training healthy
+p95 centre/IQR against development healthy spread. Isolation Forest is
+invariant to per-feature affine scaling, so a narrow *training range* (not the
+scaler) is what makes ordinary host drift look anomalous. The output
 is Markdown for a human reviewer; G3 stays an owner decision.
 """
 from __future__ import annotations
@@ -71,14 +73,14 @@ def render(candidate, v2):
             f"[{_fmt(interval['lower'])}, {_fmt(interval['upper'])}] ({interval['valid_replicates']} valid) | "
             f"{_events(item['gradual_detector_events_v1']['isolation_forest'])} | "
             f"{_events(separated)}; precursor episodes {separated.get('precursor_interval_episodes')} |")
-    lines += ["", "## Source diagnostic: training scale versus development healthy spread", "",
+    lines += ["", "## Source diagnostic: training healthy range versus development healthy spread", "",
         "| Service | train p95 centre / IQR (ms) | dev healthy p95 median / IQR (ms) | dev healthy IF flag rate |",
         "| --- | --- | --- | --- |"]
     for service, d in sorted(diagnostic.items()):
         lines.append(f"| {service} | {_fmt(d['train_center_p95'], 2)} / {_fmt(d['train_iqr_p95'], 3)} | "
                      f"{_fmt(d['dev_healthy_median_p95'], 2)} / {_fmt(d['dev_healthy_iqr_p95'], 3)} | {_fmt(d['dev_healthy_flag_rate'], 2)} |")
     lines += ["", "## Limitations carried from the reports", ""] + [f"- {x}" for x in v2["limitations"]] + [
-        "- A near-constant training feature makes RobustScaler amplify ordinary host drift; this is a candidate weakness, not fixed here.",
+        "- Training healthy p95 occupies a very narrow range; IF isolates any value outside it regardless of scaling. More independent healthy training variance is required, not a preprocessing change.",
         "", "## Decision options for the owner", "",
         "1. Accept G3 for this candidate with the stated limitations, then build the release (`scripts.build_model_release`) after B's parity record.",
         "2. Reject G3 and require a successor candidate, frozen before it sees any further development data.",
