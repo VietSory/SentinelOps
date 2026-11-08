@@ -231,16 +231,33 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                                             policy, rca_policy, enabled=lambda: not (root / 'KILL_SWITCH').exists())
                 deadline = clock() + timedelta(seconds=ACTION_DEADLINE_SECONDS)
                 state = None
-                while clock() < deadline:
+                async def trial_incident():
+                    # Only the incident whose verified evidence binds THIS observed change.
                     async with pool.acquire() as conn:
-                        row = await conn.fetchrow('''SELECT j.incident_id FROM sentinel_control.incident_jobs j
+                        rows = await conn.fetch('''SELECT j.job_id, j.incident_id FROM sentinel_control.incident_jobs j
                             JOIN sentinel_control.incident_job_evidence e USING(job_id)
-                            WHERE j.consumer_id=$1 ORDER BY j.closing_bucket_end LIMIT 1''', journal.consumer_id)
-                    if row is None:
+                            WHERE j.consumer_id=$1 ORDER BY j.closing_bucket_end''', journal.consumer_id)
+                    for item in rows:
+                        _, _, derived = await journal.verified_evidence(item['job_id'])
+                        bound = derived.get('deployment_change')
+                        if bound is not None and bound['source_ref'] == change['change_ref']:
+                            return item['incident_id']
+                    return None
+
+                def require_alive():
+                    for name, task in (('consumer', consumer), ('traffic', traffic)):
+                        if task.done():
+                            exc = task.exception() if not task.cancelled() else None
+                            raise RuntimeError(f'{name} task stopped before the side effect: {exc!r}')
+
+                while clock() < deadline:
+                    require_alive()
+                    incident_id = await trial_incident()
+                    if incident_id is None:
                         await asyncio.sleep(2)
                         continue
-                    snapshot = await journal.repository.get(row['incident_id'])
-                    request = Request(row['incident_id'], snapshot['revision'], 'g6-' + uuid4().hex)
+                    snapshot = await journal.repository.get(incident_id)
+                    request = Request(incident_id, snapshot['revision'], 'g6-' + uuid4().hex)
                     if state is None:
                         assessment = await authority.assess(request, target, now=clock())
                         if assessment.missing_reason == 'newer-accepted-health-awaits-consumer':
@@ -248,6 +265,7 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                             continue
                         report['h4'] = {'dispatch_authority': assessment.dispatch_authority,
                                         'missing_reason': assessment.missing_reason, 'revision': assessment.revision}
+                        require_alive()
                         state = await executor.execute(request)
                         phase['bad'] = state['phase'] not in ('blocked',)
                         emit('action-state', phase=state['phase'], action_id=state['action_id'])
@@ -266,9 +284,13 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                     (root / 'action-journal.json').write_text(json.dumps(report['action'], indent=2, default=str) + '\n')
             finally:
                 stop.set()
-                for task in (traffic, consumer):
+                failures = {}
+                for name, task in (('traffic', traffic), ('consumer', consumer)):
+                    if task.done() and not task.cancelled() and task.exception() is not None:
+                        failures[name] = repr(task.exception())
                     task.cancel()
                 await asyncio.gather(traffic, consumer, return_exceptions=True)
+                report['background_task_failures'] = failures
             report.update(health_stream_id=health.stream_id, consumer_id=journal.consumer_id)
             return report
         finally:
