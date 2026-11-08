@@ -75,3 +75,27 @@ publications to notify the maintainers.
   2. a new local evaluation epoch locked in advance.
 - **Schedule:** more than three weeks. Complete the local work first, then AWS
   and Bedrock.
+
+## Integration plan (architect decisions)
+
+1. **Same statistic as training.** Add per-minute mean latency
+   (`increase(_sum)/increase(_count)` of the duration histogram) under a new source
+   profile `prometheus-increase-60s-5s/v2`. p95 is kept for the SLO rule; the
+   relative model features use the mean, matching Alibaba `http_rt`. v1 captures
+   remain readable; they cannot feed the new models.
+2. **Relative features at inference.** The model-signal worker builds
+   `http-relative-5m/v1` from the service's own accepted observations: trailing
+   60 minutes, minimum 5, strictly before the window, with the same transform
+   code as training (`ml/alibaba_training.py`, shared rather than duplicated).
+   Before the minimum history exists, signals are explicitly unavailable, never
+   zero.
+3. **Registry and release.** A new bundle origin, `admitted-alibaba-v2022`, binds
+   the archive checksums, the frozen config hash and the fitting commit. The
+   registry accepts it only with that origin and the matching feature set. The
+   G3/parity/release gates are unchanged.
+4. **Evaluation layer 2 (D-21).** A new local evaluation epoch on profile v2,
+   with ≥30 healthy minutes before each fault. It is frozen before capture and
+   evaluated once.
+5. **Retirement (after the Alibaba release passes H4).** Remove local-corpus
+   training code and contract v2, and move ADR-014 to the archive, after the
+   owner reviews the file list. The testbed and the evaluation epochs stay.
