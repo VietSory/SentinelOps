@@ -61,6 +61,14 @@ Chẩn đoán hiện tại: IF báo nhầm trên run healthy vì khoảng p95 he
 train rất hẹp (IF không phụ thuộc vào thang đo feature). Chưa sửa; đây là giới hạn
 của G3/G8.
 
+**Mốc native ngày 2026-11-08** (local Kubernetes, release H1 `656bc7c5` dựng từ G3 có điều kiện D-19):
+- **H4 PASS:** `run_s2_h4` cấp dispatch authority cho incident S2; Payment score 0,799.
+- **Trial G6 đầu tiên `recovered`:** known-good được duyệt trước thay đổi xấu → H4 → rollback → 3 bucket telemetry healthy sau action → `recovered`, journal đầy đủ.
+
+Đây là **1 trial**. G6 cần ≥ 9/10 trial (Q-09) cùng ma trận safety, nên **G6 chưa PASS**. Hai lần thử trước dừng do lỗi của harness, và đều đã được sửa:
+- traffic bị ngắt lúc thay pod;
+- image xấu nằm khác repo, nên guard chặn đúng.
+
 ## Việc tiếp theo
 
 - **A:** admission/capture → models/evaluation → RCA/explanation → source parity.
