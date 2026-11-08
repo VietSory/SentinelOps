@@ -296,3 +296,14 @@ def test_acquisition_and_freeze_lock_is_exclusive_and_recovers_after_failure(tmp
                 with acquisition_lock(store): pytest.fail('concurrent acquisition was admitted')
             raise RuntimeError('simulated process failure')
     with acquisition_lock(store): pass
+
+
+def test_provisioning_starts_only_registered_source_services(tmp_path, monkeypatch):
+    store = ArtifactStore(tmp_path)
+    mock_registration_context(monkeypatch)
+    started = []
+    monkeypatch.setattr(corpus.subprocess, 'run', lambda args, **kw: started.append(args))
+    corpus.register_session(store, corpus.load_plan(), role='train', ordinal=1, prepare=True)
+    up = next(args for args in started if args[:3] == ['docker', 'compose', 'up'])
+    assert set(up[-len(corpus.SOURCE_SERVICES):]) == set(corpus.SOURCE_SERVICES)
+    assert 'grafana' not in up and len(corpus.SOURCE_SERVICES) == 7

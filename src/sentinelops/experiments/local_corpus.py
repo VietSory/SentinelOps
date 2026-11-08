@@ -32,6 +32,7 @@ DETECTOR_ROLES = ('development-validation',)
 PROJECT = Path(__file__).resolve().parents[3]
 DEFAULT_PLAN = PROJECT / 'configs/local_http_capture_plan.json'
 DETECTOR_PLAN = PROJECT / 'configs/local_http_detector_events_plan.json'
+SOURCE_SERVICES = (*sorted(BUSINESS_ROUTES), 'postgres', 'prometheus', 'otel-collector', 'jaeger')
 SLOT_PATTERN = re.compile(r'(?:(?:train|cal|dev)-[0-9]{2}-(?:healthy|payment-gradual|inventory-gradual)'
                           r'|det-[0-9]{2}-(?:healthy|payment-abrupt|inventory-abrupt))')
 
@@ -235,8 +236,7 @@ def context_snapshot(project, compose_project):
         service = labels['com.docker.compose.service']
         values[service] = {'container_id': item['Id'], 'image': item['Image'],
                            'created_at': docker_clock(item['Created']), 'created_at_source': item['Created']}
-    required = set(BUSINESS_ROUTES) | {'postgres', 'prometheus', 'otel-collector', 'jaeger'}
-    if set(values) != required:
+    if set(values) != set(SOURCE_SERVICES):
         raise ValueError('prospective context omits or adds a source service')
     config = json.loads(docker('compose', 'config', '--format', 'json'))
     mounts = next(c for c in containers if c['Config']['Labels']['com.docker.compose.service'] == 'postgres')['Mounts']
@@ -354,7 +354,9 @@ def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=Fal
         bind(store, intent_path, {'provisioning_version': 'local-http-context/v1', 'source_commit': source,
                                  'plan_sha256': stable_id(plan), 'compose_project': compose_project,
                                  'created_at': timestamp(created)})
-    subprocess.run(['docker', 'compose', 'up', '--build', '-d', '--wait', '--wait-timeout', '180'],
+    # Start only the registered source services. Operator consoles such as
+    # Grafana are not acquisition sources and would change the context scope.
+    subprocess.run(['docker', 'compose', 'up', '--build', '-d', '--wait', '--wait-timeout', '180', *SOURCE_SERVICES],
                    cwd=project, check=True, timeout=600)
     context = context_snapshot(project, compose_project)
     inspected_at = datetime.now(timezone.utc)
