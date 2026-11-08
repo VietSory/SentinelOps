@@ -192,6 +192,14 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
 
             consumer = asyncio.create_task(consume())
             traffic = asyncio.create_task(resilient_traffic(client, sandbox, urls, stop, phase))
+            pending = {'request': None}
+
+            def require_alive():
+                for name, task in (('consumer', consumer), ('traffic', traffic)):
+                    if task.done():
+                        exc = task.exception() if not task.cancelled() else None
+                        raise RuntimeError(f'{name} task stopped before a side effect: {type(exc).__name__}')
+
             try:
                 await asyncio.sleep(max(0, (ceil_minute(1) - clock()).total_seconds()))
                 images = ImageEvidenceReview(reader, observer, review, target)
@@ -218,6 +226,7 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
 
                 change_review = DeploymentChangeReview(reader, observer, changes, target)
                 baseline = await change_review.open()
+                require_alive()
                 emit('deploying-bad-payment-image', image=bad)
                 phase['bad'] = True
                 await asyncio.to_thread(sandbox.kubectl, '-n', NAMESPACE, 'set', 'image', 'deployment/payment-service', 'payment=' + bad)
@@ -244,12 +253,6 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                             return item['incident_id']
                     return None
 
-                def require_alive():
-                    for name, task in (('consumer', consumer), ('traffic', traffic)):
-                        if task.done():
-                            exc = task.exception() if not task.cancelled() else None
-                            raise RuntimeError(f'{name} task stopped before the side effect: {exc!r}')
-
                 while clock() < deadline:
                     require_alive()
                     incident_id = await trial_incident()
@@ -266,6 +269,7 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                         report['h4'] = {'dispatch_authority': assessment.dispatch_authority,
                                         'missing_reason': assessment.missing_reason, 'revision': assessment.revision}
                         require_alive()
+                        pending['request'] = request
                         state = await executor.execute(request)
                         phase['bad'] = state['phase'] not in ('blocked',)
                         emit('action-state', phase=state['phase'], action_id=state['action_id'])
@@ -282,12 +286,24 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                     report['action'] = await actions.get(state['action_id'])
                     report['action_outcome'] = state['phase'] if state['phase'] in TERMINAL else 'NONTERMINAL_TIMEOUT'
                     (root / 'action-journal.json').write_text(json.dumps(report['action'], indent=2, default=str) + '\n')
+            except Exception as exc:
+                # Bounded, redacted receipt; recover any recorded intent before the DB is deleted.
+                report['failure'] = {'error_type': type(exc).__name__}
+                report['action_outcome'] = 'TRIAL_FAILED'
+                if pending['request'] is not None:
+                    try:
+                        found = await actions.find(pending['request'], target)
+                        if found is not None:
+                            report['action'] = await actions.get(found['action_id'])
+                            (root / 'action-journal.json').write_text(json.dumps(report['action'], indent=2, default=str) + '\n')
+                    except Exception as recovery:
+                        report['failure']['journal_recovery_error_type'] = type(recovery).__name__
             finally:
                 stop.set()
                 failures = {}
                 for name, task in (('traffic', traffic), ('consumer', consumer)):
                     if task.done() and not task.cancelled() and task.exception() is not None:
-                        failures[name] = repr(task.exception())
+                        failures[name] = type(task.exception()).__name__
                     task.cancel()
                 await asyncio.gather(traffic, consumer, return_exceptions=True)
                 report['background_task_failures'] = failures
@@ -336,6 +352,8 @@ def main():
                   'policy_enabled': args.enable_rollback_policy, 'G6_accepted': False}
         (root / 'verification.json').write_text(json.dumps(result, indent=2, default=str) + '\n')
         emit('g6-trial-complete', action_outcome=report.get('action_outcome'), report=str(root / 'verification.json'))
+        if report.get('failure'):
+            raise SystemExit(1)
     except subprocess.CalledProcessError as exc:
         if sandbox.kubeconfig.exists():
             sandbox.diagnostics()
