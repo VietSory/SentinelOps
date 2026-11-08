@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from sentinelops.ml.local_data import audit_local_corpus, admitted_local_rows, freeze_local_corpus, _inside
+from sentinelops.contracts import utc_time
+from sentinelops.ml.local_data import audit_local_corpus, admitted_local_rows, freeze_local_corpus, _abrupt_onsets_in_scope, _inside
 from sentinelops.ml.readiness import DatasetNotReady
 from sentinelops.experiments.local_corpus import load_plan, bind
 from sentinelops.telemetry.store import ArtifactStore
@@ -100,3 +101,16 @@ def test_actual_run_intervals_enforce_overlap_and_train_calibration_order():
         validate_chronology({'train':[(start,end)],'calibration':[(start,end)]})
     with pytest.raises(ValueError, match='chronological'):
         validate_chronology({'calibration':[(start,end)],'train':[(end,end+timedelta(hours=1))]})
+
+
+@pytest.mark.parametrize(('service', 'onset', 'eligible'), [
+    ('payment-service', '00:03:00', False),
+    ('payment-service', '00:04:00', True),
+    ('checkout-service', '00:05:00', True),
+    ('inventory-service', '00:05:00', False),
+    ('payment-service', '00:14:00', False),
+])
+def test_abrupt_onset_must_overlap_the_fault_on_an_affected_route(service, onset, eligible):
+    oracle = {'services': {service: {'first_violation_at': f'2026-11-08T{onset}Z'}}}
+    changed_ms = int(utc_time('2026-11-08T00:04:49Z').timestamp()) * 1000
+    assert _abrupt_onsets_in_scope(oracle, 'payment-service', changed_ms, '2026-11-08T00:14:00Z') is eligible

@@ -101,6 +101,23 @@ def causal_features(serving, manifest, run):
     return frames, dict(excluded)
 
 
+def _abrupt_onsets_in_scope(oracle, target, changed_at_ms, recovery_start_at):
+    recovery_ms = utc_time(recovery_start_at).timestamp() * 1000
+    if changed_at_ms >= recovery_ms:
+        return False
+    for service, evidence in oracle['services'].items():
+        onset = evidence['first_violation_at']
+        if onset is None:
+            continue
+        # The oracle reports the start of a minute, which may contain the
+        # fault transition. Keep its clock and require the intervals to overlap.
+        onset_ms = utc_time(onset).timestamp() * 1000
+        if (service not in {target, 'checkout-service'}
+            or onset_ms + 60_000 <= changed_at_ms or onset_ms >= recovery_ms):
+            return False
+    return True
+
+
 def verify_capture(store, plan, session, kind, *, project=PROJECT, as_of=None):
     role = session['role']
     group = group_name(plan, role, session['ordinal'])  # rejects sealed before any run source read
@@ -207,6 +224,11 @@ def verify_capture(store, plan, session, kind, *, project=PROJECT, as_of=None):
                  and type(r.get('timestamp_unix_ms')) is int and lower <= r['timestamp_unix_ms'] <= upper]
         abrupt = (len(steps) == 1 and steps[0].get('mode') == mode
                   and steps[0].get('delay_ms') == registration['recipe']['maximum_delay_ms'])
+        if is_detector_plan(plan) and abrupt and (
+            not run['recovery_start_at'] or not _abrupt_onsets_in_scope(
+                oracle, target, steps[0]['timestamp_unix_ms'], run['recovery_start_at'])
+        ):
+            raise ValueError('abrupt oracle onset falls outside the observed fault interval or affected services')
     observation_objects = [(ref,serving.read(ref)) for ref in serving.read(manifest['normalization_manifest_ref'])['observation_refs']]
     observations = [value for _,value in observation_objects]
     oracle_ref = store.write('manifests', {'certificate_version':'local-http-oracle/v1',
