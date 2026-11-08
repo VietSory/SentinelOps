@@ -10,7 +10,7 @@ import subprocess
 
 from sentinelops.contracts import utc_time
 from sentinelops.experiments.local_corpus import (
-    KINDS, ROLES, PROJECT, is_detector_plan, acquisition_lock, bind, clean_source, docker, docker_clock,
+    KINDS, ROLES, PROJECT, plan_kinds, acquisition_lock, bind, clean_source, docker, docker_clock,
     group_name, read_binding, registered_sessions, registration_path,
 )
 from sentinelops.telemetry.core import stable_id, timestamp
@@ -26,10 +26,11 @@ def _code_hash(project, commit):
         ["git", "show", commit + ":" + CODE_PATH], cwd=project)).hexdigest()
 
 
-def _inventory(store, group):
+def _inventory(store, group, plan=None):
     """Bind every original source byte, including incomplete captures, without links."""
     roots = [registration_path(store, group)]
-    roots.extend(store.root / "runs" / (group + "-" + kind) for kind in KINDS)
+    kinds = KINDS if plan is None else plan_kinds(plan)
+    roots.extend(store.root / "runs" / (group + "-" + kind) for kind in kinds)
     entries = []
     for root in roots:
         for part in (root, *root.parents):
@@ -91,8 +92,6 @@ def read_abandonment(store, session, plan, *, project=PROJECT, as_of=None):
     if not path.exists():
         return None
     ref, closed = read_binding(store, path)
-    if is_detector_plan(plan) and closed.get("closure_version") != "local-http-session-closed/v1":
-        raise ValueError("detector-event epoch has no whole-group replacement protocol")
     if closed.get("closure_version") == "local-http-clock-discontinuity/v1":
         from sentinelops.experiments.clock_recovery import read_clock_abandonment
         return read_clock_abandonment(store, session, plan, closed, ref, project=project, as_of=as_of)
@@ -113,7 +112,7 @@ def read_abandonment(store, session, plan, *, project=PROJECT, as_of=None):
         or closed.get("replacement_group_id") != replacement
         or not utc_time(session["registered_at"]) <= utc_time(closed["closed_at"]) <= decision):
         raise ValueError("interrupted group disposition differs from frozen source/role/budget")
-    incomplete = [session["group_id"] + "-" + kind for kind in KINDS
+    incomplete = [session["group_id"] + "-" + kind for kind in plan_kinds(plan)
                   if not (store.root / "runs" / (session["group_id"] + "-" + kind) / "result.json").exists()]
     if not incomplete or closed.get("incomplete_slots") != incomplete:
         raise ValueError("interruption must retain its exact original incomplete slots")
@@ -124,10 +123,10 @@ def read_abandonment(store, session, plan, *, project=PROJECT, as_of=None):
         raise ValueError("interruption observer identity differs")
     inventory = store.read(closed["inventory_ref"])
     if inventory != {"inventory_version": VERSION, "group_id": session["group_id"],
-                     "files": _inventory(store, session["group_id"])}:
+                     "files": _inventory(store, session["group_id"], plan)}:
         raise ValueError("interrupted original source changed after terminal accounting")
     from sentinelops.ml.local_data import verify_capture
-    for kind in KINDS:
+    for kind in plan_kinds(plan):
         if session["group_id"] + "-" + kind not in incomplete:
             verify_capture(store, plan, session, kind, project=project, as_of=utc_time(closed["closed_at"]))
     return ref, closed
@@ -161,8 +160,6 @@ def _observe(session, source, project):
 
 
 def abandon_interrupted_group(store, plan, *, role, ordinal, replacement_ordinal, project=PROJECT):
-    if is_detector_plan(plan):
-        raise ValueError("detector-event epoch has no whole-group replacement protocol")
     """Explicit operator action. No Docker mutation, quality-based replacement or slot retry."""
     from sentinelops.experiments.local_campaign import campaign_lock
     from sentinelops.ml.local_data import _session_identity, verify_capture
@@ -170,7 +167,7 @@ def abandon_interrupted_group(store, plan, *, role, ordinal, replacement_ordinal
     if replacement_ordinal <= plan["minimum_groups"][role]:
         raise ValueError("replacement must use a new ordinal beyond the reserved minimum groups")
     with campaign_lock(store), acquisition_lock(store):
-        if (store.root / "dataset-freeze.json").exists():
+        if (store.root / "dataset-freeze.json").exists() or (store.root / "evaluation-freeze.json").exists():
             raise ValueError("cannot abandon a frozen corpus group")
         source = clean_source(project)
         _, session = read_binding(store, registration_path(store, group))
@@ -186,7 +183,7 @@ def abandon_interrupted_group(store, plan, *, role, ordinal, replacement_ordinal
                 raise ValueError("replacement is reserved by another interrupted group")
         incomplete = []
         # A corrupt completed capture cannot be hidden by an interruption receipt.
-        for kind in KINDS:
+        for kind in plan_kinds(plan):
             root = store.root / "runs" / (group + "-" + kind)
             if (root / "result.json").exists():
                 verify_capture(store, plan, session, kind, project=project)
@@ -194,9 +191,9 @@ def abandon_interrupted_group(store, plan, *, role, ordinal, replacement_ordinal
                 incomplete.append(group + "-" + kind)
         if not incomplete:
             raise ValueError("completed groups cannot be replaced by interruption accounting")
-        before = _inventory(store, group)
+        before = _inventory(store, group, plan)
         observed = _observe(session, source, project)
-        if _inventory(store, group) != before or clean_source(project) != source:
+        if _inventory(store, group, plan) != before or clean_source(project) != source:
             raise ValueError("source changed during interruption observation")
         observation_ref = store.write("raw", observed)
         inventory_ref = store.write("manifests", {"inventory_version": VERSION, "group_id": group, "files": before})

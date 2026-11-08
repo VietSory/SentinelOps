@@ -253,8 +253,10 @@ entry, 360 s recovery. Healthy runs are 900 s active; abrupt runs are 600 s
 active. Odd ordinals inject 1200 ms latency, even ordinals inject error. In
 error mode the runner accepts 503 only from direct requests to the faulted
 target during the fault phase. Checkout reports the downstream failure as 502.
-Minimum 5 groups, maximum 10. Interrupted or clock-invalid groups have **no**
-replacement protocol in this epoch: investigate and stop.
+Minimum 5 groups, maximum 10. Host-interrupted or clock-invalid groups use the
+same whole-group exclusion as the fitting corpus (`close_interrupted_group`,
+`close_clock_invalid_group` with `--plan`). The replacement ordinal must be
+beyond the reserved minimum (6–10). Never retry a slot in place.
 
 Commit `configs/local_model_evaluation_v2.json` and the detector plan **before**
 the first registration. The v2 evaluator rejects an epoch whose registered source

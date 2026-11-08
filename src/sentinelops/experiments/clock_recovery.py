@@ -13,7 +13,7 @@ import subprocess
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.experiments.labels import SLOConfig
 from sentinelops.experiments.local_corpus import (
-    KINDS, ROLES, PROJECT, is_detector_plan, acquisition_lock, bind, clean_source, docker, docker_clock,
+    KINDS, ROLES, PROJECT, plan_kinds, acquisition_lock, bind, clean_source, docker, docker_clock,
     group_name, read_binding, recipe, registered_sessions, registration_path, validate_end_context,
 )
 from sentinelops.experiments.local_recovery import _inventory
@@ -137,7 +137,7 @@ def _slot_proof(store, session, plan, kind, project, decision):
 
 
 def _proof(store, session, plan, project, decision):
-    proof = [_slot_proof(store, session, plan, kind, project, decision) for kind in KINDS]
+    proof = [_slot_proof(store, session, plan, kind, project, decision) for kind in plan_kinds(plan)]
     if not any(p['status'] == 'CLOCK_INVALID' for p in proof):
         raise ValueError('healthy/completed groups cannot be replaced based on outcomes')
     return proof
@@ -183,7 +183,7 @@ def read_clock_abandonment(store, session, plan, closed, reference, *, project=P
         or not utc_time(session['registered_at']) <= utc_time(closed['closed_at']) <= decision):
         raise ValueError('clock group disposition differs from frozen source/role/budget')
     inventory = store.read(closed['inventory_ref'])
-    entries = _inventory(store, session['group_id']); _check_inventory(entries)
+    entries = _inventory(store, session['group_id'], plan); _check_inventory(entries)
     if inventory != {'inventory_version': VERSION, 'group_id': session['group_id'], 'files': entries}:
         raise ValueError('clock-invalid original source changed after disposition')
     proof = _proof(store, session, plan, project, utc_time(closed['closed_at']))
@@ -196,8 +196,6 @@ def read_clock_abandonment(store, session, plan, closed, reference, *, project=P
 
 
 def abandon_clock_invalid_group(store, plan, *, role, ordinal, replacement_ordinal, project=PROJECT):
-    if is_detector_plan(plan):
-        raise ValueError("detector-event epoch has no whole-group replacement protocol")
     """Operator-only, whole-group exclusion; never retry, repair UTC or choose a budget."""
     from sentinelops.experiments.local_campaign import campaign_lock
     from sentinelops.experiments.local_recovery import read_abandonment
@@ -205,7 +203,7 @@ def abandon_clock_invalid_group(store, plan, *, role, ordinal, replacement_ordin
     if replacement_ordinal <= plan['minimum_groups'][role] or group == replacement:
         raise ValueError('replacement needs an unused ordinal outside the reserved minimum')
     with campaign_lock(store), acquisition_lock(store):
-        if (store.root/'dataset-freeze.json').exists():
+        if (store.root/'dataset-freeze.json').exists() or (store.root/'evaluation-freeze.json').exists():
             raise ValueError('cannot close a frozen corpus group')
         source = clean_source(project)
         _, session = read_binding(store, registration_path(store, group)); _session_identity(session, plan)
@@ -220,10 +218,10 @@ def abandon_clock_invalid_group(store, plan, *, role, ordinal, replacement_ordin
             prior = read_abandonment(store, other, plan, project=project)
             if prior and prior[1]['replacement_group_id'] == replacement:
                 raise ValueError('replacement is already reserved by another group')
-        before = _inventory(store, group); _check_inventory(before)
+        before = _inventory(store, group, plan); _check_inventory(before)
         proof = _proof(store, session, plan, project, datetime.now(timezone.utc))
         observed = _observe(session, source, project, proof)
-        if _inventory(store, group) != before or clean_source(project) != source:
+        if _inventory(store, group, plan) != before or clean_source(project) != source:
             raise ValueError('clock source changed during observation')
         closed = {'closure_version': VERSION, 'group_id': group,
             'session_ref': 'artifact://manifests/' + stable_id(session) + '.json',

@@ -8,7 +8,7 @@ import pytest
 
 import sentinelops.experiments.local_corpus as corpus
 from sentinelops.contracts import utc_time
-from sentinelops.experiments.local_recovery import abandon_interrupted_group, read_abandonment
+from sentinelops.experiments.local_recovery import abandon_interrupted_group
 from sentinelops.experiments.clock_recovery import abandon_clock_invalid_group
 from sentinelops.experiments.traffic import s1_error_responses
 from sentinelops.ml import detector_evaluation as dev
@@ -110,19 +110,21 @@ def test_s1_error_accepts_503_only_from_the_direct_target_during_fault():
         assert not s1_error_responses(good, other)
 
 
-def test_detector_epoch_has_no_replacement_protocol(tmp_path):
+def test_detector_epoch_uses_the_existing_whole_group_replacement_rules(tmp_path):
+    from sentinelops.experiments.local_recovery import _inventory
     store, plan = ArtifactStore(tmp_path), detector_plan()
-    for call in (lambda: abandon_interrupted_group(store, plan, role='development-validation', ordinal=1, replacement_ordinal=6),
-                 lambda: abandon_clock_invalid_group(store, plan, role='development-validation', ordinal=1, replacement_ordinal=6)):
-        with pytest.raises(ValueError, match='replacement'):
+    # Same ADR-014 rule: a replacement must use an ordinal beyond the reserved minimum.
+    for call in (lambda: abandon_interrupted_group(store, plan, role='development-validation', ordinal=1, replacement_ordinal=5),
+                 lambda: abandon_clock_invalid_group(store, plan, role='development-validation', ordinal=1, replacement_ordinal=5)):
+        with pytest.raises(ValueError, match='beyond|minimum'):
             call()
-    session = {'group_id': 'det-01'}
-    closed = tmp_path / 'sessions/det-01/closed.json'
-    closed.parent.mkdir(parents=True)
-    value = {'closure_version': 'local-http-host-interruption/v1'}
-    corpus.bind(store, closed, value)
-    with pytest.raises(ValueError, match='replacement'):
-        read_abandonment(store, session, plan)
+    for kind in corpus.DETECTOR_KINDS:
+        (tmp_path / 'runs' / ('det-01-' + kind)).mkdir(parents=True)
+        (tmp_path / 'runs' / ('det-01-' + kind) / 'x.json').write_text('{}')
+    assert {e['path'].split('/')[1] for e in _inventory(store, 'det-01', plan)} == {
+        'det-01-' + k for k in corpus.DETECTOR_KINDS}
+    # Default stays the fitting-corpus kinds: only the shared 'healthy' kind is visible.
+    assert {e['path'].split('/')[1] for e in _inventory(store, 'det-01')} == {'det-01-healthy'}
 
 
 def test_audits_refuse_the_other_plan_and_unready_inventories(tmp_path):

@@ -50,6 +50,16 @@ cần migration protocol của A; `telemetry/prometheus.py` thuộc A nên B kh�
 gradual (XGBoost AP 0.93–1.00). Owner duyệt thêm epoch S1 lỗi đột ngột chỉ để đánh
 giá, cùng protocol `local-model-development/v2` bên cạnh v1; kết quả v1 giữ nguyên.
 H4 phụ thuộc H1 (`anomaly_strength` của IF). Xem [handoff B](delivery/LANE_B_CHECKPOINT.md#7-handoff-a--b-ngày-2026-11-08-adr-015-và-việc-b-làm-song-song).
+Công cụ cho đường H1 → H4 đã có code nhưng **chưa chạy native**:
+- `build_model_release`: dựng release từ quyết định của owner. Đã chạy thử với gói thật; record parity giả bị từ chối.
+- `check_model_source_parity`: sinh record `model-source-parity/v1`.
+- `run_s2_h4`: dựng S2 trên Kubernetes và đánh giá H4, không dispatch.
+- `g3_review_packet`: tạo hồ sơ G3.
+
+Thứ tự chạy ở [§7.5](delivery/LANE_B_CHECKPOINT.md#75-chuỗi-lệnh-đầucuối-để-gỡ-h1-và-h4).
+Chẩn đoán hiện tại: IF báo nhầm trên run healthy vì khoảng p95 healthy của tập
+train rất hẹp (IF không phụ thuộc vào thang đo feature). Chưa sửa; đây là giới hạn
+của G3/G8.
 
 ## Việc tiếp theo
 
