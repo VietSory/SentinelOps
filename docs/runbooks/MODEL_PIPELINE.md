@@ -257,7 +257,12 @@ Each service reports:
   never true positives, and those windows leave healthy service time.
 
 The gradual groups were already inspected, so their re-accounting is not
-independent evidence. Risk/XGBoost evidence stays on the v1 gradual protocol.
+independent evidence.
+
+Render the owner's review packet with `python -m scripts.g3_review_packet --candidate
+/verified/handoff --v2-report /evaluation/v2-report.json --output packet.md`. It
+adds a source diagnostic: the training RobustScaler p95 centre/IQR compared with
+the development healthy spread. It decides nothing. Risk/XGBoost evidence stays on the v1 gradual protocol.
 The report keeps `G3_accepted=false` and `activation_allowed=false`. G3 remains
 an owner/reviewer decision over all of these results.
 
