@@ -258,6 +258,16 @@ same whole-group exclusion as the fitting corpus (`close_interrupted_group`,
 `close_clock_invalid_group` with `--plan`). The replacement ordinal must be
 beyond the reserved minimum (6–10). Never retry a slot in place.
 
+Docker can exhaust its default address pools because every preserved group keeps
+its Compose network. Provisioning then fails before registration or traffic, with
+`all predefined address pools have been fully subnetted`. Recover only owned
+resources: disconnect the stopped containers of this epoch's already closed
+groups (their end-context receipts must exist) from their `_default` networks and
+remove those networks. Keep the containers and volumes. Do not prune machine-wide
+or touch other projects. Then restart the campaign from the same worktree: an
+unregistered group resumes its own provisioning intent, and a failed attempt's
+log is kept beside the new attempt's.
+
 Commit `configs/local_model_evaluation_v2.json` and the detector plan **before**
 the first registration. The v2 evaluator rejects an epoch whose registered source
 commits do not already contain identical bytes.

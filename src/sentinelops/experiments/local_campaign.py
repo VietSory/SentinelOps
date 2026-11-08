@@ -29,6 +29,18 @@ def planned_slots(plan):
             for ordinal in range(1, plan['minimum_groups'][role]+1) for kind in plan_kinds(plan)]
 
 
+def attempt_log(store, slot):
+    """A new exclusive log per attempt; an earlier failed attempt's log is kept."""
+    directory = store.root/'campaign/logs'
+    directory.mkdir(parents=True,exist_ok=True)
+    log = directory/(slot+'.log')
+    attempt = 1
+    while log.exists():
+        attempt += 1
+        log = directory/f'{slot}.attempt-{attempt}.log'
+    return log
+
+
 def _audit(store, plan, project):
     if is_detector_plan(plan):
         return audit_detector_events(store, plan, project=project)
@@ -173,8 +185,7 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=Non
                         if not session_path.exists(): command.append('--prepare')
                         if detector: command.extend(['--plan',str(capture_project/'configs/local_http_detector_events_plan.json')])
                         environment = {**os.environ,'PYTHONPATH':str(capture_project/'src')+os.pathsep+str(capture_project)}
-                        log = store.root/'campaign/logs'/(slot+'.log')
-                        log.parent.mkdir(parents=True,exist_ok=True)
+                        log = attempt_log(store, slot)
                         _event(store,{'status':'CAPTURE_STARTED','slot':slot,'capture_checkout':str(capture_project)})
                         with log.open('x') as stream:
                             subprocess.run(command,cwd=capture_project,env=environment,stdout=stream,stderr=subprocess.STDOUT,

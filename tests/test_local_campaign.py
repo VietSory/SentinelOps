@@ -96,3 +96,14 @@ def test_controller_successor_preserves_original_registration_and_frozen_plan(tm
     changed = deepcopy(successor); changed['slots'].append(['sealed-final',1,'healthy'])
     with pytest.raises(ValueError,match='plan/roles/budgets are frozen'):
         campaign.register_controller(store,tmp_path,changed)
+
+
+def test_retry_after_a_failed_provisioning_keeps_the_earlier_log(tmp_path):
+    from sentinelops.experiments.local_campaign import attempt_log
+    from sentinelops.telemetry.store import ArtifactStore
+    store = ArtifactStore(tmp_path)
+    first = attempt_log(store, 'det-04-healthy')
+    first.write_text('failed attempt')
+    second = attempt_log(store, 'det-04-healthy')
+    assert first.name == 'det-04-healthy.log' and second.name == 'det-04-healthy.attempt-2.log'
+    assert first.read_text() == 'failed attempt'
