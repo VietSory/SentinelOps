@@ -513,3 +513,29 @@ health facts and produces missing operational support/abstention. This lets the
 consumer finish that expired job and process later incidents; it does not widen
 the old window, treat current Pods as historical evidence or allow rollback.
 Existing v1–v6 captures retain their original replay behavior.
+
+### Reproducible S2 incident and H4 assessment
+
+`scripts/run_s2_h4.py` replaces the earlier private S2 probes. It creates one owned
+kind cluster, registry and private control database, deploys the real services,
+and accepts a healthy baseline. It then records an observed change
+(`open-change` / `complete-change`) while deploying a derived Payment image. That
+image keeps all instrumentation and adds 0.95 s latency after 130 s. Finally the
+existing health and incident workers persist the incident, and the run records
+`NativeH4Authority.assess` in `verification.json`.
+
+```sh
+python -m scripts.run_s2_h4 --kind /path/to/kind-v0.30.0 --output /new/private/run \
+  [--model-store /trusted/serving-release --model-release-ref artifact://manifests/RELEASE.json]
+```
+
+- Without a release the result is the no-model path: capture v5,
+  `validated-model-and-physical-deployment-change-required` or `rca-abstained`.
+- With a release built by `scripts.build_model_release`, the incident worker
+  emits capture v6. The assessment then reports whether H4 dispatch authority is
+  granted and, if not, the exact `missing_reason`.
+
+The script never builds the executor, approves a known-good image or dispatches.
+It refuses a dirty checkout and an active corpus capture on the same host. All
+owned resources are removed on exit. A granted assessment is H4 evidence for B's
+operator-approved G6 trial, not the trial itself.
