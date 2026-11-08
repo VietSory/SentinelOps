@@ -269,6 +269,26 @@ Khi owner duyệt G3:
    lẫn worker, dùng `--stream-epoch` mới.
 3. B chạy S2 thật để kiểm H4/G6.
 
+### 7.5 Chuỗi lệnh đầu–cuối để gỡ H1 và H4
+
+Các bước có thứ tự. Mỗi bước chỉ chạy khi bước trước đạt. Docker workload chỉ
+chạy khi không có corpus capture nào đang chạy trên host (các script tự kiểm).
+
+| # | Ai | Lệnh | Đầu ra |
+| --- | --- | --- | --- |
+| 1 | A | `scripts/audit_detector_events.py --root <det-root> --output … --freeze` | Epoch `READY_FOR_EVALUATION`, đã freeze |
+| 2 | A | `scripts/evaluate_detector_events.py … --detector-report-ref <ref>` | Report v2 |
+| 3 | A | `scripts/g3_review_packet.py --candidate <handoff> --v2-report … --output packet.md` | Hồ sơ G3 |
+| 4 | B | `scripts/check_model_source_parity.py --kind <kind-v0.30.0> --candidate <handoff> --expected-id <ID> --corpus <frozen corpus> --environment <tên> --verified-by <tên> --output …` | `parity.json` (`PASS` hoặc `FAIL`) |
+| 5 | Owner | Đọc hồ sơ G3 và quyết định | Quyết định G3 |
+| 6 | Operator | `scripts/build_model_release.py … --confirm-owner-decision` | Store release mới; không bật gì |
+| 7 | B | Trỏ `SENTINELOPS_MODEL_STORE` / `_RELEASE_REF` cho API và worker, dùng `--stream-epoch` mới | H1 bật trên B |
+| 8 | B | `scripts/run_s2_h4.py --kind … --model-store … --model-release-ref …` | `verification.json` chứa đánh giá H4 |
+| 9 | B + operator | Known-good approval, policy enable, rollback có kiểm soát | G6 |
+
+Bước 4 có thể chạy ngay khi Docker rảnh, không cần chờ bước 1–3. Bước 8 khi
+chưa có release vẫn chạy được (đường no-model) để kiểm thử phần mềm.
+
 ## 8. Những gì checkpoint này KHÔNG tuyên bố
 
 - **AWS chưa triển khai.** Không `apply`, không gọi AWS API, không có credential.
