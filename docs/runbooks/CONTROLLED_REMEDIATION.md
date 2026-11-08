@@ -113,6 +113,21 @@ is claimed by software-fixture tests of this collector. Its bounded metric
 `sentinelops_image_review_observations_total` counts operation/status observations,
 including retries, not unique approvals or successful recovery.
 
+### Record the operator's known-good approval
+
+After an operator inspects `AWAITING_OPERATOR_REVIEW` evidence, record the decision:
+
+```sh
+python -m scripts.approve_known_good --review-store /private/review --evidence-ref artifact://manifests/EVIDENCE.json \
+  --approved-by "<operator>" --environment local --confirm-operator-approval
+```
+
+It writes exactly one `approved-payment-images/v1` ledger from that evidence.
+`approved_at` cannot precede the evidence. The ledger approves an image only;
+`action_dispatch_authorized` stays false. Configure `KnownGoodRegistry` with the
+printed ref and the same approver. Approve **before** any bad change the rollback
+will be used against: the registry rejects incidents before `approved_at`.
+
 ## Observe an image transition for H4 preparation
 
 The same SELECT-only health credential, explicit target, TLS observer credential
