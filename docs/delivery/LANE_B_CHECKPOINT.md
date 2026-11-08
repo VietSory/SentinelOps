@@ -1,8 +1,8 @@
 # Lane B checkpoint — trạng thái, việc cần A, bước tiếp theo
 
-Baseline: `main` `d605826`, 2026-11-05. Đây là checkpoint giao việc giữa hai lane,
-không phải báo cáo PASS. Mọi số liệu dưới đây lấy từ Git/CI/runtime thật trên
-máy B; **không suy ra gate nào đã nghiệm thu từ số test**.
+Các mục 1–3 lưu baseline trên máy B tại `d605826` (2026-11-05) và bản sửa tiếp
+sau. Mục 4–5 cập nhật tình trạng bàn giao local ngày 2026-11-08. Bằng chứng trên
+máy A và xác nhận trên môi trường B được ghi riêng.
 
 Đọc cùng [plan hai người](DELIVERY_PLAN.md), [contract](WORKSTREAM_CONTRACT.md)
 và [PROJECT_STATUS](../PROJECT_STATUS.md).
@@ -133,18 +133,14 @@ phải regression. Cần A hoặc owner rerun. Thuộc scope A, B không chạm.
 
 | Boundary | B cần nhận | Trước khi nhận, B vẫn làm được |
 | --- | --- | --- |
-| **H1 model** | Ba service bundle, `training-manifest.json`, dataset/policy refs, checksums, library/code versions, evaluation/model card, source-parity status; URI materialize được, không phải path máy A | Wiring đã xong; model thiếu thì `/v1/detect` 503 và UI vẫn đọc incident |
-| **H4 action eligibility** | IER/revision kèm RCA/evidence có scope, freshness, coverage, confidence/abstention thật | Executor/guard/journal/RBAC đã có; auto action giữ blocked |
+| **H1 model** | A đã thu đủ 30 lượt nonfinal, xác minh nguồn, huấn luyện ba service bundle và đóng gói kèm model cards, checksums, evaluation và dependency pins. Gói review đi qua kênh riêng | Khi nhận gói, B kiểm checksum, chạy replay và kiểm telemetry trên môi trường đích. Bật inference khi G3 và source parity được nghiệm thu |
+| **H4 action eligibility** | A cần giao IER/revision cùng RCA đã xác minh trên Kubernetes, đủ freshness, coverage và confidence. Lượt Payment local đã có `RCA_READY`, kết quả vẫn abstain | B có thể chuẩn bị hồ sơ known-good, policy và dry-run. Guard, journal và RBAC đã có. Dispatch chờ H4 đủ điều kiện và phê duyệt operator |
 
-Phần mềm H4 hiện có producer `NativeH4Authority(journal)` cho nguồn Kubernetes
-đã được journal xác minh, model được chấp nhận và sự kiện đổi image thật; cấu hình
-nguồn và feed theo [runbook](../runbooks/CONTROLLED_REMEDIATION.md#kubernetes-incident-evidence-source).
-B có thể tích hợp producer với executor, chuẩn bị known-good ledger và policy ngay.
-Đầu ra H1/G3 và incident H4 đủ điều kiện thực tế vẫn chưa được bàn giao; code và
-kiểm tra Kubernetes không thay thế hai đầu ra này.
-
-B không cần raw train của A để hoàn thành UI. Chỉ bước **bật inference thật** và
-**rollback sản phẩm thật** chờ hai boundary trên.
+[Hướng dẫn kiểm H1](../runbooks/MODEL_PIPELINE.md#portable-h1-candidate-preparation)
+tách kiểm nhận gói, replay, source parity và nghiệm thu G3. [Guard H4](https://github.com/VietSory/SentinelOps/actions/runs/42455708564)
+kiểm tra revision, tham chiếu RCA và health hiện tại trước khi gọi Kubernetes.
+[Runbook H4](../runbooks/CONTROLLED_REMEDIATION.md#kubernetes-incident-evidence-source)
+mô tả nguồn và feed để B chuẩn bị tích hợp sau khi điều kiện dispatch được duyệt.
 
 ## 5. Bước tiếp theo, theo thứ tự
 
@@ -156,14 +152,10 @@ handoff thật, không chỉ một bản code/fixture đã pass.
    health và incident theo [rollover runbook](../runbooks/OBSERVABILITY.md#prometheus-source-identity-and-stream-rollover),
    chọn đúng READY stream rồi chạy lại `check_lane_b_live`. Giữ DB/checkpoint
    lịch sử; không cần A ra thêm quyết định về hash.
-2. **A giao H1 local** → B activate model theo release đã duyệt, pin release và
-   restart có kiểm soát, giữ release trước để rollback. H1 cần model/evaluation
-   thật; pipeline thu thập → kiểm tra nguồn → fitting/đánh giá → đóng gói đang
-   chạy độc lập phiên chat trên máy A, có runner Windows giữ WSL hoạt động và
-   xử lý gián đoạn theo đúng giới hạn nhóm thay thế. Lịch gốc gồm 10 nhóm với
-   **19,5 giờ đo tối thiểu**, chưa tính khởi tạo/kiểm tra nguồn; máy phải giữ nguồn.
-   Gói được tạo cục bộ trước khi chia sẻ, chưa phải model được chấp nhận hay URI
-   B tải được cho đến khi artifact thật hoàn thành và được duyệt chia sẻ.
+2. **A giao H1 local.** B kiểm gói và xác minh telemetry trên môi trường đích
+   trong khi A xử lý nghiệm thu G3. Khi đủ cả hai điều kiện, chọn cùng release
+   cho API và worker. Dùng [`--stream-epoch`](../runbooks/LOCAL_TESTBED.md) để
+   tạo stream mới, giữ release và stream trước cho rollback.
 3. **A giao H4** → B chạy rollback Payment thật trên Kubernetes local với
    known-good digest, policy/dry-run/approval, idempotency/lock/audit, verify bằng
    telemetry và escalation. Đây là G6; thiếu source/qualified RCA/approval vẫn block.
