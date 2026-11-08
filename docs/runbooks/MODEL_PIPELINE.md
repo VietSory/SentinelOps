@@ -311,3 +311,12 @@ is required, and no extra fields are allowed:
 ```
 
 A failed or partial parity check is reported as such. It is never written as PASS.
+
+`python -m scripts.check_model_source_parity --kind KIND --candidate /verified/handoff
+--expected-id ID --corpus /frozen/corpus --environment NAME --verified-by NAME --output /new/dir`
+produces that record from an owned Kubernetes sandbox with five healthy minutes.
+Its criteria C1–C6 are fixed in the script docstring before measurement: replay,
+training source shape, bucket eligibility and lag, count agreement within 5%,
+same-bucket p95, and eligible live features with finite scores. Any failed
+criterion yields `status: FAIL` with the failures listed. It refuses to run beside
+an active corpus capture.
