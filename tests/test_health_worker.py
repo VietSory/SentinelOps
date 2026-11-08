@@ -93,6 +93,39 @@ def test_asyncpg_detached_proxy_keeps_database_disconnect_retryable(tmp_path, du
         asyncio.run(worker.tick())
 
 
+@pytest.mark.parametrize("during", ["lock", "capture", "unlock"])
+def test_database_shutdown_retires_session_without_discarding_committed_result(tmp_path, during):
+    class Connection:
+        closed = False
+        def is_closed(self): return self.closed
+        def terminate(self): self.closed = True
+        async def fetchval(self, query, *args):
+            step = "unlock" if "pg_advisory_unlock" in query else "lock"
+            if during == step:
+                raise asyncpg.AdminShutdownError("server stopping")
+            return True
+
+    conn = Connection()
+
+    class Acquire:
+        async def __aenter__(self): return conn
+        async def __aexit__(self, *args): pass
+
+    class Pool:
+        def acquire(self, *, timeout): return Acquire()
+
+    worker = HealthWorker(Pool(), ArtifactStore(tmp_path), POLICY, endpoint="http://localhost:9090",
+                          environment="fixture-shutdown", configuration_hash="a" * 64)
+    worker._locked_tick = AsyncMock(return_value={"status": "COMMITTED"},
+                                    side_effect=asyncpg.AdminShutdownError() if during == "capture" else None)
+    if during == "unlock":
+        assert asyncio.run(worker.tick())["status"] == "COMMITTED"
+    else:
+        with pytest.raises(asyncpg.AdminShutdownError):
+            asyncio.run(worker.tick())
+    assert conn.closed
+
+
 def test_processing_budget_includes_returning_the_connection_to_its_pool(tmp_path):
     class Connection:
         fetchval = AsyncMock(return_value=True)

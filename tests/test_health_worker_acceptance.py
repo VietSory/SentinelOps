@@ -1,5 +1,6 @@
 import json
 import asyncio
+import asyncpg
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -27,7 +28,9 @@ def test_destructive_live_acceptance_requires_exact_project_service_and_loopback
 
 @pytest.mark.parametrize("error,retry,stall_close", [(PermissionError("immutable store denied"), False, False),
     (ConnectionRefusedError("local database unavailable"), True, False),
-    (PermissionError("immutable store denied"), False, True)])
+    (asyncpg.AdminShutdownError("server stopping"), True, False),
+    (PermissionError("immutable store denied"), False, True),
+    (None, False, True)])
 def test_worker_retries_database_transport_but_fails_on_artifact_io(monkeypatch, tmp_path, capsys, error, retry, stall_close):
     class Source:
         def __init__(self, *args): self.client = SimpleNamespace(timeout=None)
@@ -38,7 +41,8 @@ def test_worker_retries_database_transport_but_fails_on_artifact_io(monkeypatch,
             await asyncio.Event().wait()
 
     pool = SimpleNamespace(close=AsyncMock(side_effect=close))
-    worker = SimpleNamespace(check_ready=AsyncMock(), tick=AsyncMock(side_effect=[error, {"status": "COMMITTED"}]),
+    ticks = [error, {"status": "COMMITTED"}] if error else [{"status": "COMMITTED"}]
+    worker = SimpleNamespace(check_ready=AsyncMock(), tick=AsyncMock(side_effect=ticks),
                              status=AsyncMock(return_value={}), stream_id="fixture", identity={})
     monkeypatch.setenv("CONTROL_DATABASE_URL", "postgresql://control_writer@127.0.0.1:5433/sentinelops_control")
     monkeypatch.setattr("scripts.run_health_worker.PrometheusSource", Source)
@@ -50,6 +54,7 @@ def test_worker_retries_database_transport_but_fails_on_artifact_io(monkeypatch,
                            max_buckets=1, poll_seconds=.25)
     if retry: asyncio.run(asyncio.wait_for(run(args), 2))
     else:
-        with pytest.raises(PermissionError): asyncio.run(asyncio.wait_for(run(args), 2))
+        with pytest.raises(type(error) if error else asyncio.TimeoutError):
+            asyncio.run(asyncio.wait_for(run(args), 2))
     pool.close.assert_awaited_once()
-    assert ("DATABASE_POOL_SHUTDOWN_TIMEOUT" in capsys.readouterr().out) is stall_close
+    assert ("DATABASE_POOL_SHUTDOWN_FAILED" in capsys.readouterr().out) is stall_close

@@ -20,6 +20,7 @@ from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE
 from sentinelops.telemetry.store import ArtifactStore
 
 DATABASE_TIMEOUT_SECONDS = 10
+DATABASE_SHUTDOWN_ERRORS = (asyncpg.AdminShutdownError, asyncpg.CrashShutdownError, asyncpg.CannotConnectNowError)
 
 
 def _connection_closed(conn) -> bool:
@@ -109,23 +110,33 @@ class HealthWorker:
         # connection. command_timeout alone does not bound cancellation drain;
         # an outage can otherwise strand the heartbeat in __aexit__ indefinitely.
         async with self.pool.acquire(timeout=DATABASE_TIMEOUT_SECONDS) as conn:
+            locked = False
             try:
-                if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", self.lock_id):
+                locked = await conn.fetchval("SELECT pg_try_advisory_lock($1)", self.lock_id)
+                if not locked:
                     return {"status": "BUSY", "stream_id": self.stream_id}
-                try:
-                    result = await self._locked_tick(conn, started)
-                finally:
-                    if not _connection_closed(conn):
-                        try:
-                            await conn.fetchval("SELECT pg_advisory_unlock($1)", self.lock_id)
-                        except (asyncpg.InterfaceError, asyncpg.PostgresConnectionError):
-                            if not _connection_closed(conn):
-                                raise
+                result = await self._locked_tick(conn, started)
             except asyncpg.InterfaceError:
                 # Reclassify only a confirmed closed connection; other API misuse is fatal.
                 if _connection_closed(conn):
                     raise ConnectionError("health database connection closed during tick") from None
                 raise
+            except DATABASE_SHUTDOWN_ERRORS:
+                if not _connection_closed(conn):
+                    conn.terminate()
+                raise
+            finally:
+                if locked and not _connection_closed(conn):
+                    try:
+                        await conn.fetchval("SELECT pg_advisory_unlock($1)", self.lock_id)
+                    except DATABASE_SHUTDOWN_ERRORS:
+                        # The server releases the session's lock. Preserve any
+                        # bucket that committed before the unlock was interrupted.
+                        if not _connection_closed(conn):
+                            conn.terminate()
+                    except (asyncpg.InterfaceError, asyncpg.PostgresConnectionError):
+                        if not _connection_closed(conn):
+                            raise
         if result["status"] == "COMMITTED":
             result["processing_ms"] = round((time.monotonic() - started) * 1000, 3)
         return result

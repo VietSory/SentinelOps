@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import sys
 from urllib.parse import urlparse
 
 import asyncpg
@@ -14,7 +15,7 @@ import httpx
 
 from sentinelops.telemetry.prometheus import PrometheusSource
 from sentinelops.telemetry.store import ArtifactStore
-from sentinelops.workers.health import DATABASE_TIMEOUT_SECONDS, HealthWorker, local_endpoint
+from sentinelops.workers.health import DATABASE_SHUTDOWN_ERRORS, DATABASE_TIMEOUT_SECONDS, HealthWorker, local_endpoint
 from sentinelops.workers.metrics import WorkerMetrics
 
 
@@ -84,7 +85,7 @@ async def run_worker(args, metrics):
                 if result["status"] in ("COMMITTED", "BUSY"):
                     print(json.dumps(result), flush=True)
                 committed += result["status"] == "COMMITTED"
-            except (asyncpg.PostgresConnectionError, asyncpg.CannotConnectNowError, ConnectionError, asyncio.TimeoutError) as exc:
+            except (asyncpg.PostgresConnectionError, *DATABASE_SHUTDOWN_ERRORS, ConnectionError, asyncio.TimeoutError) as exc:
                 ready = False
                 if metrics: metrics.error("database")
                 print(json.dumps({"status": "DATABASE_UNAVAILABLE", "error_type": type(exc).__name__}), flush=True)
@@ -97,20 +98,24 @@ async def run_worker(args, metrics):
                 pass
         try:
             durable = await worker.status()
-        except (asyncpg.PostgresConnectionError, asyncpg.CannotConnectNowError, OSError, asyncio.TimeoutError):
+        except (asyncpg.PostgresConnectionError, *DATABASE_SHUTDOWN_ERRORS, OSError, asyncio.TimeoutError):
             durable = {"availability": "UNKNOWN", "reason": "database-unavailable-at-shutdown"}
         print(json.dumps({"status": "STOPPED", "committed_by_process": committed,
                           "durable_status": durable}), flush=True)
-    except Exception:
+    except Exception as exc:
         if metrics: metrics.error(component)
+        print(json.dumps({"status": "FAILED", "component": component, "error_type": type(exc).__name__}), flush=True)
         raise
     finally:
+        active_error = sys.exc_info()[0] is not None
         if metrics: metrics.heartbeat(ready=False)
         try:
             # asyncpg terminates remaining connections if close is cancelled.
             await asyncio.wait_for(pool.close(), timeout=DATABASE_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError:
-            print(json.dumps({"status": "DATABASE_POOL_SHUTDOWN_TIMEOUT"}), flush=True)
+        except Exception as exc:
+            print(json.dumps({"status": "DATABASE_POOL_SHUTDOWN_FAILED", "error_type": type(exc).__name__}), flush=True)
+            if not active_error:
+                raise
 
 
 def main():
