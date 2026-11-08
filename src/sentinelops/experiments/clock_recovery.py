@@ -13,7 +13,7 @@ import subprocess
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.experiments.labels import SLOConfig
 from sentinelops.experiments.local_corpus import (
-    KINDS, ROLES, PROJECT, acquisition_lock, bind, clean_source, docker, docker_clock,
+    KINDS, ROLES, PROJECT, is_detector_plan, acquisition_lock, bind, clean_source, docker, docker_clock,
     group_name, read_binding, recipe, registered_sessions, registration_path, validate_end_context,
 )
 from sentinelops.experiments.local_recovery import _inventory
@@ -196,6 +196,8 @@ def read_clock_abandonment(store, session, plan, closed, reference, *, project=P
 
 
 def abandon_clock_invalid_group(store, plan, *, role, ordinal, replacement_ordinal, project=PROJECT):
+    if is_detector_plan(plan):
+        raise ValueError("detector-event epoch has no whole-group replacement protocol")
     """Operator-only, whole-group exclusion; never retry, repair UTC or choose a budget."""
     from sentinelops.experiments.local_campaign import campaign_lock
     from sentinelops.experiments.local_recovery import read_abandonment

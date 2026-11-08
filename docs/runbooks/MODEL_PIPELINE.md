@@ -231,3 +231,32 @@ data and makes no source-parity or model-quality acceptance claim. Actual H1
 readiness still requires G2/G3/parity evidence and B's consumer verification.
 Model cards/evaluation artifacts are retained for review and reproduction;
 no service smoke/PASS report is generated.
+
+## Detector-event development protocol v2 (ADR-015)
+
+`local-model-development/v2` reuses the v1 candidate gate unchanged: frozen
+corpus, rows, checksums, thresholds and the v1 protocol committed before fitting.
+It then predicts with the same bundles on a frozen ADR-015 detector-event epoch:
+
+```sh
+python scripts/evaluate_detector_events.py --store /trusted/corpus \
+  --dataset-ref artifact://manifests/DATASET_HASH.json --models /trusted/candidate \
+  --training-manifest-sha256 TRAINING_MANIFEST_BYTES_SHA256 \
+  --detector-store /trusted/detector-epoch --detector-report-ref artifact://manifests/DETECTOR_HASH.json \
+  --output /new/evaluation
+```
+
+Each service reports:
+
+- `abrupt_detector_events`: IF and MAD events matched to independent abrupt SLO
+  onsets with the v1 deadline, persistence and budget, plus a paired whole-group
+  bootstrap of IF minus MAD event F1;
+- `gradual_detector_events_v1`: the unchanged v1 result;
+- `gradual_detector_events_precursor_separated`: episodes entered on a verified
+  v1 risk-positive window are counted as `precursor_interval_episodes`. They are
+  never true positives, and those windows leave healthy service time.
+
+The gradual groups were already inspected, so their re-accounting is not
+independent evidence. Risk/XGBoost evidence stays on the v1 gradual protocol.
+The report keeps `G3_accepted=false` and `activation_allowed=false`. G3 remains
+an owner/reviewer decision over all of these results.

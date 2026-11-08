@@ -14,7 +14,9 @@ def main():
     parser.add_argument('--plan', type=Path, default=Path('configs/local_http_capture_plan.json'))
     parser.add_argument('--role', choices=['train','calibration','development-validation','sealed-final'], required=True)
     parser.add_argument('--group', type=int, required=True)
-    parser.add_argument('--kind', choices=['healthy','payment-gradual','inventory-gradual'], required=True)
+    parser.add_argument('--kind', choices=['healthy','payment-gradual','inventory-gradual',
+                                           'payment-abrupt','inventory-abrupt'], required=True,
+                        help='Abrupt kinds require the ADR-015 detector-event plan (--plan).')
     parser.add_argument('--prepare', action='store_true', help='Create an unused owned Compose context before registration.')
     args = parser.parse_args()
     result = asyncio.run(capture_slot(ArtifactStore(args.root), load_plan(args.plan), role=args.role,

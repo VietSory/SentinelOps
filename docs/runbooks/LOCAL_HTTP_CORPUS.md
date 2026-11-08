@@ -237,3 +237,41 @@ source checkout, and continue the existing campaign from a new clean immutable
 checkout. It follows only the recorded replacement chain; it never automatically
 allocates another ordinal or retries a failed slot. A new failure stops again for
 investigation. New groups require fresh contexts and original source verification.
+
+## ADR-015 detector-event epoch (evaluation only)
+
+[ADR-015](../adr/ADR-015-detector-event-evaluation-coverage.md) adds abrupt S1
+detector events beside the unchanged gradual protocol. The
+[detector plan](../../configs/local_http_detector_events_plan.json) is a separate
+epoch in its **own new store**. Its rows never enter fitting, calibration or
+thresholds. A store cannot mix it with fitting groups, and the frozen fitting
+corpus is never reopened.
+
+Each `det-NN` group runs `healthy`, `payment-abrupt` and `inventory-abrupt` in a
+fresh owned context. Plan v1 timing and rate apply: 300 s warmup, 1 request/s per
+entry, 360 s recovery. Healthy runs are 900 s active; abrupt runs are 600 s
+active. Odd ordinals inject 1200 ms latency, even ordinals inject error. In
+error mode the runner accepts 503 only from direct requests to the faulted
+target during the fault phase. Checkout reports the downstream failure as 502.
+Minimum 5 groups, maximum 10. Interrupted or clock-invalid groups have **no**
+replacement protocol in this epoch: investigate and stop.
+
+Commit `configs/local_model_evaluation_v2.json` and the detector plan **before**
+the first registration. The v2 evaluator rejects an epoch whose registered source
+commits do not already contain identical bytes.
+
+```sh
+python scripts/capture_local_campaign.py --root /absolute/detector/root \
+  --plan configs/local_http_detector_events_plan.json
+python scripts/audit_detector_events.py --root /absolute/detector/root \
+  --output /absolute/detector/root/admission.json [--freeze]
+```
+
+The audit verifies original source and oracle evidence exactly as for the fitting
+corpus. It also corroborates each abrupt run with the single recorded control step
+of the registered target and mode. Detector events are the oracle's independently
+measured SLO onsets, never control clocks. A group counts only when all three
+captures verify. `READY_FOR_EVALUATION` requires at least 5 complete groups, plus
+5 groups with healthy and abrupt-event support for each service. It is never
+`training_ready`, and `--freeze` binds `evaluation-freeze.json`, which closes
+acquisition for the epoch.

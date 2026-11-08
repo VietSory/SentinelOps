@@ -23,7 +23,7 @@ from sentinelops.experiments.client_clock import ClientClockGuard
 from sentinelops.contracts import validate_payload
 from sentinelops.experiments.labels import SLOConfig, measure_slo
 from sentinelops.experiments.diagnostics import failure_context
-from sentinelops.experiments.traffic import server_log_coverage,s5_expected_responses
+from sentinelops.experiments.traffic import server_log_coverage,s1_error_responses,s5_expected_responses
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.infrastructure import PostgresInfrastructureSource
 from sentinelops.telemetry.pipeline import process_captures
@@ -362,7 +362,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         run["parameters"]["workload_outcomes"] = dict(counts)
         if config.scenario=="S5":
             if not s5_expected_responses(outcomes,config.fault_mode):failure=failure or "UnexpectedWorkloadOutcome"
-        elif any(key not in ("200","502","504") for key in counts): failure = failure or "UnexpectedWorkloadOutcome"
+        elif any(key not in ("200","502","504","503") for key in counts) or (counts.get("503") and not s1_error_responses(outcomes,config)):
+            failure = failure or "UnexpectedWorkloadOutcome"
         if config.scenario == "S0" and any(value["first_violation_at"] for value in run["slo_by_service"].values()): failure = failure or "HealthyRunBreachedSLO"
     except Exception as exc:
         failure = failure or type(exc).__name__

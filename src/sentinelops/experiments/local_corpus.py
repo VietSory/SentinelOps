@@ -25,12 +25,61 @@ from sentinelops.telemetry.store import ArtifactStore
 
 ROLES = ('train', 'calibration', 'development-validation', 'sealed-final')
 KINDS = ('healthy', 'payment-gradual', 'inventory-gradual')
+# ADR-015: evaluation-only abrupt detector events. Never a fitting source.
+DETECTOR_PLAN_VERSION = 'local-http-detector-events-plan/v1'
+DETECTOR_KINDS = ('healthy', 'payment-abrupt', 'inventory-abrupt')
+DETECTOR_ROLES = ('development-validation',)
 PROJECT = Path(__file__).resolve().parents[3]
 DEFAULT_PLAN = PROJECT / 'configs/local_http_capture_plan.json'
+DETECTOR_PLAN = PROJECT / 'configs/local_http_detector_events_plan.json'
+SLOT_PATTERN = re.compile(r'(?:(?:train|cal|dev)-[0-9]{2}-(?:healthy|payment-gradual|inventory-gradual)'
+                          r'|det-[0-9]{2}-(?:healthy|payment-abrupt|inventory-abrupt))')
+
+
+def is_detector_plan(plan):
+    return plan.get('plan_version') == DETECTOR_PLAN_VERSION
+
+
+def plan_kinds(plan):
+    return DETECTOR_KINDS if is_detector_plan(plan) else KINDS
+
+
+def plan_roles(plan):
+    """Acquisition roles in chronological order; sealed-final is never captured."""
+    return DETECTOR_ROLES if is_detector_plan(plan) else ROLES
+
+
+def _load_detector_plan(plan):
+    policy = load_training_policy()
+    require_current_training_source('local_http', policy)
+    expected = {'plan_version': DETECTOR_PLAN_VERSION, 'authorizing_adr': 'ADR-015',
+        'policy_sha256': policy_hash(policy), 'source_profile': SOURCE_PROFILE, 'feature_set_version': FEATURE_SET,
+        'environment': 'local', 'oracle_protocol': 'server-completion-client-ledger/v1',
+        'evaluation_protocol': 'local-model-development/v2', 'roles_in_order': list(DETECTOR_ROLES),
+        'group_prefix': 'det', 'kinds': list(DETECTOR_KINDS),
+        'healthy_active_seconds': {'development-validation': 900}, 'abrupt_active_seconds': 600,
+        'abrupt_fault_mode_by_ordinal_parity': {'odd': 'latency', 'even': 'error'},
+        'warmup_seconds': 300, 'recovery_seconds': 360, 'entry_rps': 1.0, 'maximum_delay_ms': 1200,
+        'fitting_allowed': False, 'sealed_final_capture_allowed': False, 'previous_capture_promotion_allowed': False}
+    allowed = set(expected) | {'seed_base', 'minimum_groups', 'maximum_groups', 'group_isolation'}
+    if set(plan) != allowed or any(plan.get(k) != v or type(plan.get(k)) is not type(v) for k, v in expected.items()):
+        raise ValueError('detector-event plan differs from the ADR-015 accepted protocol')
+    if (type(plan['seed_base']) is not int or plan['seed_base'] < 0
+        or set(plan['minimum_groups']) != set(DETECTOR_ROLES) or set(plan['maximum_groups']) != set(DETECTOR_ROLES)
+        or type(plan['minimum_groups']['development-validation']) is not int
+        or type(plan['maximum_groups']['development-validation']) is not int
+        or not 5 <= plan['minimum_groups']['development-validation'] <= plan['maximum_groups']['development-validation'] <= 10):
+        raise ValueError('detector-event group plan weakens the accepted bounds')
+    for kind in DETECTOR_KINDS:
+        for ordinal in (1, 2):
+            recipe(plan, 'development-validation', ordinal, kind).validate()
+    return plan
 
 
 def load_plan(path=DEFAULT_PLAN):
     plan = json.loads(Path(path).read_text())
+    if is_detector_plan(plan):
+        return _load_detector_plan(plan)
     policy = load_training_policy()
     require_current_training_source('local_http', policy)
     if (plan.get('plan_version') != 'local-http-prospective-plan/v1'
@@ -56,6 +105,11 @@ def load_plan(path=DEFAULT_PLAN):
 
 
 def group_name(plan, role, ordinal):
+    if is_detector_plan(plan):
+        if (role not in DETECTOR_ROLES or type(ordinal) is not int
+            or not 1 <= ordinal <= plan['maximum_groups'][role]):
+            raise ValueError('unregistered detector-event role/group ordinal')
+        return f'det-{ordinal:02d}'
     if role not in ROLES or type(ordinal) is not int or not 1 <= ordinal <= plan['maximum_groups'][role]:
         raise ValueError('unregistered acquisition role/group ordinal')
     if role == 'sealed-final':
@@ -66,6 +120,19 @@ def group_name(plan, role, ordinal):
 
 def recipe(plan, role, ordinal, kind):
     group_name(plan, role, ordinal)
+    if is_detector_plan(plan):
+        if kind not in DETECTOR_KINDS:
+            raise ValueError('unregistered detector-event capture kind')
+        healthy = kind == 'healthy'
+        mode = plan['abrupt_fault_mode_by_ordinal_parity']['odd' if ordinal % 2 else 'even']
+        return ExperimentConfig('S0' if healthy else 'S1', 'validation',
+            seed=plan['seed_base'] + ordinal * 10 + DETECTOR_KINDS.index(kind), rps=plan['entry_rps'],
+            warmup_seconds=plan['warmup_seconds'],
+            active_seconds=plan['healthy_active_seconds'][role] if healthy else plan['abrupt_active_seconds'],
+            recovery_seconds=plan['recovery_seconds'], fault_mode='latency' if healthy else mode,
+            maximum_delay_ms=plan['maximum_delay_ms'],
+            target_service='inventory-service' if kind == 'inventory-abrupt' else 'payment-service',
+            all_entry_traffic=True)
     if kind not in KINDS:
         raise ValueError('unregistered prospective capture kind')
     offset = ROLES.index(role) * 1000 + ordinal * 10 + KINDS.index(kind)
@@ -196,6 +263,15 @@ def registered_sessions(store):
 
 def require_role_order(store, plan, role):
     sessions = registered_sessions(store)
+    if is_detector_plan(plan):
+        # One evaluation-only epoch per store; never mixed with fitting groups.
+        if any(s['plan_sha256'] != stable_id(plan) for s in sessions):
+            raise ValueError('detector-event epoch cannot share a store with another plan')
+        if role not in DETECTOR_ROLES:
+            raise ValueError('detector-event epoch has only a development-validation role')
+        return
+    if any(s['group_id'].startswith('det-') for s in sessions):
+        raise ValueError('fitting corpus cannot share a store with a detector-event epoch')
     index = ROLES.index(role)
     if any(ROLES.index(s['role']) > index for s in sessions):
         raise ValueError('cannot acquire earlier-role data after a later role has begun')
@@ -212,7 +288,8 @@ def require_role_order(store, plan, role):
                     raise ValueError('previous acquisition role has incomplete/failed source slots')
 
 
-def close_completed_sessions(store, *, except_group):
+def close_completed_sessions(store, *, except_group, plan=None):
+    plan = load_plan() if plan is None else plan
     for session in registered_sessions(store):
         group = session['group_id']
         if group == except_group:
@@ -220,9 +297,9 @@ def close_completed_sessions(store, *, except_group):
         closure = store.root / 'sessions' / group / 'closed.json'
         if closure.exists():
             from sentinelops.experiments.local_recovery import read_abandonment
-            read_abandonment(store, session, load_plan())
+            read_abandonment(store, session, plan)
             continue
-        for kind in KINDS:
+        for kind in plan_kinds(plan):
             result = store.root / 'runs' / (group + '-' + kind) / 'result.json'
             if not result.exists() or read_binding(store, result)[1]['status'] != 'completed':
                 raise ValueError('finish the active acquisition group before preparing another context')
@@ -240,7 +317,7 @@ def close_completed_sessions(store, *, except_group):
 
 def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=False):
     group = group_name(plan, role, ordinal)  # reject final before source/context reads
-    if (store.root / 'dataset-freeze.json').exists():
+    if (store.root / 'dataset-freeze.json').exists() or (store.root / 'evaluation-freeze.json').exists():
         raise ValueError('prospective dataset is frozen; new acquisition needs a new corpus epoch')
     source = clean_source(project)
     require_role_order(store, plan, role)
@@ -258,7 +335,7 @@ def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=Fal
         return reference, saved
     if not prepare:
         raise ValueError('new acquisition session needs explicit --prepare before traffic')
-    close_completed_sessions(store, except_group=group)
+    close_completed_sessions(store, except_group=group, plan=plan)
     # Persist provisioning intent before Docker creation. A retry can resume its
     # own partial startup, but cannot appropriate an older project or volume.
     intent_path = store.root / 'contexts' / group / 'provisioning.json'
@@ -360,13 +437,15 @@ def inspect_completed_capture(store, slot, *, project=PROJECT):
     process start clocks must prove no restart after their registration. Missing
     resources or clock/state evidence fails rather than minting a certificate.
     """
-    if not re.fullmatch(r'(train|cal|dev)-[0-9]{2}-(healthy|payment-gradual|inventory-gradual)', slot):
+    if not SLOT_PATTERN.fullmatch(slot):
         raise ValueError('end-context observer rejects unregistered/sealed source slots')
     source = clean_source(project)
     root = store.root / 'runs' / slot
     result_ref, result = read_binding(store, root/'result.json')
     _, registration = read_binding(store, root/'registration.json')
     session = store.read(registration['session_ref'])
+    if slot.removeprefix(session['group_id'] + '-') not in plan_kinds(store.read(session['plan_ref'])):
+        raise ValueError('end-context slot kind differs from its registered plan')
     if result['status'] != 'completed':
         raise ValueError('cannot observe a completed context for unfinished source evidence')
     from pathlib import PurePosixPath

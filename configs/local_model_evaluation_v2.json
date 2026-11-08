@@ -1,0 +1,12 @@
+{
+  "protocol_version": "local-model-development/v2",
+  "authorizing_adr": "ADR-015",
+  "base_protocol_version": "local-model-development/v1",
+  "base_protocol_sha256": "1e8a1aa8ecaf2c06316d68486d76d51c5cc3dd5a641312bcd19e1822eadff8d7",
+  "detector_plan_version": "local-http-detector-events-plan/v1",
+  "detector_event_source": "oracle-first-violation-in-verified-abrupt-runs",
+  "precursor_interval_accounting": "separate-verified-risk-positive-windows/v1",
+  "evaluation_role": "development-validation",
+  "final_access_allowed": false,
+  "activation_allowed": false
+}

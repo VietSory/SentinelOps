@@ -10,7 +10,7 @@ import subprocess
 
 from sentinelops.contracts import utc_time
 from sentinelops.experiments.local_corpus import (
-    KINDS, ROLES, PROJECT, acquisition_lock, bind, clean_source, docker, docker_clock,
+    KINDS, ROLES, PROJECT, is_detector_plan, acquisition_lock, bind, clean_source, docker, docker_clock,
     group_name, read_binding, registered_sessions, registration_path,
 )
 from sentinelops.telemetry.core import stable_id, timestamp
@@ -91,6 +91,8 @@ def read_abandonment(store, session, plan, *, project=PROJECT, as_of=None):
     if not path.exists():
         return None
     ref, closed = read_binding(store, path)
+    if is_detector_plan(plan) and closed.get("closure_version") != "local-http-session-closed/v1":
+        raise ValueError("detector-event epoch has no whole-group replacement protocol")
     if closed.get("closure_version") == "local-http-clock-discontinuity/v1":
         from sentinelops.experiments.clock_recovery import read_clock_abandonment
         return read_clock_abandonment(store, session, plan, closed, ref, project=project, as_of=as_of)
@@ -159,6 +161,8 @@ def _observe(session, source, project):
 
 
 def abandon_interrupted_group(store, plan, *, role, ordinal, replacement_ordinal, project=PROJECT):
+    if is_detector_plan(plan):
+        raise ValueError("detector-event epoch has no whole-group replacement protocol")
     """Explicit operator action. No Docker mutation, quality-based replacement or slot retry."""
     from sentinelops.experiments.local_campaign import campaign_lock
     from sentinelops.ml.local_data import _session_identity, verify_capture

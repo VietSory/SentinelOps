@@ -9,5 +9,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--follow-existing',action='store_true',help='Wait for an already registered active slot; never rerun it.')
+    parser.add_argument('--plan',type=Path,default=None,help='ADR-015 detector-event plan for the evaluation-only epoch.')
     args = parser.parse_args()
-    print(json.dumps(run_campaign(ArtifactStore(args.root),follow_existing=args.follow_existing),indent=2))
+    print(json.dumps(run_campaign(ArtifactStore(args.root),follow_existing=args.follow_existing,plan_path=args.plan),indent=2))

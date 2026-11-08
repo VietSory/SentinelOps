@@ -17,7 +17,7 @@ import subprocess
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.experiments.labels import SLOConfig, feature_vector
 from sentinelops.experiments.local_corpus import (
-    KINDS, ROLES, group_name, load_plan, read_binding, recipe,
+    KINDS, ROLES, group_name, is_detector_plan, load_plan, plan_kinds, read_binding, recipe,
     validate_end_context, docker_clock, volume_created_within,
 )
 from sentinelops.experiments.local_labels import oracle_from_requests, window_labels
@@ -194,6 +194,19 @@ def verify_capture(store, plan, session, kind, *, project=PROJECT, as_of=None):
             and type(r.get('timestamp_unix_ms')) is int and lower <= r['timestamp_unix_ms'] < upper)
     gradual = (len({v for _,v in ramp}) >= 3 and all(0 < v <= registration['recipe']['maximum_delay_ms'] for _,v in ramp)
                and all(a[1] <= b[1] for a,b in zip(ramp, ramp[1:])))
+    abrupt = None
+    if run['scenario_id'] == 'S1':
+        # ADR-015: the single abrupt control step corroborates the run kind. It
+        # never supplies the event clock; detector events use the oracle onset.
+        target, mode = registration['recipe']['target_service'], registration['recipe']['fault_mode']
+        if (run['root_cause_ground_truth'] != target or set(run['affected_services_ground_truth']) != {target, 'checkout-service'}
+            or run['fault_method'] != 'sandbox-' + mode or not run['warmup_end_at'] or not run['fault_start_at']):
+            raise ValueError('registered abrupt target/mode differs from actual recorded intervention')
+        lower, upper = utc_time(run['warmup_end_at']).timestamp()*1000, utc_time(run['fault_start_at']).timestamp()*1000
+        steps = [r for r in full['records'] if r.get('service') == target and r.get('event') == 'fault_configuration_changed'
+                 and type(r.get('timestamp_unix_ms')) is int and lower <= r['timestamp_unix_ms'] <= upper]
+        abrupt = (len(steps) == 1 and steps[0].get('mode') == mode
+                  and steps[0].get('delay_ms') == registration['recipe']['maximum_delay_ms'])
     observation_objects = [(ref,serving.read(ref)) for ref in serving.read(manifest['normalization_manifest_ref'])['observation_refs']]
     observations = [value for _,value in observation_objects]
     oracle_ref = store.write('manifests', {'certificate_version':'local-http-oracle/v1',
@@ -223,7 +236,8 @@ def verify_capture(store, plan, session, kind, *, project=PROJECT, as_of=None):
     return {'source_result_ref':result_ref, 'registration_ref':registration_ref, 'run_id':run['run_id'],
         'group_id':group, 'role':role, 'kind':kind, 'started_at':run['started_at'], 'ended_at':run['ended_at'],
         'oracle':oracle,'oracle_ref':oracle_ref, 'rows':rows, 'excluded':excluded, 'causal_features_sha256':frozen_features,
-        'observed_gradual_control_steps':len(ramp), 'gradual_control_verified':gradual}
+        'observed_gradual_control_steps':len(ramp), 'gradual_control_verified':gradual,
+        **({'abrupt_control_verified':abrupt} if is_detector_plan(plan) else {})}
 
 
 def _session_identity(session, plan):
@@ -268,19 +282,8 @@ def validate_chronology(intervals):
     return ordered
 
 
-def audit_local_corpus(store, *, plan=None, project=PROJECT, now=None):
-    """Audit all prospectively registered nonfinal groups; emit exact deficits.
-
-    Pending/failed slots never supply rows. Corrupt completed evidence blocks
-    admission and is retained in a separate quarantine inventory. Only train and
-    calibration rows are returned to numerical fitting; development is audited
-    for independent support and never passed to estimator fitting/preprocessing.
-    """
-    plan = load_plan() if plan is None else plan
-    policy = load_training_policy()
-    if plan['policy_sha256'] != policy_hash(policy):
-        raise ValueError('corpus differs from the current approved training contract')
-    created = now or datetime.now(timezone.utc)
+def _collect_sources(store, plan, project, created):
+    """Verify every registered nonfinal group; shared by fitting and detector audits."""
     cases, pending, failed, quarantine, sessions = [], [], [], [], []
     all_rows, intervals, owners = [], defaultdict(list), set()
     excluded_groups = []
@@ -309,7 +312,7 @@ def audit_local_corpus(store, *, plan=None, project=PROJECT, now=None):
                 'excluded_whole_group':True})
             intervals[session['role']].append((utc_time(session['registered_at']), utc_time(closure['closed_at'])))
             continue
-        for kind in KINDS:
+        for kind in plan_kinds(plan):
             slot = session['group_id'] + '-' + kind
             root = store.root / 'runs' / slot
             if not (root / 'result.json').exists():
@@ -333,6 +336,26 @@ def audit_local_corpus(store, *, plan=None, project=PROJECT, now=None):
             cases.append(case)
             all_rows.extend(case['rows'])
             intervals[session['role']].append((utc_time(case['started_at']),utc_time(case['ended_at'])))
+    return cases, pending, failed, quarantine, sessions, all_rows, intervals, excluded_groups
+
+
+def audit_local_corpus(store, *, plan=None, project=PROJECT, now=None):
+    """Audit all prospectively registered nonfinal groups; emit exact deficits.
+
+    Pending/failed slots never supply rows. Corrupt completed evidence blocks
+    admission and is retained in a separate quarantine inventory. Only train and
+    calibration rows are returned to numerical fitting; development is audited
+    for independent support and never passed to estimator fitting/preprocessing.
+    """
+    plan = load_plan() if plan is None else plan
+    policy = load_training_policy()
+    if plan['policy_sha256'] != policy_hash(policy):
+        raise ValueError('corpus differs from the current approved training contract')
+    created = now or datetime.now(timezone.utc)
+    if is_detector_plan(plan):
+        raise ValueError('detector-event epochs are evaluation-only; use audit_detector_events')
+    cases, pending, failed, quarantine, sessions, all_rows, intervals, excluded_groups = _collect_sources(
+        store, plan, project, created)
     ordered = validate_chronology(intervals)
     counts = {role:{service:{'healthy_windows':0,'risk_positive_windows':0,'risk_negative_windows':0,'risk_unknown_windows':0,
                             'healthy_groups':0,'precursor_groups':0} for service in BUSINESS_ROUTES} for role in ROLES[:-1]}
@@ -436,3 +459,127 @@ def _freeze_local_corpus(store, report):
             raise ValueError('prospective dataset is already frozen to another inventory')
         return reference
     return bind(store,path,report)
+
+
+DETECTOR_ADMISSION_VERSION = 'local-http-detector-events-admission/v1'
+DETECTOR_FREEZE = 'evaluation-freeze.json'
+
+
+def audit_detector_events(store, plan, *, project=PROJECT, now=None):
+    """ADR-015 evaluation-only epoch audit. Its rows never reach fitting.
+
+    A group is usable only when its healthy and both abrupt captures verify from
+    original source and each abrupt control step corroborates the registered
+    kind. Detector events are the oracle's independently measured SLO onsets.
+    """
+    if not is_detector_plan(plan):
+        raise ValueError('detector-event audit requires the ADR-015 plan')
+    policy = load_training_policy()
+    if plan['policy_sha256'] != policy_hash(policy):
+        raise ValueError('detector-event epoch differs from the current approved source contract')
+    created = now or datetime.now(timezone.utc)
+    cases, pending, failed, quarantine, sessions, all_rows, intervals, excluded = _collect_sources(
+        store, plan, project, created)
+    ordered = validate_chronology(intervals)
+    if ordered and created < max(end for _, end in ordered):
+        raise ValueError('detector-event epoch cannot be audited before its captures end')
+    by_group = defaultdict(dict)
+    for case in cases:
+        by_group[case['group_id']][case['kind']] = case
+    complete, conditions = [], []
+    unverified = sorted(c['group_id'] + '-' + c['kind'] for c in cases
+                        if c['kind'] != 'healthy' and c.get('abrupt_control_verified') is not True)
+    for group, kinds in sorted(by_group.items()):
+        if set(kinds) == set(plan_kinds(plan)) and all(
+                kinds[k].get('abrupt_control_verified') is True for k in plan_kinds(plan) if k != 'healthy'):
+            complete.append(group)
+    counts = {service: {'healthy_windows': 0, 'healthy_groups': 0, 'abrupt_event_groups': 0}
+              for service in BUSINESS_ROUTES}
+    healthy_groups, event_groups = defaultdict(set), defaultdict(set)
+    for row in all_rows:
+        if row['group_id'] in complete and row['healthy']:
+            counts[row['service']]['healthy_windows'] += 1
+            healthy_groups[row['service']].add(row['group_id'])
+    for case in cases:
+        if case['group_id'] not in complete or case['kind'] == 'healthy':
+            continue
+        for service, evidence in case['oracle']['services'].items():
+            if evidence['first_violation_at']:
+                event_groups[service].add(case['group_id'])
+    floor = plan['minimum_groups']['development-validation']
+    for service in BUSINESS_ROUTES:
+        counts[service]['healthy_groups'] = len(healthy_groups[service])
+        counts[service]['abrupt_event_groups'] = len(event_groups[service])
+        for key in ('healthy_groups', 'abrupt_event_groups'):
+            if counts[service][key] < floor:
+                conditions.append({'condition': service + '/' + key, 'available': counts[service][key], 'required': floor})
+    if len(complete) < floor:
+        conditions.append({'condition': 'complete-verified-groups', 'available': len(complete), 'required': floor})
+    if unverified:
+        conditions.append({'condition': 'abrupt-control-unverified', 'available': len(unverified), 'required': 0})
+    if pending:
+        conditions.append({'condition': 'pending-registered-slots', 'available': len(pending), 'required': 0})
+    if quarantine:
+        conditions.append({'condition': 'corrupt-completed-source', 'available': len(quarantine), 'required': 0})
+    report = {'dataset_version': DETECTOR_ADMISSION_VERSION, 'authorizing_adr': 'ADR-015', 'source': 'local_http',
+        'training_data_policy_hash': policy_hash(policy), 'feature_set_version': FEATURE_SET,
+        'ordered_features': list(FEATURE_KEYS), 'source_profile': plan['source_profile'],
+        'services': sorted(BUSINESS_ROUTES), 'plan_sha256': stable_id(plan),
+        'evaluation_protocol': plan['evaluation_protocol'], 'created_at': timestamp(created),
+        'status': 'BLOCKED' if conditions else 'READY_FOR_EVALUATION', 'evaluation_ready': not conditions,
+        'training_ready': False, 'fitting_rows': 0, 'counts': counts, 'complete_groups': complete,
+        'failed_conditions': conditions, 'pending_slots': pending, 'failed_slots': failed,
+        'quarantined_slots': quarantine, 'unverified_abrupt_slots': unverified,
+        'registered_groups': len(sessions), 'verified_completed_runs': len(cases),
+        'verified_feature_rows': len(all_rows),
+        'source_result_refs': [c['source_result_ref'] for c in cases],
+        'oracle_certificate_refs': [c['oracle_ref'] for c in cases],
+        'source_inventory_sha256': stable_id([{'group': s['group_id'], 'ref': 'artifact://manifests/' + stable_id(s) + '.json'}
+                                              for s in sessions]),
+        'rows_sha256': stable_id(all_rows), 'activation_allowed': False, 'holdout_opened': False,
+        'limitations': ['Evaluation-only development groups; no row may enter fitting, calibration or thresholds.',
+            'Whole groups are the denominator; overlapping windows are correlated.',
+            'Fresh context/source integrity is not a general proof of statistical IID independence.',
+            'Abrupt sandbox faults exercise detection, not production fault diversity.']}
+    if excluded:
+        report['excluded_groups'] = excluded
+    return report, all_rows, cases
+
+
+def detector_evaluation_inventory(store, plan, report, *, project=PROJECT):
+    """Recompute the frozen detector epoch; only complete groups are returned."""
+    if report.get('dataset_version') != DETECTOR_ADMISSION_VERSION or report.get('evaluation_ready') is not True:
+        raise DatasetNotReady('detector-event epoch is not ready for evaluation')
+    if not isinstance(report.get('created_at'), str):
+        raise DatasetNotReady('detector-event admission lacks an audit cutoff')
+    fresh, rows, cases = audit_detector_events(store, plan, project=project, now=utc_time(report['created_at']))
+    if fresh != report:
+        raise DatasetNotReady('detector-event source changed or the admission is self-attested')
+    try:
+        _, frozen = read_binding(store, store.root / DETECTOR_FREEZE)
+    except FileNotFoundError as exc:
+        raise DatasetNotReady('detector-event evaluation requires an immutable freeze') from exc
+    if frozen != report:
+        raise DatasetNotReady('detector-event evaluation differs from its immutable freeze')
+    complete = set(report['complete_groups'])
+    if any(row['split'] != 'development-validation' for row in rows):
+        raise DatasetNotReady('detector-event epoch contains another role')
+    return [r for r in rows if r['group_id'] in complete], [c for c in cases if c['group_id'] in complete]
+
+
+def freeze_detector_events(store, plan, report, *, project=PROJECT):
+    from sentinelops.experiments.local_corpus import acquisition_lock, bind, clean_source
+    with acquisition_lock(store):
+        if report.get('dataset_version') != DETECTOR_ADMISSION_VERSION or report.get('evaluation_ready') is not True:
+            raise DatasetNotReady('only a READY_FOR_EVALUATION detector admission can be frozen')
+        fresh, _, _ = audit_detector_events(store, plan, project=project, now=utc_time(report['created_at']))
+        if fresh != report:
+            raise DatasetNotReady('detector-event admission changed or is self-attested')
+        clean_source(project)
+        path = store.root / DETECTOR_FREEZE
+        if path.exists():
+            reference, value = read_binding(store, path)
+            if value != report:
+                raise ValueError('detector-event epoch is already frozen to another inventory')
+            return reference
+        return bind(store, path, report)

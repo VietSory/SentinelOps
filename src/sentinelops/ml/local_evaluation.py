@@ -216,8 +216,8 @@ def predict_windows(development, detector, risk, slope_threshold, protocol):
     return records
 
 
-def evaluate_local_models(store, dataset_ref, model_root, *, training_manifest_sha256, output, project=PROJECT):
-    """Gate original source before numerical imports, pickle, predictions or output."""
+def _verified_candidate(store, dataset_ref, model_root, *, training_manifest_sha256, output, project=PROJECT):
+    """Shared v1/v2 candidate gate: source, freeze, rows, protocol, thresholds and bytes."""
     from sentinelops.ml.local_data import admitted_local_evaluation_rows
     report = store.read(dataset_ref)
     rows, cases = admitted_local_evaluation_rows(store, report)
@@ -243,7 +243,7 @@ def evaluate_local_models(store, dataset_ref, model_root, *, training_manifest_s
         raise ValueError("training candidate differs from admitted service/dataset scope")
     from sentinelops.ml.models import load_bundle
     import numpy as np
-    comparisons, predictions, pins = {}, [], []
+    verified = []
     for service in report["services"]:
         directory = model_root / stable_id(service)
         if directory.is_symlink() or not directory.resolve().is_relative_to(model_root.resolve()):
@@ -283,13 +283,27 @@ def evaluate_local_models(store, dataset_ref, model_root, *, training_manifest_s
         slope_index = list(FEATURE_KEYS).index(protocol["slope_feature"])
         slope_threshold = float(np.quantile([max(0., r["features"][slope_index]) for r in calibration],
                                           1-protocol["false_alert_budget"], method="higher"))
+        verified.append({"service": service, "manifest": manifest, "digest": digest, "detector": detector,
+                         "risk": risk, "slope_threshold": slope_threshold, "calibration_windows": len(calibration)})
+    return report, rows, cases, protocol, evaluation_commit, verified
+
+
+def evaluate_local_models(store, dataset_ref, model_root, *, training_manifest_sha256, output, project=PROJECT):
+    """Gate original source before numerical imports, pickle, predictions or output."""
+    output = Path(output)
+    report, rows, cases, protocol, evaluation_commit, verified = _verified_candidate(
+        store, dataset_ref, model_root, training_manifest_sha256=training_manifest_sha256, output=output, project=project)
+    comparisons, predictions, pins = {}, [], []
+    for item in verified:
+        service, manifest, digest = item["service"], item["manifest"], item["digest"]
+        detector, risk, slope_threshold = item["detector"], item["risk"], item["slope_threshold"]
         development = [r for r in rows if r["service"] == service and r["split"] == "development-validation"]
         records = predict_windows(development, detector, risk, slope_threshold, protocol)
         development_cases = [c for c in cases if c["role"] == "development-validation"]
         comparisons[service] = {"metrics": summarize(records, development_cases, service, protocol),
             "uncertainty": paired_group_intervals(records, development_cases, service, protocol),
             "development_windows": len(records), "development_groups": len({r["group_id"] for r in records}),
-            "calibration_windows": len(calibration), "slope_threshold": slope_threshold}
+            "calibration_windows": item["calibration_windows"], "slope_threshold": slope_threshold}
         predictions.extend(records)
         pins.append({"service": service, "model_version": manifest["model_version"], "manifest_sha256": digest})
     result = {"evaluation_version": "local-model-development/v1", "dataset_ref": dataset_ref, "models": pins,

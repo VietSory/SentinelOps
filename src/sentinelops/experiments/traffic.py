@@ -18,6 +18,13 @@ def s5_expected_responses(outcomes,fault_mode):
     return True
 
 
+def s1_error_responses(outcomes,config):
+    """ADR-015 abrupt error: 503 only from direct requests to the faulted target during the fault phase."""
+    if getattr(config,'scenario',None)!='S1' or getattr(config,'fault_mode',None)!='error':return False
+    return all(row.get('request_entry_service')==config.target_service and row.get('phase')=='fault'
+               for row in outcomes if str(row.get('status'))=='503')
+
+
 def server_log_coverage(full_records,serving_records,outcomes):
     if any(row.get('request_entry_service') not in BUSINESS_ROUTES or any(not isinstance(row.get(key),str) or not row[key]
            for key in ('trace_id','correlation_id')) for row in outcomes):

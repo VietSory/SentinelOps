@@ -46,6 +46,11 @@ Prometheus config, nên thêm `rule_files` cho alert rules đã fork health stre
 consumer nên `check_lane_b_live` từ chối chạy. Theo stream mới bằng consumer cũ
 cần migration protocol của A; `telemetry/prometheus.py` thuộc A nên B không sửa.
 
+**ADR-015 (2026-11-08):** IF/MAD đạt 0/20 trên development vì bộ dữ liệu chỉ có run
+gradual (XGBoost AP 0.93–1.00). Owner duyệt thêm epoch S1 lỗi đột ngột chỉ để đánh
+giá, cùng protocol `local-model-development/v2` bên cạnh v1; kết quả v1 giữ nguyên.
+H4 phụ thuộc H1 (`anomaly_strength` của IF). Xem [handoff B](delivery/LANE_B_CHECKPOINT.md#7-handoff-a--b-ngày-2026-11-08-adr-015-và-việc-b-làm-song-song).
+
 ## Việc tiếp theo
 
 - **A:** admission/capture → models/evaluation → RCA/explanation → source parity.

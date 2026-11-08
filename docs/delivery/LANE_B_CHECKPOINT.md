@@ -142,6 +142,9 @@ kiểm tra revision, tham chiếu RCA và health hiện tại trước khi gọi
 [Runbook H4](../runbooks/CONTROLLED_REMEDIATION.md#kubernetes-incident-evidence-source)
 mô tả nguồn và feed để B chuẩn bị tích hợp sau khi điều kiện dispatch được duyệt.
 
+Cập nhật 2026-11-08: nguyên nhân gốc của H1/H4, quyết định ADR-015 và việc B làm
+song song nằm ở [mục 7](#7-handoff-a--b-ngày-2026-11-08-adr-015-và-việc-b-làm-song-song).
+
 ## 5. Bước tiếp theo, theo thứ tự
 
 A đã chốt và sửa §3.1; lỗi `public-data` cũ cũng đã rerun thành công (§3.2).
@@ -171,7 +174,93 @@ quota EKS/NAT/EIP/RDS/instance type; budget và địa chỉ nhận cảnh báo;
 model access theo model và region; ai được chạy `terraform apply` và quyết định
 state backend. Chi tiết và dự toán chi phí ở [AWS_BASELINE](../runbooks/AWS_BASELINE.md).
 
-## 7. Những gì checkpoint này KHÔNG tuyên bố
+## 7. Handoff A → B ngày 2026-11-08: ADR-015 và việc B làm song song
+
+### 7.1 Bối cảnh: vì sao H1 và H4 còn bị chặn
+
+H4 phụ thuộc trực tiếp vào H1:
+
+- `remediation/authority.py` chỉ cấp dispatch authority khi registry có model
+  hợp lệ (`registry.available`).
+- Ở ca S2 Kubernetes `local-s2-unknown-retry-20261108`, RCA abstain vì thiếu
+  thành phần `anomaly_strength` (IF). Payment chỉ đạt score 0.549, coverage 0.55.
+- Tính offline với điểm IF của candidate, Payment đạt score 0.799, coverage 0.80,
+  margin 0.40, vượt cả ba ngưỡng 0.75/0.75/0.15. Đây là projection, chưa phải
+  qualification.
+
+H1 bị chặn ở G3 vì phép so sánh IF với MAD trên bộ development **không chứa thông
+tin**:
+
+| Model | Kết quả development (candidate `38bcc766…`) |
+| --- | --- |
+| XGBoost (pre-SLO risk) | AP 0.93–1.00, precursor recall 1.0 trên cả 3 service |
+| IF / MAD (detector) | 0/20 event, cả hai F1 = 0 |
+
+Nguyên nhân: capture plan v1 chỉ có run healthy và gradual. Trong run gradual, IF
+đã báo ở pha precursor, trung bình khoảng 10 phút trước SLO onset. Theo luật đã
+freeze, alert trước onset không được tính là detection (CONSTRAINTS §7), nên 0/20
+là kết quả **đúng theo protocol**. Nhưng bộ dữ liệu không có kịch bản lỗi đột
+ngột, tức kịch bản mà spec giao cho IF (Q-04 trên S1–S4; S1 kỳ vọng
+*detection, không dự báo*).
+
+### 7.2 Quyết định và phần A đã giao
+
+[ADR-015](../adr/ADR-015-detector-event-evaluation-coverage.md) được owner phê
+duyệt ngày 2026-11-08:
+
+- **Không đổi:** luật chấm v1 và kết quả 0/20, vai trò model, dòng train và
+  calibration, threshold, RCA policy, các gate G3/G8.
+- **Bổ sung:** một epoch riêng `det-NN`, chỉ để đánh giá, gồm run S1 lỗi đột ngột
+  của Payment và Inventory. Nhóm số lẻ dùng latency 1200 ms, nhóm số chẵn dùng
+  error. Tối thiểu 5 group. Dòng của epoch này không bao giờ đi vào fitting.
+- **Protocol `local-model-development/v2`** chạy bên cạnh v1. IF và MAD được chấm
+  trên onset của run lỗi đột ngột. Episode bắt đầu trong cửa sổ precursor đã xác
+  minh được đếm riêng, không tính vào giờ healthy.
+- **H4** vẫn đi đường Kubernetes S2 riêng, qua các guard hiện có.
+
+Phần mềm A đã có: plan
+[`local_http_detector_events_plan.json`](../../configs/local_http_detector_events_plan.json),
+protocol [`local_model_evaluation_v2.json`](../../configs/local_model_evaluation_v2.json),
+`scripts/audit_detector_events.py`, `scripts/evaluate_detector_events.py` và
+campaign `--plan`. Cách chạy xem
+[corpus runbook](../runbooks/LOCAL_HTTP_CORPUS.md#adr-015-detector-event-epoch-evaluation-only)
+và [model pipeline](../runbooks/MODEL_PIPELINE.md#detector-event-development-protocol-v2-adr-015).
+Audit lại toàn bộ corpus đã freeze bằng code mới cho report giống hệt
+`dataset-freeze.json`: 30 run, 3.060 dòng.
+
+Tiếp theo A sẽ thu 5 group `det-NN` (khoảng 5 giờ máy), audit, freeze, chạy v2 và
+giao hồ sơ G3 để owner quyết định. A không tự nghiệm thu G3.
+
+### 7.3 Hợp đồng ranh giới cho đợt này
+
+| Hạng mục | A sở hữu | B sở hữu |
+| --- | --- | --- |
+| Corpus, epoch `det-NN`, evaluator, model, RCA, worker | Triển khai và vận hành | Chỉ đọc và review; báo lỗi cho A |
+| Kubernetes testbed, executor, known-good, policy, RBAC | Không sửa | Triển khai và vận hành |
+| Auth, packaging, host release, AWS | Không sửa | Triển khai và vận hành |
+| Quyết định G3, activation, dispatch | Cung cấp bằng chứng | Owner quyết định; B thực thi sau khi được duyệt |
+
+Nguyên tắc cho cả hai bên:
+- Không bật model và không dispatch rollback trước khi owner duyệt G3 và H4.
+- Không dùng run S1, S2 hay smoke làm dữ liệu train.
+- Không xóa volume hay checkpoint của bên kia.
+
+### 7.4 Việc B làm ngay, không cần chờ A
+
+| # | Việc | Input / lệnh | Xong khi |
+| --- | --- | --- | --- |
+| B-a | **Review độc lập ADR-015 và code v2.** Hiện chỉ có self-review của A, G3 cần reviewer thật | Commit ADR-015 và commit triển khai trên `main`; đọc `ml/detector_evaluation.py`, `ml/local_data.py` (`audit_detector_events`), `experiments/local_corpus.py`, `experiments/traffic.py` | Có kết luận ghi rõ phạm vi đã xem; lỗi (nếu có) gửi A, A sửa |
+| B-b | **Kiểm gói H1 trên máy B** | `python -m scripts.verify_model_candidate --candidate handoff --expected-id 38bcc7668851249c7b2246c24d0a2eb4fbeacb6b0fe306703ae91386d17956bd --replay` với gói nhận qua kênh riêng | Checksum và replay tái hiện đúng điểm development; telemetry trên môi trường đích được đối chiếu source profile `prometheus-increase-60s-5s/v1` |
+| B-c | **Áp dụng source v2 và rollover stream** (mục 5, bước 1) | [Rollover runbook](../runbooks/OBSERVABILITY.md#prometheus-source-identity-and-stream-rollover), sau đó `python -m scripts.check_lane_b_live` | B1 PASS trên máy B, đủ cả ba direct route; stream và checkpoint cũ còn nguyên |
+| B-d | **Chuẩn bị S2 Kubernetes cho H4** | `scripts/review_payment_image.py` (`open` / `complete` / `open-change` / `complete-change`) lập hồ sơ image trước và sau; policy và dry-run qua [controlled remediation](../runbooks/CONTROLLED_REMEDIATION.md) | Hồ sơ known-good chờ operator duyệt, dry-run pass. **Không dispatch** |
+| B-e | **Production auth adapter** | API hiện fail closed (503) ngoài `local`/`test` | Có thiết kế và adapter, kèm test; token tĩnh không dùng trên AWS |
+| B-f | **Policy remediation cho EKS** | `Target` đang hardcode namespace `sentinelops-b-actions` | Có policy version mới cho môi trường đích và chạy lại ma trận safety; policy local giữ nguyên |
+
+Khi A giao hồ sơ G3 và owner duyệt: B dựng `validated-model-release/v1` cho cùng
+release, bật cho API và worker bằng `--stream-epoch`, rồi chạy S2 thật để kiểm
+H4/G6.
+
+## 8. Những gì checkpoint này KHÔNG tuyên bố
 
 - **AWS chưa triển khai.** Không `apply`, không gọi AWS API, không có credential.
 - **Chưa có model được chấp nhận.** G2/G3 chưa nghiệm thu; không model nào được
