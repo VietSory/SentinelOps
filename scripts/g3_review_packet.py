@@ -39,8 +39,9 @@ def scaler_diagnostic(candidate, index, v1):
         service = model["service"]
         _, detector, _ = load_bundle(_inside(candidate, "runtime/" + model["bundle_directory"]),
                                      expected_manifest_sha256=model["manifest_sha256"])
-        healthy = np.array([r["features"] for r in rows if r["service"] == service and not r["slo_onset_at"]])
-        flags = [r["isolation_forest_flag"] for r in rows if r["service"] == service and not r["slo_onset_at"]]
+        certified = [r for r in rows if r["service"] == service and r["healthy"] is True]
+        healthy = np.array([r["features"] for r in certified])
+        flags = [r["isolation_forest_flag"] for r in certified]
         index_p95 = list(FEATURE_KEYS).index("p95_latency_ms_mean_5m")
         result[service] = {"train_center_p95": float(detector.scaler.center_[index_p95]),
             "train_iqr_p95": float(detector.scaler.scale_[index_p95]),
@@ -58,6 +59,7 @@ def render(candidate, v2, report_ref):
     diagnostic = scaler_diagnostic(candidate, index, v1)
     lines = [f"# G3 review packet — candidate `{index['candidate_id'][:12]}…`", "",
         "Owner decision required. This packet accepts nothing; `G3_accepted=false` in every source report.", "",
+        f"- candidate ID: `{index['candidate_id']}`",
         f"- v1 report: `{index['evaluation_ref']}` (`local-model-development/v1`)",
         f"- v2 report: `{report_ref}` (`{v2['protocol']['protocol_version']}`), detector epoch `{v2['detector_report_ref']}`",
         f"- dataset: `{v1['dataset_ref']}`; source profile `{v1['source_profile']}`", "",
@@ -74,7 +76,7 @@ def render(candidate, v2, report_ref):
             f"[{_fmt(interval['lower'])}, {_fmt(interval['upper'])}] ({interval['valid_replicates']} valid) | "
             f"{_events(item['gradual_detector_events_v1']['isolation_forest'])} | "
             f"{_events(separated)}; precursor episodes {separated.get('precursor_interval_episodes')} |")
-    lines += ["", "## Source diagnostic: training healthy range versus development healthy spread", "",
+    lines += ["", "## Source diagnostic: training range versus certified healthy development windows", "",
         "| Service | train p95 centre / IQR (ms) | dev healthy p95 median / IQR (ms) | dev healthy IF flag rate |",
         "| --- | --- | --- | --- |"]
     for service, d in sorted(diagnostic.items()):
