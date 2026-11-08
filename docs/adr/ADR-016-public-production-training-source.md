@@ -62,3 +62,16 @@ publications to notify the maintainers.
   model.
 - The scenario mismatch is real: Alibaba breaches are production latency
   regressions, not the local gradual ramps. Claims are scoped accordingly.
+
+## Owner decisions fixed before any result (2026-11-08)
+
+- **Official model:** the reported model is always the Alibaba-trained one. If it
+  underperforms on the local system, report that honestly with its causes. Do not
+  revert to self-generated training data.
+- **Role split:** ML covers latency anomaly detection and breach forecasting.
+  HTTP 5xx is covered by the objective SLO rule and the MAD control.
+- **Final results:** two layers, each frozen before it runs and run once:
+  1. unseen Alibaba microservices;
+  2. a new local evaluation epoch locked in advance.
+- **Schedule:** more than three weeks. Complete the local work first, then AWS
+  and Bedrock.
