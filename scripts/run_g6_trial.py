@@ -41,7 +41,7 @@ from scripts.check_kubernetes_testbed import BusinessSandbox
 from scripts.check_rollback_kubernetes import PROJECT, private_file
 from scripts.kubernetes_testbed import NAMESPACE, SERVICES
 from scripts.run_s2_h4 import (PAYMENT, TOKEN_DURATION, bad_image, ceil_minute, clean_commit, clock, connect_pool,
-                               deploy, drive, emit, forward_replacement, wait_ready)
+                               deploy, drive, emit, wait_ready)
 from sentinelops.ml.registry import ModelRegistry
 from sentinelops.remediation.authority import NativeH4Authority
 from sentinelops.remediation.domain import KubernetesUnavailable, Policy, Request
@@ -128,15 +128,34 @@ async def wait_for_file(path, timeout):
     raise TimeoutError(f'operator did not provide {path.name} in time')
 
 
+def reforward(sandbox, attempt):
+    """Fresh Payment port-forward after its pod changes; keep every earlier log."""
+    current = sandbox.root / (PAYMENT + '-forward.log')
+    if current.exists():
+        current.rename(sandbox.root / f'{PAYMENT}-forward.{attempt}.log')
+    return sandbox.forward(PAYMENT, 8000)
+
+
 async def resilient_traffic(client, sandbox, urls, stop_event, phase):
-    """1 request/s per entry; re-forward Payment after its pod is replaced."""
+    """1 request/s per entry; re-forward Payment while a pod replacement rolls out."""
+    attempt = 0
     while not stop_event.is_set():
         try:
             await drive(client, urls, clock() + timedelta(seconds=30), phase['bad'])
         except (httpx.HTTPError, ValueError) as exc:
             emit('traffic-interrupted', reason=type(exc).__name__, bad=phase['bad'])
-            urls[PAYMENT] = await asyncio.to_thread(forward_replacement, sandbox)
-            await wait_ready(client, urls[PAYMENT] + '/ready')
+            for _ in range(24):  # up to ~2 min of rollout (maxSurge 0 leaves a gap)
+                if stop_event.is_set():
+                    return
+                attempt += 1
+                try:
+                    urls[PAYMENT] = await asyncio.to_thread(reforward, sandbox, attempt)
+                    await wait_ready(client, urls[PAYMENT] + '/ready')
+                    break
+                except RuntimeError:
+                    await asyncio.sleep(5)
+            else:
+                raise RuntimeError('payment port-forward did not recover after the pod change')
 
 
 async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
