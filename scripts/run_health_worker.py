@@ -106,7 +106,11 @@ async def run_worker(args, metrics):
         raise
     finally:
         if metrics: metrics.heartbeat(ready=False)
-        await pool.close()
+        try:
+            # asyncpg terminates remaining connections if close is cancelled.
+            await asyncio.wait_for(pool.close(), timeout=DATABASE_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            print(json.dumps({"status": "DATABASE_POOL_SHUTDOWN_TIMEOUT"}), flush=True)
 
 
 def main():

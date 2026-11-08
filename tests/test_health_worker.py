@@ -62,6 +62,37 @@ def test_disconnect_during_capture_is_retryable_but_programming_errors_are_not(t
         asyncio.run(worker.tick())
 
 
+@pytest.mark.parametrize("during", ["lock", "capture"])
+def test_asyncpg_detached_proxy_keeps_database_disconnect_retryable(tmp_path, during):
+    class PhysicalConnection(asyncpg.Connection):
+        def __init__(self): self._proxy = None
+        def __del__(self): pass
+        async def fetchval(self, *args): return True
+
+    proxy = asyncpg.pool.PoolConnectionProxy(None, PhysicalConnection())
+
+    class Acquire:
+        async def __aenter__(self):
+            if during == "lock":
+                proxy._detach()
+            return proxy
+        async def __aexit__(self, *args): pass
+
+    class Pool:
+        def acquire(self, *, timeout): return Acquire()
+
+    async def lose_database(*args):
+        proxy._detach()
+        raise asyncpg.ConnectionDoesNotExistError("connection lost during work")
+
+    worker = HealthWorker(Pool(), ArtifactStore(tmp_path), POLICY, endpoint="http://localhost:9090",
+                          environment="fixture-detached", configuration_hash="a" * 64)
+    worker._locked_tick = lose_database
+    expected = ConnectionError if during == "lock" else asyncpg.ConnectionDoesNotExistError
+    with pytest.raises(expected):
+        asyncio.run(worker.tick())
+
+
 def test_processing_budget_includes_returning_the_connection_to_its_pool(tmp_path):
     class Connection:
         fetchval = AsyncMock(return_value=True)

@@ -25,20 +25,26 @@ def test_destructive_live_acceptance_requires_exact_project_service_and_loopback
     with pytest.raises(ValueError): require_port(info, "9090/tcp", 9090)
 
 
-@pytest.mark.parametrize("error,retry", [(PermissionError("immutable store denied"), False),
-                                        (ConnectionRefusedError("local database unavailable"), True)])
-def test_worker_retries_database_transport_but_fails_on_artifact_io(monkeypatch, tmp_path, error, retry):
+@pytest.mark.parametrize("error,retry,stall_close", [(PermissionError("immutable store denied"), False, False),
+    (ConnectionRefusedError("local database unavailable"), True, False),
+    (PermissionError("immutable store denied"), False, True)])
+def test_worker_retries_database_transport_but_fails_on_artifact_io(monkeypatch, tmp_path, capsys, error, retry, stall_close):
     class Source:
         def __init__(self, *args): self.client = SimpleNamespace(timeout=None)
         def verify_configuration(self): return {"configuration_hash": "a" * 64}
         def close(self): pass
-    pool = SimpleNamespace(close=AsyncMock())
+    async def close():
+        if stall_close:
+            await asyncio.Event().wait()
+
+    pool = SimpleNamespace(close=AsyncMock(side_effect=close))
     worker = SimpleNamespace(check_ready=AsyncMock(), tick=AsyncMock(side_effect=[error, {"status": "COMMITTED"}]),
                              status=AsyncMock(return_value={}), stream_id="fixture", identity={})
     monkeypatch.setenv("CONTROL_DATABASE_URL", "postgresql://control_writer@127.0.0.1:5433/sentinelops_control")
     monkeypatch.setattr("scripts.run_health_worker.PrometheusSource", Source)
     monkeypatch.setattr("scripts.run_health_worker.asyncpg.create_pool", AsyncMock(return_value=pool))
     monkeypatch.setattr("scripts.run_health_worker.HealthWorker", lambda *a, **k: worker)
+    monkeypatch.setattr("scripts.run_health_worker.DATABASE_TIMEOUT_SECONDS", .05)
     args = SimpleNamespace(prometheus="http://localhost:9090", store=tmp_path,
                            policy=Path("configs/slo_health_policy.json"), environment="fixture", status=False,
                            max_buckets=1, poll_seconds=.25)
@@ -46,3 +52,4 @@ def test_worker_retries_database_transport_but_fails_on_artifact_io(monkeypatch,
     else:
         with pytest.raises(PermissionError): asyncio.run(asyncio.wait_for(run(args), 2))
     pool.close.assert_awaited_once()
+    assert ("DATABASE_POOL_SHUTDOWN_TIMEOUT" in capsys.readouterr().out) is stall_close

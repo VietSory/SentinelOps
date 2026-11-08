@@ -22,6 +22,17 @@ from sentinelops.telemetry.store import ArtifactStore
 DATABASE_TIMEOUT_SECONDS = 10
 
 
+def _connection_closed(conn) -> bool:
+    try:
+        return conn.is_closed()
+    except asyncpg.InterfaceError:
+        # Connection loss detaches an asyncpg lease before the waiting task
+        # resumes. The detached proxy raises even for is_closed().
+        if isinstance(conn, asyncpg.pool.PoolConnectionProxy):
+            return True
+        raise
+
+
 def local_endpoint(endpoint: str) -> str:
     parsed = urlparse(endpoint)
     try:
@@ -98,23 +109,23 @@ class HealthWorker:
         # connection. command_timeout alone does not bound cancellation drain;
         # an outage can otherwise strand the heartbeat in __aexit__ indefinitely.
         async with self.pool.acquire(timeout=DATABASE_TIMEOUT_SECONDS) as conn:
-            if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", self.lock_id):
-                return {"status": "BUSY", "stream_id": self.stream_id}
             try:
-                result = await self._locked_tick(conn, started)
+                if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", self.lock_id):
+                    return {"status": "BUSY", "stream_id": self.stream_id}
+                try:
+                    result = await self._locked_tick(conn, started)
+                finally:
+                    if not _connection_closed(conn):
+                        try:
+                            await conn.fetchval("SELECT pg_advisory_unlock($1)", self.lock_id)
+                        except (asyncpg.InterfaceError, asyncpg.PostgresConnectionError):
+                            if not _connection_closed(conn):
+                                raise
             except asyncpg.InterfaceError:
-                # A disconnect can arrive while capture runs outside the SQL transaction.
                 # Reclassify only a confirmed closed connection; other API misuse is fatal.
-                if conn.is_closed():
-                    raise ConnectionError("health database connection closed during bucket processing") from None
+                if _connection_closed(conn):
+                    raise ConnectionError("health database connection closed during tick") from None
                 raise
-            finally:
-                if not conn.is_closed():
-                    try:
-                        await conn.fetchval("SELECT pg_advisory_unlock($1)", self.lock_id)
-                    except (asyncpg.InterfaceError, asyncpg.PostgresConnectionError):
-                        if not conn.is_closed():
-                            raise
         if result["status"] == "COMMITTED":
             result["processing_ms"] = round((time.monotonic() - started) * 1000, 3)
         return result
