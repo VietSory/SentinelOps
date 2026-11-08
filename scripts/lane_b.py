@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import stat
 import subprocess
@@ -116,18 +117,32 @@ def runtime_environment(model_store=None, release_ref=None):
         'SENTINELOPS_OPERATOR_TOKEN':os.environ.get('SENTINELOPS_OPERATOR_TOKEN') or (ROOT/'operator-token').read_text().strip()}
 
 
-def launch_arguments(command, stream=None, model_store=None, release_ref=None):
+def stream_roots(epoch=None):
+    if epoch is None:
+        return ROOT / 'health', ROOT / 'incidents'
+    if not isinstance(epoch, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,39}', epoch):
+        raise ValueError('stream epoch must be a bounded lower-case identifier')
+    streams = ROOT / 'streams'
+    selected = streams / epoch
+    health, incidents = selected / 'health', selected / 'incidents'
+    if any(path.is_symlink() for path in (ROOT, streams, selected, health, incidents)):
+        raise ValueError('stream epoch paths must stay in the owned B runtime root')
+    return health, incidents
+
+
+def launch_arguments(command, stream=None, model_store=None, release_ref=None, *, epoch=None):
     if command == 'serve':
         return [sys.executable,'-m','uvicorn','sentinelops.main:app','--app-dir',str(PROJECT/'src'),
                 '--host','127.0.0.1','--port','18000']
+    health_root, incident_root = stream_roots(epoch)
     shared = ['--prometheus','http://127.0.0.1:19090','--metrics-otlp-endpoint','http://127.0.0.1:14317']
     if command == 'health':
-        return [sys.executable,'-m','scripts.run_health_worker','--store',str(ROOT/'health'),*shared]
+        return [sys.executable,'-m','scripts.run_health_worker','--store',str(health_root),*shared]
     if not stream:
         raise ValueError('incident launcher needs the exact READY stream_id from the health worker')
     models = ['--model-store',str(model_store),'--model-release-ref',release_ref] if model_store and release_ref else []
     return [sys.executable,'-m','scripts.run_incident_worker','--health-stream',stream,
-        '--source-store',str(ROOT/'health'),'--store',str(ROOT/'incidents'),'--project',NAME,
+        '--source-store',str(health_root),'--store',str(incident_root),'--project',NAME,
         '--jaeger','http://127.0.0.1:26686',*shared,*models]
 
 
@@ -135,6 +150,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=['config','up','down','status','snapshot','serve','health','incidents'])
     parser.add_argument('--health-stream')
+    parser.add_argument('--stream-epoch', help='Explicit B stream and artifact epoch for health and incidents')
     parser.add_argument('--model-store',type=Path,help='Explicit H1 materialized trusted store inside artifacts/lane-b/models/')
     parser.add_argument('--model-release-ref',help='Separately accepted immutable H1 release; no automatic activation')
     parser.add_argument('--deployment-ref',help='Explicit immutable local deployment lock; up only, no build/pull fallback')
@@ -142,6 +158,10 @@ def main():
     if (args.model_store or args.model_release_ref) and args.command not in ('serve','incidents'):
         parser.error('model configuration is only valid for API/incident processes')
     if args.deployment_ref and args.command != 'up': parser.error('deployment lock is only valid with up')
+    if args.stream_epoch is not None and args.command not in ('health', 'incidents'):
+        parser.error('stream epoch is only valid for health/incident processes')
+    if args.stream_epoch is not None:
+        stream_roots(args.stream_epoch)
     environment = runtime_environment(args.model_store,args.model_release_ref) if args.command in ('serve','health','incidents') else None
     if args.command == 'serve':
         os.chdir(PROJECT)
@@ -172,7 +192,8 @@ def main():
     else:
         require_owned_containers()
         os.chdir(PROJECT)
-        os.execvpe(sys.executable,launch_arguments(args.command,args.health_stream,args.model_store,args.model_release_ref),environment)
+        os.execvpe(sys.executable,launch_arguments(args.command,args.health_stream,args.model_store,args.model_release_ref,
+            epoch=args.stream_epoch),environment)
 
 
 if __name__ == '__main__':

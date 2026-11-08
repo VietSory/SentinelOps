@@ -160,15 +160,16 @@ NoNewPrivileges=yes
 '''
 
 
-def arguments(role, root, stream, model_store=None, model_ref=None):
+def arguments(role, root, stream, model_store=None, model_ref=None, *, epoch=None):
     if role == 'api': return []
+    health_root, incident_root = lane_b.stream_roots(epoch)
     shared = ['--prometheus', 'http://127.0.0.1:19090', '--metrics-otlp-endpoint', 'http://127.0.0.1:14317',
               '--health-policy' if role == 'incidents' else '--policy', str(root / 'configs/slo_health_policy.json')]
-    if role == 'health': return ['--store', str(lane_b.ROOT / 'health'), *shared]
+    if role == 'health': return ['--store', str(health_root), *shared]
     if not stream or not re.fullmatch('[0-9a-f]{64}', stream): raise HostGuard('explicit accepted health stream required')
     models = ['--model-store', str(model_store), '--model-release-ref', model_ref] if model_store and model_ref else []
-    return ['--health-stream', stream, '--source-store', str(lane_b.ROOT / 'health'),
-            '--store', str(lane_b.ROOT / 'incidents'), '--project', lane_b.NAME,
+    return ['--health-stream', stream, '--source-store', str(health_root),
+            '--store', str(incident_root), '--project', lane_b.NAME,
             '--jaeger', 'http://127.0.0.1:26686', '--rca-policy', str(root / 'configs/rca_policy.json'),
             '--topology', str(root / 'configs/topology.yaml'), *shared, *models]
 
@@ -184,7 +185,8 @@ def process_environment(role, record, environment):
     return selected
 
 
-def start(role, identifier, stream=None, model_store=None, model_ref=None):
+def start(role, identifier, stream=None, model_store=None, model_ref=None, *, epoch=None):
+    health_root, _ = lane_b.stream_roots(epoch)
     with locked() as home:
         if role == 'health' and (model_store or model_ref): raise HostGuard('health does not consume models')
         current = state(role)
@@ -193,7 +195,7 @@ def start(role, identifier, stream=None, model_store=None, model_ref=None):
         selected = process_environment(role, json.loads((root / 'release.json').read_text()), environment)
         if current['state'] != 'NOT_INSTALLED':
             session = private_json(Path(current['unit_file']).parent / 'session.json')
-            if (session['release_id'] != identifier or session['arguments'] != arguments(role, root, stream, model_store, model_ref)
+            if (session['release_id'] != identifier or session['arguments'] != arguments(role, root, stream, model_store, model_ref, epoch=epoch)
                 or any(session['environment'].get(k) != environment.get(k) for k in ('SENTINELOPS_MODEL_STORE', 'SENTINELOPS_MODEL_RELEASE_REF'))
                 or role == 'api' and any(session['environment'].get(k) != selected.get(k)
                     for k in ('SENTINELOPS_API_TOKEN', 'SENTINELOPS_OPERATOR_TOKEN'))):
@@ -216,8 +218,8 @@ def start(role, identifier, stream=None, model_store=None, model_ref=None):
         folder = home / uuid4().hex;folder.mkdir(mode=0o700)
         session = folder / 'session.json'
         payload = {'role': role, 'release_id': identifier, 'release_manifest_sha256': digest(root / 'release.json'),
-                   'environment': selected, 'arguments': arguments(role, root, stream, model_store, model_ref),
-                   'health_store': str(lane_b.ROOT / 'health')}
+                   'environment': selected, 'arguments': arguments(role, root, stream, model_store, model_ref, epoch=epoch),
+                   'health_store': str(health_root)}
         if role != 'api':
             probe = folder / 'probe.json';write_private(probe, payload)
             record = json.loads((root / 'release.json').read_text())
@@ -297,11 +299,14 @@ def main():
     parser.add_argument('--role', choices=ROLES)
     parser.add_argument('--release-id')
     parser.add_argument('--health-stream')
+    parser.add_argument('--stream-epoch', help='Explicit B stream and artifact epoch for health and incidents')
     parser.add_argument('--model-store', type=Path)
     parser.add_argument('--model-release-ref')
     args = parser.parse_args()
     if args.health_stream and (args.operation != 'start' or args.role != 'incidents'):
         parser.error('health stream is only selected for incident start')
+    if args.stream_epoch is not None and (args.operation != 'start' or args.role not in ('health', 'incidents')):
+        parser.error('stream epoch is only selected for health/incident start')
     if (args.model_store or args.model_release_ref) and (args.operation != 'start' or args.role not in ('api', 'incidents')):
         parser.error('explicit H1 selection is only valid for API/incident start')
     if args.release_id and args.operation not in ('verify', 'start'):
@@ -313,7 +318,7 @@ def main():
         elif not args.role: parser.error('role is required')
         elif args.operation == 'status': result = status(args.role)
         elif args.operation == 'start': result = start(args.role, args.release_id or '', args.health_stream,
-                                                     args.model_store, args.model_release_ref)
+                                                     args.model_store, args.model_release_ref, epoch=args.stream_epoch)
         elif args.operation == 'stop': result = stop(args.role)
         else: result = restart(args.role)
         print(json.dumps(result, sort_keys=True))

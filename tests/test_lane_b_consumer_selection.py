@@ -4,7 +4,7 @@ import json
 import pytest
 import yaml
 
-from scripts import check_lane_b_live as live, lane_b
+from scripts import check_lane_b_live as live, lane_b, lane_b_host
 from sentinelops.telemetry.core import stable_id
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.health import HealthWorker
@@ -13,14 +13,15 @@ from sentinelops.workers.incident_journal import IncidentJournal
 from sentinelops.workers.health_source import HealthLedgerReader
 
 
-def row(config='a'):
+def row(config='a', *, epoch=None):
+    health_root, incident_root = lane_b.stream_roots(epoch)
     policy = json.loads((lane_b.PROJECT/'configs/slo_health_policy.json').read_text())
-    worker = HealthWorker(None, ArtifactStore(lane_b.ROOT/'health'), policy,
+    worker = HealthWorker(None, ArtifactStore(health_root), policy,
                           endpoint='http://127.0.0.1:19090', environment='local', configuration_hash=config*64)
     profile = {'profile_version': 'native-incident-evidence/v1', 'compose_project': lane_b.NAME,
                'prometheus_endpoint': 'http://127.0.0.1:19090', 'jaeger_endpoint': 'http://127.0.0.1:26686'}
     journal = IncidentJournal(None, HealthLedgerReader(None, worker.store, worker.stream_id, policy),
-        ArtifactStore(lane_b.ROOT/'incidents'), yaml.safe_load((lane_b.PROJECT/'configs/topology.yaml').read_text()),
+        ArtifactStore(incident_root), yaml.safe_load((lane_b.PROJECT/'configs/topology.yaml').read_text()),
         json.loads((lane_b.PROJECT/'configs/rca_policy.json').read_text()), profile)
     return {'consumer_id': journal.consumer_id, 'health_stream_id': worker.stream_id,
             'identity': json.dumps(journal.identity), 'health_identity': json.dumps(worker.identity)}, worker.identity
@@ -48,3 +49,29 @@ def test_no_ambiguous_or_foreign_consumer_can_be_selected(problem):
         else: value['artifact_root_hash'] = '0'*64
         current['identity'] = json.dumps(value)
     with pytest.raises(ValueError): live.select_current_consumer(rows, identity)
+
+
+def test_release_epoch_keeps_legacy_history_and_launchers_bind_the_same_roots(tmp_path, monkeypatch):
+    monkeypatch.setattr(lane_b, 'ROOT', tmp_path)
+    old, old_identity = row()
+    new, identity = row(epoch='h1-review')
+    assert identity['prometheus_configuration_hash'] == old_identity['prometheus_configuration_hash']
+    assert old['health_stream_id'] != new['health_stream_id']
+    assert live.select_current_consumer([old, new], old_identity) == old['consumer_id']
+    assert live.select_current_consumer([old, new], identity, epoch='h1-review') == new['consumer_id']
+    with pytest.raises(ValueError, match='identity differs'):
+        live.select_current_consumer([old, new], identity)
+    health, incidents = lane_b.stream_roots('h1-review')
+    foreground = lane_b.launch_arguments('incidents', new['health_stream_id'], epoch='h1-review')
+    hosted = lane_b_host.arguments('incidents', tmp_path, new['health_stream_id'], epoch='h1-review')
+    for args in (foreground, hosted):
+        assert args[args.index('--source-store') + 1] == str(health)
+        assert args[args.index('--store') + 1] == str(incidents)
+    for args in (lane_b.launch_arguments('health', epoch='h1-review'),
+                 lane_b_host.arguments('health', tmp_path, None, epoch='h1-review')):
+        assert args[args.index('--store') + 1] == str(health)
+    with pytest.raises(ValueError, match='bounded'):
+        lane_b.stream_roots('../legacy')
+    (tmp_path / 'streams').symlink_to(tmp_path)
+    with pytest.raises(ValueError, match='owned'):
+        lane_b.stream_roots('h1-review')

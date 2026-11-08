@@ -41,16 +41,22 @@ available during database/model outages; it is not proof those dependencies work
 After H1 acceptance, materialize the complete trusted model store inside
 `artifacts/lane-b/models/`. Select it explicitly with paired `--model-store` and
 `--model-release-ref` on `serve` and `incidents`; use the same immutable release
-for both processes. The existing registry verifies checksums, approvals and
-compatibility at startup. The launcher writes no approval and never inherits A's
-model configuration. Invalid releases fail startup. Keep the previous immutable
-release/reference for rollback; no hot activation is implemented. The API can
-select it at restart, but an existing incident consumer is already bound to its
-original evidence/release profile. Changing that profile needs A's explicit
-consumer migration/rollover protocol; simply restarting it with another release
-is rejected by the existing journal. Do not reset checkpoints or create duplicate
-streams to evade this guard. These flags provide wiring, not that migration.
-Without an accepted release and applicable migration, leave both flags absent.
+for both processes. The registry verifies checksums, approvals and compatibility
+at startup. To change the model release for an existing consumer, stop the old
+incident and health processes. Choose a fresh `--stream-epoch` for this release,
+such as `h1-release-01`. Start `health` with that epoch and wait for its new
+`READY` stream ID and fresh committed buckets. Start `incidents` with the same
+epoch, that stream ID and the validated model selection. Use the same flags on
+`scripts.lane_b_host start --role health` and `--role incidents` for managed roles.
+Restart `serve` or the managed API with the same validated release, then run
+`python -m scripts.check_lane_b_live --stream-epoch h1-release-01`.
+
+An epoch uses separate health and incident stores under `artifacts/lane-b/streams/`
+and derives a new stream identity without changing source settings. The old DB
+history, stores and release remain available. To roll back, stop the selected
+roles and restart with the prior release, model selection and epoch. Omit the
+epoch for the original stores. Verify current freshness after restart. Before
+H1 approval, keep both model flags absent.
 
 For B1 source integration, start both workers then run
 `python -m scripts.check_lane_b_live`. It executes 180s healthy, 360s Payment
