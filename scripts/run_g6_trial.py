@@ -286,8 +286,9 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                     report['action'] = await actions.get(state['action_id'])
                     report['action_outcome'] = state['phase'] if state['phase'] in TERMINAL else 'NONTERMINAL_TIMEOUT'
                     (root / 'action-journal.json').write_text(json.dumps(report['action'], indent=2, default=str) + '\n')
-            except Exception as exc:
+            except BaseException as exc:
                 # Bounded, redacted receipt; recover any recorded intent before the DB is deleted.
+                # BaseException: SIGTERM/SIGINT arrive as cancellation and must not skip the audit.
                 report['failure'] = {'error_type': type(exc).__name__}
                 report['action_outcome'] = 'TRIAL_FAILED'
                 if pending['request'] is not None:
@@ -298,6 +299,9 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                             (root / 'action-journal.json').write_text(json.dumps(report['action'], indent=2, default=str) + '\n')
                     except Exception as recovery:
                         report['failure']['journal_recovery_error_type'] = type(recovery).__name__
+                (root / 'failure-receipt.json').write_text(json.dumps(report, indent=2, default=str) + '\n')
+                if not isinstance(exc, Exception):
+                    raise
             finally:
                 stop.set()
                 failures = {}
