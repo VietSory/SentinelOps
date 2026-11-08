@@ -352,6 +352,13 @@ def main():
         raise ValueError('G6 requires a complete validated model release (H1)')
     root = args.output.resolve()
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
+    probe = root / '.permission-probe'
+    probe.write_text('x'); probe.chmod(0o600)
+    private = not probe.stat().st_mode & 0o077
+    probe.unlink()
+    if not private:
+        raise SystemExit('output must be on a permission-enforcing filesystem (not /mnt/<drive> on WSL): '
+                         'private credential files cannot be created there')
     sandbox = BusinessSandbox(root, args.kind)
     owned = []
     emit('sandbox-owned', cluster=sandbox.name, commit=commit, policy_enabled=args.enable_rollback_policy)
