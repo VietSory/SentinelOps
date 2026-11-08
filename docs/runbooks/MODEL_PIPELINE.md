@@ -259,8 +259,16 @@ Each service reports:
 The gradual groups were already inspected, so their re-accounting is not
 independent evidence.
 
-Render the owner's review packet with `python -m scripts.g3_review_packet --candidate
-/verified/handoff --v2-report /evaluation/v2-report.json --output packet.md`. It
+Use the evaluator's printed `report_ref` and the same output store to render
+the owner's review packet:
+
+```sh
+python -m scripts.g3_review_packet --candidate /verified/handoff \
+  --v2-store /new/evaluation --v2-report-ref artifact://manifests/REPORT_HASH.json \
+  --output packet.md
+```
+
+The packet records the exact v2 report reference for the owner decision. It
 adds a source diagnostic: the training healthy p95 centre/IQR compared with the
 development healthy spread. IF is invariant to per-feature affine scaling, so a
 narrow training range, not the scaler, explains drift flags. It decides nothing. Risk/XGBoost evidence stays on the v1 gradual protocol.
@@ -272,13 +280,14 @@ an owner/reviewer decision over all of these results.
 `validated-model-release/v1` is built only by an operator, after two decisions
 taken outside software:
 
-1. the owner accepts G3 for the exact candidate, based on the v1 and v2
-   development reports;
+1. the owner accepts G3 for the exact candidate and the v2 report reference
+   recorded in the review packet, based on the v1 and v2 development evidence;
 2. lane B records PASS source parity on the target environment.
 
 ```sh
 python -m scripts.build_model_release --candidate /verified/handoff --expected-id CANDIDATE_ID \
-  --v2-report /evaluation/v2-report.json --parity-record /b/parity.json \
+  --v2-store /new/evaluation --v2-report-ref artifact://manifests/REPORT_HASH.json \
+  --parity-record /b/parity.json \
   --approved-by "<owner>" --decision-note "<verbatim G3 decision>" --confirm-owner-decision \
   --output /trusted/serving-release
 ```
@@ -287,9 +296,9 @@ The builder works in four steps:
 
 1. Reverify the candidate with `verify_model_candidate`; add `--replay` to also
    reproduce development scores.
-2. Check that the v2 report pins the same bundle manifests, dataset and training
-   manifest, and that the parity record names exactly the same three model
-   versions and source profile.
+2. Load the exact reviewed v2 report by checksum. Check its candidate pins,
+   protocol and abrupt evaluation evidence. Check that the parity record names
+   the same three model versions and source profile.
 3. Copy the pinned bundles into a **new** store, so the received candidate stays
    reverifiable, and write one approval per route that cites all evidence.
 4. Load the result with `ModelRegistry.load` before publishing the directory

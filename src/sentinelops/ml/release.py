@@ -24,10 +24,11 @@ from sentinelops.telemetry.store import ArtifactStore
 PARITY_VERSION = "model-source-parity/v1"
 APPROVAL_VERSION = "model-release-approval/v1"
 RELEASE_VERSION = "validated-model-release/v1"
+MANIFEST_REF = re.compile(r"artifact://manifests/[0-9a-f]{64}\.json")
 
 
 def _audit(root, reference):
-    if not re.fullmatch(r"artifact://manifests/[0-9a-f]{64}\.json", reference or ""):
+    if not MANIFEST_REF.fullmatch(reference or ""):
         raise ValueError("candidate audit reference is not pinned")
     path = _inside(root, "audit/" + reference.removeprefix("artifact://"))
     return json.loads(_read_pinned(path, path.stem))
@@ -52,7 +53,7 @@ def validate_parity_record(record, index, source_profile):
     datetime.fromisoformat(record["verified_at"].replace("Z", "+00:00"))
 
 
-def validate_v2_report(report, v1):
+def validate_v2_report(report, v1, expected_ref):
     pins = sorted((m["service"], m["model_version"], m["manifest_sha256"]) for m in v1["models"])
     if (not isinstance(report, dict) or report.get("evaluation_version") != "local-model-development/v2"
         or report.get("authorizing_adr") != "ADR-015" or report.get("G3_accepted") is not False
@@ -60,12 +61,33 @@ def validate_v2_report(report, v1):
         or report.get("dataset_ref") != v1["dataset_ref"]
         or report.get("training_manifest_sha256") != v1["training_manifest_sha256"]
         or report.get("source_profile") != v1["source_profile"]
+        or report.get("feature_set_version") != v1["feature_set_version"]
+        or report.get("training_data_policy_hash") != v1["training_data_policy_hash"]
         or sorted((m["service"], m["model_version"], m["manifest_sha256"]) for m in report.get("models", [])) != pins
         or set(report.get("services", {})) != set(BUSINESS_ROUTES)):
         raise ValueError("v2 detector-event report is not for this exact candidate")
+    if expected_ref != f"artifact://manifests/{stable_id(report)}.json":
+        raise ValueError("v2 detector-event report differs from the reviewed reference")
+    protocol = report.get("protocol")
+    if (not isinstance(protocol, dict) or protocol.get("protocol_version") != report["evaluation_version"]
+        or protocol.get("base_protocol_sha256") != v1["protocol_sha256"]
+        or report.get("base_protocol") != v1["protocol"]
+        or report.get("protocol_sha256") != stable_id(protocol)
+        or not all(isinstance(report.get(key), str) and MANIFEST_REF.fullmatch(report[key])
+                   for key in ("detector_report_ref", "predictions_ref"))):
+        raise ValueError("v2 detector-event report does not bind the detector epoch, predictions and protocols")
+    for service, item in report["services"].items():
+        if not isinstance(item, dict):
+            raise ValueError(f"invalid v2 detector-event result for {service}")
+        groups, windows = item.get("abrupt_groups"), item.get("abrupt_windows")
+        metrics = item.get("abrupt_detector_events", {})
+        if (type(groups) is not int or groups < 5 or type(windows) is not int or windows < groups
+            or not isinstance(metrics, dict)
+            or not all(isinstance(metrics.get(name), dict) and metrics[name] for name in ("isolation_forest", "median_mad"))):
+            raise ValueError(f"v2 detector-event report lacks abrupt evaluation evidence for {service}")
 
 
-def build_model_release(candidate, expected_id, *, v2_report, parity_record, approved_by, decision_note,
+def build_model_release(candidate, expected_id, *, v2_report, v2_report_ref, parity_record, approved_by, decision_note,
                         output, replay=False, now=None):
     from scripts.verify_model_candidate import verify_candidate
     from sentinelops.ml.registry import ModelRegistry
@@ -80,7 +102,7 @@ def build_model_release(candidate, expected_id, *, v2_report, parity_record, app
     dataset, v1 = _audit(candidate, index["dataset_ref"]), _audit(candidate, index["evaluation_ref"])
     if dataset.get("training_ready") is not True or dataset.get("dataset_version") != "local-http-admission/v1":
         raise ValueError("candidate dataset is not the frozen G2 admission")
-    validate_v2_report(v2_report, v1)
+    validate_v2_report(v2_report, v1, v2_report_ref)
     validate_parity_record(parity_record, index, v1["source_profile"])
     decided = timestamp(now or datetime.now(timezone.utc))
     staging = output.with_name("." + output.name + ".staging")

@@ -16,6 +16,7 @@ from pathlib import Path
 from sentinelops.ml.local_data import _inside
 from sentinelops.ml.release import _audit, validate_v2_report
 from sentinelops.telemetry.core import FEATURE_KEYS
+from sentinelops.telemetry.store import ArtifactStore
 
 
 def _fmt(value, digits=3):
@@ -49,16 +50,16 @@ def scaler_diagnostic(candidate, index, v1):
     return result
 
 
-def render(candidate, v2):
+def render(candidate, v2, report_ref):
     candidate = Path(candidate).resolve(strict=True)
     index = json.loads(_inside(candidate, "handoff.json").read_bytes())
     v1 = _audit(candidate, index["evaluation_ref"])
-    validate_v2_report(v2, v1)
+    validate_v2_report(v2, v1, report_ref)
     diagnostic = scaler_diagnostic(candidate, index, v1)
     lines = [f"# G3 review packet — candidate `{index['candidate_id'][:12]}…`", "",
         "Owner decision required. This packet accepts nothing; `G3_accepted=false` in every source report.", "",
         f"- v1 report: `{index['evaluation_ref']}` (`local-model-development/v1`)",
-        f"- v2 report: protocol `{v2['protocol']['protocol_version']}`, detector epoch `{v2['detector_report_ref']}`",
+        f"- v2 report: `{report_ref}` (`{v2['protocol']['protocol_version']}`), detector epoch `{v2['detector_report_ref']}`",
         f"- dataset: `{v1['dataset_ref']}`; source profile `{v1['source_profile']}`", "",
         "## Per-route evidence", "",
         "| Service | XGBoost AP / precursor recall ≥60 s (v1 gradual) | IF abrupt events (v2) | MAD abrupt events (v2) | IF−MAD F1 95% CI (abrupt) | IF gradual v1 | IF gradual precursor-separated |",
@@ -91,10 +92,12 @@ def render(candidate, v2):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", type=Path, required=True)
-    parser.add_argument("--v2-report", type=Path, required=True)
+    parser.add_argument("--v2-store", type=Path, required=True, help="Output store from evaluate_detector_events")
+    parser.add_argument("--v2-report-ref", required=True, help="Report reference emitted by evaluate_detector_events")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    text, _ = render(args.candidate, json.loads(args.v2_report.read_bytes()))
+    report = ArtifactStore(args.v2_store).read(args.v2_report_ref)
+    text, _ = render(args.candidate, report, args.v2_report_ref)
     with args.output.open("x") as stream:
         stream.write(text)
     print(str(args.output))

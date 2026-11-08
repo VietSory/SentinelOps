@@ -277,11 +277,11 @@ chạy khi không có corpus capture nào đang chạy trên host (các script t
 | # | Ai | Lệnh | Đầu ra |
 | --- | --- | --- | --- |
 | 1 | A | `scripts/audit_detector_events.py --root <det-root> --output … --freeze` | Epoch `READY_FOR_EVALUATION`, đã freeze |
-| 2 | A | `scripts/evaluate_detector_events.py … --detector-report-ref <ref>` | Report v2 |
-| 3 | A | `scripts/g3_review_packet.py --candidate <handoff> --v2-report … --output packet.md` | Hồ sơ G3 |
+| 2 | A | `scripts/evaluate_detector_events.py … --detector-report-ref <ref> --output <v2-store>` | `report_ref` của báo cáo v2 |
+| 3 | A | `scripts/g3_review_packet.py --candidate <handoff> --v2-store <v2-store> --v2-report-ref <report_ref> --output packet.md` | Hồ sơ G3 ghi rõ báo cáo cần duyệt |
 | 4 | B | `scripts/check_model_source_parity.py --kind <kind-v0.30.0> --candidate <handoff> --expected-id <ID> --corpus <frozen corpus> --environment <tên> --verified-by <tên> --output …` | `parity.json` (`PASS` hoặc `FAIL`) |
-| 5 | Owner | Đọc hồ sơ G3 và quyết định | Quyết định G3 |
-| 6 | Operator | `scripts/build_model_release.py … --confirm-owner-decision` | Store release mới; không bật gì |
+| 5 | Owner | Đọc hồ sơ G3 và quyết định | Quyết định G3 gắn với candidate và `report_ref` |
+| 6 | Operator | `scripts/build_model_release.py … --v2-store <v2-store> --v2-report-ref <report_ref-đã-duyệt> --confirm-owner-decision` | Store release mới; không bật gì |
 | 7 | B | Trỏ `SENTINELOPS_MODEL_STORE` / `_RELEASE_REF` cho API và worker, dùng `--stream-epoch` mới | H1 bật trên B |
 | 8 | B | `scripts/run_s2_h4.py --kind … --model-store … --model-release-ref …` | `verification.json` chứa đánh giá H4 |
 | 9 | B + operator | Known-good approval, policy enable, rollback có kiểm soát | G6 |
