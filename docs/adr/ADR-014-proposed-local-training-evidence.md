@@ -1,6 +1,6 @@
 # ADR-014 — Proposed observed local HTTP training source
 
-**Status:** Accepted — owner approved 2026-10-31. Acquisition and implementation are authorized; dataset/model acceptance still requires measured evidence.
+**Status:** Superseded by [ADR-016](ADR-016-public-production-training-source.md) on 2026-11-08 for the training source. Originally accepted 2026-10-31. The local testbed remains the evaluation environment only; this record is kept as decision history. Acquisition and implementation are authorized; dataset/model acceptance still requires measured evidence.
 **Authorization:** Owner explicitly answered “Phê duyệt ADR-014” to the review question describing the replacement source, oracle, 300-second horizon and independent partition protocol.
 **Date:** 2026-10-31  
 **Related:** ADR-002, ADR-007, ADR-008, ADR-010, ADR-011; measured feasibility decision.

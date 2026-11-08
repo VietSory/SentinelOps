@@ -23,7 +23,7 @@ Breaking changes require a new ADR before code is merged.
 | [011](ADR-011-frozen-gamma-rcaeval-contract.md) | Accepted historically; prospective primary fitting superseded by 014 | Frozen v1 reproduced unchanged; RCAEval role and source isolation retained |
 | [012](ADR-012-continuous-incident-consumer.md) | Accepted for local implementation | Accepted continuous-health lineage, stable delayed grouping and durable incident publication; full G4 remains separate |
 | [013](ADR-013-native-rcaeval-evaluation.md) | Accepted for native development software | Exact source clocks/entities, research-only support and post-business label evaluation; no operational/quality G4 acceptance |
-| [014](ADR-014-proposed-local-training-evidence.md) | Accepted 2026-10-31 — explicit owner approval | Prospective local HTTP primary training, independent oracle/labels/groups; versioned v2 contract; readiness not implied |
+| [014](ADR-014-proposed-local-training-evidence.md) | **Superseded by 016** (2026-11-08); accepted 2026-10-31 | Prospective local HTTP primary training, independent oracle/labels/groups; versioned v2 contract; readiness not implied |
 | [015](ADR-015-detector-event-evaluation-coverage.md) | Accepted 2026-11-08 — explicit owner approval | Evaluation-only abrupt S1 detector events beside unchanged gradual protocol; H4 via separate Kubernetes S2 |
 | [016](ADR-016-public-production-training-source.md) | Accepted 2026-11-08 — explicit owner approval | IF/XGBoost trained on Alibaba production traces (`http-relative-5m/v1`); local data evaluation-only; supersedes ADR-014 training source |
 
