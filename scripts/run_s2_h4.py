@@ -111,11 +111,13 @@ s = s.replace(marker, '    if time.monotonic() >= _s2_regression_after:\n       
 p.write_text(s)
 """
     (context / 'Dockerfile').write_text('FROM ' + base + '\nRUN ' + json.dumps(['python', '-c', patch]) + '\n')
-    tag = f'localhost:{sandbox.port}/sentinelops-payment:s2-regression'
+    # A real bad deployment is a new version of the SAME repository; the
+    # executor only rolls back to a distinct digest of that repository.
+    tag = f'localhost:{sandbox.port}/sentinelops-business:s2-regression'
     sandbox.docker('build', '-f', str(context / 'Dockerfile'), '-t', tag, str(context))
     sandbox.docker('push', tag)
     digests = json.loads(sandbox.docker('image', 'inspect', '--format', '{{json .RepoDigests}}', tag))
-    image = next(r for r in digests if r.startswith(f'localhost:{sandbox.port}/sentinelops-payment@sha256:'))
+    image = next(r for r in digests if r.startswith(f'localhost:{sandbox.port}/sentinelops-business@sha256:'))
     sandbox.docker('exec', sandbox.nodes[0], 'crictl', 'pull', image)
     return image
 
