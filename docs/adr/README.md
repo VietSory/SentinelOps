@@ -25,5 +25,6 @@ Breaking changes require a new ADR before code is merged.
 | [013](ADR-013-native-rcaeval-evaluation.md) | Accepted for native development software | Exact source clocks/entities, research-only support and post-business label evaluation; no operational/quality G4 acceptance |
 | [014](ADR-014-proposed-local-training-evidence.md) | Accepted 2026-10-31 — explicit owner approval | Prospective local HTTP primary training, independent oracle/labels/groups; versioned v2 contract; readiness not implied |
 | [015](ADR-015-detector-event-evaluation-coverage.md) | Accepted 2026-11-08 — explicit owner approval | Evaluation-only abrupt S1 detector events beside unchanged gradual protocol; H4 via separate Kubernetes S2 |
+| [016](ADR-016-public-production-training-source.md) | Accepted 2026-11-08 — explicit owner approval | IF/XGBoost trained on Alibaba production traces (`http-relative-5m/v1`); local data evaluation-only; supersedes ADR-014 training source |
 
 ADR-001…005 remain current. ADR-007 supersedes the contradictory unknown-field rule and example wire formats in historical PRODUCT_SPEC v1.0; that source is archived. Numeric thresholds/performance targets are not automatically accepted or measured by these ADRs.
