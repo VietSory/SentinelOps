@@ -1,0 +1,32 @@
+{
+  "feature_set_version": "http-relative-5m/v1",
+  "authorizing_adr": "ADR-016",
+  "window_minutes": 5,
+  "step_seconds": 60,
+  "baseline": {"statistic": "median", "max_minutes": 60, "min_minutes": 5, "excludes_window": true},
+  "features": [
+    "rt_log_level_rel",
+    "rt_slope_rel_per_min",
+    "rate_log_level_rel",
+    "rate_slope_rel_per_min",
+    "rt_log_peak_rel"
+  ],
+  "label": {
+    "label_version": "relative-latency-breach/v1",
+    "breach_minute": "rt / baseline_rt > 2.0",
+    "breach_onset_requires_consecutive_minutes": 2,
+    "horizon_seconds": 300,
+    "confirmation_tail_minutes": 2,
+    "healthy_window": "no breach minute within the window or the following horizon+tail",
+    "positive": "no breach minute in the window and a confirmed onset in (t, t+300s]",
+    "negative": "complete observed minutes through t+300s+tail with no breach minute"
+  },
+  "splits": {
+    "unit": "microservice",
+    "assignment": "sha256(msname) mod 10: 0-5 train, 6-7 calibration, 8-9 evaluation",
+    "min_minutes_per_service": 120
+  },
+  "false_alert_budget": 0.01,
+  "seed": 42,
+  "frozen_before_fit": true
+}
