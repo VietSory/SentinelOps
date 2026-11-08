@@ -159,6 +159,8 @@ def rows_for(run, group, flags, positives=(), first=1):
 
 
 def test_detector_summary_without_separation_matches_v1_detector_counts():
+    pytest.importorskip("numpy")
+    pytest.importorskip("sklearn")
     protocol = load_protocol()
     cases = [run_case('run-a', 'g1', 8), run_case('run-b', 'g2', None)]
     rows = (rows_for('run-a', 'g1', [False, False, True, True, True, True, True, True, False, False, False, False])
@@ -199,6 +201,8 @@ def test_abrupt_detection_inside_deadline_is_a_true_positive_and_late_is_not():
 
 
 def test_detector_bootstrap_needs_five_whole_groups_and_is_reproducible():
+    pytest.importorskip("numpy")
+    pytest.importorskip("sklearn")
     protocol = load_protocol()
     cases, rows = [], []
     for g in range(5):
