@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -30,7 +31,25 @@ import yaml
 URLS = {'checkout-service':'http://127.0.0.1:18001/v1/checkout',
         'payment-service':'http://127.0.0.1:18002/v1/payments/charge',
         'inventory-service':'http://127.0.0.1:18003/v1/inventory/sku-001'}
-BODY = {'sku':'sku-001','quantity':1,'amount':10.0,'currency':'USD'}
+
+
+async def business_request(client, service, headers):
+    if service == 'inventory-service':
+        return await client.get(URLS[service], headers=headers)
+    if service == 'payment-service':
+        payload = {'order_id': headers['x-correlation-id'], 'amount': 10.0, 'currency': 'USD'}
+    else:
+        payload = {'sku': 'sku-001', 'quantity': 1, 'amount': 10.0}
+    return await client.post(URLS[service], headers=headers, json=payload)
+
+
+def require_phase_traffic(counts):
+    for service in URLS:
+        responses = counts[service]
+        if any(type(status) is int and 400 <= status < 500 for status in responses):
+            raise ValueError('B workload sent an invalid business request to ' + service)
+        if not responses[200]:
+            raise ValueError('B workload had no successful business request to ' + service)
 
 
 def now(): return datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
@@ -111,20 +130,21 @@ async def run(epoch=None):
             original = (await client.get('http://127.0.0.1:18002/internal/faults')).json()
             if original.get('mode') != 'healthy': raise ValueError('B Payment is not healthy; preserve the existing fault for investigation')
             with (root/'requests.jsonl').open('x') as ledger:
-                async def request(service, phase):
+                async def request(service, phase, counts):
                     trace = uuid4().hex; correlation = 'b-ui-'+uuid4().hex
                     headers = {'traceparent':'00-'+trace+'-'+uuid4().hex[:16]+'-01','x-correlation-id':correlation}
                     started, clock = now(), time.monotonic()
                     try:
-                        if service == 'inventory-service': result = await client.get(URLS[service],headers=headers)
-                        else: result = await client.post(URLS[service],headers=headers,json=BODY)
+                        result = await business_request(client, service, headers)
                         status = result.status_code
                     except httpx.HTTPError: status = 'transport_error'
+                    counts[service][status] += 1
                     ledger.write(json.dumps({'entry_service':service,'phase':phase,'trace_id':trace,'correlation_id':correlation,
                         'started_at':started,'completed_at':now(),'duration_ms':round((time.monotonic()-clock)*1000,3),'status':status})+'\n')
                     ledger.flush()
 
                 async def load(phase, seconds):
+                    counts = {service: Counter() for service in URLS}
                     record = {'phase':phase,'started_at':now()}; metadata['phases'].append(record)
                     (root/'run.json').write_text(json.dumps(metadata,indent=2)+'\n')
                     print(json.dumps({'phase':phase,'started_at':record['started_at'],'seconds':seconds}),flush=True)
@@ -132,12 +152,14 @@ async def run(epoch=None):
                     while time.monotonic()<end and not stop.is_set():
                         if len(active)>20: raise RuntimeError('B workload queue saturated')
                         for service in URLS:
-                            task = asyncio.create_task(request(service,phase)); active.add(task); task.add_done_callback(active.discard)
+                            task = asyncio.create_task(request(service,phase,counts)); active.add(task); task.add_done_callback(active.discard)
                         try: await asyncio.wait_for(stop.wait(),timeout=1)
                         except asyncio.TimeoutError: pass
                     if active: await asyncio.gather(*tuple(active))
                     record['ended_at'] = now()
+                    record['responses'] = {service: dict(statuses) for service, statuses in counts.items()}
                     if stop.is_set(): raise RuntimeError('B workload interrupted; observations retained')
+                    require_phase_traffic(counts)
 
                 try:
                     await load('healthy',180)

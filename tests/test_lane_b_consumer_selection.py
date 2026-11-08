@@ -1,6 +1,9 @@
+import asyncio
+from collections import Counter
 from copy import deepcopy
 import json
 
+import httpx
 import pytest
 import yaml
 
@@ -75,3 +78,24 @@ def test_release_epoch_keeps_legacy_history_and_launchers_bind_the_same_roots(tm
     (tmp_path / 'streams').symlink_to(tmp_path)
     with pytest.raises(ValueError, match='owned'):
         lane_b.stream_roots('h1-review')
+
+
+def test_b1_payment_payload_and_phase_gate_require_direct_success():
+    def handler(request):
+        assert request.url.path == '/v1/payments/charge'
+        assert json.loads(request.content) == {'order_id': 'fixture-correlation', 'amount': 10.0, 'currency': 'USD'}
+        return httpx.Response(200)
+
+    async def request():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await live.business_request(client, 'payment-service', {'x-correlation-id': 'fixture-correlation'})
+
+    assert asyncio.run(request()).status_code == 200
+    counts = {service: Counter({200: 180}) for service in live.URLS}
+    live.require_phase_traffic(counts)
+    counts['payment-service'] = Counter({422: 180})
+    with pytest.raises(ValueError, match='invalid business request to payment-service'):
+        live.require_phase_traffic(counts)
+    counts['payment-service'] = Counter({'transport_error': 180})
+    with pytest.raises(ValueError, match='no successful business request to payment-service'):
+        live.require_phase_traffic(counts)
