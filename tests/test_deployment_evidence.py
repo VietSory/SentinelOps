@@ -86,15 +86,20 @@ def test_known_good_must_predate_entire_observed_mutation_interval(offset):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize('version,model,abstained,expected',[
-    ('continuous-incident-evidence/v6',True,False,True),
-    ('continuous-incident-evidence/v6',False,False,False),
-    ('continuous-incident-evidence/v5',True,False,False),
-    ('continuous-incident-evidence/v2',True,False,False),
-    ('continuous-incident-evidence/v7',True,False,False),
-    ('continuous-incident-evidence/v6',True,True,False),
+@pytest.mark.parametrize('version,model,abstained,availability,projected,newer,reason',[
+    ('continuous-incident-evidence/v6',True,False,'ELIGIBLE',True,False,None),
+    ('continuous-incident-evidence/v6',True,False,'UNKNOWN',True,False,'current-incident-health-unavailable'),
+    ('continuous-incident-evidence/v6',True,False,'ELIGIBLE',False,False,'current-incident-revision-does-not-bind-verified-rca'),
+    ('continuous-incident-evidence/v6',True,False,'ELIGIBLE',True,True,'newer-accepted-health-awaits-consumer'),
+    ('continuous-incident-evidence/v6',False,False,'ELIGIBLE',True,False,'validated-model-and-physical-deployment-change-required'),
+    ('continuous-incident-evidence/v5',True,False,'ELIGIBLE',True,False,'validated-model-and-physical-deployment-change-required'),
+    ('continuous-incident-evidence/v2',True,False,'ELIGIBLE',True,False,'validated-model-and-physical-deployment-change-required'),
+    ('continuous-incident-evidence/v7',True,False,'ELIGIBLE',True,False,'validated-model-and-physical-deployment-change-required'),
+    ('continuous-incident-evidence/v6',True,True,'ELIGIBLE',True,False,'rca-abstained'),
 ])
-def test_native_h4_requires_verified_kubernetes_model_change_combination(tmp_path,version,model,abstained,expected):
+def test_native_h4_requires_verified_kubernetes_model_change_combination(
+    tmp_path, version, model, abstained, availability, projected, newer, reason,
+):
     async def run():
         f=executor_fixture();store=ArtifactStore(tmp_path);assessment=f.authority.value
         result=deepcopy(assessment.rca);result['abstained']=abstained
@@ -107,14 +112,32 @@ def test_native_h4_requires_verified_kubernetes_model_change_combination(tmp_pat
         capture=store.write('manifests',{'capture_version':version})
         async def evidence(*args):
             return {},{'result_ref':assessment.result_ref,'capture_ref':capture}, {'rca':result,'deployment_change':asdict(assessment.change)}
-        async def snapshot(*args):return {'revision':2,'context':{'lifecycle_stage':'RCA_READY','availability':'ELIGIBLE'}}
-        async def checkpoint():return None,{'last_bucket_end':timestamp(f.clock())}
+        group = next(g for g in result['correlation']['groups'] if g['group_id'] == result['group_id'])
+        async def snapshot(*args):
+            return {'revision':2,'payload':{'affected_services':group['affected_services']},
+                    'context':{'lifecycle_stage':'RCA_READY','availability':'ELIGIBLE',
+                               'source_refs':[capture,assessment.result_ref] if projected else [capture]}}
+        async def checkpoint():
+            return None, {'last_bucket_end':timestamp(f.clock()), 'service_states':{
+                service:{'availability':availability if service == 'payment-service' else 'ELIGIBLE'}
+                for service in group['affected_services']}}
+        async def next_health(state):
+            assert state == (await checkpoint())[1]
+            return {'service_states': {'payment-service': {'availability': 'UNKNOWN'}}} if newer else None
+        f.recovery.source.next = next_health
         journal=SimpleNamespace(pool=Pool(),source=f.recovery.source,consumer_id='fixture',store=store,
             model_registry=SimpleNamespace(available=model),verified_evidence=evidence,
             repository=SimpleNamespace(get=snapshot),checkpoint=checkpoint)
-        actual=await NativeH4Authority(journal).assess(f.request,TARGET,now=f.clock())
-        assert actual.dispatch_authority is expected
-        assert (actual.change is not None) is expected
+        authority = NativeH4Authority(journal)
+        actual = await authority.assess(f.request, TARGET, now=f.clock())
+        assert actual.dispatch_authority is (reason is None)
+        assert (actual.change is not None) is (reason is None)
+        if reason is not None:
+            f.executor.authority = authority
+            action = await f.executor.execute(f.request)
+            assert action['phase'] == 'blocked'
+            assert action['facts']['reason'] == reason
+            assert f.kube.calls == []
     asyncio.run(run())
 
 

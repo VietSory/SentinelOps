@@ -58,15 +58,29 @@ class NativeH4Authority:
         result = derived['rca']
         value = derived.get('deployment_change')
         qualified = False
-        if value is not None:
+        reason = 'native-h4-contract-not-activated'
+        if result['abstained']:
+            reason = 'rca-abstained'
+        elif value is not None:
             capture = self.journal.store.read(accepted['capture_ref'])
             registry = self.journal.model_registry
-            qualified = (capture['capture_version'] == 'continuous-incident-evidence/v6'
-                and registry is not None and registry.available and not result['abstained'])
+            if capture['capture_version'] != 'continuous-incident-evidence/v6' or not (registry and registry.available):
+                reason = 'validated-model-and-physical-deployment-change-required'
+            else:
+                group = next(g for g in result['correlation']['groups'] if g['group_id'] == result['group_id'])
+                affected = group['affected_services']
+                refs = {accepted['capture_ref'], accepted['result_ref']}
+                if (set(snapshot['payload']['affected_services']) != set(affected)
+                    or not refs.issubset(snapshot['context']['source_refs'])):
+                    reason = 'current-incident-revision-does-not-bind-verified-rca'
+                elif any(state['service_states'][service]['availability'] != 'ELIGIBLE' for service in affected):
+                    reason = 'current-incident-health-unavailable'
+                elif await self.journal.source.next(state) is not None:
+                    reason = 'newer-accepted-health-awaits-consumer'
+                else:
+                    qualified = True
+                    reason = ''
         change = Change(**{**value, 'target': Target(**value['target'])}) if qualified else None
-        reason = ('rca-abstained' if result['abstained'] else
-                  'native-h4-contract-not-activated' if value is None else
-                  'validated-model-and-physical-deployment-change-required')
         return Assessment(request.incident_id, snapshot['revision'], snapshot['context']['lifecycle_stage'],
             snapshot['context']['availability'], state['last_bucket_end'], accepted['result_ref'], result, change,
             dispatch_authority=qualified, missing_reason=reason)
