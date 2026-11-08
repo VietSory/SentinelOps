@@ -146,3 +146,19 @@ def test_artifact_store_rejects_corruption_traversal_and_nonfinite_data(tmp_path
         store.read("artifact://raw/../../secret")
     with pytest.raises(ValueError):
         store.write("raw", {"data": float("nan")})
+
+
+def test_v2_profile_adds_latency_sum_count_and_leaves_v1_unchanged():
+    from sentinelops.telemetry.prometheus import SOURCE_PROFILE, SOURCE_PROFILE_V2, mean_latency_ms, queries
+    v1, v2 = queries('payment-service'), queries('payment-service', SOURCE_PROFILE_V2)
+    assert set(v2) - set(v1) == {'duration_sum', 'duration_count'} and all(v2[k] == v1[k] for k in v1)
+    def resp(value):
+        return {'status': 'success', 'data': {'resultType': 'vector', 'result': [] if value is None else
+                [{'metric': {}, 'value': [1762600000, str(value)]}]}}
+    capture = {'source_profile': SOURCE_PROFILE_V2, 'service': 'payment-service', 'bucket_end': '2025-11-08T12:26:40Z',
+               'queries': {'duration_sum': {'expression': v2['duration_sum'], 'response': resp(600.0)},
+                           'duration_count': {'expression': v2['duration_count'], 'response': resp(120.0)}}}
+    assert mean_latency_ms(capture) == 5.0
+    capture['queries']['duration_count']['response'] = resp(0.0)
+    assert mean_latency_ms(capture) is None
+    assert mean_latency_ms({**capture, 'source_profile': SOURCE_PROFILE}) is None

@@ -13,7 +13,11 @@ from sentinelops.contracts import utc_time
 from sentinelops.telemetry.core import BUSINESS_ROUTES, BucketMetrics, normalize_bucket, stable_id, timestamp
 
 SOURCE_PROFILE = "prometheus-increase-60s-5s/v1"
-SOURCE_INTERVALS = {"prometheus-increase-60s/v1": 15, SOURCE_PROFILE: 5}
+# ADR-016: v2 = v1 queries plus the duration histogram _sum/_count, so the mean
+# latency (the statistic of the Alibaba training source) is recoverable from the
+# raw capture. v1 is unchanged for every existing stream and capture.
+SOURCE_PROFILE_V2 = "prometheus-increase-60s-5s/v2"
+SOURCE_INTERVALS = {"prometheus-increase-60s/v1": 15, SOURCE_PROFILE: 5, SOURCE_PROFILE_V2: 5}
 
 
 def source_configuration_hash(config: dict) -> str:
@@ -40,9 +44,11 @@ class BucketNotReady(ValueError):
 
 REQUESTS = "sentinelops_http_requests_total"
 DURATION = "sentinelops_http_request_duration_ms_milliseconds_bucket"
+DURATION_SUM = "sentinelops_http_request_duration_ms_milliseconds_sum"
+DURATION_COUNT = "sentinelops_http_request_duration_ms_milliseconds_count"
 
 
-def queries(service: str) -> dict[str, str]:
+def queries(service: str, profile: str = SOURCE_PROFILE) -> dict[str, str]:
     if service not in BUSINESS_ROUTES:
         raise ValueError("unregistered business service")
     method, route = BUSINESS_ROUTES[service]
@@ -56,6 +62,9 @@ def queries(service: str) -> dict[str, str]:
         "scrapes": 'min(count_over_time(up{job="otel-collector"}[60s]))',
         "up": 'min(min_over_time(up{job="otel-collector"}[60s]))',
         "series_scrapes": f"min(count_over_time({REQUESTS}{{{selector}}}[60s]))",
+        **({"duration_sum": f"sum(increase({DURATION_SUM}{{{selector}}}[60s]))",
+            "duration_count": f"sum(increase({DURATION_COUNT}{{{selector}}}[60s]))"}
+           if profile == SOURCE_PROFILE_V2 else {}),
     }
 
 
@@ -82,7 +91,7 @@ def decode_capture(capture: dict[str, Any], *, environment: str = "local") -> di
     if profile not in SOURCE_INTERVALS:
         raise ValueError("unsupported source profile")
     end = utc_time(capture["bucket_end"])
-    expected_queries = queries(capture["service"])
+    expected_queries = queries(capture["service"], profile)
     responses = capture["queries"]
     if set(responses) != set(expected_queries):
         raise ValueError("incomplete source capture")
@@ -131,7 +140,8 @@ class PrometheusSource:
             raise ValueError("Prometheus scrape configuration does not match the 5s source profile")
         return {"scrape_interval":interval,"configuration_hash":source_configuration_hash(config)}
 
-    def capture(self, service: str, end: datetime, *, now: datetime | None = None) -> dict[str, Any]:
+    def capture(self, service: str, end: datetime, *, now: datetime | None = None,
+                profile: str = SOURCE_PROFILE) -> dict[str, Any]:
         current = now or datetime.now(timezone.utc)
         timestamp(end)
         timestamp(current)
@@ -140,7 +150,9 @@ class PrometheusSource:
         if current < end + timedelta(seconds=30):
             raise BucketNotReady("bucket is not past the source watermark")
         responses = {}
-        for key, expression in queries(service).items():
+        if profile not in (SOURCE_PROFILE, SOURCE_PROFILE_V2):
+            raise ValueError("unsupported capture profile")
+        for key, expression in queries(service, profile).items():
             try:
                 response = self.client.get(self.endpoint + "/api/v1/query", params={"query": expression, "time": end.timestamp()})
                 response.raise_for_status()
@@ -155,8 +167,28 @@ class PrometheusSource:
                 break
             responses[key] = {"expression": expression, "response": body}
         return {
-            "capture_version": "1.0", "source_profile": SOURCE_PROFILE,
+            "capture_version": "1.0", "source_profile": profile,
             "service": service, "bucket_end": timestamp(end),
             "collected_at": timestamp(current if now is not None else datetime.now(timezone.utc)),
             "queries": responses,
         }
+
+
+def mean_latency_ms(capture: dict[str, Any]) -> float | None:
+    """Per-minute mean latency from a v2 raw capture; None without traffic or v1."""
+    if capture.get("source_profile") != SOURCE_PROFILE_V2:
+        return None
+    end = utc_time(capture["bucket_end"])
+    expected = queries(capture["service"], SOURCE_PROFILE_V2)
+    values = {}
+    for key in ("duration_sum", "duration_count"):
+        entry = capture["queries"].get(key)
+        if entry is None or entry["expression"] != expected[key]:
+            raise ValueError("v2 capture lacks its pinned latency sum/count query")
+        samples = _vector(entry["response"], end)
+        if len(samples) > 1:
+            raise ValueError("expected one aggregate latency sample")
+        values[key] = samples[0][1] if samples else None
+    if not values["duration_count"]:
+        return None
+    return values["duration_sum"] / values["duration_count"]
