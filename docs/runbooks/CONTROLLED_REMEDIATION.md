@@ -537,5 +537,15 @@ python -m scripts.run_s2_h4 --kind /path/to/kind-v0.30.0 --output /new/private/r
 
 The script never builds the executor, approves a known-good image or dispatches.
 It refuses a dirty checkout and an active corpus capture on the same host. All
-owned resources are removed on exit. A granted assessment is H4 evidence for B's
-operator-approved G6 trial, not the trial itself.
+owned resources are removed on exit. A granted assessment shows that a qualified
+S2 incident earns H4 authority. It is not the G6 trial: that sandbox is deleted,
+and known-good approval must predate the whole bad-change interval. Run G6 on a
+persistent B-owned target in this order:
+
+1. Accept healthy buckets.
+2. Approve the known-good image.
+3. Enable the policy.
+4. Deploy and record the bad change.
+5. Let the executor consume the qualified incident within the 180-second freshness bound.
+
+The ordered steps are in [LANE_B_CHECKPOINT §7.5](../delivery/LANE_B_CHECKPOINT.md#75-chuỗi-lệnh-đầucuối-để-gỡ-h1-và-h4).

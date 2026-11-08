@@ -22,3 +22,21 @@ def test_source_shape_compares_profile_queries_and_ordered_bounds():
     assert capture_shape(raw()) != capture_shape(raw(query="other"))
     assert capture_shape(raw()) != capture_shape(raw(bounds=BOUNDS[:-2] + ["+Inf"]))
     assert COUNT_TOLERANCE == .05
+
+
+def test_source_shape_manifest_is_pinned_and_bound_to_the_candidate_dataset(tmp_path):
+    import hashlib, json
+    import pytest
+    from scripts.check_model_source_parity import load_source_shapes
+    routes = {s: {"profile": "p", "queries": {}, "latency_bounds_ms": BOUNDS}
+              for s in ("checkout-service", "payment-service", "inventory-service")}
+    value = {"shapes_version": "training-source-shapes/v1", "dataset_ref": "artifact://manifests/" + "d" * 64 + ".json",
+             "routes": routes}
+    path = tmp_path / "shapes.json"
+    path.write_bytes(json.dumps(value).encode())
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert load_source_shapes(path, sha, {"dataset_ref": value["dataset_ref"]})[1] == routes
+    for index, digest in (({"dataset_ref": "artifact://manifests/" + "0" * 64 + ".json"}, sha),
+                          ({"dataset_ref": value["dataset_ref"]}, "0" * 64)):
+        with pytest.raises(ValueError):
+            load_source_shapes(path, digest, index)

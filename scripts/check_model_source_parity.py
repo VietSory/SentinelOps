@@ -9,7 +9,8 @@ approval or activation and removes all owned resources on exit.
 Criteria (fixed before any measurement):
   C1 candidate inventory verifies and development predictions replay on this host;
   C2 every raw capture has the same source profile, queries and latency bucket
-     bounds as the frozen training captures of the same service;
+     bounds as the frozen training captures of the same service (from the
+     pinned A-exported `training-source-shapes/v1` manifest);
   C3 all five buckets per service are eligible with full scrape coverage and a
      receipt lag within the frozen SLO health policy `maximum_lag_seconds`;
   C4 Prometheus request counts match the independent server-completion ledger
@@ -78,6 +79,19 @@ def training_shapes(corpus):
     if any(len(v) != 1 for v in shapes.values()):
         raise ValueError('frozen training captures do not share one source shape per service')
     return freeze, {s: json.loads(next(iter(v))) for s, v in shapes.items()}
+
+
+def load_source_shapes(path, expected_sha256, index):
+    """Pinned A-exported shapes; B never needs the raw fitting corpus."""
+    import hashlib
+    data = Path(path).read_bytes()
+    if hashlib.sha256(data).hexdigest() != expected_sha256:
+        raise ValueError('source-shape manifest checksum differs from the trusted value')
+    value = json.loads(data)
+    if (value.get('shapes_version') != 'training-source-shapes/v1' or value.get('dataset_ref') != index['dataset_ref']
+            or set(value.get('routes', {})) != set(BUSINESS_ROUTES)):
+        raise ValueError('source-shape manifest is not bound to this candidate dataset')
+    return value, value['routes']
 
 
 def bucket_of(value, bounds):
@@ -157,7 +171,7 @@ def exact_logs(sandbox, inventory, rows, ends):
     return selected
 
 
-def evaluate(root, candidate, corpus, captures, logs, ends, config, policy):
+def evaluate(root, candidate, shapes_manifest, captures, logs, ends, config, policy):
     checks, failures = {}, []
 
     def check(name, ok, detail):
@@ -165,7 +179,7 @@ def evaluate(root, candidate, corpus, captures, logs, ends, config, policy):
         if not ok:
             failures.append({'criterion': name, **detail})
 
-    freeze, shapes = training_shapes(corpus)
+    freeze, shapes = shapes_manifest
     index = json.loads(_inside(candidate, 'handoff.json').read_bytes())
     check('C2', freeze['source_profile'] == SOURCE_PROFILE == index_profile(candidate, index),
           {'what': 'source profile', 'frozen': freeze['source_profile']})
@@ -223,7 +237,7 @@ def index_profile(candidate, index):
     return _audit(candidate, index['evaluation_ref'])['source_profile']
 
 
-async def measure(sandbox, root, candidate, corpus, policy):
+async def measure(sandbox, root, candidate, shapes_manifest, policy):
     targets = {s: sandbox.forward(s, 8000) for s in SERVICES}
     source = PrometheusSource(sandbox.forward('prometheus', 9090))
     try:
@@ -239,7 +253,7 @@ async def measure(sandbox, root, candidate, corpus, policy):
             if inventory != await asyncio.to_thread(sandbox.inventory):
                 raise ValueError('workload pod identity changed while sampling')
             logs = await asyncio.to_thread(exact_logs, sandbox, inventory, rows, ends)
-            return evaluate(root, candidate, corpus, captures, logs, ends, config, policy) + (config,)
+            return evaluate(root, candidate, shapes_manifest, captures, logs, ends, config, policy) + (config,)
     finally:
         source.close()
 
@@ -249,7 +263,9 @@ def main():
     parser.add_argument('--kind', required=True)
     parser.add_argument('--candidate', type=Path, required=True)
     parser.add_argument('--expected-id', required=True)
-    parser.add_argument('--corpus', type=Path, required=True, help='Frozen fitting corpus root of the candidate')
+    parser.add_argument('--source-shapes', type=Path, required=True,
+                        help='training-source-shapes/v1 manifest exported by A (scripts.export_source_shapes)')
+    parser.add_argument('--source-shapes-sha256', required=True, help='Its SHA-256 from a separate trusted channel')
     parser.add_argument('--environment', required=True, help='Name of the target environment being certified')
     parser.add_argument('--verified-by', required=True)
     parser.add_argument('--output', type=Path, required=True)
@@ -257,6 +273,8 @@ def main():
     commit = clean_commit()
     candidate = args.candidate.resolve(strict=True)
     replay = verify_candidate(candidate, args.expected_id, replay=True)  # C1
+    index = json.loads(_inside(candidate, 'handoff.json').read_bytes())
+    shapes_manifest = load_source_shapes(args.source_shapes, args.source_shapes_sha256, index)
     policy = json.loads((PROJECT / 'configs/slo_health_policy.json').read_text())
     root = args.output.resolve()
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -267,8 +285,7 @@ def main():
     signal.signal(signal.SIGTERM, terminate)
     try:
         images = deploy(sandbox)
-        checks, failures, normalization_ref, config = asyncio.run(measure(sandbox, root, candidate, args.corpus, policy))
-        index = json.loads(_inside(candidate, 'handoff.json').read_bytes())
+        checks, failures, normalization_ref, config = asyncio.run(measure(sandbox, root, candidate, shapes_manifest, policy))
         verification = {'version': 'model-source-parity-check/v1', 'source_commit': commit, 'candidate_id': args.expected_id,
             'replay': replay, 'criteria': checks, 'failures': failures, 'images': images,
             'configuration_hash': config['configuration_hash'], 'normalization_ref': normalization_ref,

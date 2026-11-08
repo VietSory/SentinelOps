@@ -321,9 +321,12 @@ is required, and no extra fields are allowed:
 
 A failed or partial parity check is reported as such. It is never written as PASS.
 
+A first exports the frozen training source shapes, which contain no observations:
+`python -m scripts.export_source_shapes --corpus /frozen/corpus --output shapes.json`.
+A sends the printed SHA-256 over a separate trusted channel. Then
 `python -m scripts.check_model_source_parity --kind KIND --candidate /verified/handoff
---expected-id ID --corpus /frozen/corpus --environment NAME --verified-by NAME --output /new/dir`
-produces that record from an owned Kubernetes sandbox with five healthy minutes.
+--expected-id ID --source-shapes shapes.json --source-shapes-sha256 SHA --environment NAME
+--verified-by NAME --output /new/dir` produces that record from an owned Kubernetes sandbox with five healthy minutes.
 Its criteria C1–C6 are fixed in the script docstring before measurement: replay,
 training source shape, bucket eligibility and lag, count agreement within 5%,
 same-bucket p95, and eligible live features with finite scores. Any failed

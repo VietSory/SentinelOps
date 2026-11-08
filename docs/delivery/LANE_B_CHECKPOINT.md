@@ -279,15 +279,27 @@ chạy khi không có corpus capture nào đang chạy trên host (các script t
 | 1 | A | `scripts/audit_detector_events.py --root <det-root> --output … --freeze` | Epoch `READY_FOR_EVALUATION`, đã freeze |
 | 2 | A | `scripts/evaluate_detector_events.py … --detector-report-ref <ref> --output <v2-store>` | `report_ref` của báo cáo v2 |
 | 3 | A | `scripts/g3_review_packet.py --candidate <handoff> --v2-store <v2-store> --v2-report-ref <report_ref> --output packet.md` | Hồ sơ G3 ghi rõ báo cáo cần duyệt |
-| 4 | B | `scripts/check_model_source_parity.py --kind <kind-v0.30.0> --candidate <handoff> --expected-id <ID> --corpus <frozen corpus> --environment <tên> --verified-by <tên> --output …` | `parity.json` (`PASS` hoặc `FAIL`) |
+| 4a | A | `scripts/export_source_shapes.py --corpus <frozen corpus> --output shapes.json` | Manifest hình dạng nguồn (không có observation thô) + SHA-256, gửi B qua kênh riêng |
+| 4 | B | `scripts/check_model_source_parity.py --kind <kind-v0.30.0> --candidate <handoff> --expected-id <ID> --source-shapes shapes.json --source-shapes-sha256 <SHA> --environment <tên> --verified-by <tên> --output …` | `parity.json` (`PASS` hoặc `FAIL`) |
 | 5 | Owner | Đọc hồ sơ G3 và quyết định | Quyết định G3 gắn với candidate và `report_ref` |
 | 6 | Operator | `scripts/build_model_release.py … --v2-store <v2-store> --v2-report-ref <report_ref-đã-duyệt> --confirm-owner-decision` | Store release mới; không bật gì |
 | 7 | B | Trỏ `SENTINELOPS_MODEL_STORE` / `_RELEASE_REF` cho API và worker, dùng `--stream-epoch` mới | H1 bật trên B |
-| 8 | B | `scripts/run_s2_h4.py --kind … --model-store … --model-release-ref …` | `verification.json` chứa đánh giá H4 |
-| 9 | B + operator | Known-good approval, policy enable, rollback có kiểm soát | G6 |
+| 8 | A hoặc B | `scripts/run_s2_h4.py --kind … --model-store … --model-release-ref …` | Đánh giá H4 trên sandbox **dùng một lần**: chứng minh incident S2 có model đủ điều kiện dispatch authority. Sandbox bị xóa khi xong |
+| 9 | B + operator | Trial G6 trên một target Kubernetes **bền vững** do B sở hữu (xem dưới) | G6 |
 
-Bước 4 có thể chạy ngay khi Docker rảnh, không cần chờ bước 1–3. Bước 8 khi
+Bước 4a/4 có thể chạy ngay khi Docker rảnh, không cần chờ bước 1–3. Bước 8 khi
 chưa có release vẫn chạy được (đường no-model) để kiểm thử phần mềm.
+
+Bước 8 không thể nối thẳng sang bước 9. `run_s2_h4` xóa cluster, control DB và
+credential khi kết thúc, và known-good phải được duyệt **trước** toàn bộ khoảng
+thay đổi xấu. Vì vậy G6 cần một trình tự riêng trên target bền vững của B:
+
+1. Dựng target, health worker và incident worker có release model.
+2. Ghi ít nhất ba bucket healthy gắn nguồn.
+3. Lập hồ sơ image tốt bằng `review_payment_image.py`, operator duyệt known-good.
+4. Bật policy, sau đó mới deploy image xấu và ghi change (`open-change` / `complete-change`).
+5. Executor dùng `NativeH4Authority` trên đúng incident đó, trong thời hạn freshness 180 giây.
+6. Rollback, verify bằng telemetry, hoặc escalate.
 
 ## 8. Những gì checkpoint này KHÔNG tuyên bố
 
