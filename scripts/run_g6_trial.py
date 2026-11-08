@@ -207,7 +207,14 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                 emit('awaiting-operator-approval', evidence_ref=result['evidence_ref'], review_store=str(root / 'review'))
                 ledger_ref = await wait_for_file(root / 'approved-ledger-ref', APPROVAL_WAIT_SECONDS)
                 known_good = KnownGoodRegistry(review, ledger_ref, approved_by=args.approver, source=reader)
-                report['phases'].append({'known_good_ledger_ref': ledger_ref, 'evidence_ref': result['evidence_ref']})
+                # Preflight before any bad change: the approval must resolve for this exact
+                # target and match both the collected evidence and the deployed healthy image.
+                resolved = await known_good.resolve(target, incident_at=clock())
+                current = await observer.observe()
+                if resolved.image != result['evidence']['image'] or resolved.image != current.image:
+                    raise ValueError('approved known-good image differs from evidence or the deployed healthy image')
+                report['phases'].append({'known_good_ledger_ref': ledger_ref, 'evidence_ref': result['evidence_ref'],
+                                         'known_good_image': resolved.image, 'preflight_resolved_at': str(clock())})
 
                 change_review = DeploymentChangeReview(reader, observer, changes, target)
                 baseline = await change_review.open()
@@ -250,7 +257,13 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                     if state['phase'] in TERMINAL:
                         break
                     await asyncio.sleep(5)
-                report['action'] = state and {k: state[k] for k in ('action_id', 'phase', 'revision', 'facts') if k in state}
+                if state is None:
+                    report['action_outcome'] = 'NO_ACTION_ATTEMPTED_BEFORE_DEADLINE'
+                else:
+                    # Keep the verified journal (intent, history, hash chain) before the DB is deleted.
+                    report['action'] = await actions.get(state['action_id'])
+                    report['action_outcome'] = state['phase'] if state['phase'] in TERMINAL else 'NONTERMINAL_TIMEOUT'
+                    (root / 'action-journal.json').write_text(json.dumps(report['action'], indent=2, default=str) + '\n')
             finally:
                 stop.set()
                 for task in (traffic, consumer):
@@ -300,7 +313,7 @@ def main():
                   'bad_image': bad, 'model_release_ref': args.model_release_ref, **report,
                   'policy_enabled': args.enable_rollback_policy, 'G6_accepted': False}
         (root / 'verification.json').write_text(json.dumps(result, indent=2, default=str) + '\n')
-        emit('g6-trial-complete', action_phase=(report.get('action') or {}).get('phase'), report=str(root / 'verification.json'))
+        emit('g6-trial-complete', action_outcome=report.get('action_outcome'), report=str(root / 'verification.json'))
     except subprocess.CalledProcessError as exc:
         if sandbox.kubeconfig.exists():
             sandbox.diagnostics()
