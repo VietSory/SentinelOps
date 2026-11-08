@@ -260,3 +260,48 @@ The gradual groups were already inspected, so their re-accounting is not
 independent evidence. Risk/XGBoost evidence stays on the v1 gradual protocol.
 The report keeps `G3_accepted=false` and `activation_allowed=false`. G3 remains
 an owner/reviewer decision over all of these results.
+
+## Operator serving release
+
+`validated-model-release/v1` is built only by an operator, after two decisions
+taken outside software:
+
+1. the owner accepts G3 for the exact candidate, based on the v1 and v2
+   development reports;
+2. lane B records PASS source parity on the target environment.
+
+```sh
+python -m scripts.build_model_release --candidate /verified/handoff --expected-id CANDIDATE_ID \
+  --v2-report /evaluation/v2-report.json --parity-record /b/parity.json \
+  --approved-by "<owner>" --decision-note "<verbatim G3 decision>" --confirm-owner-decision \
+  --output /trusted/serving-release
+```
+
+The builder works in four steps:
+
+1. Reverify the candidate with `verify_model_candidate`; add `--replay` to also
+   reproduce development scores.
+2. Check that the v2 report pins the same bundle manifests, dataset and training
+   manifest, and that the parity record names exactly the same three model
+   versions and source profile.
+3. Copy the pinned bundles into a **new** store, so the received candidate stays
+   reverifiable, and write one approval per route that cites all evidence.
+4. Load the result with `ModelRegistry.load` before publishing the directory
+   atomically.
+
+It activates nothing. B points `SENTINELOPS_MODEL_STORE` and
+`SENTINELOPS_MODEL_RELEASE_REF` at the printed release, for both API and workers,
+using a fresh `--stream-epoch`.
+
+The source parity record (`model-source-parity/v1`) is produced by B. Every field
+is required, and no extra fields are allowed:
+
+```json
+{"parity_version": "model-source-parity/v1", "candidate_id": "<64 hex>",
+ "environment": "<target environment>", "source_profile": "prometheus-increase-60s-5s/v1",
+ "models": [{"service": "checkout-service", "model_version": "<64 hex>"}, "... all three routes"],
+ "status": "PASS", "verified_by": "<operator>", "verified_at": "<UTC ISO-8601>",
+ "evidence": ["<refs to replay output, live feature/source comparison>"]}
+```
+
+A failed or partial parity check is reported as such. It is never written as PASS.

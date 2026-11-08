@@ -256,9 +256,18 @@ Nguyên tắc cho cả hai bên:
 | B-e | **Production auth adapter** | API hiện fail closed (503) ngoài `local`/`test` | Có thiết kế và adapter, kèm test; token tĩnh không dùng trên AWS |
 | B-f | **Policy remediation cho EKS** | `Target` đang hardcode namespace `sentinelops-b-actions` | Có policy version mới cho môi trường đích và chạy lại ma trận safety; policy local giữ nguyên |
 
-Khi A giao hồ sơ G3 và owner duyệt: B dựng `validated-model-release/v1` cho cùng
-release, bật cho API và worker bằng `--stream-epoch`, rồi chạy S2 thật để kiểm
-H4/G6.
+Đầu ra của B-b là một record `model-source-parity/v1`, theo đúng format trong
+[operator serving release](../runbooks/MODEL_PIPELINE.md#operator-serving-release).
+Record này chỉ được ghi `PASS` khi replay và phần đối chiếu telemetry trên môi
+trường đích đều đạt.
+
+Khi owner duyệt G3:
+1. Operator chạy `python -m scripts.build_model_release` với gói H1, report v2 của
+   A và record parity của B. Lệnh tạo một store release mới, tự load để kiểm,
+   và không bật gì.
+2. B trỏ `SENTINELOPS_MODEL_STORE` và `SENTINELOPS_MODEL_RELEASE_REF` cho cả API
+   lẫn worker, dùng `--stream-epoch` mới.
+3. B chạy S2 thật để kiểm H4/G6.
 
 ## 8. Những gì checkpoint này KHÔNG tuyên bố
 
