@@ -301,6 +301,15 @@ thay đổi xấu. Vì vậy G6 cần một trình tự riêng trên target bề
 5. Executor dùng `NativeH4Authority` trên đúng incident đó, trong thời hạn freshness 180 giây.
 6. Rollback, verify bằng telemetry, hoặc escalate.
 
+`scripts/run_g6_trial.py` chạy đúng trình tự này trên **một** sandbox được giữ sống
+suốt trial:
+- Nó dừng ở `AWAITING_OPERATOR_APPROVAL` để operator chạy
+  `scripts.approve_known_good`, rồi ghi ledger ref vào `approved-ledger-ref`.
+- Executor chỉ patch khi có cờ `--enable-rollback-policy` và không có file
+  `KILL_SWITCH`.
+- Script cần một release H1 hợp lệ.
+- Đã kiểm CLI và chữ ký ghép nối; **chưa chạy native**.
+
 ## 8. Những gì checkpoint này KHÔNG tuyên bố
 
 - **AWS chưa triển khai.** Không `apply`, không gọi AWS API, không có credential.
