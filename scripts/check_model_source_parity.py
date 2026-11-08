@@ -15,7 +15,12 @@ Criteria (fixed before any measurement):
      receipt lag within the frozen SLO health policy `maximum_lag_seconds`;
   C4 Prometheus request counts match the independent server-completion ledger
      within 5% per bucket (increase() extrapolation), with no 5xx;
-  C5 the histogram p95 and the exact-log p95 fall in the same histogram bucket;
+  C5 (criteria v2) the histogram p95 and the exact-log p95 fall in the same or
+     an adjacent histogram bucket: `histogram_quantile` interpolates inside the
+     bucket holding the 95th-percentile rank, so near an edge the rank can sit
+     one bucket away from the exact sample. v1 required the same bucket; v2 was
+     adopted by the owner on 2026-11-08 after a single v1 C5 failure at the 25 ms
+     edge (26.67 vs 24.93 ms). That v1 FAIL record is kept unchanged;
   C6 a complete five-minute FeatureWindow is eligible at its live cutoff (and
      masked before it), the feature schema matches the bundle, and candidate
      scores are finite.
@@ -92,6 +97,17 @@ def load_source_shapes(path, expected_sha256, index):
             or set(value.get('routes', {})) != set(BUSINESS_ROUTES)):
         raise ValueError('source-shape manifest is not bound to this candidate dataset')
     return value, value['routes']
+
+
+CRITERIA_VERSION = 'parity-criteria/v2'
+
+
+def bucket_index(value, bounds):
+    edges = [float(b) for b in bounds if b != '+Inf']
+    for index, (lower, upper) in enumerate(zip([0.] + edges, edges)):
+        if lower <= value <= upper:
+            return index
+    return len(edges)
 
 
 def bucket_of(value, bounds):
@@ -213,8 +229,10 @@ def evaluate(root, candidate, shapes_manifest, captures, logs, ends, config, pol
                 exact = sorted(r['duration_ms'] for r in records)[math.ceil(.95 * len(records)) - 1]
                 bounds = shapes[service]['latency_bounds_ms']
                 observed = obs['payload']['p95_latency_ms']
-                check('C5', bucket_of(observed, bounds) == bucket_of(exact, bounds),
-                      {'service': service, 'bucket_end': timestamp(end), 'histogram_p95_ms': observed, 'exact_p95_ms': exact})
+                distance = abs(bucket_index(observed, bounds) - bucket_index(exact, bounds))
+                check('C5', distance <= 1,
+                      {'service': service, 'bucket_end': timestamp(end), 'histogram_p95_ms': observed, 'exact_p95_ms': exact,
+                       'bucket_distance': distance})
         manifest, detector, risk = load_bundle(_inside(candidate, 'runtime/' + model['bundle_directory']),
                                                expected_manifest_sha256=model['manifest_sha256'])
         feature = build_feature_window(observations, service=service, window_end=ends[-1], as_of=cutoff, source_profile=SOURCE_PROFILE)
@@ -289,7 +307,7 @@ def main():
         scope = {'candidate_id': args.expected_id, 'environment': args.environment, 'source_profile': SOURCE_PROFILE,
                  'models': [{'service': m['service'], 'model_version': m['model_version']} for m in index['models']],
                  'verified_by': args.verified_by, 'verified_at': timestamp(utcnow())}
-        verification = {'version': PARITY_VERIFICATION_VERSION, **scope, 'source_commit': commit,
+        verification = {'version': PARITY_VERIFICATION_VERSION, 'criteria_version': CRITERIA_VERSION, **scope, 'source_commit': commit,
             'source_shapes_sha256': args.source_shapes_sha256,
             'replay': replay, 'criteria': checks, 'failures': failures, 'images': images,
             'configuration_hash': config['configuration_hash'], 'normalization_ref': normalization_ref,

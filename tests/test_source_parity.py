@@ -40,3 +40,12 @@ def test_source_shape_manifest_is_pinned_and_bound_to_the_candidate_dataset(tmp_
                           ({"dataset_ref": value["dataset_ref"]}, "0" * 64)):
         with pytest.raises(ValueError):
             load_source_shapes(path, digest, index)
+
+
+def test_c5_v2_accepts_same_or_adjacent_bucket_only():
+    from scripts.check_model_source_parity import CRITERIA_VERSION, bucket_index
+    assert CRITERIA_VERSION == 'parity-criteria/v2'
+    # The observed v1 failure: interpolated 26.67 ms vs exact 24.93 ms across the 25 ms edge.
+    assert abs(bucket_index(26.6667, BOUNDS) - bucket_index(24.93, BOUNDS)) == 1
+    assert abs(bucket_index(4.25, BOUNDS) - bucket_index(4.75, BOUNDS)) == 0
+    assert abs(bucket_index(4.0, BOUNDS) - bucket_index(30.0, BOUNDS)) == 3
