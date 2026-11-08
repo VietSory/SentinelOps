@@ -369,6 +369,10 @@ def main():
         raise
     finally:
         try:
+            receipt = root / 'failure-receipt.json'
+            if receipt.exists():
+                # Also covers cancellation, where trial() re-raised before main saw a report.
+                retain_db = retain_db or bool(json.loads(receipt.read_text()).get('retain_control_db'))
             if owned and retain_db:
                 emit('control-db-retained-for-audit', container=owned[0],
                      note='an action intent may exist that was not exported; inspect, then remove manually')
