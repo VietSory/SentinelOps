@@ -287,7 +287,7 @@ taken outside software:
 ```sh
 python -m scripts.build_model_release --candidate /verified/handoff --expected-id CANDIDATE_ID \
   --v2-store /new/evaluation --v2-report-ref artifact://manifests/REPORT_HASH.json \
-  --parity-record /b/parity.json \
+  --parity-record /b/parity.json --parity-verification /b/verification.json \
   --approved-by "<owner>" --decision-note "<verbatim G3 decision>" --confirm-owner-decision \
   --output /trusted/serving-release
 ```
@@ -297,8 +297,9 @@ The builder works in four steps:
 1. Reverify the candidate with `verify_model_candidate`; add `--replay` to also
    reproduce development scores.
 2. Load the exact reviewed v2 report by checksum. Check its candidate pins,
-   protocol and abrupt evaluation evidence. Check that the parity record names
-   the same three model versions and source profile.
+   protocol and abrupt evaluation evidence. Check the hash of B's verification
+   report, its scope, the candidate replay and the passing C2–C6 checks for the
+   same three model versions and source profile.
 3. Copy the pinned bundles into a **new** store, so the received candidate stays
    reverifiable, and write one approval per route that cites all evidence.
 4. Load the result with `ModelRegistry.load` before publishing the directory
@@ -316,7 +317,7 @@ is required, and no extra fields are allowed:
  "environment": "<target environment>", "source_profile": "prometheus-increase-60s-5s/v1",
  "models": [{"service": "checkout-service", "model_version": "<64 hex>"}, "... all three routes"],
  "status": "PASS", "verified_by": "<operator>", "verified_at": "<UTC ISO-8601>",
- "evidence": ["<refs to replay output, live feature/source comparison>"]}
+ "evidence": ["artifact://manifests/<verification report content hash>.json"]}
 ```
 
 A failed or partial parity check is reported as such. It is never written as PASS.
@@ -331,4 +332,6 @@ Its criteria C1–C6 are fixed in the script docstring before measurement: repla
 training source shape, bucket eligibility and lag, count agreement within 5%,
 same-bucket p95, and eligible live features with finite scores. Any failed
 criterion yields `status: FAIL` with the failures listed. It refuses to run beside
-an active corpus capture.
+an active corpus capture. B sends `parity.json` and `verification.json` together
+through the trusted handoff channel. The release builder verifies the report
+against its content hash and stores both files as manifests in the release.

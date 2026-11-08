@@ -8,7 +8,7 @@ selects the release through the existing serving settings.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -16,15 +16,18 @@ from pathlib import Path
 import re
 import shutil
 
+from sentinelops.contracts import utc_time
 from sentinelops.ml.handoff import _read_pinned
 from sentinelops.ml.local_data import _inside
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.store import ArtifactStore
 
 PARITY_VERSION = "model-source-parity/v1"
+PARITY_VERIFICATION_VERSION = "model-source-parity-check/v1"
 APPROVAL_VERSION = "model-release-approval/v1"
 RELEASE_VERSION = "validated-model-release/v1"
 MANIFEST_REF = re.compile(r"artifact://manifests/[0-9a-f]{64}\.json")
+PARITY_SCOPE = ("candidate_id", "environment", "source_profile", "models", "verified_by", "verified_at")
 
 
 def _audit(root, reference):
@@ -34,23 +37,58 @@ def _audit(root, reference):
     return json.loads(_read_pinned(path, path.stem))
 
 
-def validate_parity_record(record, index, source_profile):
-    """B's target-environment parity record; the release only checks its scope."""
-    expected = {"parity_version", "candidate_id", "environment", "source_profile", "models", "status",
-                "verified_by", "verified_at", "evidence"}
+def parity_verification_ref(verification):
+    return f"artifact://manifests/{stable_id(verification)}.json"
+
+
+def validate_parity_record(record, index, source_profile, verification, candidate_check):
+    """Bind B's parity decision to the portable C1–C6 evidence for this release."""
+    expected = {"parity_version", "status", "evidence", *PARITY_SCOPE}
     routes = {m["service"]: m["model_version"] for m in index["models"]}
     if (not isinstance(record, dict) or set(record) != expected or record["parity_version"] != PARITY_VERSION
         or record["candidate_id"] != index["candidate_id"] or record["status"] != "PASS"
         or record["source_profile"] != source_profile
         or not isinstance(record["environment"], str) or not record["environment"].strip()
         or not isinstance(record["verified_by"], str) or not record["verified_by"].strip()
-        or not isinstance(record["evidence"], list) or not record["evidence"]
-        or any(not isinstance(e, str) or not e.strip() for e in record["evidence"])
+        or not isinstance(record["verified_at"], str)
         or not isinstance(record["models"], list)
+        or any(not isinstance(m, dict) or set(m) != {"service", "model_version"} for m in record["models"])
         or {(m.get("service"), m.get("model_version")) for m in record["models"]} != set(routes.items())
         or len(record["models"]) != len(routes)):
         raise ValueError("source parity record does not certify this exact candidate and source profile")
-    datetime.fromisoformat(record["verified_at"].replace("Z", "+00:00"))
+    utc_time(record["verified_at"])
+
+    if (not isinstance(verification, dict) or verification.get("version") != PARITY_VERIFICATION_VERSION
+        or record["evidence"] != [parity_verification_ref(verification)]
+        or any(verification.get(key) != record[key] for key in PARITY_SCOPE)
+        or verification.get("activation_allowed") is not False or verification.get("G3_accepted") is not False
+        or not re.fullmatch(r"[0-9a-f]{40}", verification.get("source_commit") or "")
+        or not re.fullmatch(r"[0-9a-f]{64}", verification.get("source_shapes_sha256") or "")
+        or not MANIFEST_REF.fullmatch(verification.get("normalization_ref") or "")
+        or verification.get("failures") != []
+        or verification.get("replay") != {**candidate_check, "development_predictions_reproduced": True}):
+        raise ValueError("source parity verification is missing, failed or differs from the pinned decision")
+
+    criteria = verification.get("criteria")
+    expected_counts = {"C2": 17, "C3": 16, "C4": 15, "C5": 15, "C6": 3}
+    if (not isinstance(criteria, dict) or set(criteria) != set(expected_counts)
+        or any(not isinstance(criteria[key], list) or len(criteria[key]) != count
+               or any(not isinstance(row, dict) or row.get("ok") is not True for row in criteria[key])
+               for key, count in expected_counts.items())):
+        raise ValueError("source parity verification lacks complete passing C2–C6 checks")
+    scopes = {(row.get("service"), row.get("bucket_end")) for row in criteria["C4"]}
+    ends = {end for _, end in scopes if isinstance(end, str)}
+    if (len(ends) != 5 or scopes != {(service, end) for service in routes for end in ends}
+        or any({(row.get("service"), row.get("bucket_end")) for row in criteria[key] if "service" in row} != scopes
+               or sum("service" in row for row in criteria[key]) != len(scopes)
+               for key in ("C2", "C3", "C5"))
+        or {(row.get("service"), row.get("model_version")) for row in criteria["C6"]} != set(routes.items())):
+        raise ValueError("source parity verification lacks five matched buckets per route or exact model coverage")
+    ordered = sorted(map(utc_time, ends))
+    if any(end.second or end.microsecond for end in ordered) or any(
+        right - left != timedelta(minutes=1) for left, right in zip(ordered, ordered[1:])
+    ):
+        raise ValueError("source parity verification buckets are not five consecutive UTC minutes")
 
 
 def validate_v2_report(report, v1, expected_ref):
@@ -87,8 +125,8 @@ def validate_v2_report(report, v1, expected_ref):
             raise ValueError(f"v2 detector-event report lacks abrupt evaluation evidence for {service}")
 
 
-def build_model_release(candidate, expected_id, *, v2_report, v2_report_ref, parity_record, approved_by, decision_note,
-                        output, replay=False, now=None):
+def build_model_release(candidate, expected_id, *, v2_report, v2_report_ref, parity_record, parity_verification,
+                        approved_by, decision_note, output, replay=False, now=None):
     from scripts.verify_model_candidate import verify_candidate
     from sentinelops.ml.registry import ModelRegistry
     candidate, output = Path(candidate).resolve(strict=True), Path(output)
@@ -103,14 +141,14 @@ def build_model_release(candidate, expected_id, *, v2_report, v2_report_ref, par
     if dataset.get("training_ready") is not True or dataset.get("dataset_version") != "local-http-admission/v1":
         raise ValueError("candidate dataset is not the frozen G2 admission")
     validate_v2_report(v2_report, v1, v2_report_ref)
-    validate_parity_record(parity_record, index, v1["source_profile"])
+    validate_parity_record(parity_record, index, v1["source_profile"], parity_verification, verified)
     decided = timestamp(now or datetime.now(timezone.utc))
     staging = output.with_name("." + output.name + ".staging")
     if staging.exists():
         raise FileExistsError("a previous release build left a staging directory; investigate it")
     staging.mkdir(parents=True)
     store = ArtifactStore(staging)
-    evidence = [store.write("manifests", value) for value in (dataset, v1, v2_report, parity_record)]
+    evidence = [store.write("manifests", value) for value in (dataset, v1, v2_report, parity_record, parity_verification)]
     rows = []
     for model in index["models"]:
         source_dir = _inside(candidate, "runtime/" + model["bundle_directory"])

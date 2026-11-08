@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--v2-store", type=Path, required=True, help="Output store from evaluate_detector_events")
     parser.add_argument("--v2-report-ref", required=True, help="Exact v2 report reference in the owner's decision")
     parser.add_argument("--parity-record", type=Path, required=True, help="B model-source-parity/v1 record JSON")
+    parser.add_argument("--parity-verification", type=Path, required=True, help="B verification.json pinned by the parity record")
     parser.add_argument("--approved-by", required=True, help="Owner identity recording the G3 decision")
     parser.add_argument("--decision-note", required=True, help="Owner's G3/activation decision, verbatim")
     parser.add_argument("--confirm-owner-decision", action="store_true", required=True,
@@ -29,6 +30,7 @@ def main():
     report = ArtifactStore(args.v2_store).read(args.v2_report_ref)
     result = build_model_release(args.candidate, args.expected_id, v2_report=report, v2_report_ref=args.v2_report_ref,
         parity_record=json.loads(args.parity_record.read_bytes()),
+        parity_verification=json.loads(args.parity_verification.read_bytes()),
         approved_by=args.approved_by, decision_note=args.decision_note, output=args.output, replay=args.replay)
     print(json.dumps(result, indent=2))
 

@@ -263,7 +263,7 @@ trường đích đều đạt.
 
 Khi owner duyệt G3:
 1. Operator chạy `python -m scripts.build_model_release` với gói H1, report v2 của
-   A và record parity của B. Lệnh tạo một store release mới, tự load để kiểm,
+   A và cặp `parity.json`, `verification.json` của B. Lệnh tạo store release mới, tự load để kiểm,
    và không bật gì.
 2. B trỏ `SENTINELOPS_MODEL_STORE` và `SENTINELOPS_MODEL_RELEASE_REF` cho cả API
    lẫn worker, dùng `--stream-epoch` mới.
@@ -280,9 +280,9 @@ chạy khi không có corpus capture nào đang chạy trên host (các script t
 | 2 | A | `scripts/evaluate_detector_events.py … --detector-report-ref <ref> --output <v2-store>` | `report_ref` của báo cáo v2 |
 | 3 | A | `scripts/g3_review_packet.py --candidate <handoff> --v2-store <v2-store> --v2-report-ref <report_ref> --output packet.md` | Hồ sơ G3 ghi rõ báo cáo cần duyệt |
 | 4a | A | `scripts/export_source_shapes.py --corpus <frozen corpus> --output shapes.json` | Manifest hình dạng nguồn (không có observation thô) + SHA-256, gửi B qua kênh riêng |
-| 4 | B | `scripts/check_model_source_parity.py --kind <kind-v0.30.0> --candidate <handoff> --expected-id <ID> --source-shapes shapes.json --source-shapes-sha256 <SHA> --environment <tên> --verified-by <tên> --output …` | `parity.json` (`PASS` hoặc `FAIL`) |
+| 4 | B | `scripts/check_model_source_parity.py --kind <kind-v0.30.0> --candidate <handoff> --expected-id <ID> --source-shapes shapes.json --source-shapes-sha256 <SHA> --environment <tên> --verified-by <tên> --output …` | `parity.json` (`PASS` hoặc `FAIL`) kèm `verification.json` được ghim bằng hash |
 | 5 | Owner | Đọc hồ sơ G3 và quyết định | Quyết định G3 gắn với candidate và `report_ref` |
-| 6 | Operator | `scripts/build_model_release.py … --v2-store <v2-store> --v2-report-ref <report_ref-đã-duyệt> --confirm-owner-decision` | Store release mới; không bật gì |
+| 6 | Operator | `scripts/build_model_release.py … --v2-store <v2-store> --v2-report-ref <report_ref-đã-duyệt> --parity-record parity.json --parity-verification verification.json --confirm-owner-decision` | Store release mới; không bật gì |
 | 7 | B | Trỏ `SENTINELOPS_MODEL_STORE` / `_RELEASE_REF` cho API và worker, dùng `--stream-epoch` mới | H1 bật trên B |
 | 8 | A hoặc B | `scripts/run_s2_h4.py --kind … --model-store … --model-release-ref …` | Đánh giá H4 trên sandbox **dùng một lần**: chứng minh incident S2 có model đủ điều kiện dispatch authority. Sandbox bị xóa khi xong |
 | 9 | B + operator | Trial G6 trên một target Kubernetes **bền vững** do B sở hữu (xem dưới) | G6 |

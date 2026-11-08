@@ -42,7 +42,7 @@ from scripts.verify_model_candidate import verify_candidate
 from sentinelops.contracts import utc_time
 from sentinelops.experiments.traffic import PATHS
 from sentinelops.ml.local_data import _inside
-from sentinelops.ml.release import PARITY_VERSION, _audit
+from sentinelops.ml.release import PARITY_VERIFICATION_VERSION, PARITY_VERSION, _audit, parity_verification_ref
 from sentinelops.telemetry.core import BUSINESS_ROUTES, FEATURE_KEYS, FEATURE_SET, build_feature_window, timestamp
 from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import REQUESTS, SOURCE_PROFILE, PrometheusSource
@@ -205,8 +205,8 @@ def evaluate(root, candidate, shapes_manifest, captures, logs, ends, config, pol
             records = [r for r in logs if r['service'] == service
                        and (end.timestamp() - 60) * 1000 < r['timestamp_unix_ms'] <= end.timestamp() * 1000]
             count = obs['measurements']['request_count'] or 0
-            relative = abs(count / len(records) - 1) if records else math.inf
-            check('C4', records and relative <= COUNT_TOLERANCE and obs['measurements']['error_count'] == 0,
+            relative = abs(count / len(records) - 1) if records else None
+            check('C4', relative is not None and relative <= COUNT_TOLERANCE and obs['measurements']['error_count'] == 0,
                   {'service': service, 'bucket_end': timestamp(end), 'prometheus_count': count,
                    'server_completions': len(records), 'relative_difference': relative})
             if records and obs['payload']:
@@ -286,16 +286,17 @@ def main():
     try:
         images = deploy(sandbox)
         checks, failures, normalization_ref, config = asyncio.run(measure(sandbox, root, candidate, shapes_manifest, policy))
-        verification = {'version': 'model-source-parity-check/v1', 'source_commit': commit, 'candidate_id': args.expected_id,
+        scope = {'candidate_id': args.expected_id, 'environment': args.environment, 'source_profile': SOURCE_PROFILE,
+                 'models': [{'service': m['service'], 'model_version': m['model_version']} for m in index['models']],
+                 'verified_by': args.verified_by, 'verified_at': timestamp(utcnow())}
+        verification = {'version': PARITY_VERIFICATION_VERSION, **scope, 'source_commit': commit,
+            'source_shapes_sha256': args.source_shapes_sha256,
             'replay': replay, 'criteria': checks, 'failures': failures, 'images': images,
             'configuration_hash': config['configuration_hash'], 'normalization_ref': normalization_ref,
             'activation_allowed': False, 'G3_accepted': False}
-        (root / 'verification.json').write_text(json.dumps(verification, indent=2) + '\n')
-        record = {'parity_version': PARITY_VERSION, 'candidate_id': args.expected_id, 'environment': args.environment,
-            'source_profile': SOURCE_PROFILE,
-            'models': [{'service': m['service'], 'model_version': m['model_version']} for m in index['models']],
-            'status': 'FAIL' if failures else 'PASS', 'verified_by': args.verified_by,
-            'verified_at': timestamp(utcnow()), 'evidence': [str(root / 'verification.json'), 'source_commit:' + commit]}
+        (root / 'verification.json').write_text(json.dumps(verification, indent=2, allow_nan=False) + '\n')
+        record = {'parity_version': PARITY_VERSION, **scope, 'status': 'FAIL' if failures else 'PASS',
+                  'evidence': [parity_verification_ref(verification)]}
         (root / 'parity.json').write_text(json.dumps(record, indent=2) + '\n')
         emit('parity-complete', status=record['status'], failures=len(failures), record=str(root / 'parity.json'))
     except subprocess.CalledProcessError as exc:

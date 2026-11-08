@@ -1,7 +1,9 @@
 """Release builder boundaries; fixtures here never constitute an approval."""
 import pytest
 
-from sentinelops.ml.release import build_model_release, validate_parity_record, validate_v2_report
+from sentinelops.ml.release import (
+    PARITY_SCOPE, build_model_release, parity_verification_ref, validate_parity_record, validate_v2_report,
+)
 from sentinelops.telemetry.core import stable_id
 from sentinelops.telemetry.store import ArtifactStore
 
@@ -14,6 +16,7 @@ V1 = {"dataset_ref": "artifact://manifests/" + "d" * 64 + ".json", "training_man
       "models": [{"service": m["service"], "model_version": m["model_version"], "manifest_sha256": "m" * 64}
                  for m in INDEX["models"]]}
 V1["protocol_sha256"] = stable_id(V1["protocol"])
+CANDIDATE_CHECK = {"candidate_id": INDEX["candidate_id"], "development_predictions_reproduced": False}
 
 
 def parity(**change):
@@ -21,6 +24,21 @@ def parity(**change):
             "source_profile": V1["source_profile"], "status": "PASS", "verified_by": "lane-b",
             "verified_at": "2026-11-08T10:00:00Z", "evidence": ["artifact://manifests/" + "e" * 64 + ".json"],
             "models": [{"service": m["service"], "model_version": m["model_version"]} for m in INDEX["models"]], **change}
+
+
+def verification():
+    buckets = [{"service": model["service"], "bucket_end": f"2026-11-08T09:{minute}:00Z", "ok": True}
+               for model in INDEX["models"] for minute in range(51, 56)]
+    return {
+        "version": "model-source-parity-check/v1", **{key: parity()[key] for key in PARITY_SCOPE},
+        "replay": {**CANDIDATE_CHECK, "development_predictions_reproduced": True},
+        "source_commit": "a" * 40, "source_shapes_sha256": "b" * 64,
+        "normalization_ref": "artifact://manifests/" + "f" * 64 + ".json",
+        "failures": [], "activation_allowed": False, "G3_accepted": False,
+        "criteria": {"C2": [{"ok": True}, {"ok": True}, *buckets], "C3": [{"ok": True}, *buckets],
+                     "C4": list(buckets), "C5": list(buckets),
+                     "C6": [{**model, "ok": True} for model in INDEX["models"]]},
+    }
 
 
 def v2(**change):
@@ -36,13 +54,44 @@ def v2(**change):
             "predictions_ref": "artifact://manifests/" + "b" * 64 + ".json", **change}
 
 
-def test_parity_record_must_certify_this_exact_candidate():
-    validate_parity_record(parity(), INDEX, V1["source_profile"])
+def test_parity_record_must_certify_this_exact_candidate(tmp_path):
+    report = verification()
+    ref = ArtifactStore(tmp_path).write("manifests", report)
+    assert ref == parity_verification_ref(report)
+    validate_parity_record(parity(evidence=[ref]), INDEX, V1["source_profile"], report, CANDIDATE_CHECK)
     for bad in (parity(status="FAIL"), parity(candidate_id="0" * 64), parity(models=parity()["models"][:2]),
                 parity(source_profile="other/v1"), parity(evidence=[]), parity(verified_by=" "),
                 {**parity(), "extra": 1}, parity(models=[{**m, "model_version": "x"} for m in parity()["models"]])):
         with pytest.raises(ValueError):
-            validate_parity_record(bad, INDEX, V1["source_profile"])
+            validate_parity_record(bad, INDEX, V1["source_profile"], report, CANDIDATE_CHECK)
+
+
+def test_parity_rejects_relocated_path_and_changed_target():
+    report = verification()
+    original = parity(evidence=[parity_verification_ref(report)])
+    for record, supplied in (
+        (parity(evidence=["/b/verification.json"]), report),
+        (original, {**report, "source_commit": "b" * 40}),
+        ({**original, "environment": "another-target"}, report),
+    ):
+        with pytest.raises(ValueError, match="differs from the pinned decision"):
+            validate_parity_record(record, INDEX, V1["source_profile"], supplied, CANDIDATE_CHECK)
+
+
+def test_parity_requires_all_passes_and_unique_source_buckets():
+    report = verification()
+    without_replay = {**report, "replay": CANDIDATE_CHECK}
+    with pytest.raises(ValueError, match="differs from the pinned decision"):
+        validate_parity_record(parity(evidence=[parity_verification_ref(without_replay)]), INDEX,
+                               V1["source_profile"], without_replay, CANDIDATE_CHECK)
+    report["criteria"]["C5"][0] = {"ok": False}
+    with pytest.raises(ValueError, match="complete passing"):
+        validate_parity_record(parity(evidence=[parity_verification_ref(report)]), INDEX,
+                               V1["source_profile"], report, CANDIDATE_CHECK)
+    report["criteria"]["C5"][0] = report["criteria"]["C5"][1]
+    with pytest.raises(ValueError, match="matched buckets"):
+        validate_parity_record(parity(evidence=[parity_verification_ref(report)]), INDEX,
+                               V1["source_profile"], report, CANDIDATE_CHECK)
 
 
 def test_v2_report_must_pin_the_same_bundles_and_never_self_accept(tmp_path):
@@ -66,12 +115,13 @@ def test_v2_report_must_pin_the_same_bundles_and_never_self_accept(tmp_path):
 def test_release_requires_an_explicit_owner_decision_before_any_read(tmp_path, field):
     kwargs = {"approved_by": "owner", "decision_note": "accept G3", field: "  "}
     with pytest.raises(ValueError, match="owner decision"):
-        build_model_release(tmp_path, "c" * 64, v2_report={}, v2_report_ref="", parity_record={}, output=tmp_path / "out", **kwargs)
+        build_model_release(tmp_path, "c" * 64, v2_report={}, v2_report_ref="", parity_record={},
+                            parity_verification={}, output=tmp_path / "out", **kwargs)
     assert not (tmp_path / "out").exists()
 
 
 def test_release_output_is_exclusive(tmp_path):
     (tmp_path / "out").mkdir()
     with pytest.raises(FileExistsError):
-        build_model_release(tmp_path, "c" * 64, v2_report={}, v2_report_ref="", parity_record={}, approved_by="o",
-                            decision_note="d", output=tmp_path / "out")
+        build_model_release(tmp_path, "c" * 64, v2_report={}, v2_report_ref="", parity_record={},
+                            parity_verification={}, approved_by="o", decision_note="d", output=tmp_path / "out")
