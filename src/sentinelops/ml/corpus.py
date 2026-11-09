@@ -1,7 +1,7 @@
 """Source-verified corpus dispatch. Sealed final references are never opened.
 
-Local development support is audited separately from the train/calibration rows
-returned for fitting. Historical GAMMA certificates remain unavailable.
+Local HTTP corpora are evaluation-only (ADR-016, D-23) and are never returned for
+fitting. Historical GAMMA certificates remain unavailable.
 """
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from sentinelops.telemetry.core import stable_id
 
 def load_training_rows(store, report):
     if report.get("dataset_version") == "local-http-admission/v1":
-        from sentinelops.ml.local_data import admitted_local_rows
-        return admitted_local_rows(store, report)
+        # ADR-016/D-23: local corpora are evaluation-only (RCA development evidence).
+        raise DatasetNotReady("local-data fitting was retired; local corpora are evaluation-only")
     require_training_ready(report)
     features = tuple(report["ordered_features"])
     if not features or len(set(features)) != len(features):

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from sentinelops.contracts import utc_time
-from sentinelops.ml.local_data import audit_local_corpus, admitted_local_rows, freeze_local_corpus, _abrupt_onsets_in_scope, _inside
+from sentinelops.ml.local_data import audit_local_corpus, admitted_local_evaluation_rows, freeze_local_corpus, _abrupt_onsets_in_scope, _inside
 from sentinelops.ml.readiness import DatasetNotReady
 from sentinelops.experiments.local_corpus import load_plan, bind
 from sentinelops.telemetry.store import ArtifactStore
@@ -28,7 +28,7 @@ def test_forged_ready_flags_do_not_replace_original_evidence(tmp_path):
     report, _, _ = audit_local_corpus(store)
     report.update(training_ready=True,status='READY_FOR_FITTING',failed_conditions=[])
     with pytest.raises(DatasetNotReady, match='raw-source/G2'):
-        admitted_local_rows(store, report)
+        admitted_local_evaluation_rows(store, report)
 
 
 @pytest.mark.parametrize('path', ['../sealed-final/run.json','/tmp/foreign.json','runs/../../secret'])
@@ -104,3 +104,9 @@ def test_abrupt_onset_must_overlap_the_fault_on_an_affected_route(service, onset
     oracle = {'services': {service: {'first_violation_at': f'2026-11-08T{onset}Z'}}}
     changed_ms = int(utc_time('2026-11-08T00:04:49Z').timestamp()) * 1000
     assert _abrupt_onsets_in_scope(oracle, 'payment-service', changed_ms, '2026-11-08T00:14:00Z') is eligible
+
+
+def test_local_admission_is_never_returned_for_fitting(tmp_path):
+    from sentinelops.ml.corpus import load_training_rows
+    with pytest.raises(DatasetNotReady, match='evaluation-only'):
+        load_training_rows(ArtifactStore(tmp_path), {'dataset_version': 'local-http-admission/v1', 'training_ready': True})

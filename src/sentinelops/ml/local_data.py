@@ -482,11 +482,6 @@ def _admitted_local_inventory(store, report):
     return rows, cases
 
 
-def admitted_local_rows(store, report):
-    rows, _ = _admitted_local_inventory(store, report)
-    return [row for row in rows if row['split'] in ('train','calibration')]
-
-
 def admitted_local_evaluation_rows(store, report):
     rows, cases = _admitted_local_inventory(store, report)
     if any(row['split'] not in ('train', 'calibration', 'development-validation') for row in rows):
@@ -503,9 +498,9 @@ def freeze_local_corpus(store, report):
 def _freeze_local_corpus(store, report):
     """Bind one fully recomputed ready dataset; never freeze an incomplete gate."""
     from sentinelops.experiments.local_corpus import bind
-    rows = admitted_local_rows(store, report)
+    rows, _ = _admitted_local_inventory(store, report)
     if not rows:
-        raise DatasetNotReady('no source-admitted prospective training rows')
+        raise DatasetNotReady('no source-admitted prospective rows')
     from sentinelops.experiments.local_corpus import clean_source
     clean_source(PROJECT)
     path = store.root/'dataset-freeze.json'

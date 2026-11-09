@@ -102,5 +102,7 @@ publications to notify the maintainers.
    *Done 2026-11-09 (D-23):* H4 passed and the owner approved the list. Entry
    points, handoff, release, parity and the `admitted-local-http` bundle origin
    were removed. Contract v2 and ADR-014 stay in place as superseded records,
-   because ADRs are never deleted. The training capture plan and its admission
-   functions remain for now, because the evaluation capture machinery shares them.
+   because ADRs are never deleted. Step 2 removed the fitting-row path
+   (`admitted_local_rows` and the local branch of `load_training_rows`). The
+   capture plan, admission and freeze stay: they are the data pipeline for the
+   local RCA development evaluation (Q-08) and the evaluation campaigns.
