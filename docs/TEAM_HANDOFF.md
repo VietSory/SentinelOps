@@ -77,8 +77,7 @@ python scripts/validate_contracts.py
 ```sh
 python -m pytest -q tests/test_local_corpus.py tests/test_local_campaign.py tests/test_local_data.py tests/test_local_labels.py tests/test_ml_pipeline.py
 python scripts/capture_local_campaign.py --help
-python scripts/audit_local_corpus.py --help
-python scripts/train_models.py --help
+python -m scripts.train_alibaba --help
 ```
 
 Trước campaign: kiểm tra máy capture, corpus root tuyệt đối, controller/slot đang

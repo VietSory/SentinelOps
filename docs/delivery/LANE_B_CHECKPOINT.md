@@ -136,7 +136,7 @@ phải regression. Cần A hoặc owner rerun. Thuộc scope A, B không chạm.
 | **H1 model** | A đã thu đủ 30 lượt nonfinal, xác minh nguồn, huấn luyện ba service bundle và đóng gói kèm model cards, checksums, evaluation và dependency pins. Gói review đi qua kênh riêng | Khi nhận gói, B kiểm checksum, chạy replay và kiểm telemetry trên môi trường đích. Bật inference khi G3 và source parity được nghiệm thu |
 | **H4 action eligibility** | A cần giao IER/revision cùng RCA đã xác minh trên Kubernetes, đủ freshness, coverage và confidence. Lượt Payment local đã có `RCA_READY`, kết quả vẫn abstain | B có thể chuẩn bị hồ sơ known-good, policy và dry-run. Guard, journal và RBAC đã có. Dispatch chờ H4 đủ điều kiện và phê duyệt operator |
 
-[Hướng dẫn kiểm H1](../runbooks/MODEL_PIPELINE.md#portable-h1-candidate-preparation)
+[Hướng dẫn model hiện hành](../runbooks/MODEL_PIPELINE.md#source-parity-and-serving-release)
 tách kiểm nhận gói, replay, source parity và nghiệm thu G3. [Guard H4](https://github.com/VietSory/SentinelOps/actions/runs/42455708564)
 kiểm tra revision, tham chiếu RCA và health hiện tại trước khi gọi Kubernetes.
 [Runbook H4](../runbooks/CONTROLLED_REMEDIATION.md#kubernetes-incident-evidence-source)
@@ -224,7 +224,7 @@ protocol [`local_model_evaluation_v2.json`](../../configs/local_model_evaluation
 `scripts/audit_detector_events.py`, `scripts/evaluate_detector_events.py` và
 campaign `--plan`. Cách chạy xem
 [corpus runbook](../runbooks/LOCAL_HTTP_CORPUS.md#adr-015-detector-event-epoch-evaluation-only)
-và [model pipeline](../runbooks/MODEL_PIPELINE.md#detector-event-development-protocol-v2-adr-015).
+và [model pipeline](../runbooks/MODEL_PIPELINE.md#evaluation).
 Audit lại toàn bộ corpus đã freeze bằng code mới cho report giống hệt
 `dataset-freeze.json`: 30 run, 3.060 dòng.
 
@@ -257,7 +257,7 @@ Nguyên tắc cho cả hai bên:
 | B-f | **Policy remediation cho EKS** | `Target` đang hardcode namespace `sentinelops-b-actions` | Có policy version mới cho môi trường đích và chạy lại ma trận safety; policy local giữ nguyên |
 
 Đầu ra của B-b là một record `model-source-parity/v1`, theo đúng format trong
-[operator serving release](../runbooks/MODEL_PIPELINE.md#operator-serving-release).
+[operator serving release](../runbooks/MODEL_PIPELINE.md#source-parity-and-serving-release).
 Record này chỉ được ghi `PASS` khi replay và phần đối chiếu telemetry trên môi
 trường đích đều đạt.
 
@@ -270,6 +270,10 @@ Khi owner duyệt G3:
 3. B chạy S2 thật để kiểm H4/G6.
 
 ### 7.5 Chuỗi lệnh đầu–cuối để gỡ H1 và H4
+
+> **Lịch sử.** Chuỗi lệnh này là của candidate local `38bcc766`. Các script của
+> nó đã gỡ ngày 2026-11-09 khi bỏ train trên dữ liệu local; đường hiện hành ở
+> [§7.6](#76-cập-nhật-2026-11-09-model-chính-thức-là-model-alibaba-adr-016).
 
 Các bước có thứ tự. Mỗi bước chỉ chạy khi bước trước đạt. Docker workload chỉ
 chạy khi không có corpus capture nào đang chạy trên host (các script tự kiểm).

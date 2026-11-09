@@ -99,3 +99,8 @@ publications to notify the maintainers.
 5. **Retirement (after the Alibaba release passes H4).** Remove local-corpus
    training code and contract v2, and move ADR-014 to the archive, after the
    owner reviews the file list. The testbed and the evaluation epochs stay.
+   *Done 2026-11-09 (D-23):* H4 passed and the owner approved the list. Entry
+   points, handoff, release, parity and the `admitted-local-http` bundle origin
+   were removed. Contract v2 and ADR-014 stay in place as superseded records,
+   because ADRs are never deleted. The training capture plan and its admission
+   functions remain for now, because the evaluation capture machinery shares them.

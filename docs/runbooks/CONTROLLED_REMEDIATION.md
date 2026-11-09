@@ -546,7 +546,7 @@ python -m scripts.run_s2_h4 --kind /path/to/kind-v0.30.0 --output /new/private/r
 
 - Without a release the result is the no-model path: capture v5,
   `validated-model-and-physical-deployment-change-required` or `rca-abstained`.
-- With a release built by `scripts.build_model_release`, the incident worker
+- With a release built by `scripts.build_alibaba_release`, the incident worker
   emits capture v6. The assessment then reports whether H4 dispatch authority is
   granted and, if not, the exact `missing_reason`.
 

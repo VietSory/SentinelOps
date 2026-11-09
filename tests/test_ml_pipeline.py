@@ -184,63 +184,6 @@ def test_real_inference_rejects_wrong_duration_before_predict(fitted, seconds):
         registry.infer(feature, source_profile='fixture', now=now)
 
 
-@pytest.mark.parametrize('service,features', [('foreign-service', list(FEATURE_KEYS)),
-    ('payment-service', ['cpu_cores', 'memory_bytes', 'network_bytes'])])
-def test_registry_rejects_wrong_route_or_feature_semantics_even_with_version_string(tmp_path, monkeypatch, service, features):
-    from sentinelops.ml import models
-    store = ArtifactStore(tmp_path)
-    from sentinelops.public_data.policy import load_training_policy, policy_hash
-    policy = load_training_policy()
-    manifest = {'origin': 'admitted-local-http', 'bundle_version': 'sentinelops-model/v2', 'model_version': 'fixture', 'ordered_features': features,
-                'provenance': {'service': service, 'feature_set_version': 'http-red-5m/v1',
-                    'training_policy': policy, 'training_data_policy_hash': policy_hash(policy),
-                    'source_profile': policy['sources']['local_http']['source_profile'], 'dataset_ref': 'fixture://routing-test'}}
-    monkeypatch.setattr(models, 'read_bundle_manifest', lambda *a, **k: manifest)
-    evidence = store.write('manifests', {'fixture': True})
-    validation = store.write('manifests', {'model_version': 'fixture', 'G2': 'PASS', 'G3': 'PASS',
-        'source_parity': 'PASS', 'activation_allowed': True, 'evaluation_refs': [evidence],
-        'dataset_ref':'fixture://routing-test', 'training_data_policy_hash':policy_hash(policy)})
-    release = store.write('manifests', {'release_version': 'validated-model-release/v1', 'models': [
-        {'bundle_directory': 'fixture', 'manifest_sha256': 'fixture', 'validation_ref': validation}]})
-    with pytest.raises(IncompatibleFeatures):
-        ModelRegistry.load(store, release)
-
-
-def test_registry_preflights_all_routes_before_loading_weights(tmp_path, monkeypatch):
-    from sentinelops.ml import models
-    from sentinelops.public_data.policy import load_training_policy, policy_hash
-
-    store = ArtifactStore(tmp_path)
-    policy = load_training_policy()
-    digest = policy_hash(policy)
-    dataset_ref = 'fixture://routing-test'
-    model_metadata = {
-        'origin': 'admitted-local-http', 'bundle_version': 'sentinelops-model/v2',
-        'model_version': 'fixture', 'ordered_features': list(FEATURE_KEYS),
-        'provenance': {'feature_set_version': 'http-red-5m/v1',
-            'training_policy': policy, 'training_data_policy_hash': digest,
-            'source_profile': policy['sources']['local_http']['source_profile'], 'dataset_ref': dataset_ref},
-    }
-
-    def read_manifest(directory, **kwargs):
-        return {**model_metadata, 'provenance': {**model_metadata['provenance'], 'service': directory.name}}
-
-    monkeypatch.setattr(models, 'read_bundle_manifest', read_manifest)
-    monkeypatch.setattr(models, 'load_bundle', lambda *a, **k: pytest.fail('rejected release loaded weights'))
-    evidence = store.write('manifests', {'fixture': True})
-    approval = {'model_version': 'fixture', 'G2': 'PASS', 'G3': 'PASS',
-        'source_parity': 'PASS', 'activation_allowed': True, 'evaluation_refs': [evidence],
-        'dataset_ref': dataset_ref, 'training_data_policy_hash': digest}
-    rows = [
-        {'bundle_directory': service, 'manifest_sha256': 'fixture',
-         'validation_ref': store.write('manifests', {**approval, 'G3': g3})}
-        for service, g3 in (('checkout-service', 'PASS'), ('payment-service', 'PENDING'))
-    ]
-    release = store.write('manifests', {'release_version': 'validated-model-release/v1', 'models': rows})
-    with pytest.raises(ModelUnavailable, match='separately accepted G2/G3'):
-        ModelRegistry.load(store, release)
-
-
 def test_v2_risk_anchor_cannot_be_backdated_while_if_window_is_still_fresh(fitted):
     detector, train, _ = fitted
     risk_model = fit_risk(train, (train[:, 0] > 0).astype(int), FEATURE_KEYS)
@@ -260,13 +203,9 @@ def test_v2_risk_anchor_cannot_be_backdated_while_if_window_is_still_fresh(fitte
     assert later['risk_availability']['missing_reason'] == 'forecast-anchor-minute-advanced'
 
 
-def test_local_bundle_cannot_claim_admission_without_original_source(tmp_path,fitted):
-    from sentinelops.public_data.policy import load_training_policy, policy_hash
-    policy = load_training_policy()
-    with pytest.raises(ValueError,match='original-source admission'):
-        save_bundle(tmp_path/'forged-local',fitted[0],provenance={
-            'origin':'admitted-local-http','training_policy':policy,
-            'training_data_policy_hash':policy_hash(policy),'dataset_report':{'training_ready':True}})
+def test_retired_local_origin_cannot_be_written(tmp_path,fitted):
+    with pytest.raises(ValueError,match='admitted-source provenance'):
+        save_bundle(tmp_path/'forged-local',fitted[0],provenance={'origin':'admitted-local-http'})
     assert not (tmp_path/'forged-local').exists()
 
 
@@ -277,5 +216,17 @@ def test_local_origin_cannot_relabel_a_v1_fixture_artifact(tmp_path,fitted):
         {k:v for k,v in manifest.items() if k != 'model_version'})
     path = tmp_path/'fixture-v1/manifest.json'
     path.write_text(json.dumps(manifest))
-    with pytest.raises(ValueError,match='explicit v2 bundle'):
+    with pytest.raises(ValueError,match='retired'):
         load_bundle(path.parent,expected_manifest_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+
+
+def test_only_an_alibaba_release_is_servable(tmp_path, fitted):
+    store = ArtifactStore(tmp_path)
+    manifest = save_bundle(tmp_path/'fixture', fitted[0], provenance={'origin':'fixture-only'})
+    checksum = hashlib.sha256((tmp_path/'fixture/manifest.json').read_bytes()).hexdigest()
+    approval = store.write('manifests', {'model_version': manifest['model_version'], 'G2': 'PASS', 'G3': 'PASS',
+                                         'source_parity': 'PASS', 'activation_allowed': True})
+    release = store.write('manifests', {'release_version': 'validated-model-release/v1', 'models': [
+        {'bundle_directory': 'fixture', 'manifest_sha256': checksum, 'validation_ref': approval}]})
+    with pytest.raises(ModelUnavailable, match='Alibaba'):
+        ModelRegistry.load(store, release)

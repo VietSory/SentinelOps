@@ -50,11 +50,12 @@ cần migration protocol của A; `telemetry/prometheus.py` thuộc A nên B kh�
 gradual (XGBoost AP 0.93–1.00). Owner duyệt thêm epoch S1 lỗi đột ngột chỉ để đánh
 giá, cùng protocol `local-model-development/v2` bên cạnh v1; kết quả v1 giữ nguyên.
 H4 phụ thuộc H1 (`anomaly_strength` của IF). Xem [handoff B](delivery/LANE_B_CHECKPOINT.md#7-handoff-a--b-ngày-2026-11-08-adr-015-và-việc-b-làm-song-song).
-Công cụ cho đường H1 → H4 đã có code nhưng **chưa chạy native**:
-- `build_model_release`: dựng release từ quyết định của owner. Đã chạy thử với gói thật; record parity giả bị từ chối.
-- `check_model_source_parity`: sinh record `model-source-parity/v1`.
-- `run_s2_h4`: dựng S2 trên Kubernetes và đánh giá H4, không dispatch.
-- `g3_review_packet`: tạo hồ sơ G3.
+Ngày 2026-11-09 owner duyệt gỡ đường train trên dữ liệu local. Các công cụ của
+candidate local (`build_model_release`, `check_model_source_parity`,
+`g3_review_packet`, handoff/verify, `train_models`) đã gỡ khỏi code; bằng chứng
+`38bcc766` dưới đây giữ nguyên và tra được trong git history. Đường hiện hành:
+`check_alibaba_source_parity`, `build_alibaba_release`, `run_s2_h4`, `run_g6_trial`
+([model pipeline](runbooks/MODEL_PIPELINE.md#source-parity-and-serving-release)).
 
 Thứ tự chạy ở [§7.5](delivery/LANE_B_CHECKPOINT.md#75-chuỗi-lệnh-đầucuối-để-gỡ-h1-và-h4).
 Chẩn đoán hiện tại: IF báo nhầm trên run healthy vì khoảng p95 healthy của tập

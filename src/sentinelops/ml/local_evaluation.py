@@ -2,18 +2,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
-import hashlib
+from datetime import timedelta
 import json
-from pathlib import Path
-import re
-import subprocess
 
 from sentinelops.contracts import utc_time
-from sentinelops.experiments.local_corpus import PROJECT, clean_source, read_binding
+from sentinelops.experiments.local_corpus import PROJECT
 from sentinelops.ml.readiness import DatasetNotReady
-from sentinelops.telemetry.core import FEATURE_KEYS, FEATURE_SET, stable_id, timestamp
-from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.telemetry.core import FEATURE_KEYS, FEATURE_SET, timestamp
 
 PROTOCOL_PATH = "configs/local_model_evaluation.json"
 
@@ -214,110 +209,3 @@ def predict_windows(development, detector, risk, slope_threshold, protocol):
             slope_flag=bool(values[index][slope_index] > slope_threshold) if risk_available else None)
         records.append(record)
     return records
-
-
-def _verified_candidate(store, dataset_ref, model_root, *, training_manifest_sha256, output, project=PROJECT):
-    """Shared v1/v2 candidate gate: source, freeze, rows, protocol, thresholds and bytes."""
-    from sentinelops.ml.local_data import admitted_local_evaluation_rows
-    report = store.read(dataset_ref)
-    rows, cases = admitted_local_evaluation_rows(store, report)
-    try:
-        frozen_ref, frozen = read_binding(store, store.root / "dataset-freeze.json")
-    except FileNotFoundError as exc:
-        raise DatasetNotReady("development evaluation requires a frozen admission") from exc
-    if frozen_ref != dataset_ref or frozen != report:
-        raise DatasetNotReady("evaluation dataset differs from the immutable admission freeze")
-    evaluation_commit = clean_source(project)
-    protocol = load_protocol(project)
-    model_root, output = Path(model_root), Path(output)
-    if output.exists():
-        raise FileExistsError("evaluation output must be new")
-    training_bytes = (model_root / "training-manifest.json").read_bytes()
-    if not re.fullmatch("[0-9a-f]{64}", training_manifest_sha256) or hashlib.sha256(training_bytes).hexdigest() != training_manifest_sha256:
-        raise ValueError("trusted training manifest checksum mismatch")
-    training = json.loads(training_bytes)
-    if (training.get("training_manifest_version") != "local-http-fit/v1" or training.get("dataset_ref") != dataset_ref
-        or training.get("activation_allowed") is not False or training.get("holdout_opened") is not False
-        or len(training["models"]) != len(report["services"])
-        or {m["service"] for m in training["models"]} != set(report["services"])):
-        raise ValueError("training candidate differs from admitted service/dataset scope")
-    from sentinelops.ml.models import load_bundle
-    import numpy as np
-    verified = []
-    for service in report["services"]:
-        directory = model_root / stable_id(service)
-        if directory.is_symlink() or not directory.resolve().is_relative_to(model_root.resolve()):
-            raise ValueError("model directory escapes trusted candidate root")
-        data = (directory / "manifest.json").read_bytes()
-        manifest = json.loads(data)
-        provenance = manifest["provenance"]
-        train = [r for r in rows if r["service"] == service and r["split"] == "train"]
-        calibration = [r for r in rows if r["service"] == service and r["split"] == "calibration" and r["healthy"]]
-        risk_train = [r for r in train if type(r["risk_label"]) is int and r["risk_label"] in (0, 1)]
-        selected = next(m for m in training["models"] if m["service"] == service)
-        if (manifest["bundle_version"] != "sentinelops-model/v2" or manifest["origin"] != "admitted-local-http"
-            or manifest["model_version"] != selected["model_version"] or provenance["dataset_ref"] != dataset_ref
-            or provenance["dataset_report"] != report or provenance["service"] != service
-            or provenance["source_profile"] != protocol["source_profile"] or provenance["feature_set_version"] != FEATURE_SET
-            or manifest["ordered_features"] != list(FEATURE_KEYS) or provenance["risk_horizon_seconds"] != 300
-            or provenance["training_rows_sha256"] != stable_id(train)
-            or provenance["calibration_rows_sha256"] != stable_id(calibration)
-            or provenance["risk_training_rows_sha256"] != stable_id(risk_train)
-            or manifest["risk_thresholds"]["degrading"] != protocol["risk_threshold"]):
-            raise ValueError("model fitting rows, source or frozen thresholds differ")
-        fitting = provenance["fitting_source_commit"]
-        if not isinstance(fitting, str) or not re.fullmatch("[0-9a-f]{40}", fitting):
-            raise ValueError("model lacks a valid fitting source identity")
-        declared = subprocess.check_output(["git", "show", fitting + ":" + PROTOCOL_PATH], cwd=project)
-        if json.loads(declared) != protocol:
-            raise ValueError("evaluation protocol was not frozen before candidate fitting")
-        digest = hashlib.sha256(data).hexdigest()
-        _, detector, risk = load_bundle(directory, expected_manifest_sha256=digest)
-        if risk is None:
-            raise ValueError("candidate lacks its required risk estimator")
-        cal = [r["features"] for r in calibration]
-        raw_cal = detector.raw_scores(cal)
-        if any(not np.isclose(detector.thresholds[k], np.quantile(v, 1-protocol["false_alert_budget"], method="higher"), rtol=0, atol=1e-12)
-               for k, v in raw_cal.items()):
-            raise ValueError("detector thresholds differ from the predeclared shared calibration budget")
-        slope_index = list(FEATURE_KEYS).index(protocol["slope_feature"])
-        slope_threshold = float(np.quantile([max(0., r["features"][slope_index]) for r in calibration],
-                                          1-protocol["false_alert_budget"], method="higher"))
-        verified.append({"service": service, "manifest": manifest, "digest": digest, "detector": detector,
-                         "risk": risk, "slope_threshold": slope_threshold, "calibration_windows": len(calibration)})
-    return report, rows, cases, protocol, evaluation_commit, verified
-
-
-def evaluate_local_models(store, dataset_ref, model_root, *, training_manifest_sha256, output, project=PROJECT):
-    """Gate original source before numerical imports, pickle, predictions or output."""
-    output = Path(output)
-    report, rows, cases, protocol, evaluation_commit, verified = _verified_candidate(
-        store, dataset_ref, model_root, training_manifest_sha256=training_manifest_sha256, output=output, project=project)
-    comparisons, predictions, pins = {}, [], []
-    for item in verified:
-        service, manifest, digest = item["service"], item["manifest"], item["digest"]
-        detector, risk, slope_threshold = item["detector"], item["risk"], item["slope_threshold"]
-        development = [r for r in rows if r["service"] == service and r["split"] == "development-validation"]
-        records = predict_windows(development, detector, risk, slope_threshold, protocol)
-        development_cases = [c for c in cases if c["role"] == "development-validation"]
-        comparisons[service] = {"metrics": summarize(records, development_cases, service, protocol),
-            "uncertainty": paired_group_intervals(records, development_cases, service, protocol),
-            "development_windows": len(records), "development_groups": len({r["group_id"] for r in records}),
-            "calibration_windows": item["calibration_windows"], "slope_threshold": slope_threshold}
-        predictions.extend(records)
-        pins.append({"service": service, "model_version": manifest["model_version"], "manifest_sha256": digest})
-    result = {"evaluation_version": "local-model-development/v1", "dataset_ref": dataset_ref, "models": pins,
-        "source_profile": report["source_profile"], "feature_set_version": report["feature_set_version"],
-        "training_data_policy_hash": report["training_data_policy_hash"],
-        "training_manifest_sha256": training_manifest_sha256, "evaluation_source_commit": evaluation_commit,
-        "protocol": protocol, "protocol_sha256": stable_id(protocol), "evaluated_at": timestamp(datetime.now(timezone.utc)),
-        "services": comparisons, "activation_allowed": False, "holdout_opened": False, "G3_accepted": False,
-        "limitations": ["Development only; no final holdout or production generalization claim.",
-            "Event metrics and precursor leads use recorded feature cutoffs with instantaneous counterfactual inference, not historical alert emission.",
-            "Shared calibration-window budget is not proof of matched event-level false-alert budgets.",
-            "Live inference timing, parity and all remaining gates require separate evidence."]}
-    output.mkdir(parents=True, exist_ok=False)
-    destination = ArtifactStore(output)
-    result["predictions_ref"] = destination.write("manifests", {"table_version": "local-development-predictions/v1", "rows": predictions})
-    reference = destination.write("manifests", result)
-    return {"report_ref": reference, "activation_allowed": False, "holdout_opened": False, "G3_accepted": False}

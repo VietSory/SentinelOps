@@ -1,5 +1,10 @@
 # Prospective local HTTP corpus — ADR-014
 
+> **Retired for training (2026-11-09, owner approval, ADR-016).** This corpus
+> machinery now captures evaluation epochs only (ADR-015 detector events, ADR-016
+> layer 2). Training admission and fitting from local data were removed; the
+> sections below that describe them are historical.
+
 Owner approval on 2026-10-31 accepts [ADR-014](../adr/ADR-014-proposed-local-training-evidence.md).
 [Training contract v2](../../configs/training_data_contract_v2.json) governs new prospective fitting.
 The original v1 contract/schema and source hashes remain historical reproduction inputs.
@@ -115,8 +120,6 @@ corroborated actual gradual control steps; controls are never model features.
 ```sh
 python scripts/inspect_local_capture.py --root artifacts/local-http-corpus-v1 \
   --slot train-01-healthy
-python scripts/audit_local_corpus.py --root artifacts/local-http-corpus-v1 \
-  --output artifacts/local-http-corpus-v1/admission.json
 ```
 
 Only a fully reverified READY_FOR_FITTING report may use `--freeze`. The exclusive

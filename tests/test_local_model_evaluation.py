@@ -1,17 +1,13 @@
 """Numerical fixtures exercise evaluation software, never source admission or G3."""
 from copy import deepcopy
 import json
-from pathlib import Path
-import sys
-from types import SimpleNamespace
 
 import pytest
 
 from sentinelops.ml.local_evaluation import (
-    evaluate_local_models, load_protocol, paired_group_intervals, persistent_states, risk_curve, summarize,
+    load_protocol, paired_group_intervals, persistent_states, risk_curve, summarize,
 )
 from sentinelops.ml.readiness import DatasetNotReady
-from sentinelops.telemetry.store import ArtifactStore
 
 
 def at(minute, second=0):
@@ -143,22 +139,6 @@ def test_group_bootstrap_is_paired_reproducible_and_rejects_window_pseudoreplica
         paired_group_intervals(records, cases, "payment-service", protocol)
 
 
-@pytest.mark.parametrize("forged_ready", [False, True])
-def test_unadmitted_corpus_cannot_deserialize_models_or_create_output(tmp_path, monkeypatch, forged_ready):
-    store = ArtifactStore(tmp_path/"source")
-    report = {"dataset_version": "local-http-admission/v1", "training_ready": forged_ready,
-              "created_at": "2026-11-01T00:00:00Z"}
-    reference = store.write("manifests", report)
-    def forbidden(*args, **kwargs):
-        pytest.fail("model bytes must not be read before original-source admission")
-    monkeypatch.setitem(sys.modules, "sentinelops.ml.models", SimpleNamespace(load_bundle=forbidden))
-    output = tmp_path/"evaluation"
-    with pytest.raises(DatasetNotReady):
-        evaluate_local_models(store, reference, tmp_path/"missing-models",
-                              training_manifest_sha256="0"*64, output=output)
-    assert not output.exists()
-
-
 @pytest.mark.parametrize("labels,scores", [([0, 1], [.1]), ([0, True], [.1, .9]),
                                          ([0, 2], [.1, .9]), ([0, 1], [.1, float("nan")])])
 def test_invalid_risk_curve_inputs_never_produce_a_quality_score(labels, scores):
@@ -173,18 +153,6 @@ def test_persistence_rejects_backward_decision_time_without_backdating():
     with pytest.raises(ValueError, match="clocks"):
         persistent_states(rows, "flag", load_protocol())
 
-
-def test_evaluation_requires_freeze_even_after_reader_verifies_source(tmp_path, monkeypatch):
-    from sentinelops.ml import local_data
-    store = ArtifactStore(tmp_path/"source")
-    report = {"dataset_version": "local-http-admission/v1", "training_ready": True}
-    ref = store.write("manifests", report)
-    # Test double isolates the freeze boundary; this is not a source certificate.
-    monkeypatch.setattr(local_data, "admitted_local_evaluation_rows", lambda *_: ([], []))
-    with pytest.raises(DatasetNotReady, match="frozen admission"):
-        evaluate_local_models(store, ref, tmp_path/"models", training_manifest_sha256="0"*64,
-                              output=tmp_path/"evaluation")
-    assert not (tmp_path/"evaluation").exists()
 
 def test_constant_risk_scores_do_not_beat_prevalence_under_primary_ap():
     pytest.importorskip("sklearn")
@@ -219,22 +187,6 @@ def test_numeric_prediction_uses_only_features_and_preserves_unavailable_clock_r
     assert first[1]["xgboost_flag"] is None and first[1]["isolation_forest_flag"] is not None
     assert first[2]["xgboost_flag"] is None and first[2]["isolation_forest_flag"] is None
     assert detector.thresholds == frozen
-
-
-def test_cli_reports_blocked_without_model_load_or_output(tmp_path):
-    import subprocess
-    store = ArtifactStore(tmp_path/"source")
-    ref = store.write("manifests", {"dataset_version": "local-http-admission/v1", "training_ready": False})
-    output = tmp_path/"evaluation"
-    completed = subprocess.run([sys.executable, "-m", "scripts.evaluate_local_models",
-        "--store", str(store.root), "--dataset-ref", ref, "--models", str(tmp_path/"not-a-model"),
-        "--training-manifest-sha256", "0"*64, "--output", str(output)],
-        cwd=Path(__file__).parents[1], capture_output=True, text=True, timeout=30)
-    assert completed.returncode == 2
-    result = json.loads(completed.stdout)
-    assert result["status"] == "BLOCKED" and result["models_fitted"] == 0
-    assert not result["holdout_opened"] and not result["activation_allowed"] and not result["G3_accepted"]
-    assert not output.exists()
 
 
 @pytest.mark.parametrize("first_true,second,lead,qualified", [

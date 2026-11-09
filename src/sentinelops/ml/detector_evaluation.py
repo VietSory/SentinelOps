@@ -1,26 +1,23 @@
 """ADR-015 development protocol v2: detector events from abrupt runs beside v1.
 
-Nothing here fits, refits, recalibrates or thresholds a model. The unchanged v1
-candidate gate is reused; v1 gradual results are recomputed and reported as-is.
-Abrupt detector events come from a separate evaluation-only epoch whose plan and
-this protocol were committed before its first registration.
+Nothing here fits, refits, recalibrates or thresholds a model. Abrupt detector
+events come from a separate evaluation-only epoch whose plan and this protocol
+were committed before its first registration. The local-candidate evaluator that
+used these functions was retired with local-data training (ADR-016).
 """
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 import json
-from pathlib import Path
 import subprocess
 
 from sentinelops.contracts import utc_time
-from sentinelops.experiments.local_corpus import PROJECT, is_detector_plan, load_plan
+from sentinelops.experiments.local_corpus import PROJECT
 from sentinelops.ml.evaluation import event_metrics
-from sentinelops.ml.local_evaluation import (PROTOCOL_PATH, _verified_candidate, load_protocol,
-    persistent_states, predict_windows, summarize)
+from sentinelops.ml.local_evaluation import PROTOCOL_PATH, load_protocol, persistent_states
 from sentinelops.ml.readiness import DatasetNotReady
 from sentinelops.telemetry.core import stable_id, timestamp
-from sentinelops.telemetry.store import ArtifactStore
 
 PROTOCOL_V2_PATH = "configs/local_model_evaluation_v2.json"
 DETECTORS = ("isolation_forest", "median_mad")
@@ -137,60 +134,3 @@ def require_frozen_before_capture(store, project=PROJECT):
                 raise DatasetNotReady("detector protocol/plan was not committed before capture") from exc
             if json.loads(declared) != value:
                 raise DatasetNotReady("detector protocol/plan changed after capture registration")
-
-
-def evaluate_detector_events(store, dataset_ref, model_root, *, training_manifest_sha256, detector_store,
-                             detector_report_ref, output, project=PROJECT):
-    from sentinelops.ml.local_data import detector_evaluation_inventory
-    output = Path(output)
-    protocol_v2, protocol = load_protocol_v2(project)
-    plan = load_plan(Path(project) / "configs/local_http_detector_events_plan.json")
-    if not is_detector_plan(plan):
-        raise ValueError("detector-event evaluation requires the ADR-015 plan")
-    detector_report = detector_store.read(detector_report_ref)
-    abrupt_rows, abrupt_cases = detector_evaluation_inventory(detector_store, plan, detector_report, project=project)
-    require_frozen_before_capture(detector_store, project)
-    report, rows, cases, base, evaluation_commit, verified = _verified_candidate(
-        store, dataset_ref, model_root, training_manifest_sha256=training_manifest_sha256, output=output, project=project)
-    if stable_id(base) != protocol_v2["base_protocol_sha256"]:
-        raise ValueError("candidate gate used a different base protocol")
-    if detector_report["source_profile"] != report["source_profile"] or detector_report["feature_set_version"] != report["feature_set_version"]:
-        raise ValueError("detector-event epoch differs from the candidate source/feature profile")
-    services, predictions, pins = {}, [], []
-    gradual_cases = [c for c in cases if c["role"] == "development-validation"]
-    for item in verified:
-        service = item["service"]
-        args = (item["detector"], item["risk"], item["slope_threshold"], protocol)
-        gradual = predict_windows([r for r in rows if r["service"] == service and r["split"] == "development-validation"], *args)
-        abrupt = predict_windows([r for r in abrupt_rows if r["service"] == service], *args)
-        v1 = summarize(gradual, gradual_cases, service, protocol)["counterfactual_detector_events"]
-        services[service] = {
-            "abrupt_detector_events": detector_summary(abrupt, abrupt_cases, service, protocol),
-            "abrupt_uncertainty": paired_detector_interval(abrupt, abrupt_cases, service, protocol),
-            "gradual_detector_events_v1": v1,
-            "gradual_detector_events_precursor_separated": detector_summary(gradual, gradual_cases, service, protocol,
-                                                                            separate_precursor=True),
-            "abrupt_windows": len(abrupt), "abrupt_groups": len({r["group_id"] for r in abrupt}),
-            "gradual_windows": len(gradual)}
-        predictions.extend({**r, "evaluation_epoch": "abrupt"} for r in abrupt)
-        pins.append({"service": service, "model_version": item["manifest"]["model_version"], "manifest_sha256": item["digest"]})
-    result = {"evaluation_version": "local-model-development/v2", "authorizing_adr": "ADR-015",
-        "dataset_ref": dataset_ref, "detector_report_ref": detector_report_ref, "models": pins,
-        "source_profile": report["source_profile"], "feature_set_version": report["feature_set_version"],
-        "training_data_policy_hash": report["training_data_policy_hash"],
-        "training_manifest_sha256": training_manifest_sha256, "evaluation_source_commit": evaluation_commit,
-        "protocol": protocol_v2, "base_protocol": protocol, "protocol_sha256": stable_id(protocol_v2),
-        "evaluated_at": timestamp(datetime.now(timezone.utc)), "services": services,
-        "activation_allowed": False, "holdout_opened": False, "G3_accepted": False,
-        "limitations": ["Development only; no final holdout or production generalization claim.",
-            "Abrupt events are prospective evaluation-only groups captured after this protocol was committed.",
-            "Gradual results reuse previously inspected development groups; precursor-separated accounting on them is not independent evidence.",
-            "Event metrics use recorded feature cutoffs with instantaneous counterfactual inference, not historical alert emission.",
-            "Risk/XGBoost evidence remains the v1 gradual protocol; abrupt runs supply no precursor labels.",
-            "Live inference timing, parity and all remaining gates require separate evidence."]}
-    output.mkdir(parents=True, exist_ok=False)
-    destination = ArtifactStore(output)
-    result["predictions_ref"] = destination.write("manifests", {"table_version": "local-detector-event-predictions/v1",
-                                                                "rows": predictions})
-    reference = destination.write("manifests", result)
-    return {"report_ref": reference, "activation_allowed": False, "holdout_opened": False, "G3_accepted": False}

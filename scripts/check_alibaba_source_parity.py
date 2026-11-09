@@ -35,13 +35,14 @@ import math
 from pathlib import Path
 import signal
 import subprocess
+from uuid import uuid4
 
 import httpx
 
 from scripts.check_kubernetes_testbed import BusinessSandbox, pod_samples
-from scripts.check_model_source_parity import FIRST_AGE, COUNT_TOLERANCE, drive, exact_logs, utcnow
-from scripts.kubernetes_testbed import SERVICES
+from scripts.kubernetes_testbed import NAMESPACE, SERVICES
 from scripts.run_s2_h4 import clean_commit, deploy, emit, wait_ready
+from sentinelops.experiments.traffic import PATHS
 from sentinelops.ml.release import PARITY_VERIFICATION_VERSION, PARITY_VERSION, parity_verification_ref
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.pipeline import process_captures
@@ -49,8 +50,62 @@ from sentinelops.telemetry.prometheus import REQUESTS, SOURCE_PROFILE_V2, Promet
 from sentinelops.telemetry.store import ArtifactStore
 
 CRITERIA_VERSION = 'alibaba-parity-criteria/v1'
+FIRST_AGE = 35
+COUNT_TOLERANCE = .05
 MEAN_TOLERANCE = .10
 PROJECT = Path(__file__).resolve().parents[1]
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+async def drive(client, targets, stop):
+    rows = []
+
+    async def request(service, url):
+        trace, correlation = uuid4().hex, 'parity-' + uuid4().hex
+        method, _ = BUSINESS_ROUTES[service]
+        body = ({'sku': 'sku-001', 'quantity': 1, 'amount': 9.9} if service == 'checkout-service'
+                else {'order_id': 'direct-' + uuid4().hex, 'amount': 9.9, 'currency': 'USD'} if service == 'payment-service' else None)
+        started = utcnow()
+        response = await client.request(method, url + PATHS[service], json=body,
+            headers={'x-correlation-id': correlation, 'traceparent': f'00-{trace}-{uuid4().hex[:16]}-01'})
+        if (response.status_code != 200 or response.headers.get('x-trace-id') != trace
+                or response.headers.get('x-correlation-id') != correlation):
+            raise ValueError(f'unexpected healthy response on {service}: {response.status_code}')
+        rows.append({'request_entry_service': service, 'trace_id': trace, 'correlation_id': correlation,
+                     'started_at': timestamp(started), 'completed_at': timestamp(utcnow())})
+
+    loop = asyncio.get_running_loop()
+    tick = loop.time()
+    while utcnow() < stop:
+        await asyncio.gather(*(request(s, u) for s, u in targets.items()))
+        tick += 1
+        await asyncio.sleep(max(0, tick - loop.time()))
+    return rows
+
+
+def exact_logs(sandbox, inventory, rows, ends):
+    start_ms, stop_ms = int((ends[0] - timedelta(minutes=1)).timestamp() * 1000), int(ends[-1].timestamp() * 1000)
+    clients = {row['correlation_id']: row for row in rows}
+    selected = []
+    for service in SERVICES:
+        method, route = BUSINESS_ROUTES[service]
+        for line in sandbox.kubectl('-n', NAMESPACE, 'logs', 'deployment/' + service).decode().splitlines():
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            if (item.get('event') != 'request_completed' or (item.get('method'), item.get('route')) != (method, route)
+                    or not start_ms < item['timestamp_unix_ms'] <= stop_ms):
+                continue
+            client = clients.get(item['correlation_id'])
+            if (client is None or item['trace_id'] != client['trace_id'] or item['k8s.pod.uid'] != inventory[service]['pod_uid']
+                    or item['status_code'] != 200 or not math.isfinite(item['duration_ms']) or item['duration_ms'] < 0):
+                raise ValueError('server completion does not resolve to its client, pod, route and status')
+            selected.append(item)
+    return selected
 
 
 def verify_bundle(bundle, manifest_sha256):

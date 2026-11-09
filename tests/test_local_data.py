@@ -52,16 +52,6 @@ def test_sealed_registration_metadata_never_opens_raw_final_refs(tmp_path):
     assert report['registered_groups'] == 0
 
 
-def test_local_report_cannot_fit_or_write_artifacts_before_g2(tmp_path):
-    pytest.importorskip('numpy'); pytest.importorskip('sklearn'); pytest.importorskip('xgboost')
-    from sentinelops.ml.models import train_local_http
-    store = ArtifactStore(tmp_path/'corpus')
-    report, _, _ = audit_local_corpus(store)
-    ref = store.write('manifests',report)
-    with pytest.raises(DatasetNotReady): train_local_http(store,ref,tmp_path/'model')
-    assert not (tmp_path/'model').exists()
-
-
 def test_verified_features_do_not_read_future_observations_or_backdate_availability(tmp_path):
     from datetime import timedelta
     from test_phase_incident_projection import source_fixture

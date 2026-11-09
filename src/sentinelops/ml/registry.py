@@ -14,7 +14,7 @@ from pathlib import Path
 
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.ml.alibaba_bundle import BUNDLE_VERSION as ALIBABA_BUNDLE_VERSION
-from sentinelops.telemetry.core import BUSINESS_ROUTES, FEATURE_KEYS, FEATURE_SET, stable_id
+from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 
@@ -56,9 +56,6 @@ class ModelRegistry:
             raise ValueError("unsupported model release ledger")
         from sentinelops.ml.models import load_bundle, read_bundle_manifest
 
-        # Check every route before loading any estimator. One invalid approval
-        # rejects the release without deserializing even an earlier valid route.
-        approved = {}
         for item in release["models"]:
             directory = (store.root / item["bundle_directory"]).resolve()
             if not directory.is_relative_to(store.root):
@@ -88,34 +85,10 @@ class ModelRegistry:
                 registry.identity = release_ref
                 registry.is_alibaba = True
                 return registry
-            if (manifest["origin"] != "admitted-local-http" or manifest.get("bundle_version") != "sentinelops-model/v2"
-                or approval.get("model_version") != manifest["model_version"]
-                or approval.get("G2") != "PASS" or approval.get("G3") != "PASS" or approval.get("source_parity") != "PASS"
-                or approval.get("activation_allowed") is not True or not approval.get("evaluation_refs")
-                or approval.get("dataset_ref") != manifest["provenance"].get("dataset_ref")
-                or approval.get("training_data_policy_hash") != manifest["provenance"].get("training_data_policy_hash")):
-                raise ModelUnavailable("model lacks separately accepted G2/G3 and live source compatibility")
-            for ref in approval["evaluation_refs"]:
-                store.read(ref)
-            provenance = manifest["provenance"]
-            validate_payload("training-data-policy-v2.schema.json", provenance.get("training_policy", {}))
-            from sentinelops.public_data.policy import policy_hash
-            if provenance.get("training_data_policy_hash") != policy_hash(provenance["training_policy"]):
-                raise IncompatibleFeatures("model training source differs from its approved contract")
-            service = provenance["service"]
-            if (service not in BUSINESS_ROUTES or service in approved
-                or provenance["feature_set_version"] != FEATURE_SET
-                or set(manifest["ordered_features"]) != set(FEATURE_KEYS)
-                or provenance.get("source_profile") != provenance["training_policy"]["sources"]["local_http"]["source_profile"]):
-                raise IncompatibleFeatures("duplicate model route or incompatible live feature set")
-            approved[service] = (directory, item["manifest_sha256"], item["validation_ref"])
-
-        registry = cls()
-        for service, (directory, checksum, validation_ref) in approved.items():
-            manifest, detector, risk = load_bundle(directory, expected_manifest_sha256=checksum)
-            registry._models[service] = (manifest, detector, risk, validation_ref)
-        registry.identity = release_ref
-        return registry
+            # Local-data bundles were retired with ADR-016 (2026-11-09): only the
+            # shared Alibaba bundle above can form a servable release.
+            raise ModelUnavailable("only an accepted ADR-016 Alibaba release is servable")
+        raise ModelUnavailable("model release has no servable route")
 
     @property
     def available(self):
