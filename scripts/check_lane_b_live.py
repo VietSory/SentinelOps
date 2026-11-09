@@ -183,7 +183,7 @@ async def run(epoch=None, source_profile=None):
                 measured.append({'incident_id':row['incident_id'],'revisions':row['revisions'],'api_revision':envelope['revision'],
                     'availability':envelope['context']['availability'],'lifecycle':envelope['context']['lifecycle_stage']})
             if not measured or any(item['revisions']<2 for item in measured): raise ValueError('no new enriched source-backed B incident reached the API')
-            if await current_consumer(connection, epoch=epoch) != consumer:
+            if await current_consumer(connection, epoch=epoch, source_profile=source_profile) != consumer:
                 raise ValueError('current health source changed during B workload; results preserved')
             metadata.update(status='PASS',ended_at=now(),consumer_id=consumer,incidents=measured,
                 model_dependency=(await client.get('http://127.0.0.1:18000/ready')).json()['dependencies']['model'])
