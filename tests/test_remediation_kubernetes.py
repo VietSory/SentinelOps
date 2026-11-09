@@ -4,8 +4,8 @@ from copy import deepcopy
 from dataclasses import replace
 import json
 from pathlib import Path
-import ssl
 
+import certifi
 import httpx
 import pytest
 
@@ -48,7 +48,9 @@ def api_objects():
 def client(tmp_path, handler):
     token = tmp_path/'token'; token.write_text('fixture-private-token-'+'x'*32); token.chmod(0o600)
     ca = tmp_path/'ca.crt'
-    ca.write_text(ssl.DER_cert_to_PEM_cert(ssl.create_default_context().get_ca_certs(binary_form=True)[0]))
+    # A real, parseable CA bundle that exists on every host (certifi ships with httpx);
+    # the system store can be empty in a venv, which made this fixture host-dependent.
+    ca.write_bytes(Path(certifi.where()).read_bytes())
     return LocalKubernetes('https://127.0.0.1:6443', TARGET, token_file=token, ca_file=ca,
                            transport=httpx.MockTransport(handler))
 
