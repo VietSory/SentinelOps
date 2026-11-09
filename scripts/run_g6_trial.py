@@ -67,6 +67,7 @@ WRITER_DSN_PREFIX = 'postgresql://control_writer:local-control-writer@127.0.0.1:
 APPROVAL_WAIT_SECONDS = 1800
 ACTION_DEADLINE_SECONDS = 900
 TERMINAL = ('recovered', 'escalated', 'blocked')
+FAILED_VERIFY_SCENARIO = 'commerce-db-unavailable-after-rollback'
 PENDING_AUDIT = 'action-audit-pending.json'
 
 
@@ -142,7 +143,8 @@ async def resilient_traffic(client, sandbox, urls, stop_event, phase):
     attempt = 0
     while not stop_event.is_set():
         try:
-            await drive(client, urls, clock() + timedelta(seconds=30), phase['bad'])
+            await drive(client, urls, clock() + timedelta(seconds=30), phase['bad'],
+                        dependency_outage=lambda: phase.get('outage', False))
         except (httpx.HTTPError, ValueError) as exc:
             emit('traffic-interrupted', reason=type(exc).__name__, bad=phase['bad'])
             for _ in range(24):  # up to ~2 min of rollout (maxSurge 0 leaves a gap)
@@ -271,6 +273,7 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                                             policy, rca_policy, enabled=lambda: not (root / 'KILL_SWITCH').exists())
                 deadline = clock() + timedelta(seconds=ACTION_DEADLINE_SECONDS)
                 state = None
+                dependency_broken = False
                 async def trial_incident():
                     # Only the incident whose verified evidence binds THIS observed change.
                     async with pool.acquire() as conn:
@@ -310,6 +313,16 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                     else:
                         state = await executor.reconcile(state['action_id'])
                         emit('action-state', phase=state['phase'])
+                    if args.failed_verify_scenario and not dependency_broken and state['phase'] == 'verifying':
+                        # Negative Q-09 path: the rollback is dispatched, but a second, independent
+                        # cause (commerce DB outage) keeps Payment unhealthy, so verification must fail.
+                        phase['outage'] = True
+                        await asyncio.to_thread(sandbox.kubectl, '-n', NAMESPACE, 'scale', 'deployment/postgres',
+                                                '--replicas=0')
+                        dependency_broken = True
+                        report['phases'].append({'dependency_broken_at': str(clock()),
+                                                 'scenario': FAILED_VERIFY_SCENARIO})
+                        emit('dependency-broken', scenario=FAILED_VERIFY_SCENARIO)
                     if state['phase'] in TERMINAL:
                         break
                     await asyncio.sleep(5)
@@ -365,6 +378,9 @@ def main():
     parser.add_argument('--approver', required=True, help='Operator identity that must sign the known-good ledger')
     parser.add_argument('--enable-rollback-policy', action='store_true',
                         help='Without it the executor records a blocked intent and never patches')
+    parser.add_argument('--failed-verify-scenario', action='store_true',
+                        help='Negative Q-09 trial: after dispatch, scale the in-cluster commerce PostgreSQL to zero; '
+                             'expected outcome escalated with a complete audit')
     args = parser.parse_args()
     commit = clean_commit()
     registry = ModelRegistry.load(ArtifactStore(args.model_store), args.model_release_ref)
@@ -394,7 +410,9 @@ def main():
         report = asyncio.run(trial(sandbox, dsn, port, password, bad, registry, args))
         result = {'version': 'g6-local-trial/v1', 'source_commit': commit, 'healthy_image': images['application'],
                   'bad_image': bad, 'model_release_ref': args.model_release_ref, **report,
-                  'policy_enabled': args.enable_rollback_policy, 'G6_accepted': False}
+                  'policy_enabled': args.enable_rollback_policy,
+                  'scenario': FAILED_VERIFY_SCENARIO if args.failed_verify_scenario else 'golden-path',
+                  'G6_accepted': False}
         (root / 'verification.json').write_text(json.dumps(result, indent=2, default=str) + '\n')
         emit('g6-trial-complete', action_outcome=report.get('action_outcome'), report=str(root / 'verification.json'))
         if report.get('failure'):

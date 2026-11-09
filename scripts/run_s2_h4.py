@@ -175,8 +175,12 @@ async def wait_ready(client, url):
     raise RuntimeError('private Kubernetes port forward is not ready')
 
 
-async def drive(client, urls, stop, bad):
-    """One request per second per entry; direct Payment/Inventory must stay 200."""
+async def drive(client, urls, stop, bad, *, dependency_outage=lambda: False):
+    """One request per second per entry; direct Payment/Inventory must stay 200.
+
+    ``dependency_outage()`` turns true only just before a deliberate G6 negative-path
+    DB outage; from then on every entry may also return a server error.
+    """
     loop = asyncio.get_running_loop()
     deadline = loop.time()
     grace = deadline + 25
@@ -192,6 +196,8 @@ async def drive(client, urls, stop, bad):
         wanted = (200,)
         if bad and service == 'checkout-service':
             wanted = (200, 502, 504) if loop.time() < grace else (200, 504)
+        if dependency_outage():
+            wanted = (200, 500, 502, 503, 504)
         if (response.status_code not in wanted or response.headers.get('x-trace-id') != trace
                 or response.headers.get('x-correlation-id') != correlation):
             raise ValueError(f'{service} returned {response.status_code}, expected {wanted}')

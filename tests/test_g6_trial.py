@@ -44,3 +44,29 @@ def test_cancelled_trial_keeps_database_when_audit_is_pending(tmp_path, monkeypa
         assert any(call.args[0] == 'control-db-retained-for-audit' for call in run_g6_trial.emit.call_args_list)
     else:
         sandbox.docker.assert_called_with('rm', '-f', '-v', 'owned-db')
+
+
+def test_dependency_outage_flag_is_read_per_request(monkeypatch):
+    from scripts import run_s2_h4
+    responses = iter([500, 200])
+    outage = {'on': False}
+
+    class Response:
+        def __init__(self, code, trace, correlation):
+            self.status_code, self.headers = code, {'x-trace-id': trace, 'x-correlation-id': correlation}
+
+    class Client:
+        async def request(self, method, url, json=None, headers=None):
+            trace = headers['traceparent'].split('-')[1]
+            return Response(next(responses), trace, headers['x-correlation-id'])
+
+    from datetime import timedelta
+    start = run_s2_h4.clock()
+    with pytest.raises(ValueError):
+        asyncio.run(run_s2_h4.drive(Client(), {'payment-service': 'http://p'}, start + timedelta(seconds=1), False,
+                                    dependency_outage=lambda: outage['on']))
+    responses = iter([500])
+    outage['on'] = True
+    counts = asyncio.run(run_s2_h4.drive(Client(), {'payment-service': 'http://p'}, run_s2_h4.clock() + timedelta(seconds=0.5),
+                                         False, dependency_outage=lambda: outage['on']))
+    assert counts['payment-service'] == {'500': 1}
