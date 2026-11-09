@@ -44,7 +44,7 @@ Q-04 is defined on local S1–S4 scenarios and is measured in layer 2, not here.
 
 ## Local development evidence — ADR-015 detector epoch (p95 fallback)
 
-`scripts/evaluate_alibaba_local.py` (commit `c2006ee`) scored det-01..05 with
+`scripts/evaluate_alibaba_legacy_p95.py` (commit `c2006ee`) scored det-01..05 with
 p95 in place of mean latency, because profile v1 has no `_sum`.
 
 | Service | IF TP/FP/FN | MAD TP/FP/FN | IF false incidents per healthy hour |
