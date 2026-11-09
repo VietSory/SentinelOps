@@ -52,3 +52,23 @@ def test_tampered_v3_bundle_is_rejected(tmp_path):
         load_bundle(tmp_path / 'bundle', expected_manifest_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
     with pytest.raises(FileExistsError):
         package_fit(tmp_path / 'fit', tmp_path / 'bundle')
+
+
+def test_local_epoch_pins_ali_bundle_and_rejects_changed_artifact(tmp_path):
+    from sentinelops.experiments.local_campaign import register_alibaba_epoch
+    from sentinelops.experiments.local_corpus import ALIBABA_PLAN, load_plan, read_alibaba_epoch
+    from sentinelops.telemetry.store import ArtifactStore
+
+    bundle = tmp_path / 'bundle'
+    packaged = package_fit(synthetic_fit(tmp_path), bundle)
+    store = ArtifactStore(tmp_path / 'epoch')
+    plan = load_plan(ALIBABA_PLAN)
+    digest = packaged['manifest_sha256']
+    pinned = register_alibaba_epoch(store, plan, 'a' * 40, bundle, digest)
+    reference, epoch = read_alibaba_epoch(store, plan)
+    assert reference == pinned
+    assert epoch['model_version'] == packaged['model_version']
+    assert epoch['manifest_sha256'] == digest
+    (bundle / 'risk.json').write_bytes(b'changed')
+    with pytest.raises(ValueError, match='risk.json differs from its pin'):
+        register_alibaba_epoch(store, plan, 'a' * 40, bundle, digest)

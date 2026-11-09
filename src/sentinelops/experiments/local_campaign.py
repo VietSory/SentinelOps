@@ -140,8 +140,8 @@ def register_controller(store, project, identity):
 
 def register_alibaba_epoch(store, plan, source, bundle, manifest_sha256):
     from sentinelops.ml.alibaba_bundle import BUNDLE_VERSION
+    from sentinelops.ml.alibaba_release import _pinned
     from sentinelops.ml.alibaba_training import load_config
-    from sentinelops.ml.handoff import _read_pinned
     from sentinelops.ml.models import read_bundle_manifest
 
     if bundle is None or manifest_sha256 is None:
@@ -153,8 +153,8 @@ def register_alibaba_epoch(store, plan, source, bundle, manifest_sha256):
     if set(manifest['artifacts']) != {'detector.joblib', 'risk.json'}:
         raise ValueError('ADR-016 requires both pinned Alibaba estimators')
     for name, digest in manifest['artifacts'].items():
-        _read_pinned(bundle/name, digest)
-    _read_pinned(bundle/'report.json', manifest['provenance']['report_sha256'])
+        _pinned(bundle/name, digest)
+    _pinned(bundle/'report.json', manifest['provenance']['report_sha256'])
     value = {'epoch_version': 'alibaba-local-epoch/v1', 'plan_sha256': stable_id(plan), 'source_commit': source,
              'model_version': manifest['model_version'], 'manifest_sha256': manifest_sha256}
     path = store.root/ALIBABA_BINDING
