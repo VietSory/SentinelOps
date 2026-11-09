@@ -12,8 +12,6 @@ from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2, decode_capture, 
 
 def project_relative_window(store, batch_ref, service, *, as_of, config):
     """Project the final window only; missing or late observations never become zeros."""
-    import pandas as pd
-
     if service not in BUSINESS_ROUTES:
         raise ValueError("relative projection requires a registered business service")
     anchor = store.read(batch_ref)
@@ -60,17 +58,28 @@ def project_relative_window(store, batch_ref, service, *, as_of, config):
         batch = store.read(batch["previous_batch_ref"])
 
     anchor_minute = int(end.timestamp()) // 60
-    if anchor_minute not in rows or len(rows) < config["baseline"]["min_minutes"] + window - 1:
-        return None
-    series = pd.DataFrame.from_dict({minute: (rt, rate) for minute, (rt, rate, _) in rows.items()},
-                                   orient="index", columns=["rt", "rate"]).sort_index()
-    projected = service_windows_fast(series, config)
-    if not projected or projected[-1]["minute"] != anchor_minute:
+    values = relative_feature_values({minute: (rt, rate) for minute, (rt, rate, _) in rows.items()},
+                                     anchor_minute, config)
+    if values is None:
         return None
     return {
         "projection_version": "accepted-alibaba-feature/v1", "feature_set_version": config["feature_set_version"],
         "service": service, "source_profile": SOURCE_PROFILE_V2, "batch_ref": batch_ref,
         "window_start": timestamp(end - timedelta(minutes=window)), "window_end": timestamp(end),
         "as_of": timestamp(as_of), "raw_refs": [rows[minute][2] for minute in sorted(rows)],
-        "features": dict(zip(config["features"], projected[-1]["features"])),
+        "features": dict(zip(config["features"], values)),
     }
+
+
+def relative_feature_values(minutes, anchor, config):
+    """Call the shared training transform on only the bounded past of this anchor."""
+    import pandas as pd
+
+    window, baseline = config["window_minutes"], config["baseline"]
+    first = anchor - window - baseline["max_minutes"] + 1
+    selected = {minute: values for minute, values in minutes.items() if first <= minute <= anchor}
+    if anchor not in selected or len(selected) < baseline["min_minutes"] + window - 1:
+        return None
+    series = pd.DataFrame.from_dict(selected, orient="index", columns=["rt", "rate"]).sort_index()
+    projected = service_windows_fast(series, config)
+    return projected[-1]["features"] if projected and projected[-1]["minute"] == anchor else None

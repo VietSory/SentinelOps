@@ -23,10 +23,10 @@ async def wait_until_utc(deadline: float,*,now=None,sleep=None,timeout_seconds: 
             await sleep(min(5.,remaining))
 
 
-async def capture_ready_bucket(source,service,end,*,store=None,wait=None):
+async def capture_ready_bucket(source,service,end,*,store=None,wait=None,profile=None):
     wait=wait or wait_until_utc
     def capture_and_store():
-        raw=source.capture(service,end)
+        raw=source.capture(service,end,**({"profile":profile} if profile is not None else {}))
         if store is not None:
             store.write("raw",raw)
         return raw

@@ -16,10 +16,10 @@ import sys
 import time
 
 from sentinelops.contracts import utc_time
-from sentinelops.experiments.local_corpus import (KINDS, ROLES, PROJECT, bind, clean_source,
-    group_name, inspect_completed_capture, is_detector_plan, load_plan, plan_kinds, plan_roles, read_binding,
-    recipe, registration_path)
-from sentinelops.ml.local_data import audit_detector_events, audit_local_corpus, verify_capture
+from sentinelops.experiments.local_corpus import (ALIBABA_BINDING, ALIBABA_PLAN, DETECTOR_PLAN, KINDS, ROLES, PROJECT,
+    bind, clean_source, group_name, inspect_completed_capture, is_alibaba_plan, is_detector_plan, load_plan,
+    plan_kinds, plan_roles, read_alibaba_epoch, read_binding, recipe, registered_sessions, registration_path)
+from sentinelops.ml.local_data import audit_alibaba_local, audit_detector_events, audit_local_corpus, verify_capture
 from sentinelops.telemetry.core import stable_id, timestamp
 
 
@@ -42,6 +42,8 @@ def attempt_log(store, slot):
 
 
 def _audit(store, plan, project):
+    if is_alibaba_plan(plan):
+        return audit_alibaba_local(store, plan, project=project)
     if is_detector_plan(plan):
         return audit_detector_events(store, plan, project=project)
     return audit_local_corpus(store, plan=plan, project=project)
@@ -136,7 +138,38 @@ def register_controller(store, project, identity):
         'registered_at':timestamp(datetime.now(timezone.utc)),'capture_registrations_rewritten':False})
 
 
-def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=None):
+def register_alibaba_epoch(store, plan, source, bundle, manifest_sha256):
+    from sentinelops.ml.alibaba_bundle import BUNDLE_VERSION
+    from sentinelops.ml.alibaba_training import load_config
+    from sentinelops.ml.handoff import _read_pinned
+    from sentinelops.ml.models import read_bundle_manifest
+
+    if bundle is None or manifest_sha256 is None:
+        raise ValueError('ADR-016 campaign requires --bundle and --manifest-sha256')
+    bundle = Path(bundle).resolve(strict=True)
+    manifest = read_bundle_manifest(bundle, expected_manifest_sha256=manifest_sha256)
+    if manifest['bundle_version'] != BUNDLE_VERSION or manifest['provenance']['config'] != load_config():
+        raise ValueError('ADR-016 requires the frozen Alibaba v3 feature contract')
+    if set(manifest['artifacts']) != {'detector.joblib', 'risk.json'}:
+        raise ValueError('ADR-016 requires both pinned Alibaba estimators')
+    for name, digest in manifest['artifacts'].items():
+        _read_pinned(bundle/name, digest)
+    _read_pinned(bundle/'report.json', manifest['provenance']['report_sha256'])
+    value = {'epoch_version': 'alibaba-local-epoch/v1', 'plan_sha256': stable_id(plan), 'source_commit': source,
+             'model_version': manifest['model_version'], 'manifest_sha256': manifest_sha256}
+    path = store.root/ALIBABA_BINDING
+    if path.exists():
+        reference, previous = read_alibaba_epoch(store, plan)
+        if any(previous[k] != v for k, v in value.items()):
+            raise ValueError('ADR-016 epoch is already registered to another bundle or source')
+        return reference
+    if registered_sessions(store):
+        raise ValueError('ADR-016 candidate cannot be pinned after registration')
+    return bind(store, path, {**value, 'registered_at': timestamp(datetime.now(timezone.utc))})
+
+
+def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=None,
+                 bundle=None, manifest_sha256=None):
     """Acquire exactly the minimum registered nonfinal plan, then report G2.
 
     With the ADR-015 detector plan the same controller acquires the
@@ -146,12 +179,17 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=Non
         source = clean_source(project)
         plan_file = Path(plan_path) if plan_path else project/'configs/local_http_capture_plan.json'
         plan = load_plan(plan_file)
-        detector = is_detector_plan(plan)
+        alibaba = is_alibaba_plan(plan)
+        detector = is_detector_plan(plan) or alibaba
         identity = {'campaign_version':'local-http-acquisition/v1','controller_source_commit':source,
                     'plan_sha256':stable_id(plan),'slots':[list(slot) for slot in planned_slots(plan)],
                     'sealed_final_allowed':False,'automatic_fitting_allowed':False}
         if detector:
             identity['plan_version'] = plan['plan_version']
+        if alibaba:
+            identity['evaluation_epoch_ref'] = register_alibaba_epoch(store, plan, source, bundle, manifest_sha256)
+        elif bundle is not None or manifest_sha256 is not None:
+            raise ValueError('candidate pins apply only to the ADR-016 evaluation plan')
         controller_ref = register_controller(store,project,identity)
         _event(store,{'status':'CONTROLLER_RESUMED','controller_ref':controller_ref})
         previous_role = None
@@ -183,7 +221,9 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=Non
                         command = [sys.executable,str(capture_project/'scripts/capture_local_corpus.py'),
                             '--root',str(store.root),'--role',role,'--group',str(ordinal),'--kind',kind]
                         if not session_path.exists(): command.append('--prepare')
-                        if detector: command.extend(['--plan',str(capture_project/'configs/local_http_detector_events_plan.json')])
+                        if detector:
+                            selected_plan = ALIBABA_PLAN if alibaba else DETECTOR_PLAN
+                            command.extend(['--plan', str(capture_project/'configs'/selected_plan.name)])
                         environment = {**os.environ,'PYTHONPATH':str(capture_project/'src')+os.pathsep+str(capture_project)}
                         log = attempt_log(store, slot)
                         _event(store,{'status':'CAPTURE_STARTED','slot':slot,'capture_checkout':str(capture_project)})

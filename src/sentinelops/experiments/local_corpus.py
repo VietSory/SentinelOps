@@ -20,7 +20,7 @@ from sentinelops.contracts import utc_time
 from sentinelops.experiments.runner import ExperimentConfig, execute, image_identity
 from sentinelops.public_data.policy import load_training_policy, policy_hash, require_current_training_source
 from sentinelops.telemetry.core import BUSINESS_ROUTES, FEATURE_SET, stable_id, timestamp
-from sentinelops.telemetry.prometheus import SOURCE_PROFILE
+from sentinelops.telemetry.prometheus import SOURCE_PROFILE, SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 
 ROLES = ('train', 'calibration', 'development-validation', 'sealed-final')
@@ -29,25 +29,36 @@ KINDS = ('healthy', 'payment-gradual', 'inventory-gradual')
 DETECTOR_PLAN_VERSION = 'local-http-detector-events-plan/v1'
 DETECTOR_KINDS = ('healthy', 'payment-abrupt', 'inventory-abrupt')
 DETECTOR_ROLES = ('development-validation',)
+ALIBABA_PLAN_VERSION = 'local-http-alibaba-evaluation/v1'
+ALIBABA_KINDS = (*DETECTOR_KINDS, 'payment-gradual', 'inventory-gradual')
 PROJECT = Path(__file__).resolve().parents[3]
 DEFAULT_PLAN = PROJECT / 'configs/local_http_capture_plan.json'
 DETECTOR_PLAN = PROJECT / 'configs/local_http_detector_events_plan.json'
+ALIBABA_PLAN = PROJECT / 'configs/alibaba_local_evaluation.json'
+ALIBABA_BINDING = 'alibaba-epoch.json'
 SOURCE_SERVICES = (*sorted(BUSINESS_ROUTES), 'postgres', 'prometheus', 'otel-collector', 'jaeger')
 SLOT_PATTERN = re.compile(r'(?:(?:train|cal|dev)-[0-9]{2}-(?:healthy|payment-gradual|inventory-gradual)'
-                          r'|det-[0-9]{2}-(?:healthy|payment-abrupt|inventory-abrupt))')
+                          r'|det-[0-9]{2}-(?:healthy|payment-abrupt|inventory-abrupt)'
+                          r'|ali-0[1-5]-(?:healthy|payment-abrupt|inventory-abrupt|payment-gradual|inventory-gradual))')
 
 
 def is_detector_plan(plan):
     return plan.get('plan_version') == DETECTOR_PLAN_VERSION
 
 
+def is_alibaba_plan(plan):
+    return plan.get('plan_version') == ALIBABA_PLAN_VERSION
+
+
 def plan_kinds(plan):
+    if is_alibaba_plan(plan):
+        return ALIBABA_KINDS
     return DETECTOR_KINDS if is_detector_plan(plan) else KINDS
 
 
 def plan_roles(plan):
     """Acquisition roles in chronological order; sealed-final is never captured."""
-    return DETECTOR_ROLES if is_detector_plan(plan) else ROLES
+    return DETECTOR_ROLES if is_detector_plan(plan) or is_alibaba_plan(plan) else ROLES
 
 
 def _load_detector_plan(plan):
@@ -79,6 +90,12 @@ def _load_detector_plan(plan):
 
 def load_plan(path=DEFAULT_PLAN):
     plan = json.loads(Path(path).read_text())
+    if is_alibaba_plan(plan):
+        if (plan != json.loads(ALIBABA_PLAN.read_bytes()) or plan['source_profile'] != SOURCE_PROFILE_V2
+            or plan['fitting_allowed'] is not False or plan['sealed_final_capture_allowed'] is not False
+            or plan['previous_capture_promotion_allowed'] is not False):
+            raise ValueError('ADR-016 acquisition requires the committed evaluation-only plan')
+        return plan
     if is_detector_plan(plan):
         return _load_detector_plan(plan)
     policy = load_training_policy()
@@ -106,11 +123,11 @@ def load_plan(path=DEFAULT_PLAN):
 
 
 def group_name(plan, role, ordinal):
-    if is_detector_plan(plan):
+    if is_detector_plan(plan) or is_alibaba_plan(plan):
         if (role not in DETECTOR_ROLES or type(ordinal) is not int
             or not 1 <= ordinal <= plan['maximum_groups'][role]):
             raise ValueError('unregistered detector-event role/group ordinal')
-        return f'det-{ordinal:02d}'
+        return f"{plan['group_prefix']}-{ordinal:02d}"
     if role not in ROLES or type(ordinal) is not int or not 1 <= ordinal <= plan['maximum_groups'][role]:
         raise ValueError('unregistered acquisition role/group ordinal')
     if role == 'sealed-final':
@@ -121,18 +138,21 @@ def group_name(plan, role, ordinal):
 
 def recipe(plan, role, ordinal, kind):
     group_name(plan, role, ordinal)
-    if is_detector_plan(plan):
-        if kind not in DETECTOR_KINDS:
+    if is_detector_plan(plan) or is_alibaba_plan(plan):
+        kinds = plan_kinds(plan)
+        if kind not in kinds:
             raise ValueError('unregistered detector-event capture kind')
         healthy = kind == 'healthy'
+        gradual = kind.endswith('-gradual')
         mode = plan['abrupt_fault_mode_by_ordinal_parity']['odd' if ordinal % 2 else 'even']
-        return ExperimentConfig('S0' if healthy else 'S1', 'validation',
-            seed=plan['seed_base'] + ordinal * 10 + DETECTOR_KINDS.index(kind), rps=plan['entry_rps'],
+        return ExperimentConfig('S0' if healthy else 'S3' if gradual else 'S1', 'validation',
+            seed=plan['seed_base'] + ordinal * 10 + kinds.index(kind), rps=plan['entry_rps'],
             warmup_seconds=plan['warmup_seconds'],
-            active_seconds=plan['healthy_active_seconds'][role] if healthy else plan['abrupt_active_seconds'],
-            recovery_seconds=plan['recovery_seconds'], fault_mode='latency' if healthy else mode,
+            active_seconds=(plan['healthy_active_seconds'][role] if healthy
+                            else plan['gradual_active_seconds'] if gradual else plan['abrupt_active_seconds']),
+            recovery_seconds=plan['recovery_seconds'], fault_mode='latency' if healthy or gradual else mode,
             maximum_delay_ms=plan['maximum_delay_ms'],
-            target_service='inventory-service' if kind == 'inventory-abrupt' else 'payment-service',
+            target_service='inventory-service' if kind.startswith('inventory-') else 'payment-service',
             all_entry_traffic=True)
     if kind not in KINDS:
         raise ValueError('unregistered prospective capture kind')
@@ -168,6 +188,21 @@ def bind(store, path, value):
     source = store.root / reference.removeprefix('artifact://')
     os.link(source, path)  # exclusive and atomic, never overwrite/re-admit
     return reference
+
+
+def read_alibaba_epoch(store, plan):
+    try:
+        reference, value = read_binding(store, store.root / ALIBABA_BINDING)
+    except FileNotFoundError as exc:
+        raise ValueError('ADR-016 requires a candidate pinned before capture') from exc
+    if (set(value) != {'epoch_version', 'plan_sha256', 'source_commit', 'model_version',
+                       'manifest_sha256', 'registered_at'}
+        or value['epoch_version'] != 'alibaba-local-epoch/v1' or value['plan_sha256'] != stable_id(plan)
+        or not all(isinstance(value[k], str) and re.fullmatch(f'[0-9a-f]{{{length}}}', value[k])
+                   for k, length in (('source_commit', 40), ('model_version', 64), ('manifest_sha256', 64)))):
+        raise ValueError('ADR-016 epoch identity differs from its pinned plan or candidate')
+    utc_time(value['registered_at'])
+    return reference, value
 
 
 @contextmanager
@@ -263,14 +298,14 @@ def registered_sessions(store):
 
 def require_role_order(store, plan, role):
     sessions = registered_sessions(store)
-    if is_detector_plan(plan):
+    if is_detector_plan(plan) or is_alibaba_plan(plan):
         # One evaluation-only epoch per store; never mixed with fitting groups.
         if any(s['plan_sha256'] != stable_id(plan) for s in sessions):
             raise ValueError('detector-event epoch cannot share a store with another plan')
         if role not in DETECTOR_ROLES:
             raise ValueError('detector-event epoch has only a development-validation role')
         return
-    if any(s['group_id'].startswith('det-') for s in sessions):
+    if any(s['group_id'].startswith(('det-', 'ali-')) for s in sessions):
         raise ValueError('fitting corpus cannot share a store with a detector-event epoch')
     index = ROLES.index(role)
     if any(ROLES.index(s['role']) > index for s in sessions):
@@ -320,6 +355,11 @@ def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=Fal
     if (store.root / 'dataset-freeze.json').exists() or (store.root / 'evaluation-freeze.json').exists():
         raise ValueError('prospective dataset is frozen; new acquisition needs a new corpus epoch')
     source = clean_source(project)
+    epoch_ref = None
+    if is_alibaba_plan(plan):
+        epoch_ref, epoch = read_alibaba_epoch(store, plan)
+        if epoch['source_commit'] != source:
+            raise ValueError('ADR-016 capture differs from the preregistered plan and source')
     require_role_order(store, plan, role)
     path = registration_path(store, group)
     if (path.parent / 'closed.json').exists():
@@ -327,7 +367,8 @@ def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=Fal
     compose_project = configure_compose(project, store.root, group)
     if path.exists():
         reference, saved = read_binding(store, path)
-        if saved['plan_sha256'] != stable_id(plan) or saved['source_commit'] != source:
+        if (saved['plan_sha256'] != stable_id(plan) or saved['source_commit'] != source
+            or saved.get('evaluation_epoch_ref') != epoch_ref):
             raise ValueError('session is frozen to another plan/source checkout')
         current = context_snapshot(project, compose_project)
         if current != saved['context']:
@@ -376,6 +417,8 @@ def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=Fal
         'source_commit': source, 'registered_at': timestamp(datetime.now(timezone.utc)),
         'context_created_after': timestamp(created), 'compose_project': compose_project,
         'context': context, 'initial_payment_rows': 0, 'fitting_allowed_by_registration': False}
+    if epoch_ref is not None:
+        value['evaluation_epoch_ref'] = epoch_ref
     return bind(store, path, value), value
 
 
@@ -396,7 +439,9 @@ async def _capture_slot(store, plan, *, role, ordinal, kind, project=PROJECT, pr
     slot_ref = bind(store, root / 'registration.json', value)
     # A completed old experiment cannot be supplied here. The runner generates a
     # new run after this registration and records its source/clock/images.
-    captured = await execute(config, project=project, output=root / 'captures', session_id=registration['group_id'])
+    options = {'source_profile': SOURCE_PROFILE_V2} if is_alibaba_plan(plan) else {}
+    captured = await execute(config, project=project, output=root / 'captures',
+                             session_id=registration['group_id'], **options)
     run = json.loads((captured / 'run.json').read_text())
     if (run['source_commit'] != registration['source_commit'] or run['image_digests'] != registration['context']['images']
         or utc_time(run['started_at']) < utc_time(value['registered_at'])):

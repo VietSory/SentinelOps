@@ -27,7 +27,7 @@ from sentinelops.experiments.traffic import server_log_coverage,s1_error_respons
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.infrastructure import PostgresInfrastructureSource
 from sentinelops.telemetry.pipeline import process_captures
-from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE
+from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE, SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.telemetry.scheduling import capture_ready_bucket,wait_until_utc
 from sentinelops.trace_query import decode_v3_trace
@@ -141,7 +141,7 @@ def serving_logs(project: Path, since: str) -> tuple[list[dict],list[dict]]:
 
 
 async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Path, session_id: str | None = None,
-                  allow_dirty: bool = False) -> Path:
+                  allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE) -> Path:
     config.validate()
     commit,dirty,hashes = checkout_identity(project)
     if dirty and not allow_dirty:
@@ -167,7 +167,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
     collector = None
     run = {
         "schema_version":"1.0","run_id":identifier,"session_id":session_id or "session-"+uuid4().hex,
-        "scenario_id":config.scenario,"declared_split":config.split,"environment":"local","source_profile":SOURCE_PROFILE,
+        "scenario_id":config.scenario,"declared_split":config.split,"environment":"local","source_profile":source_profile,
         "seed":config.seed,"status":"running","source_commit":commit,"dirty_worktree":dirty,"image_digests":images,
         "started_at":timestamp(datetime.now(timezone.utc)),"ended_at":None,"warmup_end_at":None,"fault_start_at":None,
         "recovery_start_at":None,"root_cause_ground_truth":None if config.scenario in ("S0","S5") else config.target_service,
@@ -249,7 +249,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                     break
                 end = datetime.fromtimestamp(bucket,timezone.utc)
                 for service in BUSINESS_ROUTES:
-                    captures.append(await capture_ready_bucket(source,service,end,store=serving))
+                    options = {"profile": source_profile} if source_profile != SOURCE_PROFILE else {}
+                    captures.append(await capture_ready_bucket(source,service,end,store=serving,**options))
                 if os.getenv("DATABASE_URL"):
                     item = await PostgresInfrastructureSource(os.environ["DATABASE_URL"]).capture()
                     infra_refs.append(await asyncio.to_thread(serving.write,"observations",item))
@@ -351,7 +352,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             measured = measure_slo(admitted,service,slo,start_at=datetime.fromisoformat(run["started_at"].replace("Z","+00:00")),end_at=ended)
             run["slo_by_service"][service] = {key:measured[key] for key in ("first_violation_at","confirmed_at","request_count")}
             if not multi_entry and measured["request_count"] < .95*len(outcomes): failure = failure or "IncompleteServerLogs"
-        base = process_captures(captures,serving)
+        base = process_captures(captures,serving,default_profile=source_profile)
         if base["eligible_feature_count"] == 0:
             failure = failure or "NoEligibleFeatureWindows"
         manifest = {key:value for key,value in base.items() if key != "manifest_ref"}
@@ -380,7 +381,15 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
 
 
 async def execute(config: ExperimentConfig, *, project: Path, output: Path, session_id: str | None = None,
-                  allow_dirty: bool = False) -> Path:
+                  allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE) -> Path:
     config.validate()
+    if source_profile not in (SOURCE_PROFILE, SOURCE_PROFILE_V2):
+        raise ValueError("unsupported experiment source profile")
+    if source_profile == SOURCE_PROFILE_V2 and (
+        config.split != "validation" or config.scenario not in ("S0", "S1", "S3")
+        or config.warmup_seconds < 1800 or not config.all_entry_traffic or allow_dirty
+    ):
+        raise ValueError("ADR-016 capture requires clean S0/S1/S3 validation with all-entry traffic and 30-minute warmup")
     with ExperimentLock(project):
-        return await _execute_locked(config,project=project,output=output,session_id=session_id,allow_dirty=allow_dirty)
+        return await _execute_locked(config, project=project, output=output, session_id=session_id,
+                                     allow_dirty=allow_dirty, source_profile=source_profile)

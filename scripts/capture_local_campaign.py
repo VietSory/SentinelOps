@@ -10,5 +10,8 @@ if __name__ == '__main__':
     parser.add_argument('--root',type=Path,required=True)
     parser.add_argument('--follow-existing',action='store_true',help='Wait for an already registered active slot; never rerun it.')
     parser.add_argument('--plan',type=Path,default=None,help='ADR-015 detector-event plan for the evaluation-only epoch.')
+    parser.add_argument('--bundle', type=Path, help='Alibaba v3 bundle to pin before ADR-016 capture.')
+    parser.add_argument('--manifest-sha256', help='Trusted manifest SHA-256 for the Alibaba bundle.')
     args = parser.parse_args()
-    print(json.dumps(run_campaign(ArtifactStore(args.root),follow_existing=args.follow_existing,plan_path=args.plan),indent=2))
+    print(json.dumps(run_campaign(ArtifactStore(args.root), follow_existing=args.follow_existing, plan_path=args.plan,
+                                  bundle=args.bundle, manifest_sha256=args.manifest_sha256), indent=2))

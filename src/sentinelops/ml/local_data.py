@@ -17,7 +17,8 @@ import subprocess
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.experiments.labels import SLOConfig, feature_vector
 from sentinelops.experiments.local_corpus import (
-    KINDS, ROLES, group_name, is_detector_plan, load_plan, plan_kinds, read_binding, recipe,
+    KINDS, ROLES, group_name, is_alibaba_plan, is_detector_plan, load_plan, plan_kinds,
+    read_alibaba_epoch, read_binding, recipe,
     validate_end_context, docker_clock, volume_created_within,
 )
 from sentinelops.experiments.local_labels import oracle_from_requests, window_labels
@@ -25,6 +26,7 @@ from sentinelops.experiments.verification import verify_source_replay
 from sentinelops.ml.readiness import DatasetNotReady
 from sentinelops.public_data.policy import load_training_policy, policy_hash
 from sentinelops.telemetry.core import BUSINESS_ROUTES, FEATURE_KEYS, FEATURE_SET, build_feature_window, stable_id, timestamp
+from sentinelops.telemetry.prometheus import mean_latency_ms
 from sentinelops.telemetry.store import ArtifactStore
 
 PROJECT = Path(__file__).resolve().parents[3]
@@ -118,6 +120,29 @@ def _abrupt_onsets_in_scope(oracle, target, changed_at_ms, recovery_start_at):
     return True
 
 
+def verify_alibaba_warmup(serving, normalization, observations, oracle, warmup_end, required):
+    """Certify consecutive complete pre-fault minutes using two independent sources."""
+    cutoff = utc_time(warmup_end)
+    # The capture watermark is 30s. Require that every bucket was available before
+    # the warmup ended, even when the intervention crosses a UTC minute boundary.
+    last = (cutoff - timedelta(seconds=30)).replace(second=0, microsecond=0)
+    required_ends = {timestamp(last - timedelta(minutes=n)) for n in range(required)}
+    raw = [serving.read(ref) for ref in normalization['raw_refs']]
+    for service in BUSINESS_ROUTES:
+        accepted = {observation['bucket_end'] for observation in observations
+                    if observation['service'] == service and observation['quality']['eligible_for_inference']
+                    and utc_time(observation['available_at']) <= cutoff}
+        means = {capture['bucket_end'] for capture in raw if capture['service'] == service
+                 and capture['bucket_end'] in required_ends & accepted
+                 and (value := mean_latency_ms(capture)) is not None and value > 0}
+        buckets = oracle['services'][service]['buckets']
+        verified = {end for end in required_ends if (
+            (item := buckets.get(str(int(utc_time(end).timestamp()) - 60)))
+            and item['availability'] == 'VERIFIED' and item['breach'] is False)}
+        if means != required_ends or verified != required_ends:
+            raise ValueError(f'ADR-016 {service} lacks {required} consecutive verified healthy pre-fault minutes')
+
+
 def verify_capture(store, plan, session, kind, *, project=PROJECT, as_of=None):
     role = session['role']
     group = group_name(plan, role, session['ordinal'])  # rejects sealed before any run source read
@@ -125,6 +150,11 @@ def verify_capture(store, plan, session, kind, *, project=PROJECT, as_of=None):
         raise ValueError('registered session differs from its approved source/role')
     if session['plan_sha256'] != stable_id(plan) or store.read(session['plan_ref']) != plan:
         raise ValueError('registered session changed the pre-capture plan')
+    if is_alibaba_plan(plan):
+        epoch_ref, epoch = read_alibaba_epoch(store, plan)
+        if (session.get('evaluation_epoch_ref') != epoch_ref or session['source_commit'] != epoch['source_commit']
+            or utc_time(epoch['registered_at']) > utc_time(session['context_created_after'])):
+            raise ValueError('ADR-016 source context predates or changes the pinned candidate')
     slot = group + '-' + kind
     root = store.root / 'runs' / slot
     registration_ref, registration = read_binding(store, root / 'registration.json')
@@ -224,13 +254,17 @@ def verify_capture(store, plan, session, kind, *, project=PROJECT, as_of=None):
                  and type(r.get('timestamp_unix_ms')) is int and lower <= r['timestamp_unix_ms'] <= upper]
         abrupt = (len(steps) == 1 and steps[0].get('mode') == mode
                   and steps[0].get('delay_ms') == registration['recipe']['maximum_delay_ms'])
-        if is_detector_plan(plan) and abrupt and (
+        if (is_detector_plan(plan) or is_alibaba_plan(plan)) and abrupt and (
             not run['recovery_start_at'] or not _abrupt_onsets_in_scope(
                 oracle, target, steps[0]['timestamp_unix_ms'], run['recovery_start_at'])
         ):
             raise ValueError('abrupt oracle onset falls outside the observed fault interval or affected services')
-    observation_objects = [(ref,serving.read(ref)) for ref in serving.read(manifest['normalization_manifest_ref'])['observation_refs']]
+    normalization = serving.read(manifest['normalization_manifest_ref'])
+    observation_objects = [(ref,serving.read(ref)) for ref in normalization['observation_refs']]
     observations = [value for _,value in observation_objects]
+    if is_alibaba_plan(plan):
+        verify_alibaba_warmup(serving, normalization, observations, oracle, run['warmup_end_at'],
+                              plan['minimum_verified_healthy_prefault_minutes'])
     oracle_ref = store.write('manifests', {'certificate_version':'local-http-oracle/v1',
         'source_result_ref':result_ref,'source_logs_ref':run['logs_ref'],'source_full_logs_ref':full_ref,
         'source_client_ledger_ref':run['request_outcomes_ref'],'oracle':oracle})
@@ -259,7 +293,7 @@ def verify_capture(store, plan, session, kind, *, project=PROJECT, as_of=None):
         'group_id':group, 'role':role, 'kind':kind, 'started_at':run['started_at'], 'ended_at':run['ended_at'],
         'oracle':oracle,'oracle_ref':oracle_ref, 'rows':rows, 'excluded':excluded, 'causal_features_sha256':frozen_features,
         'observed_gradual_control_steps':len(ramp), 'gradual_control_verified':gradual,
-        **({'abrupt_control_verified':abrupt} if is_detector_plan(plan) else {})}
+        **({'abrupt_control_verified':abrupt} if is_detector_plan(plan) or is_alibaba_plan(plan) else {})}
 
 
 def _session_identity(session, plan):
@@ -374,7 +408,7 @@ def audit_local_corpus(store, *, plan=None, project=PROJECT, now=None):
     if plan['policy_sha256'] != policy_hash(policy):
         raise ValueError('corpus differs from the current approved training contract')
     created = now or datetime.now(timezone.utc)
-    if is_detector_plan(plan):
+    if is_detector_plan(plan) or is_alibaba_plan(plan):
         raise ValueError('detector-event epochs are evaluation-only; use audit_detector_events')
     cases, pending, failed, quarantine, sessions, all_rows, intervals, excluded_groups = _collect_sources(
         store, plan, project, created)
@@ -485,6 +519,41 @@ def _freeze_local_corpus(store, report):
 
 DETECTOR_ADMISSION_VERSION = 'local-http-detector-events-admission/v1'
 DETECTOR_FREEZE = 'evaluation-freeze.json'
+
+
+def audit_alibaba_local(store, plan, *, project=PROJECT, now=None):
+    """Recompute the complete ADR-016 epoch without admitting any fitting rows."""
+    if not is_alibaba_plan(plan):
+        raise ValueError('ADR-016 audit requires the Alibaba local evaluation plan')
+    epoch_ref, _ = read_alibaba_epoch(store, plan)
+    created = now or datetime.now(timezone.utc)
+    cases, pending, failed, quarantine, sessions, rows, intervals, excluded = _collect_sources(
+        store, plan, project, created)
+    ordered = validate_chronology(intervals)
+    if ordered and created < max(end for _, end in ordered):
+        raise ValueError('ADR-016 epoch audit precedes a captured source end')
+    role = 'development-validation'
+    expected = {group_name(plan, role, ordinal) + '-' + kind
+                for ordinal in range(1, plan['maximum_groups'][role]+1) for kind in plan_kinds(plan)}
+    actual = {case['group_id'] + '-' + case['kind'] for case in cases}
+    unverified_controls = sorted(case['group_id'] + '-' + case['kind'] for case in cases if
+        (case['kind'].endswith('-abrupt') and case.get('abrupt_control_verified') is not True)
+        or (case['kind'].endswith('-gradual') and case['gradual_control_verified'] is not True))
+    ready = actual == expected and len(actual) == len(cases) and not (
+        pending or failed or quarantine or excluded or unverified_controls)
+    report = {
+        'dataset_version': 'alibaba-local-evaluation-admission/v1', 'epoch_ref': epoch_ref,
+        'authorizing_adr': 'ADR-016', 'plan_sha256': stable_id(plan), 'created_at': timestamp(created),
+        'source_profile': plan['source_profile'], 'feature_set_version': plan['feature_set_version'],
+        'status': 'READY_FOR_EVALUATION' if ready else 'BLOCKED', 'evaluation_ready': ready,
+        'training_ready': False, 'fitting_rows': 0, 'activation_allowed': False, 'holdout_opened': False,
+        'registered_groups': len(sessions), 'verified_completed_runs': len(cases),
+        'missing_slots': sorted(expected - actual), 'unverified_controls': unverified_controls,
+        'pending_slots': pending, 'failed_slots': failed, 'quarantined_slots': quarantine, 'excluded_groups': excluded,
+        'source_result_refs': [case['source_result_ref'] for case in cases],
+        'oracle_certificate_refs': [case['oracle_ref'] for case in cases],
+    }
+    return report, rows, cases
 
 
 def audit_detector_events(store, plan, *, project=PROJECT, now=None):
