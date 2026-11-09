@@ -15,7 +15,8 @@ from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from sentinelops.api_http import ApiError, RequestSafetyMiddleware
-from sentinelops.api_settings import Settings
+from sentinelops.oidc import OidcVerifier, ScopeMissing, TokenRejected, VerifierUnavailable
+from sentinelops.api_settings import LOCAL_ENVIRONMENTS, Settings
 from sentinelops.contracts import utc_time,validate_payload,load_schema
 from sentinelops.demo import demo_incident
 from sentinelops.incidents.domain import IncidentConflict,IncidentNotFound,IncidentWrite
@@ -97,10 +98,13 @@ def _reject_direct_inference(registry):
 
 
 def create_app(settings: Settings | None = None,*,repository=None,model_registry=None,action_reader=None,
-               explanation_provider: ExplanationProvider | None = None) -> FastAPI:
+               explanation_provider: ExplanationProvider | None = None, identity_verifier=None) -> FastAPI:
     settings = settings or Settings.from_env()
     if explanation_provider is not None and not isinstance(explanation_provider, ExplanationProvider):
         raise ValueError("explanation provider must use the bounded backend adapter")
+    if identity_verifier is not None and (settings.oidc is None or identity_verifier.config != settings.oidc):
+        raise ValueError("identity verifier must match the configured OIDC settings")
+    verifier = identity_verifier or (OidcVerifier(settings.oidc) if settings.oidc is not None else None)
     registry = model_registry if model_registry is not None else ModelRegistry()
     if model_registry is None and settings.model_store:
         registry = ModelRegistry.load(ArtifactStore(settings.model_store), settings.model_release_ref)
@@ -158,7 +162,20 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
                              "request_id":request.state.request_id},status_code=exc.status_code)
 
     async def authorize(request: Request) -> str:
-        if settings.environment not in ("local","test"):
+        if verifier is not None:
+            scheme,_,token = request.headers.get("authorization","").partition(" ")
+            if scheme.lower()!="bearer":
+                raise ApiError(401,"unauthorized","A valid bearer token is required")
+            try:
+                role,subject = await verifier.identify(token.strip())
+            except TokenRejected:
+                raise ApiError(401,"unauthorized","A valid bearer token is required") from None
+            except ScopeMissing:
+                raise ApiError(403,"insufficient_scope","The token carries no SentinelOps scope") from None
+            except VerifierUnavailable:
+                raise ApiError(503,"authentication_unavailable","The identity provider keys are unavailable") from None
+            return f"oidc-{role}:{subject}"
+        if settings.environment not in LOCAL_ENVIRONMENTS:
             raise ApiError(503,"authentication_adapter_unavailable","Production identity adapter is not configured")
         if not (settings.api_token or settings.operator_token):
             raise ApiError(503,"authentication_unavailable","Incident API authentication is not configured")
@@ -172,7 +189,7 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
 
     async def authorize_producer(request: Request) -> str:
         identity = await authorize(request)
-        if identity != "local-trusted-producer":
+        if identity != "local-trusted-producer" and not identity.startswith("oidc-producer:"):
             raise ApiError(403,"read_only_credential","Operator credentials cannot import or revise incidents")
         return identity
 
@@ -232,7 +249,9 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
         except ApiError:
             pass
         dependencies = {"incident_store": storage,
-            "authentication": bool(settings.api_token or settings.operator_token) and settings.environment in ("local","test"), "model": registry.available}
+            "authentication": verifier is not None or (bool(settings.api_token or settings.operator_token)
+                                                       and settings.environment in LOCAL_ENVIRONMENTS),
+            "model": registry.available}
         ready = all(dependencies.values())
         return JSONResponse({"status":"ready" if ready else "not_ready","dependencies":dependencies,
             "demo_mode":settings.demo_mode,

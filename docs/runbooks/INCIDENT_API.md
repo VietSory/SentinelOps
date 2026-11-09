@@ -58,7 +58,7 @@ The HTTP incident endpoints now use the [real control repository](INCIDENT_STORE
 
 Start the dedicated control database as described in the storage guide. Export `CONTROL_DATABASE_URL` using the nonowner runtime role and set `SENTINELOPS_API_TOKEN` to a random local secret of at least 32 characters. Start `uvicorn sentinelops.main:app --host 127.0.0.1 --port 8000`. Environment variables are read from the process; the API does not automatically source `.env` files.
 
-All incident read/write endpoints require `Authorization: Bearer TOKEN`. This adapter is for local/test only. Other environments fail closed until a production identity adapter is implemented; a static sandbox token is not an AWS authentication acceptance. The server supplies the actor identity; a request cannot choose an audit actor. Tokens/DSNs are not returned in errors or logged by request error handling.
+All incident read/write endpoints require `Authorization: Bearer TOKEN`. Static tokens are for local/test only: outside those environments the settings refuse them at startup, and the API fails closed (503 `authentication_adapter_unavailable`) unless OIDC is configured (see [OIDC](#oidc-for-non-local-environments)). The server supplies the actor identity; a request cannot choose an audit actor. Tokens/DSNs are not returned in errors or logged by request error handling.
 
 Two distinct local credentials are supported:
 
@@ -82,8 +82,36 @@ overrides select the respective credential. No token is included in bundles,
 public status or browser storage. These remain static local credentials: rotate
 them by restarting the API with the new configuration and reconnect the tab.
 Managed releases require explicit stop/start to resnapshot credentials; a normal
-restart reuses the pinned private session. Production authentication remains
-unavailable for both credentials.
+restart reuses the pinned private session.
+
+### OIDC for non-local environments
+
+The API verifies signed JWT access tokens from any OIDC provider (Amazon Cognito,
+Okta, Entra ID, Keycloak) against the provider's JWKS. Static tokens and OIDC cannot
+be configured together.
+
+| Environment variable | Meaning |
+| --- | --- |
+| `SENTINELOPS_OIDC_ISSUER` | Required. Exact `iss`, https |
+| `SENTINELOPS_OIDC_AUDIENCE` | Required. Expected audience |
+| `SENTINELOPS_OIDC_JWKS_URL` | Required. https JWKS document (no redirects, at most 64 KiB) |
+| `SENTINELOPS_OIDC_AUDIENCE_CLAIM` | `aud` (default) or `client_id` (Cognito access tokens) |
+| `SENTINELOPS_OIDC_PRODUCER_SCOPE` | Default `sentinelops/incidents.write`: producer role (reads + IER writes) |
+| `SENTINELOPS_OIDC_OPERATOR_SCOPE` | Default `sentinelops/incidents.read`: read-only operator role |
+
+Only RS256/ES256 keys marked for signing are used, and the token's `kid` and `alg` must match a
+published key. `exp`, `iat`, `iss` and `sub` are required, with 60 s leeway. `token_use`, if present,
+must be `access`. Scopes come from `scope` (space separated) or `scp` (list). A token with
+the producer scope gets the producer role; with only the operator scope, the operator role. A valid token
+with neither scope gets 403 `insufficient_scope`, and an invalid one gets 401. The audit actor is
+`oidc-<role>:<sub>`. Keys are cached for 5 minutes. An unknown `kid` forces at most one refresh
+per 30 s (key rotation), and a failed fetch backs off for 30 s. Old keys keep verifying for up
+to four cache lifetimes without a successful refresh; after that, and before the first successful
+fetch, requests get 503 `authentication_unavailable`. `/ready` reports
+`authentication=true` once OIDC is configured; it does not contact the provider.
+
+Provider setup (user pool, app client, resource server scopes) and its IaC belong
+to the AWS phase and are not applied here.
 
 `/health` is liveness. `/ready/incidents` checks authenticated storage readiness, schema version and runtime privileges. `/ready` remains 503 while the real model dependency is missing, even when incident storage is ready. A database outage returns 503 while liveness stays 200; the pool reconnects after restoration.
 

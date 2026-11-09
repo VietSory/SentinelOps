@@ -64,13 +64,14 @@ def test_auth_missing_invalid_schemes_and_production_adapter_fail_closed():
     for headers in ({},{"authorization":"Bearer wrong"},{"authorization":"Basic abc"}):
         response=local.get("/ready/incidents",headers=headers)
         assert response.status_code==401 and response.headers["www-authenticate"]=="Bearer"
-    prod=TestClient(create_app(Settings(environment="aws",api_token=token),repository=Ready()))
+    prod=TestClient(create_app(Settings(environment="aws"),repository=Ready()))
     assert prod.get("/ready/incidents",headers={"authorization":"Bearer "+token}).status_code==503
 
 
 def test_demo_cannot_be_enabled_outside_sandbox_and_weak_token_is_rejected():
     import pytest
-    for settings in ({"environment":"aws","demo_mode":True},{"api_token":"short"}):
+    for settings in ({"environment":"aws","demo_mode":True},{"api_token":"short"},
+                     {"environment":"aws","api_token":"x"*32},{"environment":"aws","operator_token":"y"*32}):
         with pytest.raises(ValueError):
             Settings(**settings)
 

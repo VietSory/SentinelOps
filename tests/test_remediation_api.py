@@ -95,7 +95,7 @@ def test_incident_revision_bounds_actions_and_cursor_cannot_cross_scope():
 def test_unavailable_or_unsafe_reader_fails_closed_without_leaking_dsn(mode,caplog):
     async def run():
         reader=Reader();reader.unavailable=mode=='unavailable';reader.corrupt=mode=='corrupt'
-        app=create_app(Settings(api_token=TOKEN,environment='aws' if mode=='production' else 'test'),
+        app=create_app(Settings(environment='aws') if mode=='production' else Settings(api_token=TOKEN,environment='test'),
                        action_reader=None if mode=='unconfigured' else reader)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://api',
                                      headers={'Authorization':'Bearer '+TOKEN}) as client:

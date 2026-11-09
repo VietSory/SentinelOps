@@ -92,7 +92,9 @@ def test_settings_keep_secrets_private_distinct_and_explicitly_loaded(monkeypatc
 
 def test_production_authentication_remains_unavailable_for_both_credentials():
     repo = Repository()
-    with TestClient(create_app(Settings(environment='aws', api_token=PRODUCER, operator_token=OPERATOR), repository=repo)) as api:
+    with pytest.raises(ValueError, match='static bearer tokens'):
+        Settings(environment='aws', api_token=PRODUCER, operator_token=OPERATOR)
+    with TestClient(create_app(Settings(environment='aws'), repository=repo)) as api:
         for token in (PRODUCER, OPERATOR):
             result = api.get('/ready/incidents', headers=auth(token))
             assert result.status_code == 503 and result.json()['code'] == 'authentication_adapter_unavailable'
