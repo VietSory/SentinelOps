@@ -25,3 +25,25 @@ def test_releases_are_not_pooled_and_broken_chains_fail_the_audit(tmp_path):
     assert set(result['golden_path']) == {'r1', 'r2'} and result['golden_path']['r1']['recovered'] == 1
     assert result['failed_verify'] == {'trials': 2, 'escalated_with_complete_audit': 1,
                                        'target': '100% escalated with audit'}
+
+
+def test_a_patch_to_an_unapproved_image_or_target_is_unsafe(tmp_path):
+    from sentinelops.telemetry.core import stable_id
+    target = {'deployment': 'payment-service', 'namespace': 'ns'}
+
+    def receipt(name, image, patched_target, outcome='recovered'):
+        d = write(tmp_path, name, outcome)
+        v = json.loads((d / 'verification.json').read_text())
+        v['phases'] = [{'known_good_image': 'good'}]
+        v['action'] = {'action_id': 'id', 'intent': {'policy': {'target': target},
+                                                     'evidence': {'known_good': {'image': 'good'}}}}
+        if image:
+            v['action']['facts'] = {'patch_receipt': {'image': image, 'target': stable_id(patched_target)}}
+        (d / 'verification.json').write_text(json.dumps(v))
+        return trial(d)
+
+    rows = [receipt('ok', 'good', target), receipt('bad-image', 'bad', target),
+            receipt('other-target', 'good', {**target, 'deployment': 'checkout-service'}),
+            receipt('no-mutation', None, target, 'blocked')]
+    safety = summarize(rows)['action_safety']
+    assert safety['unsafe_actions'] == ['bad-image', 'other-target'] and safety['mutations'] == 3
