@@ -91,6 +91,8 @@ class ModelIncidentEvidence:
         self.profile = {**collector.profile, "model_release_ref": registry.identity}
 
     async def verify_source(self, identity):
+        if getattr(self.model_registry, "is_alibaba", False) and identity.get("source_profile") != SOURCE_PROFILE_V2:
+            raise IncompatibleFeatures("Alibaba release requires an accepted Prometheus v2 health stream")
         return await self.collector.verify_source(identity)
 
     async def close(self):

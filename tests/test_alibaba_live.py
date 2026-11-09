@@ -1,24 +1,27 @@
 """ADR-016 online worker and replay using a disposable v3 numerical fixture."""
+import asyncio
 from datetime import timedelta
 import json
+from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("pandas")
 
 from sentinelops.ml.alibaba_bundle import package_fit
-from sentinelops.ml.registry import ModelRegistry, ModelUnavailable
+from sentinelops.ml.registry import IncompatibleFeatures, ModelRegistry, ModelUnavailable
 from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
 from sentinelops.telemetry.pipeline import process_captures
-from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
+from sentinelops.telemetry.prometheus import SOURCE_PROFILE, SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.health import HealthWorker
-from sentinelops.workers.model_signals import collect_model_signals, verify_model_signal
+from sentinelops.workers import model_signals
+from sentinelops.workers.model_signals import ModelIncidentEvidence, collect_model_signals, verify_model_evidence, verify_model_signal
 from test_alibaba_bundle import synthetic_fit
 from test_health_source import POLICY, START, capture
 
 
-def test_shared_v3_bundle_infers_and_replays_only_after_accepted_history(tmp_path):
+def test_shared_v3_bundle_infers_and_replays_only_after_accepted_history(tmp_path, monkeypatch):
     serving = ArtifactStore(tmp_path / "serving")
     packaged = package_fit(synthetic_fit(tmp_path), serving.root / "bundle")
     manifest = json.loads((serving.root / "bundle/manifest.json").read_bytes())
@@ -77,3 +80,36 @@ def test_shared_v3_bundle_infers_and_replays_only_after_accepted_history(tmp_pat
                     with pytest.raises(ValueError, match="does not reproduce"):
                         verify_model_signal(envelope, {**signal, "model_feature_ref": signal["feature_ref"]},
                                             registry, store=store, batch_ref=previous)
+
+    # Exercise the same wrapper and replay entry points used by native H4.
+    batch_ref = store.write("manifests", {**store.read(previous),
+                                         "normalization_manifest_ref": normalized["manifest_ref"]})
+    state_ref = store.write("manifests", {"last_batch_ref": batch_ref})
+
+    async def native_capture(incident_store):
+        return incident_store.write("manifests", {"capture_version": "continuous-incident-evidence/v5",
+                                                  "window_start": timestamp(end - timedelta(minutes=5)),
+                                                  "window_end": timestamp(end)})
+
+    monkeypatch.setattr(model_signals, "datetime", SimpleNamespace(now=lambda _: now))
+    collector = ModelIncidentEvidence(SimpleNamespace(profile={}, capture=native_capture), registry)
+    capture_ref = asyncio.run(collector.capture(store, source_state_ref=state_ref))
+    capture_object = store.read(capture_ref)
+    assert capture_object["capture_version"] == "continuous-incident-evidence/v6"
+    model_evidence = verify_model_evidence(store, capture_object, registry)
+    assert {signal["service"] for _, signal in model_evidence if signal["status"] == "AVAILABLE"} == set(BUSINESS_ROUTES)
+
+
+def test_alibaba_worker_rejects_wrong_stream_profile_before_collecting():
+    checked = []
+
+    async def verify(identity):
+        checked.append(identity["source_profile"])
+
+    collector = SimpleNamespace(profile={}, verify_source=verify)
+    registry = SimpleNamespace(identity="fixture", is_alibaba=True)
+    evidence = ModelIncidentEvidence(collector, registry)
+    with pytest.raises(IncompatibleFeatures, match="Prometheus v2"):
+        asyncio.run(evidence.verify_source({"source_profile": SOURCE_PROFILE}))
+    asyncio.run(evidence.verify_source({"source_profile": SOURCE_PROFILE_V2}))
+    assert checked == [SOURCE_PROFILE_V2]
