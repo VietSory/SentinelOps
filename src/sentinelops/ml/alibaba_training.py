@@ -112,6 +112,74 @@ def service_windows(series, config):
     return rows
 
 
+def service_windows_fast(series, config):
+    """Vectorised equivalent of ``service_windows`` (same frozen semantics; tested equal)."""
+    import numpy as np
+    import pandas as pd
+    from numpy.lib.stride_tricks import sliding_window_view
+    w = config['window_minutes']
+    base = config['baseline']
+    full = series.reindex(range(series.index.min(), series.index.max() + 1))
+    rt_s, rate_s = full['rt'], full['rate']
+    roll = lambda s: s.rolling(base['max_minutes'], min_periods=base['min_minutes']).median().shift(w)
+    rt_base, rate_base = roll(rt_s).to_numpy(float), roll(rate_s).to_numpy(float)
+    minute_base = rt_s.rolling(base['max_minutes'], min_periods=base['min_minutes']).median().shift(1)
+    ratio = rt_s / minute_base
+    breach_s = (ratio > 2.0).astype(float).where(ratio.notna())
+    consecutive = config['label']['breach_onset_requires_consecutive_minutes']
+    confirmed = breach_s.rolling(consecutive).sum() == consecutive
+    onset = confirmed & ~confirmed.shift(1, fill_value=False)
+    index = full.index.to_numpy()
+    onset_minute = np.where(onset.to_numpy(), index - (consecutive - 1), np.nan).astype(float)
+    horizon = config['label']['horizon_seconds'] // 60
+    tail = config['label']['confirmation_tail_minutes']
+    n = len(index)
+    if n < w:
+        return []
+    rt, rate, breach = rt_s.to_numpy(float), rate_s.to_numpy(float), breach_s.to_numpy(float)
+    pad = np.full(horizon + tail + consecutive, np.nan)
+    rt_win, rate_win = sliding_window_view(rt, w), sliding_window_view(rate, w)
+    pos = np.arange(w - 1, n)
+    b_rt, b_rate = rt_base[pos], rate_base[pos]
+    import warnings
+    with np.errstate(invalid='ignore', divide='ignore'), warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)  # all-NaN windows are excluded below
+        rel_rt, rel_rate = rt_win / b_rt[:, None], rate_win / b_rate[:, None]
+        ok = ((np.isfinite(rt_win).sum(1) >= 4) & (b_rt > 0) & (b_rate > 0) & np.isfinite(b_rt)
+              & ~(rel_rt <= 0).any(1) & ~(rel_rate <= 0).any(1))
+
+        def slope(y):
+            m = np.isfinite(y)
+            cnt = m.sum(1)
+            x = np.broadcast_to(np.arange(w, dtype=float), y.shape)
+            xm = np.where(m, x, 0).sum(1) / np.maximum(cnt, 1)
+            ym = np.where(m, y, 0).sum(1) / np.maximum(cnt, 1)
+            dx = np.where(m, x - xm[:, None], 0)
+            val = (dx * np.where(m, y - ym[:, None], 0)).sum(1) / (dx * dx).sum(1)
+            return np.where(cnt >= 4, val, np.nan)
+
+        feats = np.column_stack([np.log(np.nanmean(rel_rt, 1)), slope(rel_rt), np.log(np.nanmean(rel_rate, 1)),
+                                 slope(rel_rate), np.log(np.nanmax(rel_rt, 1))]) if len(pos) else np.empty((0, 5))
+    ok &= np.isfinite(feats).all(1)
+    breach_p, onset_p = np.concatenate([breach, pad]), np.concatenate([onset_minute, pad])
+    fut = sliding_window_view(breach_p[1:], horizon + tail)[pos]
+    win = sliding_window_view(breach, w)
+    ons = sliding_window_view(onset_p[1:], horizon + consecutive - 1)[pos]
+    rows = []
+    for k in np.nonzero(ok)[0]:
+        t = int(index[pos[k]])
+        in_window, future = win[k], fut[k]
+        cand = ons[k][~np.isnan(ons[k])]
+        cand = cand[(cand > t) & (cand <= t + horizon)]
+        window_seen = np.isfinite(in_window).all()
+        observed = np.isfinite(future).all() and window_seen
+        healthy = bool(observed and (in_window == 0).all() and (future == 0).all())
+        risk = 1 if (window_seen and (in_window == 0).all() and len(cand)) else (0 if healthy else None)
+        rows.append({'minute': t, 'features': [float(v) for v in feats[k]], 'healthy': healthy,
+                     'risk_label': risk, 'onset_minute': int(cand[0]) if len(cand) else None})
+    return rows
+
+
 def build_rows(data, config):
     """All services with enough minutes; split assigned by identity before rows exist."""
     rows = []
@@ -121,6 +189,6 @@ def build_rows(data, config):
         series = group.set_index('minute')[['http_rt_ms', 'http_mcr_sum']].rename(
             columns={'http_rt_ms': 'rt', 'http_mcr_sum': 'rate'}).sort_index()
         split = split_of(msname)
-        for row in service_windows(series, config):
+        for row in service_windows_fast(series, config):
             rows.append({'service': msname, 'split': split, **row})
     return rows

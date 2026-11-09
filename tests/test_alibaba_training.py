@@ -38,3 +38,23 @@ def test_baseline_needs_minimum_history_and_split_is_stable_by_identity():
     rows = service_windows(series([10.0] * 9), config)
     assert rows == []                # fewer than window + min_minutes of history
     assert split_of('MS_1') == split_of('MS_1') and {split_of(f'MS_{i}') for i in range(200)} == {'train', 'calibration', 'evaluation'}
+
+
+@pytest.mark.parametrize('seed', range(6))
+def test_vectorised_transform_equals_the_reference(seed):
+    from sentinelops.ml.alibaba_training import service_windows_fast
+    config = load_config()
+    rng = np.random.default_rng(seed)
+    n = 200
+    rt = rng.lognormal(2.5, 0.3, n)
+    rt[rng.integers(0, n, 8)] *= rng.uniform(2.5, 6, 8)              # spikes → breaches
+    rate = rng.lognormal(0, 0.2, n)
+    rt[rng.integers(0, n, 10)] = np.nan                              # gaps
+    rate[rng.integers(0, n, 6)] = np.nan
+    index = np.sort(rng.choice(np.arange(n + 30), n, replace=False))  # missing minutes
+    frame = pd.DataFrame({'rt': rt, 'rate': rate}, index=index)
+    ref, fast = service_windows(frame, config), service_windows_fast(frame, config)
+    assert [r['minute'] for r in ref] == [r['minute'] for r in fast]
+    for a, b in zip(ref, fast):
+        assert a['healthy'] == b['healthy'] and a['risk_label'] == b['risk_label'] and a['onset_minute'] == b['onset_minute']
+        assert np.allclose(a['features'], b['features'], rtol=1e-9, atol=1e-12)
