@@ -40,17 +40,20 @@ with forged PASS flags.
 No endpoint writes approvals. Environment configuration uses both
 `SENTINELOPS_MODEL_STORE` and `SENTINELOPS_MODEL_RELEASE_REF`; absent configuration
 leaves the registry empty and `/v1/detect` returns 503. Invalid configured artifacts
-fail initialization. Each request pins its loaded bundle; process restart selects a
+fail initialization. Each worker pins its loaded bundle; process restart selects a
 new immutable release. Distributed hot activation/CAS and production registry audit
 are not claimed by this local loader.
 
-The existing `/v1/detect` wire shape is preserved. Real inference requires the
-matching `X-SentinelOps-Source-Profile`, exact finite feature schema and a nonfuture,
-fresh window. The model version is also returned in a header. Supplemental worker
-inference retains risk, provenance and availability; unavailable risk stays null.
-`/v1/risk` serves the existing strict degradation-risk contract with the same
-source/window checks and returns 503 when the compatible risk model is unavailable.
-The explicit legacy demo remains separately marked. No fallback supplies fake scores.
+The Alibaba bundle runs in the incident worker on accepted Prometheus v2 history.
+Consumers read its available detection and risk signals from the pinned incident
+revision. Missing history leaves the corresponding signal unavailable.
+
+The existing `/v1/detect` and `/v1/risk` routes still accept the legacy
+`FeatureWindow` shape. With an Alibaba release loaded, they return
+`422 incompatible_feature_set` for that shape because it cannot provide accepted
+v2 history. The `model` dependency in `/ready` currently reports bundle load
+status. Verify the incident worker's v2 stream and a published incident revision
+when accepting H1. The explicit demo remains separately marked.
 
 Event evaluation matches actual alert emissions one-to-one to independent evaluator
 events, keeps duplicate/missed alerts, reports measured delay/lead time and denominators,
