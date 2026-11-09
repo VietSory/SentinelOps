@@ -69,6 +69,11 @@ của G3/G8.
 - traffic bị ngắt lúc thay pod;
 - image xấu nằm khác repo, nên guard chặn đúng.
 
+**Mốc native ngày 2026-11-09 với model chính thức Alibaba** (release `3966e75e`, G3 có điều kiện D-22):
+- **Source parity profile v2 PASS** (P1–P6): mean latency Prometheus lệch tối đa 4,3% so với log server.
+- **H4 PASS:** health stream v2, 11 phút healthy trước image xấu; IF Alibaba cho `anomaly_strength` 0,989, Payment score 0,797, coverage 0,80, `dispatch_authority=true`.
+- **G6:** 9 trial còn lại đang chạy tuần tự với model này (owner ủy quyền operator); Q-09 tính trên chính chuỗi trial này.
+
 ## Việc tiếp theo
 
 - **A:** admission/capture → models/evaluation → RCA/explanation → source parity.
