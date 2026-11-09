@@ -6,7 +6,7 @@ Isolation Forest and XGBoost are trained only on Alibaba
 are evaluation only. Local-data fitting (ADR-014) and its per-service candidate,
 handoff, release and parity tools were retired on 2026-11-09 with owner approval;
 they stay readable in git history, and their recorded evidence (candidate
-`38bcc766`, D-19) is unchanged. RCAEval remains RCA-only.
+`38bcc766`, D-19) is unchanged. Current model: [model card](../reports/MODEL_CARD_ALIBABA_BADF9DA0.md). RCAEval remains RCA-only.
 
 `scripts.audit_model_readiness` describes historical GAMMA v1 reproduction; it
 remains ineligible for fitting.

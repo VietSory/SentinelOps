@@ -9,7 +9,7 @@ approval record carries the decision.
 - model version: `badf9da0b563f4900fa099b11ba9223ee864d414ef3aa9af82a534db962d85e3`
 - bundle `sentinelops-model/v3`, origin `admitted-alibaba-v2022`, manifest SHA-256
   `2d1a5376eccdd691da0741b9dc88eecd223d75a85a23fa712e00c1dc53291e62`
-- one service-agnostic bundle for all business routes; feature set `http-relative-5m/v1`
+- [model card](MODEL_CARD_ALIBABA_BADF9DA0.md); one service-agnostic bundle for all business routes; feature set `http-relative-5m/v1`
 - frozen config `configs/alibaba_relative_features.json`, SHA-256 `3e29879a…`
 - fit commit `a1820c7`; source: Alibaba `cluster-trace-microservices-v2022`
   MSRTMCR files 0–119 (trace hours 0–6), each archive checksummed at download
