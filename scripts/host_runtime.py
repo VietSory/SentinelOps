@@ -77,7 +77,14 @@ def health_identity(root, session):
     try: configuration = source.verify_configuration()
     finally: source.close()
     recorded = session.get('arguments', [])
-    profile = {'source_profile': recorded[recorded.index('--source-profile') + 1]} if '--source-profile' in recorded else {}
+    # Incident sessions cannot carry --source-profile: run_incident_worker has no
+    # such flag. The selected health profile travels as session metadata instead,
+    # so the probe and this runtime recheck derive the same stream identity.
+    # v1 sessions have neither and keep the default profile.
+    selected_profile = session.get('health_source_profile')
+    if selected_profile is None and '--source-profile' in recorded:
+        selected_profile = recorded[recorded.index('--source-profile') + 1]
+    profile = {'source_profile': selected_profile} if selected_profile else {}
     worker = HealthWorker(None, ArtifactStore(session['health_store']),
         json.loads((root / 'configs/slo_health_policy.json').read_text()), endpoint=endpoint,
         environment='local', configuration_hash=configuration['configuration_hash'], **profile)
