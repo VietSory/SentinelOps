@@ -312,11 +312,37 @@ suốt trial:
   để operator truy xuất journal theo request trong file đó trước khi dọn DB.
 - Đã kiểm CLI và chữ ký ghép nối; **chưa chạy native**.
 
+### 7.6 Cập nhật 2026-11-09: model chính thức là model Alibaba (ADR-016)
+
+Mục 7.5 vẫn đúng cho candidate local `38bcc766`, nhưng đó chỉ còn là bằng chứng
+tích hợp. Model chính thức là **một bundle dùng chung cho cả ba service**, train
+trên trace production Alibaba v2022 (`sentinelops-model/v3`, origin
+`admitted-alibaba-v2022`, model `badf9da0…`). Ba bundle theo service không còn
+là đường giao hàng.
+
+| # | Ai | Lệnh | Trạng thái |
+| --- | --- | --- | --- |
+| 1 | A | `scripts.train_alibaba` → `scripts.package_alibaba_bundle` | Xong; manifest SHA-256 `2d1a5376…` |
+| 2 | A | `scripts.alibaba_controls` (lớp 1, chạy một lần) | Xong; [hồ sơ G3](../reports/G3_CANDIDATE_ALIBABA_BADF9DA0.md) |
+| 3 | A/B | `scripts.check_alibaba_source_parity --kind … --bundle … --manifest-sha256 …` (profile v2, tiêu chí P1–P6) | PASS 2026-11-09 trên `local-wsl-shared-host`; môi trường khác phải đo lại |
+| 4 | Owner | Quyết định G3 | **Duyệt có điều kiện** (D-22), chỉ cho tích hợp local H4→G6 |
+| 5 | Operator | `scripts.build_alibaba_release … --confirm-owner-decision` | Đã build, chưa bật |
+| 6 | B | Health worker chạy profile v2 (`_sum`/`_count`); model-signal đọc lịch sử v2 đã accept | Đang tích hợp ở lane online |
+| 7 | A | `scripts.run_s2_h4` / `scripts.run_g6_trial` với release Alibaba: health v2 và ≥11 phút healthy trước thay đổi xấu | Chờ bước 6 lên `main` |
+
+Ràng buộc mới cho B:
+
+- Model chỉ có tín hiệu khi service đã có ít nhất 5 phút baseline trước một cửa
+  sổ 5 phút. Trước thời điểm đó, tín hiệu là *unavailable*, không phải 0.
+- Model không học lỗi 5xx; lỗi do luật SLO và MAD đảm nhận.
+- Kết quả chính thức của model là lớp 2 (đợt đánh giá local v2 đã khóa trước khi
+  chạy) và G8, không phải số development trong hồ sơ G3.
+
 ## 8. Những gì checkpoint này KHÔNG tuyên bố
 
 - **AWS chưa triển khai.** Không `apply`, không gọi AWS API, không có credential.
-- **Chưa có model được chấp nhận.** G2/G3 chưa nghiệm thu; không model nào được
-  phép activate.
+- **Chưa có model được bật trên môi trường của B.** G3 chỉ được duyệt có điều kiện
+  cho tích hợp local (D-19, D-22); kết quả chính thức chờ lớp 2 và G8.
 - **G4 đầy đủ chưa nghiệm thu.** Ranking là suspect kèm evidence, không phải
   nguyên nhân đã xác nhận.
 - **G5 chưa nghiệm thu.** Explanation dùng deterministic fallback thật, không
