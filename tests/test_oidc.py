@@ -81,11 +81,25 @@ def test_invalid_tokens_are_rejected(case):
         identify(v, value)
 
 
-def test_cognito_style_client_id_audience():
+def test_cognito_style_client_id_audience_only_for_unbound_access_tokens():
     v = verifier(audience_claim='client_id')
-    assert identify(v, token('sentinelops/incidents.write', aud=None, client_id=AUDIENCE))[0] == 'producer'
+    write = 'sentinelops/incidents.write'
+    assert identify(v, token(write, aud=None, client_id=AUDIENCE, token_use='access'))[0] == 'producer'
+    for claims in ({'client_id': 'other-client', 'token_use': 'access'},
+                   {'client_id': AUDIENCE},  # token_use must be explicit
+                   {'client_id': AUDIENCE, 'token_use': 'id'}):
+        with pytest.raises(TokenRejected):
+            identify(v, token(write, aud=None, **claims))
+    with pytest.raises(TokenRejected):  # bound to another resource server
+        identify(v, token(write, aud='https://different-resource.example', client_id=AUDIENCE, token_use='access'))
+
+
+@pytest.mark.parametrize('claims', [{'scope': None, 'scp': [['sentinelops/incidents.write']]},
+                                    {'scope': {'a': 1}}, {'iat': {'nested': 1}}, {'exp': 'soon'}])
+def test_claims_of_the_wrong_shape_are_rejected_not_raised(claims):
+    claims = {'scope': 'sentinelops/incidents.write', **claims}
     with pytest.raises(TokenRejected):
-        identify(v, token('sentinelops/incidents.write', aud=None, client_id='other-client'))
+        identify(verifier(), token(**claims))
 
 
 def test_jwks_is_cached_refreshed_on_rotation_and_fails_closed_when_unreachable():

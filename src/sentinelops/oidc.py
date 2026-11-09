@@ -139,17 +139,26 @@ class OidcVerifier:
                                 audience=config.audience if by_aud else None, leeway=config.leeway_seconds,
                                 options={"require": ["exp", "iat", "iss", "sub"] + (["aud"] if by_aud else []),
                                          "verify_aud": by_aud})
-        except jwt.PyJWTError:
+        except (jwt.PyJWTError, TypeError, ValueError):
+            # TypeError/ValueError: claims of the wrong JSON shape (e.g. an object as iat).
             raise TokenRejected("token signature or claims are invalid") from None
-        if not by_aud and claims.get("client_id") != config.audience:
-            raise TokenRejected("token belongs to another client")
-        if claims.get("token_use", "access") != "access":
+        if not by_aud:
+            # Compatibility only for unbound Cognito access tokens: explicit token_use=access and no
+            # aud at all. A token bound to another resource (any aud) is never accepted by client_id.
+            if "aud" in claims or claims.get("token_use") != "access" or claims.get("client_id") != config.audience:
+                raise TokenRejected("token is not an unbound access token of this client")
+        elif claims.get("token_use", "access") != "access":
             raise TokenRejected("only access tokens are accepted")
         subject = claims["sub"]
         if not isinstance(subject, str) or not SUBJECT.fullmatch(subject):
             raise TokenRejected("token subject is not a bounded identifier")
         raw = claims.get("scope", claims.get("scp", ""))
-        scopes = set(raw.split()) if isinstance(raw, str) else set(raw) if isinstance(raw, list) else set()
+        if isinstance(raw, str):
+            scopes = set(raw.split())
+        elif isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+            scopes = set(raw)
+        else:
+            raise TokenRejected("token scope claim has an invalid shape")
         if config.producer_scope in scopes:
             return PRODUCER, subject
         if config.operator_scope in scopes:

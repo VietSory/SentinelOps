@@ -120,7 +120,7 @@ vẫn dùng được; không chạy cùng role foreground và managed song song.
 | `GET /v1/incidents/{id}/explanation?revision=N` | Wrapper riêng version 1.0, GroundedExplanation trong payload, provider/fallback, refs thuộc IER đang chọn; GET không ghi EXPLAINED hoặc cấp action |
 | `GET /v1/incidents/{id}/actions`, `/v1/actions/{id}` | Optional SELECT-only action journal, pin incident revision và action ETag; xem [action runbook](runbooks/CONTROLLED_REMEDIATION.md#read-only-action-http-and-ui) |
 | `GET /v1/actions/{id}/quarantine` | Optional migration 2, receipt operator riêng; không biến `escalated` thành recovered, không có HTTP release/dispatch |
-| `POST /v1/detect`, `/v1/risk` | FeatureWindow, source-profile header, approved model; unavailable 503; Alibaba release 409 `model_requires_stream_history` (read IER `service_signals`) |
+| `POST /v1/detect`, `/v1/risk` | FeatureWindow, source-profile header, approved model; unavailable 503; Alibaba release 409 `model_requires_stream_history` (read `service_signals` from `GET /v1/incidents/{id}?revision=…`) |
 | Incident writes | Trusted producer/operator; If-Match + Idempotency-Key, không public upload tùy ý |
 
 H2 [backend](runbooks/EXPLANATIONS.md) và [API/UI](runbooks/INCIDENT_API.md) đã có

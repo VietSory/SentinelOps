@@ -95,13 +95,13 @@ be configured together.
 | `SENTINELOPS_OIDC_ISSUER` | Required. Exact `iss`, https |
 | `SENTINELOPS_OIDC_AUDIENCE` | Required. Expected audience |
 | `SENTINELOPS_OIDC_JWKS_URL` | Required. https JWKS document (no redirects, at most 64 KiB) |
-| `SENTINELOPS_OIDC_AUDIENCE_CLAIM` | `aud` (default) or `client_id` (Cognito access tokens) |
+| `SENTINELOPS_OIDC_AUDIENCE_CLAIM` | `aud` (default, resource-bound tokens per RFC 9068) or `client_id`: only for unbound Cognito access tokens, which must have `token_use=access`, no `aud` and a matching `client_id` |
 | `SENTINELOPS_OIDC_PRODUCER_SCOPE` | Default `sentinelops/incidents.write`: producer role (reads + IER writes) |
 | `SENTINELOPS_OIDC_OPERATOR_SCOPE` | Default `sentinelops/incidents.read`: read-only operator role |
 
 Only RS256/ES256 keys marked for signing are used, and the token's `kid` and `alg` must match a
 published key. `exp`, `iat`, `iss` and `sub` are required, with 60 s leeway. `token_use`, if present,
-must be `access`. Scopes come from `scope` (space separated) or `scp` (list). A token with
+must be `access`. Scopes come from `scope` (space separated) or `scp` (list of strings); claims of the wrong JSON shape get 401, not a server error. A token with
 the producer scope gets the producer role; with only the operator scope, the operator role. A valid token
 with neither scope gets 403 `insufficient_scope`, and an invalid one gets 401. The audit actor is
 `oidc-<role>:<sub>`. Keys are cached for 5 minutes. An unknown `kid` forces at most one refresh
@@ -186,6 +186,6 @@ Supplemental schema `$ref`s resolve the original IER from installed package reso
 
 ## Mock migration and validation
 
-Default `POST /v1/detect` returns 503 when no validated model is active. With the ADR-016 Alibaba release, `POST /v1/detect` and `POST /v1/risk` return 409 `model_requires_stream_history`: the relative model needs accepted v2 stream history that one FeatureWindow cannot carry. Read the worker's model results as `service_signals` in the IER (`GET /v1/incidents?service=<route>`). `/ready` reports `direct_inference=false`; scores from healthy periods, which open no incident, are not exposed. Default `/v1/incidents/demo` is disabled. For local fixture consumers only, `SENTINELOPS_ENABLE_DEMO=true` in local/test enables the old skeleton output and nonpersisted demo IER; both responses carry `X-SentinelOps-Mode: demo`. Demo mode is rejected outside the sandbox. It cannot make readiness/model quality pass.
+Default `POST /v1/detect` returns 503 when no validated model is active. With the ADR-016 Alibaba release, `POST /v1/detect` and `POST /v1/risk` return 409 `model_requires_stream_history`: the relative model needs accepted v2 stream history that one FeatureWindow cannot carry. Read the worker's model results as `service_signals` in the IER: list with `GET /v1/incidents?service=<route>` (summaries only), then fetch `GET /v1/incidents/{id}?revision={revision}`. `/ready` reports `direct_inference=false`; scores from healthy periods, which open no incident, are not exposed. Default `/v1/incidents/demo` is disabled. For local fixture consumers only, `SENTINELOPS_ENABLE_DEMO=true` in local/test enables the old skeleton output and nonpersisted demo IER; both responses carry `X-SentinelOps-Mode: demo`. Demo mode is rejected outside the sandbox. It cannot make readiness/model quality pass.
 
 `python scripts/check_incident_api.py --restart-database` launches a real Uvicorn process, uses HTTP over loopback against real PostgreSQL, verifies persistence/idempotency/CAS/ETags, historical context, filtered pagination, streamed body limits and denied unintegrated stages, then stops/restarts the dedicated control database and verifies outage/reconnection. It generates its own ephemeral token and terminates the API in `finally`. All inserted IER contents are explicitly synthetic validation fixtures. The control-storage CI job runs this path after repository acceptance.

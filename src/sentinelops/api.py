@@ -88,7 +88,8 @@ def revision_headers(response: Response,snapshot: dict) -> None:
 
 
 STREAM_HISTORY_DETAIL = ("The active model scores accepted health-stream history in the incident worker; "
-                         "read its results as service_signals via GET /v1/incidents?service=<route>")
+                         "find incidents via GET /v1/incidents?service=<route>, then read service_signals from "
+                         "GET /v1/incidents/{id}?revision={revision}")
 
 
 def _reject_direct_inference(registry):
