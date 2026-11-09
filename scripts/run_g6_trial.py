@@ -130,6 +130,19 @@ async def wait_for_file(path, timeout):
     raise TimeoutError(f'operator did not provide {path.name} in time')
 
 
+def source_unavailable_is_transient(exc, outage):
+    """Which KubernetesUnavailable errors the trial consumer retries instead of failing.
+
+    A golden-path trial keeps the strict rule: only a not-yet-accepted HTTP bucket is
+    retried. During the injected dependency outage the Payment pod crash-loops by
+    design, so the business inventory is legitimately unusable for a while; the
+    production incident worker (`scripts/run_incident_worker.py`) treats every
+    KubernetesUnavailable as SOURCE_UNAVAILABLE and retries. The trial does the same
+    then, so the executor, not a harness crash, decides the outcome.
+    """
+    return outage or str(exc) == 'kubernetes-accepted-http-bucket-unavailable'
+
+
 def reforward(sandbox, attempt):
     """Fresh Payment port-forward after its pod changes; keep every earlier log."""
     current = sandbox.root / (PAYMENT + '-forward.log')
@@ -212,8 +225,9 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                     try:
                         await worker.tick()
                     except KubernetesUnavailable as exc:
-                        if str(exc) != 'kubernetes-accepted-http-bucket-unavailable':
+                        if not source_unavailable_is_transient(exc, phase.get('outage', False)):
                             raise
+                        emit('incident-source-unavailable', reason=str(exc))
                     await asyncio.sleep(1)
 
             consumer = asyncio.create_task(consume())

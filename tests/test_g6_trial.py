@@ -70,3 +70,12 @@ def test_dependency_outage_flag_is_read_per_request(monkeypatch):
     counts = asyncio.run(run_s2_h4.drive(Client(), {'payment-service': 'http://p'}, run_s2_h4.clock() + timedelta(seconds=0.5),
                                          False, dependency_outage=lambda: outage['on']))
     assert counts['payment-service'] == {'500': 1}
+
+
+def test_consumer_retries_any_source_outage_only_during_the_injected_dependency_outage():
+    from sentinelops.remediation.domain import KubernetesUnavailable
+    pending = KubernetesUnavailable('kubernetes-accepted-http-bucket-unavailable')
+    unusable = KubernetesUnavailable('kubernetes-business-inventory-not-currently-usable')
+    assert run_g6_trial.source_unavailable_is_transient(pending, outage=False)
+    assert not run_g6_trial.source_unavailable_is_transient(unusable, outage=False)
+    assert run_g6_trial.source_unavailable_is_transient(unusable, outage=True)
