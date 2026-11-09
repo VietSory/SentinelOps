@@ -157,6 +157,33 @@ must pass. Otherwise the controller stops while additional whole earlier-role
 groups can still be collected within the predeclared maximum; it cannot silently
 make a deficient train/calibration split unrepairable by advancing chronology.
 
+### Docker address pool exhaustion
+
+`all predefined address pools have been fully subnetted` can stop Compose before
+session registration and traffic. First confirm the controller exited, and check
+that the failed group has its provisioning record but no session, run, containers
+or volumes. An interrupted workload follows the recovery procedure below.
+
+For a fresh group on Docker Compose v5.1.4, you can provision its default bridge
+outside the exhausted pool. Check the proposed private subnet against Docker
+IPAM and host routes. Set `capture_project` to the group's registered Compose
+project and `capture_subnet` to the free subnet. Confirm the network name is unused
+before creating it.
+
+```sh
+docker network create --driver bridge --subnet "$capture_subnet" \
+  --label "com.docker.compose.project=$capture_project" \
+  --label com.docker.compose.network=default "${capture_project}_default"
+```
+
+Reserve a distinct subnet for each remaining group if the default pool is still
+full. Check that a Compose dry run with the frozen files reuses the bridge. Then
+rerun the original campaign command with the same checkout, source root, plan and
+candidate pins. The controller reuses the pre-traffic provisioning record and
+keeps the old log beside the new attempt. Existing Docker objects can stay in
+place. If reclaiming capacity from this epoch instead, use only its already closed
+groups with end-context receipts. Disconnect only their stopped containers and
+remove only the group's default network, preserving containers and volumes.
 
 ### Terminal host interruption
 
@@ -260,16 +287,6 @@ Minimum 5 groups, maximum 10. Host-interrupted or clock-invalid groups use the
 same whole-group exclusion as the fitting corpus (`close_interrupted_group`,
 `close_clock_invalid_group` with `--plan`). The replacement ordinal must be
 beyond the reserved minimum (6–10). Never retry a slot in place.
-
-Docker can exhaust its default address pools because every preserved group keeps
-its Compose network. Provisioning then fails before registration or traffic, with
-`all predefined address pools have been fully subnetted`. Recover only owned
-resources: disconnect the stopped containers of this epoch's already closed
-groups (their end-context receipts must exist) from their `_default` networks and
-remove those networks. Keep the containers and volumes. Do not prune machine-wide
-or touch other projects. Then restart the campaign from the same worktree: an
-unregistered group resumes its own provisioning intent, and a failed attempt's
-log is kept beside the new attempt's.
 
 Commit `configs/local_model_evaluation_v2.json` and the detector plan **before**
 the first registration. The v2 evaluator rejects an epoch whose registered source
