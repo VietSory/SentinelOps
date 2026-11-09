@@ -38,6 +38,11 @@ Use the repository environment, a credential-free loopback Prometheus endpoint, 
 
 `--max-buckets` bounds an execution when needed. SIGTERM/SIGINT request graceful shutdown. A transport/database outage is logged without credentials and retried by the live process; integrity, configuration, schema/role or filesystem errors fail closed. `--status` verifies the matching source configuration before reading the stream. The output includes stream/bucket identity and full cycle plus stage timings; source lag and processing time are distinct quantities.
 
+For ADR-016 evaluation, use `--source-profile prometheus-increase-60s-5s/v2`
+to collect raw latency sum and count alongside the existing p95 SLO inputs.
+Use the same flag with `--status` and point the evaluation consumer at the
+printed stream ID. The profile forms part of the stream identity.
+
 New dedicated test volumes apply migration 003 through Compose initialization. Existing v1 volumes require an explicit migration as the bootstrap/migration owner. Do not delete volumes to upgrade. Apply only against the intended control project/database, verify schema/permissions/history and keep a tested recovery path.
 
 For a worker rollback, stop its processes and retain the accepted checkpoint, immutable objects and schema-v2-compatible API readiness code. An older binary that requires exactly schema 1 will reject version 2; reverting all code alone is not a database rollback. Preserve the additive tables/history or use an explicitly planned backup/restore migration. Do not truncate history to make readiness green.

@@ -8,7 +8,7 @@ import pytest
 from sentinelops.incidents.health import advance_health
 from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
 from sentinelops.telemetry.pipeline import process_captures
-from sentinelops.telemetry.prometheus import SOURCE_PROFILE, queries, decode_capture
+from sentinelops.telemetry.prometheus import SOURCE_PROFILE, SOURCE_PROFILE_V2, queries, decode_capture
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.health import HealthWorker
 from sentinelops.workers.health_source import verify_health_batch
@@ -17,36 +17,38 @@ POLICY = json.loads(Path("configs/slo_health_policy.json").read_text())
 START = datetime(2026, 10, 29, tzinfo=timezone.utc)
 
 
-def capture(service, end, *, errors=12):
+def capture(service, end, *, errors=12, profile=SOURCE_PROFILE):
     values = {"requests": [({}, 120)], "errors": [({}, errors)],
               "buckets": [({"le": "0"}, 0), ({"le": "100"}, 120), ({"le": "+Inf"}, 120)],
               "scrapes": [({}, 12)], "series_scrapes": [({}, 12)], "up": [({}, 1)]}
-    return {"capture_version": "1.0", "source_profile": SOURCE_PROFILE, "service": service,
+    if profile == SOURCE_PROFILE_V2:
+        values.update(duration_sum=[({}, 7200)], duration_count=[({}, 120)])
+    return {"capture_version": "1.0", "source_profile": profile, "service": service,
             "bucket_end": timestamp(end), "collected_at": timestamp(end + timedelta(seconds=30)),
             "queries": {key: {"expression": expression, "response": {"status": "success", "data": {
                 "resultType": "vector", "result": [{"metric": labels, "value": [end.timestamp(), str(value)]}
-                    for labels, value in values[key]]}}} for key, expression in queries(service).items()}}
+                    for labels, value in values[key]]}}} for key, expression in queries(service, profile).items()}}
 
 
-def ledger(tmp_path, *, broken=False):
+def ledger(tmp_path, *, broken=False, profile=SOURCE_PROFILE):
     """Real codec/store software fixture, independent of PostgreSQL integration."""
     store = ArtifactStore(tmp_path)
     worker = HealthWorker(None, store, POLICY, endpoint="http://localhost:9090",
-                          environment="fixture", configuration_hash="a" * 64)
+                          environment="fixture", configuration_hash="a" * 64, source_profile=profile)
     batches, records, previous, raws, previous_ref = [], [], {}, [], None
     for index in range(2):
         end, evaluated = START + timedelta(minutes=index), START + timedelta(minutes=index, seconds=37 + index)
-        current = [capture(service, end) for service in sorted(BUSINESS_ROUTES)]
+        current = [capture(service, end, profile=profile) for service in sorted(BUSINESS_ROUTES)]
         if broken: current[0]["queries"].pop("buckets")
         refs = sorted(store.write("raw", raw) for raw in current)
         raws.extend(current)
-        normalized = process_captures(raws, store, environment="fixture")
+        normalized = process_captures(raws, store, environment="fixture", default_profile=profile)
         observations = {o["service"]: o for ref in normalized["observation_refs"]
                         if (o := store.read(ref))["bucket_end"] == timestamp(end)}
         signals, signal_refs = {}, []
         for service in sorted(BUSINESS_ROUTES):
             signal = advance_health(previous.get(service), observations.get(service), service=service,
-                environment="fixture", source_profile=SOURCE_PROFILE, bucket_end=end, evaluated_at=evaluated, policy=POLICY)
+                environment="fixture", source_profile=profile, bucket_end=end, evaluated_at=evaluated, policy=POLICY)
             signals[service] = signal
             ref = store.write("signals", signal)
             signal_refs.append(ref)
@@ -73,12 +75,14 @@ def verify_at(source, index, previous=None):
 
 
 @pytest.mark.parametrize("broken", [False, True])
-def test_actual_decision_clock_replays_raw_and_retains_quarantined_unknown(tmp_path, broken):
-    source = ledger(tmp_path, broken=broken)
+@pytest.mark.parametrize("profile", [SOURCE_PROFILE, SOURCE_PROFILE_V2])
+def test_actual_decision_clock_replays_raw_and_retains_quarantined_unknown(tmp_path, broken, profile):
+    source = ledger(tmp_path, broken=broken, profile=profile)
     before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob('*.json')}
     first = verify_at(source, 0)
     last = verify_at(source, 1, first["service_states"])
     assert last["raw_health_lineage_verified"] is True
+    assert last["normalization"]["source_profile"] == profile
     assert last["batch"]["evaluated_at"].endswith("01:38Z")
     assert len(last["signal_objects"]) == 3
     if broken:

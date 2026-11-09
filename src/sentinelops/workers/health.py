@@ -16,7 +16,7 @@ from sentinelops.incidents.health import advance_health, validate_policy
 from sentinelops.incidents.repository import IncidentRepository
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.pipeline import process_captures
-from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE
+from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE, SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 
 DATABASE_TIMEOUT_SECONDS = 10
@@ -53,25 +53,27 @@ def latest_bucket(now: datetime) -> datetime:
     return datetime.fromtimestamp(int((now - timedelta(seconds=30)).timestamp()) // 60 * 60, timezone.utc)
 
 
-def native_capture(endpoint: str, service: str, end: datetime) -> dict:
+def native_capture(endpoint: str, service: str, end: datetime, *, profile: str = SOURCE_PROFILE) -> dict:
     source = PrometheusSource(endpoint)
     source.client.timeout = httpx.Timeout(1.)
     try:
-        return source.capture(service, end)
+        return source.capture(service, end, profile=profile)
     finally:
         source.close()
 
 
 class HealthWorker:
     def __init__(self, pool, store: ArtifactStore, policy: dict, *, endpoint: str, environment: str,
-                 configuration_hash: str):
+                 configuration_hash: str, source_profile: str = SOURCE_PROFILE):
         validate_policy(policy)
         if not environment or not re.fullmatch(r"[0-9a-f]{64}", configuration_hash):
             raise ValueError("health worker source identity is incomplete")
+        if source_profile not in (SOURCE_PROFILE, SOURCE_PROFILE_V2):
+            raise ValueError("unsupported continuous health source profile")
         self.pool, self.store = pool, store
         self.policy = json.loads(json.dumps(policy, allow_nan=False))
         self.endpoint, self.environment = local_endpoint(endpoint), environment
-        self.identity = {"worker_version": "continuous-health/v1", "source_profile": SOURCE_PROFILE,
+        self.identity = {"worker_version": "continuous-health/v1", "source_profile": source_profile,
                          "environment": environment, "policy_sha256": stable_id(policy),
                          "prometheus_configuration_hash": configuration_hash,
                          "endpoint_hash": stable_id({"endpoint": self.endpoint}),
@@ -182,8 +184,11 @@ class HealthWorker:
             captures.extend(self.store.read(ref) for ref in manifest["current_raw_refs"])
         missed = (current - end).total_seconds() > self.policy["maximum_lag_seconds"]
         history_done = time.monotonic()
+        profile = self.identity["source_profile"]
+        capture_options = {"profile": profile} if profile != SOURCE_PROFILE else {}
         current_captures = [] if missed else await asyncio.gather(*(
-            asyncio.to_thread(native_capture, self.endpoint, service, end) for service in sorted(BUSINESS_ROUTES)))
+            asyncio.to_thread(native_capture, self.endpoint, service, end, **capture_options)
+            for service in sorted(BUSINESS_ROUTES)))
         if not missed and (len(current_captures) != len(BUSINESS_ROUTES)
                            or {item["service"] for item in current_captures} != set(BUSINESS_ROUTES)
                            or any(item["bucket_end"] != timestamp(end) for item in current_captures)):
@@ -191,11 +196,12 @@ class HealthWorker:
         allowed = {"capture_version", "source_profile", "service", "bucket_end", "collected_at", "queries"}
         for capture in captures + current_captures:
             if (set(capture) != allowed or capture["capture_version"] != "1.0"
-                or capture["source_profile"] != SOURCE_PROFILE or capture["service"] not in BUSINESS_ROUTES):
+                or capture["source_profile"] != profile or capture["service"] not in BUSINESS_ROUTES):
                 raise ValueError("health worker rejects mixed source/control metadata")
         capture_done = time.monotonic()
         current_refs = sorted(self.store.write("raw", capture) for capture in current_captures)
-        normalized = await asyncio.to_thread(process_captures, captures + current_captures, self.store, environment=self.environment)
+        normalized = await asyncio.to_thread(process_captures, captures + current_captures, self.store,
+                                             environment=self.environment, default_profile=profile)
         observations = {}
         for ref in normalized["observation_refs"]:
             observation = self.store.read(ref)
@@ -208,7 +214,7 @@ class HealthWorker:
         signals, signal_refs = [], []
         for service in sorted(BUSINESS_ROUTES):
             signal = advance_health(previous.get(service), observations.get(service), service=service,
-                environment=self.environment, source_profile=SOURCE_PROFILE, bucket_end=end,
+                environment=self.environment, source_profile=profile, bucket_end=end,
                 evaluated_at=evaluated, policy=self.policy)
             signals.append(signal)
             signal_refs.append(self.store.write("signals", signal))

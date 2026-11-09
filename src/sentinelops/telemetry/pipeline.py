@@ -9,9 +9,10 @@ from sentinelops.telemetry.prometheus import SOURCE_PROFILE, decode_capture
 from sentinelops.telemetry.store import ArtifactStore
 
 
-def process_captures(captures: list[dict[str, Any]], store: ArtifactStore, *, environment: str = "local") -> dict[str, Any]:
+def process_captures(captures: list[dict[str, Any]], store: ArtifactStore, *, environment: str = "local",
+                     default_profile: str = SOURCE_PROFILE) -> dict[str, Any]:
     return _process_captures(captures, store, environment=environment,
-                             decoder=decode_capture, default_profile=SOURCE_PROFILE)
+                             decoder=decode_capture, default_profile=default_profile)
 
 
 def _process_captures(captures, store, *, environment, decoder, default_profile):

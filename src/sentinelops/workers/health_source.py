@@ -15,7 +15,7 @@ from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.incidents.health import advance_health, validate_policy
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.pipeline import process_captures
-from sentinelops.telemetry.prometheus import SOURCE_PROFILE
+from sentinelops.telemetry.prometheus import SOURCE_PROFILE, SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 
 IDENTITY_KEYS = {"worker_version", "source_profile", "environment", "policy_sha256",
@@ -39,7 +39,7 @@ def validate_stream(stream: dict, policy: dict) -> dict:
     validate_policy(policy)
     identity = decoded(stream["identity"])
     if (set(identity) != IDENTITY_KEYS or identity["worker_version"] != "continuous-health/v1"
-        or identity["source_profile"] != SOURCE_PROFILE or not isinstance(identity["environment"], str)
+        or identity["source_profile"] not in (SOURCE_PROFILE, SOURCE_PROFILE_V2) or not isinstance(identity["environment"], str)
         or not identity["environment"] or identity["policy_sha256"] != stable_id(policy)
         or type(identity["source_watermark_seconds"]) is not int or identity["source_watermark_seconds"] != 30
         or type(identity["query_timeout_seconds"]) not in (int, float) or identity["query_timeout_seconds"] != 1.
@@ -121,7 +121,8 @@ def verify_health_batch(store: ArtifactStore, stream: dict, row: dict, signal_ro
                         or any(c["bucket_end"] != item["bucket_end"] for c in current)):
             raise ValueError("consumer source current captures do not resolve their accepted bucket")
     with TemporaryDirectory(prefix="sentinelops-health-lineage-") as temporary:
-        recomputed = process_captures(captures, ArtifactStore(temporary), environment=identity["environment"])
+        recomputed = process_captures(captures, ArtifactStore(temporary), environment=identity["environment"],
+                                      default_profile=identity["source_profile"])
     if recomputed["manifest_ref"] != batch["normalization_manifest_ref"]:
         raise ValueError("accepted health normalization does not reproduce from raw captures")
     observations = {}

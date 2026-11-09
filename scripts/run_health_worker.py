@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import asyncpg
 import httpx
 
-from sentinelops.telemetry.prometheus import PrometheusSource
+from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE, SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.health import DATABASE_SHUTDOWN_ERRORS, DATABASE_TIMEOUT_SECONDS, HealthWorker, local_endpoint
 from sentinelops.workers.metrics import WorkerMetrics
@@ -67,7 +67,8 @@ async def run_worker(args, metrics):
         component = "configuration"
         worker = HealthWorker(pool, ArtifactStore(args.store), json.loads(args.policy.read_text()),
                               endpoint=endpoint, environment=args.environment,
-                              configuration_hash=configuration["configuration_hash"])
+                              configuration_hash=configuration["configuration_hash"],
+                              source_profile=getattr(args, "source_profile", SOURCE_PROFILE))
         await worker.check_ready()
         ready = True
         if args.status:
@@ -124,6 +125,7 @@ def main():
     parser.add_argument("--policy", type=Path, default=Path("configs/slo_health_policy.json"))
     parser.add_argument("--environment", default="local")
     parser.add_argument("--prometheus", default="http://127.0.0.1:9090")
+    parser.add_argument("--source-profile", choices=(SOURCE_PROFILE, SOURCE_PROFILE_V2), default=SOURCE_PROFILE)
     parser.add_argument("--max-buckets", type=int)
     parser.add_argument("--status", action="store_true", help="Read the matching durable stream without processing")
     parser.add_argument("--poll-seconds", type=float, default=1.)

@@ -31,14 +31,17 @@ def test_scheduler_uses_real_30_second_source_watermark_and_retains_late_start_b
 
 
 def test_restarting_same_source_resumes_same_stream_but_policy_root_or_config_change_cannot_join(tmp_path):
+    from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
+
     policy = deepcopy(POLICY)
-    def worker(*, root=tmp_path, config="a" * 64, p=policy):
+    def worker(*, root=tmp_path, config="a" * 64, p=policy, **options):
         return HealthWorker(None, ArtifactStore(root), p, endpoint="http://127.0.0.1:9090/",
-                            environment="fixture-identity", configuration_hash=config)
+                            environment="fixture-identity", configuration_hash=config, **options)
     first = worker()
     assert first.stream_id == worker().stream_id
     assert first.stream_id != worker(root=tmp_path / "other").stream_id
     assert first.stream_id != worker(config="b" * 64).stream_id
+    assert first.stream_id != worker(source_profile=SOURCE_PROFILE_V2).stream_id
     policy["minimum_requests"] += 1
     assert first.policy == POLICY and first.stream_id != worker().stream_id
     assert -(2 ** 63) <= first.lock_id < 2 ** 63
