@@ -147,7 +147,7 @@ def read_bundle_manifest(output: Path, *, expected_manifest_sha256: str) -> dict
     if hashlib.sha256(data).hexdigest() != expected_manifest_sha256:
         raise ValueError("model manifest checksum mismatch")
     manifest = json.loads(data)
-    if manifest.get("bundle_version") not in ("sentinelops-model/v1", "sentinelops-model/v2") or manifest["model_version"] != stable_id({k: v for k, v in manifest.items() if k != "model_version"}):
+    if manifest.get("bundle_version") not in ("sentinelops-model/v1", "sentinelops-model/v2", "sentinelops-model/v3") or manifest["model_version"] != stable_id({k: v for k, v in manifest.items() if k != "model_version"}):
         raise ValueError("unsupported or corrupt model identity")
     if manifest["bundle_version"] == "sentinelops-model/v2":
         from sentinelops.contracts import validate_payload
@@ -162,6 +162,9 @@ def read_bundle_manifest(output: Path, *, expected_manifest_sha256: str) -> dict
             or provenance.get("dataset_ref") != "artifact://manifests/" + stable_id(report) + ".json"
             or report.get("training_data_policy_hash") != provenance["training_data_policy_hash"]):
             raise ValueError("local bundle dataset identity/admission differs")
+    elif manifest["bundle_version"] == "sentinelops-model/v3":
+        from sentinelops.ml.alibaba_bundle import validate_alibaba_manifest
+        validate_alibaba_manifest(manifest)
     elif manifest["origin"] == "admitted-local-http":
         raise ValueError("local HTTP model requires its explicit v2 bundle format")
     return manifest
