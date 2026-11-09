@@ -7,19 +7,28 @@ model quality or final heldout results.
 
 ## Training data sources
 
-The frozen [training-data contract](../../configs/training_data_contract.json) and [ADR-011](../adr/ADR-011-frozen-gamma-rcaeval-contract.md) govern published public datasets: GAMMA v1 is primary training; pinned RCAEval is RCA validation/holdout only, without ML fitting. At most these two public sources are used, with no row concatenation. SMD is excluded historical research and is not expanded. The local three-service/PostgreSQL captures below are integration/transfer evidence, not the primary training corpus. They are experimental workload measurements, not production-user traffic or hand-authored metrics.
+[ADR-016](../adr/ADR-016-public-production-training-source.md) authorizes only
+Alibaba v2022 production traces for fitting and calibration. Follow the
+[model pipeline](MODEL_PIPELINE.md) for the admitted dataset and release. Local
+three-service/PostgreSQL captures measure controlled workloads for integration and
+evaluation. Pinned RCAEval serves RCA evaluation only. The old GAMMA and local
+training contracts are historical references.
 
 | Source | Training/evaluation use |
 | --- | --- |
-| Local Prometheus, populated by service OTel metrics | Live adapter/integration: closed 60s observations → 300s features at 60s steps; five registered RED/trend features |
-| Healthy independent local runs | Source parity, nominal calibration/transfer evidence for a compatible live model |
+| Local Prometheus, populated by service OTel metrics | Accepted v2 history supplies 60s observations for the released model's `http-relative-5m/v1` features |
+| Healthy independent local runs | Source parity and evaluation on nominal traffic |
 | Healthy + gradual-degradation local runs | Independent integration labels and validation of live precursor semantics |
 | Unsampled business server logs | Independent raw-duration/error SLO labels; not labels derived from model predictions |
-| Jaeger, structured logs, native PostgreSQL observations and actual change events | Retained RCA/evaluation evidence; not automatically appended to the five-feature model vector |
+| Jaeger, structured logs, native PostgreSQL observations and actual change events | Retained RCA/evaluation evidence, separate from model features |
 | Out-of-band run truth | Fault/scenario/root-cause timing for labeling/evaluation only; excluded from serving model input |
-| Future AWS CloudWatch/X-Ray captures | Separate environment/source-profile inventory, parity checks and AWS training/recalibration before activation |
+| Future AWS CloudWatch/X-Ray captures | Separate environment/source profile with parity and activation gates |
 
-Full planned coverage is S0…S5 in the delivery/technical spec. The CLI supports S0/S1/S3 and S5 development capture; real deployment/DB-pressure adapters and final multi-fault heldout evaluation remain required. Local model weights cannot be assumed valid for AWS without the source/environment gate. Collected pilot fixtures/phase labels alone do not establish detector accuracy or calibrated risk probabilities.
+The delivery and technical specs cover S0…S5. This CLI supports S0/S1/S3/S5;
+native S2 uses `scripts.run_s2_h4`. S4 still needs a real DB-pressure adapter,
+and final multi-fault evaluation remains a separate holdout. AWS activation
+requires parity in the target environment. Pilot fixtures and phase labels
+alone cannot establish detector accuracy or calibrated risk probabilities.
 
 ## Separation of truth and serving
 
@@ -41,9 +50,15 @@ These labels do not come from IF/XGBoost output or from histogram interpolation.
 
 For gradual S3 runs, `risk_label=1` is restricted to affected services after fault onset and before that service's objective SLO onset/recovery. Healthy windows get 0. Abrupt S1, post-incident and recovery windows do not become precursor positives. No-breach gradual runs retain their censored interpretation and do not substantiate a failure-time prediction.
 
-Warmup, invalid features and unknown truth are excluded. All vectors must match exactly the five registered numeric features. IDs, timestamps, labels and scenario metadata live outside `features`; the extractor rejects extra fields.
+Warmup, invalid features and unknown truth are excluded. The legacy experiment
+feature vector has five registered numeric fields. The Alibaba release derives
+its separate relative feature vector from accepted v2 history. IDs, timestamps,
+labels and scenario metadata stay outside both feature vectors.
 
-## Dataset freeze
+## Historical dataset manifest verification
+
+The manifest assembler below remains available to verify legacy evidence. Current
+Alibaba evaluation uses the [pinned local epoch](MODEL_PIPELINE.md#evaluation).
 
 Splits are declared before collection and checked as train → validation → test in time. A session cannot cross splits. Single-testbed runs cannot overlap, and neither source captures nor feature IDs may be reused as independent runs. Datasets cannot mix environments/source profiles/SLO versions. Dirty or failed runs are rejected.
 
@@ -69,13 +84,13 @@ Unit tests cover sustained/gapped/partial-bucket SLOs, raw-log deduplication, af
 On Linux/WSL, start the Docker Compose stack and commit the source, then run from the repository root with the installed Python 3.11 environment:
 
 ```bash
-python scripts/run_experiment.py --scenario S0 --split train \
+python scripts/run_experiment.py --scenario S0 --split validation \
   --warmup-seconds 300 --active-seconds 300 --seed 42
 ```
 
 Each invocation creates an opaque `artifacts/experiments/run-UUID/` directory. The runner holds a nonblocking file lock for the entire experiment, validates the actual Prometheus 5s scrape configuration, captures image IDs and loaded source/schema hashes, and persists the declared split before generating traffic. Keep the testbed exclusive: do not run Step 2/3/4 smoke tests, another load generator or deployment changes during an experiment. External business traffic causes failure; the lock coordinates this runner only.
 
-S1 applies a bounded Payment latency/error fault. S3 ramps Payment latency every 30s, then observes recovery. Fault experiments require at least 120s recovery; every run requires at least 300s warmup. S2/S4 are rejected until actual deployment/DB adapters exist. Default load is 3 requests/s with seeded ±5% jitter; queue saturation fails instead of accumulating unlimited pending requests. Requested rate is a generator setting, not a measured throughput claim.
+S1 applies a bounded Payment latency/error fault. S3 ramps Payment latency every 30s, then observes recovery. Fault experiments require at least 120s recovery and every run requires at least 300s warmup. Default load is 3 requests/s with seeded ±5% jitter. Queue saturation fails the run and prevents unbounded pending requests. Measure actual throughput from the run receipts.
 
 Prometheus queries run after the 30s watermark and blocking capture I/O runs off the traffic event loop. The runner archives business logs, available full business traces and optional native PostgreSQL observations when `DATABASE_URL` is explicitly provided. Control/configuration logs and phase-tagged client outcomes stay in `truth/`; serving evidence excludes control events. Raw duration logs supply SLO labels independently from histogram features.
 
@@ -83,7 +98,8 @@ UTC readiness is rechecked after bounded monotonic sleeps; waking a timer does n
 
 The runner restores both original sandbox fault states in `finally`, including preflight failure/cancellation. It persists a failed run and partial evidence when possible; failed/dirty runs cannot enter a dataset. A hard process/host kill cannot execute cleanup: inspect both `/internal/faults` endpoints before reusing the sandbox. `--allow-dirty` is only for diagnostic pilot evidence; it does not bypass the dataset clean-source gate. Editing loaded source/contracts during collection marks the run dirty.
 
-After completion, use `scripts/build_dataset.py` as above. A single 10-minute healthy run must require `--allow-pilot`; it cannot satisfy the independent-run, calibration, gradual-positive or holdout requirements. Do not train or claim G2 from this smoke-sized dataset.
+Use the manifest assembler above when reproducing historical corpus evidence. A
+new local run is integration or evaluation evidence under ADR-016.
 
 ## S5 independent-fault development
 
