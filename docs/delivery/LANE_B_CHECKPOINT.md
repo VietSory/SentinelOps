@@ -327,8 +327,8 @@ là đường giao hàng.
 | 3 | A/B | `scripts.check_alibaba_source_parity --kind … --bundle … --manifest-sha256 …` (profile v2, tiêu chí P1–P6) | PASS 2026-11-09 trên `local-wsl-shared-host`; môi trường khác phải đo lại |
 | 4 | Owner | Quyết định G3 | **Duyệt có điều kiện** (D-22), chỉ cho tích hợp local H4→G6 |
 | 5 | Operator | `scripts.build_alibaba_release … --confirm-owner-decision` | Đã build, chưa bật |
-| 6 | B | Health worker chạy profile v2 (`_sum`/`_count`); model-signal đọc lịch sử v2 đã accept | Đang tích hợp ở lane online |
-| 7 | A | `scripts.run_s2_h4` / `scripts.run_g6_trial` với release Alibaba: health v2 và ≥11 phút healthy trước thay đổi xấu | Chờ bước 6 lên `main` |
+| 6 | B | `scripts.lane_b_host start --role health --stream-epoch <epoch-mới> --source-profile prometheus-increase-60s-5s/v2`, rồi `--role incidents --health-stream <READY-v2> --model-store … --model-release-ref …`; kiểm bằng `check_lane_b_live --stream-epoch <epoch> --source-profile …/v2` | Code đã có trên `main` (`28a1184`, `d81431b`); stream v1 cũ giữ nguyên để rollback |
+| 7 | A | `scripts.run_s2_h4` / `scripts.run_g6_trial` với release Alibaba: health v2 và ≥11 phút healthy trước thay đổi xấu (`41d0f74`) | H4 native đang chạy; sau đó 9 trial G6 do operator được ủy quyền |
 
 Ràng buộc mới cho B:
 
