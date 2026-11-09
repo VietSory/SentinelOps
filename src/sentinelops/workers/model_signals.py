@@ -8,9 +8,24 @@ from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.incidents.rca import COMPONENTS, evaluate_rca
 from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, IncompatibleFeatures, complete_inference
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
+from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
 
 
-def verify_model_signal(envelope, signal, registry):
+def _infer_signal(registry, envelope, started, *, store=None, batch_ref=None):
+    if not getattr(registry, "is_alibaba", False):
+        return None, registry.infer_envelope(envelope, now=started)
+    if (envelope["source_profile"] != SOURCE_PROFILE_V2
+        or not envelope["quality"]["eligible_for_inference"] or envelope["payload"] is None
+        or utc_time(envelope["as_of"]) > started):
+        raise IncompatibleFeatures("source feature window is unavailable at inference start")
+    projection, output = registry.infer_accepted_history(store, batch_ref, envelope["service"], now=started)
+    if (projection["window_end"] != envelope["window_end"]
+        or projection["source_profile"] != envelope["source_profile"]):
+        raise ValueError("relative projection differs from its accepted source window")
+    return projection, output
+
+
+def verify_model_signal(envelope, signal, registry, *, store=None, batch_ref=None):
     """Recompute numerics at the recorded start; preserve completion availability.
 
     V1 did not record a separate start. Its original completion-based replay is
@@ -19,10 +34,18 @@ def verify_model_signal(envelope, signal, registry):
     fields = {"signal_version", "service", "window_end", "feature_ref", "status", "missing_reason",
               "inference", "evaluated_at", "signal_id"}
     version = signal.get("signal_version")
-    if version == "validated-window-model/v2":
+    relative = version == "validated-window-model/v3"
+    has_start = version in ("validated-window-model/v2", "validated-window-model/v3")
+    if has_start:
         fields.add("inference_started_at")
     elif version != "validated-window-model/v1":
         raise ValueError("unsupported recorded model signal version")
+    if relative:
+        fields.update(("model_feature_ref", "source_batch_ref"))
+        if store is None or batch_ref is None or signal.get("source_batch_ref") != batch_ref:
+            raise ValueError("relative model signal differs from its accepted source batch")
+    if relative != getattr(registry, "is_alibaba", False):
+        raise ValueError("model signal version differs from its approved model family")
     if set(signal) != fields:
         raise ValueError("recorded model signal fields differ from its version")
     if signal["service"] != envelope["service"] or signal["window_end"] != envelope["window_end"]:
@@ -33,7 +56,7 @@ def verify_model_signal(envelope, signal, registry):
         completed = utc_time(inference["inferred_at"])
         if completed > evaluated:
             raise ValueError("model inference completes after signal evaluation")
-    if version == "validated-window-model/v2":
+    if has_start:
         started = utc_time(signal["inference_started_at"])
         if started > evaluated or (inference is not None and started < utc_time(envelope["as_of"])):
             raise ValueError("model inference start contradicts source availability/completion")
@@ -41,14 +64,20 @@ def verify_model_signal(envelope, signal, registry):
             raise ValueError("model inference completion differs from recorded availability")
     else:
         started = completed if inference is not None else evaluated
-    expected, reason = None, None
+    expected, projection, reason = None, None, None
     try:
-        expected = registry.infer_envelope(envelope, now=started)
+        projection, expected = _infer_signal(registry, envelope, started, store=store, batch_ref=batch_ref)
     except ModelUnavailable:
         reason = "no-validated-compatible-model"
     except IncompatibleFeatures:
         reason = "ineligible-incompatible-or-stale-feature"
-    if expected is not None and version == "validated-window-model/v2":
+    if relative:
+        reference = signal["model_feature_ref"]
+        if ((projection is None and reference is not None)
+            or (projection is not None and (reference != f"artifact://features/{stable_id(projection)}.json"
+                                            or store.read(reference) != projection))):
+            raise ValueError("relative model feature does not reproduce from accepted source history")
+    if expected is not None and has_start:
         expected = complete_inference(expected, signal["evaluated_at"])
     status = "AVAILABLE" if expected is not None else "UNAVAILABLE"
     if expected != inference or reason != signal["missing_reason"] or status != signal["status"]:
@@ -81,7 +110,7 @@ class ModelIncidentEvidence:
             if capture["window_start"] <= store.read(ref)["window_end"] <= capture["window_end"]]}
         import asyncio
         signals = await asyncio.to_thread(collect_model_signals, store, selected,
-            bucket_end=batch["bucket_end"], registry=self.model_registry)
+            bucket_end=batch["bucket_end"], registry=self.model_registry, batch_ref=state["last_batch_ref"])
         capture.update(capture_version={"continuous-incident-evidence/v1":"continuous-incident-evidence/v2",
             "continuous-incident-evidence/v3":"continuous-incident-evidence/v4",
             "continuous-incident-evidence/v5":"continuous-incident-evidence/v6"}[capture["capture_version"]], profile=self.profile,
@@ -110,7 +139,7 @@ def verify_model_evidence(store, capture, registry):
             or signal["window_end"] != envelope["window_end"] or utc_time(signal["evaluated_at"]) > utc_time(capture["analyzed_at"])
             or signal["signal_id"] != stable_id({"feature_ref": signal["feature_ref"], "release_identity": registry.identity})):
             raise ValueError("model signal differs from its frozen feature/source clock")
-        verify_model_signal(envelope, signal, registry)
+        verify_model_signal(envelope, signal, registry, store=store, batch_ref=pack["feature_batch_ref"])
     return pack["signals"]
 
 
@@ -121,8 +150,11 @@ def project_model_signals(derived):
             for _, s in derived.get("model_signals", []) if s["status"] == "AVAILABLE" and s["service"] in group["affected_services"]]
 
 
-def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRegistry, now=None):
+def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRegistry, now=None, batch_ref=None):
     signals, seen = [], set()
+    relative = getattr(registry, "is_alibaba", False)
+    if relative and batch_ref is None:
+        raise ValueError("relative inference requires the accepted health batch")
     for reference in normalization["feature_refs"]:
         envelope = store.read(reference)
         validate_payload("feature-envelope.schema.json", envelope)
@@ -133,9 +165,9 @@ def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRe
             raise ValueError("duplicate current feature envelope for service")
         seen.add(service)
         started = now or datetime.now(timezone.utc)
-        output, reason, status = None, None, "AVAILABLE"
+        output, projection, reason, status = None, None, None, "AVAILABLE"
         try:
-            output = registry.infer_envelope(envelope, now=started)
+            projection, output = _infer_signal(registry, envelope, started, store=store, batch_ref=batch_ref)
         except ModelUnavailable:
             reason, status = "no-validated-compatible-model", "UNAVAILABLE"
         except IncompatibleFeatures:
@@ -151,13 +183,16 @@ def collect_model_signals(store, normalization, *, bucket_end, registry: ModelRe
                 if payload is not None and (payload["service"] != service or payload["observed_at"] != bucket_end
                     or payload["model_version"] != output["model_version"]):
                     raise ValueError("model result identity differs from exact feature window/version")
-            if (output["feature_sha256"] != stable_id(envelope["payload"])
+            if (output["feature_sha256"] != stable_id(projection if relative else envelope["payload"])
                 or output["source_profile"] != envelope["source_profile"] or utc_time(output["inferred_at"]) != started):
                 raise ValueError("model inference source/clock differs from feature provenance")
             output = complete_inference(output, timestamp(completed))
         body = {"signal_version": "validated-window-model/v2", "service": service, "window_end": bucket_end,
                 "feature_ref": reference, "status": status, "missing_reason": reason, "inference": output,
                 "inference_started_at": timestamp(started), "evaluated_at": timestamp(completed)}
+        if relative:
+            body.update(signal_version="validated-window-model/v3", source_batch_ref=batch_ref,
+                        model_feature_ref=store.write("features", projection) if projection is not None else None)
         body["signal_id"] = stable_id({"feature_ref": reference, "release_identity": registry.identity})
         ref = store.write("signals", body)
         signals.append((ref, body))
@@ -184,11 +219,19 @@ def add_model_support(store, row, signals, *, policy, as_of):
         inference = signal["inference"]
         feature = store.read(signal["feature_ref"])
         validate_payload("feature-envelope.schema.json", feature)
+        payload = feature["payload"]
+        if signal["signal_version"] == "validated-window-model/v3":
+            payload = store.read(signal["model_feature_ref"])
+            if (payload["service"] != service or payload["window_end"] != feature["window_end"]
+                or payload["batch_ref"] != signal["source_batch_ref"]
+                or payload["as_of"] != signal["inference_started_at"]):
+                raise ValueError("relative model support differs from its pinned source window")
+            source_refs.add(signal["model_feature_ref"])
         if (utc_time(signal["evaluated_at"]) > as_of or utc_time(feature["window_end"]) > as_of
             or (as_of - utc_time(feature["window_end"])).total_seconds() > 180
             or feature["service"] != service or feature["window_end"] != signal["window_end"]
             or feature["payload"] is None or not feature["quality"]["eligible_for_inference"]
-            or inference["feature_sha256"] != stable_id(feature["payload"])
+            or inference["feature_sha256"] != stable_id(payload)
             or inference["source_profile"] != feature["source_profile"]):
             raise ValueError("future/stale/incompatible model support")
         source_refs.update((reference, signal["feature_ref"]))

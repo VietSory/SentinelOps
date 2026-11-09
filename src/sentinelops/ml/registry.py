@@ -13,7 +13,9 @@ import math
 from pathlib import Path
 
 from sentinelops.contracts import utc_time, validate_payload
+from sentinelops.ml.alibaba_bundle import BUNDLE_VERSION as ALIBABA_BUNDLE_VERSION
 from sentinelops.telemetry.core import BUSINESS_ROUTES, FEATURE_KEYS, FEATURE_SET, stable_id
+from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 
 
@@ -45,6 +47,7 @@ class ModelRegistry:
     def __init__(self):
         self._models = {}
         self.identity = "unavailable/v1"
+        self.is_alibaba = False
 
     @classmethod
     def load(cls, store: ArtifactStore, release_ref: str):
@@ -62,6 +65,29 @@ class ModelRegistry:
                 raise ValueError("model path escapes trusted store")
             manifest = read_bundle_manifest(directory, expected_manifest_sha256=item["manifest_sha256"])
             approval = store.read(item["validation_ref"])
+            if manifest["bundle_version"] == ALIBABA_BUNDLE_VERSION:
+                if len(release["models"]) != 1:
+                    raise IncompatibleFeatures("Alibaba release requires one shared bundle for all business routes")
+                from sentinelops.ml.alibaba_training import load_config
+                provenance = manifest["provenance"]
+                if (approval.get("model_version") != manifest["model_version"]
+                    or approval.get("G2") != "PASS" or approval.get("G3") != "PASS"
+                    or approval.get("source_parity") != "PASS" or approval.get("activation_allowed") is not True
+                    or not approval.get("evaluation_refs") or approval.get("source_profile") != SOURCE_PROFILE_V2
+                    or any(approval.get(key) != provenance[key] for key in ("report_sha256", "config_sha256"))):
+                    raise ModelUnavailable("Alibaba model lacks separately accepted G2/G3 and v2 source parity")
+                if (provenance["config"] != load_config()
+                    or hashlib.sha256((directory / "report.json").read_bytes()).hexdigest() != provenance["report_sha256"]):
+                    raise IncompatibleFeatures("Alibaba source report or frozen feature config differs")
+                for ref in approval["evaluation_refs"]:
+                    store.read(ref)
+                manifest, detector, risk = load_bundle(directory, expected_manifest_sha256=item["manifest_sha256"])
+                registry = cls()
+                registry._models = {service: (manifest, detector, risk, item["validation_ref"])
+                                    for service in BUSINESS_ROUTES}
+                registry.identity = release_ref
+                registry.is_alibaba = True
+                return registry
             if (manifest["origin"] != "admitted-local-http" or manifest.get("bundle_version") != "sentinelops-model/v2"
                 or approval.get("model_version") != manifest["model_version"]
                 or approval.get("G2") != "PASS" or approval.get("G3") != "PASS" or approval.get("source_parity") != "PASS"
@@ -100,16 +126,35 @@ class ModelRegistry:
         route = self._models.get(feature["service"])
         if route is None:
             raise ModelUnavailable("no validated compatible model for this service")
-        manifest, detector, risk_model, validation_ref = route
+        manifest = route[0]
+        if self.is_alibaba:
+            raise IncompatibleFeatures("Alibaba inference requires accepted v2 observation history")
         if (source_profile != manifest["provenance"]["source_profile"]
             or set(feature["features"]) != set(manifest["ordered_features"])):
             raise IncompatibleFeatures("feature/source schema differs from the pinned bundle")
+        return self._predict(route, feature, source_profile, now)
+
+    def infer_accepted_history(self, store, batch_ref, service, *, now=None):
+        """Return the exact relative projection and inference for a pinned health batch."""
+        route = self._models.get(service)
+        if route is None or not self.is_alibaba:
+            raise ModelUnavailable("no validated Alibaba model for this service")
+        from sentinelops.ml.alibaba_live import project_relative_window
+        current = now or datetime.now(timezone.utc)
+        feature = project_relative_window(store, batch_ref, service, as_of=current,
+                                          config=route[0]["provenance"]["config"])
+        if feature is None:
+            raise IncompatibleFeatures("insufficient accepted v2 observations for relative inference")
+        return feature, self._predict(route, feature, SOURCE_PROFILE_V2, current)
+
+    def _predict(self, route, feature, source_profile, now):
+        manifest, detector, risk_model, validation_ref = route
         current = now or datetime.now(timezone.utc)
         end = utc_time(feature["window_end"])
         if end - utc_time(feature["window_start"]) != timedelta(seconds=300):
             raise IncompatibleFeatures("live feature profile requires a 300-second historical window")
-        local_v2 = manifest.get("origin") == "admitted-local-http"
-        if local_v2 and (end.second or end.microsecond):
+        minute_causal = self.is_alibaba or manifest.get("origin") == "admitted-local-http"
+        if minute_causal and (end.second or end.microsecond):
             raise IncompatibleFeatures("validated local source requires UTC minute-aligned windows")
         if end > current or current - end > timedelta(seconds=180):
             raise IncompatibleFeatures("future or stale feature window")
@@ -122,7 +167,7 @@ class ModelRegistry:
                      "model_name": "isolation-forest", "model_version": manifest["model_version"]}
         validate_payload("detection-result.schema.json", detection)
         risk = None
-        risk_clock_valid = not local_v2 or current < end + timedelta(seconds=60)
+        risk_clock_valid = not minute_causal or current < end + timedelta(seconds=60)
         if risk_model is not None and risk_clock_valid:
             value = float(risk_model.predict_proba([values])[0, 1])
             watch, degrading = manifest["risk_thresholds"]["watch"], manifest["risk_thresholds"]["degrading"]
@@ -133,7 +178,7 @@ class ModelRegistry:
         completed = now or datetime.now(timezone.utc)
         output = {"detection": detection, "risk": risk, "model_version": manifest["model_version"], "validation_ref": validation_ref,
                 "feature_sha256": stable_id(feature), "source_profile": source_profile, "inferred_at": completed.isoformat().replace("+00:00", "Z")}
-        if local_v2:
+        if minute_causal:
             output["risk_availability"] = {"anchor_at":feature["window_end"],"horizon_seconds":300,
                 "available":risk is not None, "missing_reason":None if risk is not None else
                 "forecast-anchor-minute-advanced" if not risk_clock_valid else "no-risk-estimator"}
