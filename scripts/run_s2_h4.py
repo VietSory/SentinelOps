@@ -39,7 +39,7 @@ from sentinelops.remediation.domain import KubernetesUnavailable, Request
 from sentinelops.remediation.kubernetes import LocalKubernetes
 from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
 from sentinelops.telemetry.deployment_changes import DeploymentChangeReview
-from sentinelops.telemetry.prometheus import PrometheusSource
+from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE, SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.deployment_evidence import DeploymentIncidentEvidence
 from sentinelops.workers.health import HealthWorker
@@ -62,6 +62,20 @@ def clock():
 
 def emit(stage, **data):
     print(json.dumps({'stage': stage, 'at': timestamp(clock()), **data}), flush=True)
+
+
+def health_profile(registry):
+    """ADR-016 releases read relative windows from an accepted v2 history."""
+    return SOURCE_PROFILE_V2 if getattr(registry, 'is_alibaba', False) else SOURCE_PROFILE
+
+
+def healthy_history_minutes(registry):
+    """Full healthy minutes before any bad change: window + minimum baseline + one spare."""
+    if not getattr(registry, 'is_alibaba', False):
+        return 1
+    from sentinelops.ml.alibaba_training import load_config
+    config = load_config()
+    return config['window_minutes'] + config['baseline']['min_minutes'] + 1
 
 
 def ceil_minute(offset=0):
@@ -240,7 +254,7 @@ async def run(sandbox, bad, dsn, registry, release):
             topology = yaml.safe_load((PROJECT / 'configs/topology.yaml').read_text())
             store, raw, changes = (ArtifactStore(sandbox.root / n) for n in ('journal', 'health', 'change'))
             health = HealthWorker(pool, raw, health_policy, endpoint=prometheus, environment='local',
-                                  configuration_hash=cfg['configuration_hash'])
+                                  configuration_hash=cfg['configuration_hash'], source_profile=health_profile(registry))
             await health.check_ready()
             await health.tick()
             reader = HealthLedgerReader(pool, raw, health.stream_id, health_policy)
@@ -289,7 +303,7 @@ async def run(sandbox, bad, dsn, registry, release):
                     await asyncio.sleep(1)
 
             async def experiment():
-                first_full = ceil_minute(1)
+                first_full = ceil_minute(healthy_history_minutes(registry))
                 await drive(client, urls, first_full + timedelta(seconds=33), False)
                 await asyncio.wait_for(ready.wait(), timeout=10)
                 review = DeploymentChangeReview(reader, kube, changes, target)

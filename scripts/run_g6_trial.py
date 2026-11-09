@@ -41,6 +41,7 @@ from scripts.check_kubernetes_testbed import BusinessSandbox
 from scripts.check_rollback_kubernetes import PROJECT, private_file
 from scripts.kubernetes_testbed import NAMESPACE, SERVICES
 from scripts.run_s2_h4 import (PAYMENT, TOKEN_DURATION, bad_image, ceil_minute, clean_commit, clock, connect_pool,
+                               health_profile, healthy_history_minutes,
                                deploy, drive, emit, wait_ready)
 from sentinelops.ml.registry import ModelRegistry
 from sentinelops.remediation.authority import NativeH4Authority
@@ -188,7 +189,7 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
             topology = yaml.safe_load((PROJECT / 'configs/topology.yaml').read_text())
             store, raw, changes, review = (ArtifactStore(root / n) for n in ('journal', 'health', 'change', 'review'))
             health = HealthWorker(pool, raw, health_policy, endpoint=prometheus, environment='local',
-                                  configuration_hash=cfg['configuration_hash'])
+                                  configuration_hash=cfg['configuration_hash'], source_profile=health_profile(registry))
             await health.check_ready()
             await health.tick()
             reader = HealthLedgerReader(pool, raw, health.stream_id, health_policy)
@@ -231,7 +232,7 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                         raise RuntimeError(f'{name} task stopped before a side effect: {type(exc).__name__}')
 
             try:
-                await asyncio.sleep(max(0, (ceil_minute(1) - clock()).total_seconds()))
+                await asyncio.sleep(max(0, (ceil_minute(healthy_history_minutes(registry)) - clock()).total_seconds()))
                 images = ImageEvidenceReview(reader, observer, review, target)
                 opened = await images.open()
                 for _ in range(40):
