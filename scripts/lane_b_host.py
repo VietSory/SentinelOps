@@ -51,7 +51,7 @@ def build():
     for name in ('run_health_worker.py', 'run_incident_worker.py'):
         shutil.copyfile(lane_b.PROJECT / 'scripts' / name, cli / name)
     config = root / 'configs';config.mkdir()
-    for name in ('slo_health_policy.json', 'rca_policy.json', 'topology.yaml'):
+    for name in ('slo_health_policy.json', 'rca_policy.json', 'topology.yaml', 'alibaba_relative_features.json'):
         shutil.copyfile(lane_b.PROJECT / 'configs' / name, config / name)
     shutil.copyfile(lane_b.PROJECT / 'scripts/host_runtime.py', root / 'launch.py')
     original_runtime = Path(sysconfig.get_paths()['purelib'])
@@ -186,6 +186,17 @@ def process_environment(role, record, environment):
     return selected
 
 
+def health_source_profile():
+    """The profile the running health role selected; None for a v1 session."""
+    current = state('health')
+    if current['state'] == 'NOT_INSTALLED': return None
+    session = private_json(Path(current['unit_file']).parent / 'session.json')
+    recorded = session.get('arguments', [])
+    if session.get('health_source_profile'): return session['health_source_profile']
+    if '--source-profile' in recorded: return recorded[recorded.index('--source-profile') + 1]
+    return None
+
+
 def start(role, identifier, stream=None, model_store=None, model_ref=None, *, epoch=None, source_profile=None):
     health_root, _ = lane_b.stream_roots(epoch)
     with locked() as home:
@@ -221,6 +232,10 @@ def start(role, identifier, stream=None, model_store=None, model_ref=None, *, ep
         payload = {'role': role, 'release_id': identifier, 'release_manifest_sha256': digest(root / 'release.json'),
                    'environment': selected, 'arguments': arguments(role, root, stream, model_store, model_ref, epoch=epoch, source_profile=source_profile),
                    'health_store': str(health_root)}
+        # run_incident_worker has no --source-profile flag, so the selected health
+        # profile is recorded as session metadata for identity derivation instead.
+        profile = source_profile if role == 'health' else health_source_profile() if role == 'incidents' else None
+        if profile: payload['health_source_profile'] = profile
         if role != 'api':
             probe = folder / 'probe.json';write_private(probe, payload)
             record = json.loads((root / 'release.json').read_text())
