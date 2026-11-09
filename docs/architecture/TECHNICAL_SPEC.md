@@ -428,7 +428,7 @@ Update current pointer, append version/event và enqueue downstream tasks trong 
 | --- | --- | --- |
 | `GET /health` | Process liveness, độc lập Bedrock | Đã có |
 | `GET /ready`, `GET /ready/incidents` | Model/control-store readiness tách riêng | Đã có; inference readiness mặc định unavailable khi không có approved model |
-| `POST /v1/detect`, `POST /v1/risk` | Frozen FeatureWindow và DetectionResult/DegradationRiskResult; compatible pinned model | Guard/compatibility/software đã có; zero approved source models, mặc định 503 |
+| `POST /v1/detect`, `POST /v1/risk` | Frozen FeatureWindow và DetectionResult/DegradationRiskResult; compatible pinned model | Không có model: 503. Với release Alibaba (ADR-016): **409 `model_requires_stream_history`**, vì model relative cần lịch sử stream v2 đã accept mà một window không mang theo. Kết quả model do incident worker tính, đọc qua `service_signals` của IER (`GET /v1/incidents?service=…`). `/ready` ghi `direct_inference=false`. Không có đường inference thứ hai phía API (owner, 2026-11-09) |
 | `POST /v1/incidents` | Authenticated validated IER import, idempotency/expected revision, exact IER response và revision headers | Đã persist vào control DB; không tự cấp model/action truth |
 | `POST /v1/incidents/{id}/revisions` | Protected bounded supplemental write/lifecycle context | Đã có với semantic/CAS/idempotency checks |
 | `GET /v1/incidents` | State/service filters, bounded stable cursor, limit 1…100 | Đã có; time-range filter còn thuộc target, chưa có query parameter |

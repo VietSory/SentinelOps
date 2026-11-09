@@ -99,3 +99,20 @@ def test_unexpected_repository_failure_is_sanitized_with_request_identity(caplog
     response=api.get("/v1/incidents/fixture",headers={"authorization":"Bearer "+token})
     assert response.status_code==500 and "SECRET" not in response.text and "SECRET" not in caplog.text
     assert response.headers["x-request-id"]==response.json()["request_id"]
+
+
+def test_relative_alibaba_model_rejects_single_window_direct_inference_with_a_pointer():
+    class Relative:
+        available, is_alibaba = True, True
+
+        def infer(self, *args, **kwargs):  # must never be reached
+            raise AssertionError("direct inference was attempted")
+
+    payload = json.loads((ROOT / "samples" / "feature-window.sample.json").read_text())
+    api = TestClient(create_app(Settings(), model_registry=Relative()))
+    for route in ("/v1/detect", "/v1/risk"):
+        response = api.post(route, json=payload)
+        assert response.status_code == 409 and response.json()["code"] == "model_requires_stream_history"
+        assert "service_signals" in response.json()["message"]
+        assert api.post(route, json={}).status_code == 422
+    assert api.get("/ready").json()["direct_inference"] is False

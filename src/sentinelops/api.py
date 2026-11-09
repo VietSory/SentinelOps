@@ -86,6 +86,16 @@ def revision_headers(response: Response,snapshot: dict) -> None:
     response.headers["X-Incident-Revision"] = str(snapshot["revision"])
 
 
+STREAM_HISTORY_DETAIL = ("The active model scores accepted health-stream history in the incident worker; "
+                         "read its results as service_signals via GET /v1/incidents?service=<route>")
+
+
+def _reject_direct_inference(registry):
+    """ADR-016 relative models need accepted v2 history a single FeatureWindow cannot carry."""
+    if getattr(registry, "is_alibaba", False):
+        raise ApiError(409, "model_requires_stream_history", STREAM_HISTORY_DETAIL)
+
+
 def create_app(settings: Settings | None = None,*,repository=None,model_registry=None,action_reader=None,
                explanation_provider: ExplanationProvider | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
@@ -225,7 +235,9 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
             "authentication": bool(settings.api_token or settings.operator_token) and settings.environment in ("local","test"), "model": registry.available}
         ready = all(dependencies.values())
         return JSONResponse({"status":"ready" if ready else "not_ready","dependencies":dependencies,
-            "demo_mode":settings.demo_mode},status_code=200 if ready else 503)
+            "demo_mode":settings.demo_mode,
+            "direct_inference":registry.available and not getattr(registry,"is_alibaba",False)},
+            status_code=200 if ready else 503)
 
     @app.get("/ready/incidents")
     async def incidents_ready(identity=Depends(authorize),repo=Depends(require_repository)):
@@ -287,6 +299,7 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
         except ValueError as exc:
             raise ApiError(422,"invalid_payload",str(exc)[:500]) from exc
         if not settings.demo_mode:
+            _reject_direct_inference(registry)
             try:
                 result = registry.infer(feature_window, source_profile=request.headers.get("x-sentinelops-source-profile"))
             except ModelUnavailable:
@@ -307,6 +320,7 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
             validate_payload("feature-window.schema.json", feature_window)
         except ValueError as exc:
             raise ApiError(422,"invalid_payload",str(exc)[:500]) from exc
+        _reject_direct_inference(registry)
         try:
             result = registry.infer(feature_window, source_profile=request.headers.get("x-sentinelops-source-profile"))
         except ModelUnavailable:

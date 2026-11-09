@@ -50,9 +50,10 @@ revision. Missing history leaves the corresponding signal unavailable.
 
 The existing `/v1/detect` and `/v1/risk` routes still accept the legacy
 `FeatureWindow` shape. With an Alibaba release loaded, they return
-`422 incompatible_feature_set` for that shape because it cannot provide accepted
-v2 history. The `model` dependency in `/ready` currently reports bundle load
-status. Verify the incident worker's v2 stream and a published incident revision
+`409 model_requires_stream_history` for that shape because it cannot provide accepted
+v2 history (owner decision 2026-11-09: no second inference path in the API). The
+`model` dependency in `/ready` reports bundle load status, and `direct_inference`
+is `false` for the Alibaba release. Verify the incident worker's v2 stream and a published incident revision
 when accepting H1. The explicit demo remains separately marked.
 
 Event evaluation matches actual alert emissions one-to-one to independent evaluator
