@@ -336,3 +336,36 @@ criterion yields `status: FAIL` with the failures listed. It refuses to run besi
 an active corpus capture. B sends `parity.json` and `verification.json` together
 through the trusted handoff channel. The release builder verifies the report
 against its content hash and stores both files as manifests in the release.
+
+## Training on Alibaba production traces (ADR-016, current)
+
+Detectors are trained on Alibaba `cluster-trace-microservices-v2022` MSRTMCR
+(production; research and study use per its README). Local corpora and the
+detector-event epochs are evaluation only.
+
+```sh
+# 1. Immutable acquisition: one 3-minute archive per file, SHA-256 recorded at download.
+#    Files 0..119 cover trace hours 0-6; the download loop retries and never overwrites.
+# 2. Aggregate HTTP minutes per microservice (streams each archive, no extraction):
+python -m scripts.aggregate_alibaba --raw <root>/raw --output <root>/minutes
+# 3. Fit and evaluate under the frozen configs/alibaba_relative_features.json (clean checkout):
+python -m scripts.train_alibaba --minutes <root>/minutes --output <root>/fit-<date>
+# 4. Package a checksum-pinned bundle (sentinelops-model/v3, origin admitted-alibaba-v2022):
+python -m scripts.package_alibaba_bundle --fit <root>/fit-<date> --output <root>/bundle-<date>
+```
+
+What each step does:
+
+- **Features (`http-relative-5m/v1`):** compare a service's last five minutes with
+  its own trailing median (5–60 minutes, strictly before the window): latency
+  level/slope/peak and call-rate level/slope.
+- **Breach labels:** latency above twice that baseline for two consecutive
+  minutes. XGBoost predicts an onset within 300 s.
+- **Splits:** by microservice identity (60/20/20), so evaluation services are
+  never fitted.
+- **5xx:** the source has no error field. Errors are covered by the SLO rule and
+  MAD, not by these models.
+- **Transform:** `service_windows` is the single-window reference and
+  `service_windows_fast` the vectorised training path; a test keeps them equal.
+- **No gates:** the bundle is never an approval or activation. G3, parity and
+  release apply unchanged.
