@@ -300,6 +300,13 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                         if assessment.missing_reason == 'newer-accepted-health-awaits-consumer':
                             await asyncio.sleep(2)
                             continue
+                        if assessment.revision != request.incident_revision:
+                            # The consumer advanced the incident between the snapshot and the
+                            # assessment; the executor would rightly block this stale request.
+                            emit('incident-revision-advanced', requested=request.incident_revision,
+                                 assessed=assessment.revision)
+                            await asyncio.sleep(1)
+                            continue
                         report['h4'] = {'dispatch_authority': assessment.dispatch_authority,
                                         'missing_reason': assessment.missing_reason, 'revision': assessment.revision}
                         require_alive()
