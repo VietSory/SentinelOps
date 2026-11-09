@@ -1,7 +1,10 @@
 # G3 review packet — Alibaba bundle `badf9da0…` (ADR-016)
 
-Owner decision required. This packet accepts nothing; every source report has
-`G3_accepted=false` and `activation_allowed=false`.
+**Owner decision (2026-11-09, explicit answer): option 1 — G3 accepted with conditions**
+for local integration H4 → G6 only, with the limitations below recorded (D-22).
+The owner also delegated Claude as operator for the remaining nine local G6
+trials with this bundle. Source reports keep `G3_accepted=false`; the release
+approval record carries the decision.
 
 - model version: `badf9da0b563f4900fa099b11ba9223ee864d414ef3aa9af82a534db962d85e3`
 - bundle `sentinelops-model/v3`, origin `admitted-alibaba-v2022`, manifest SHA-256
