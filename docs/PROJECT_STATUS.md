@@ -73,7 +73,8 @@ của G3/G8.
 **Mốc native ngày 2026-11-09 với model chính thức Alibaba** (release `3966e75e`, G3 có điều kiện D-22):
 - **Source parity profile v2 PASS** (P1–P6): mean latency Prometheus lệch tối đa 4,3% so với log server.
 - **H4 PASS:** health stream v2, 11 phút healthy trước image xấu; IF Alibaba cho `anomaly_strength` 0,989, Payment score 0,797, coverage 0,80, `dispatch_authority=true`.
-- **G6:** 9 trial còn lại đang chạy tuần tự với model này (owner ủy quyền operator); Q-09 tính trên chính chuỗi trial này.
+- **G6 local Q-09 đạt đúng ngưỡng** ([báo cáo](reports/G6_LOCAL_ALIBABA_BADF9DA0.md)): 9/10 golden-path recovered (trial 04 blocked do race của harness, vẫn tính); 1/1 failed-verify escalated với audit đầy đủ; 0 patch không an toàn trên 10 lần mutate. **G6 chưa PASS**: Q-10 còn cần các case safety bắt buộc, và owner chưa quyết định nghiệm thu.
+- **Lớp 2** (local v2 epoch, Codex) đã bắt đầu 2026-11-09 08:42Z, khoảng 25 giờ.
 
 ## Việc tiếp theo
 
