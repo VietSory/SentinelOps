@@ -308,6 +308,9 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                         with pending_audit.open('x') as stream:
                             json.dump({'request': asdict(request), 'target': asdict(target)}, stream)
                         state = await executor.execute(request)
+                        # Once dispatched, the executor decides within its own verification window;
+                        # never cut a trial off before it can reach recovered or escalated.
+                        deadline = max(deadline, clock() + timedelta(seconds=policy.verification_seconds + 90))
                         phase['bad'] = state['phase'] not in ('blocked',)
                         emit('action-state', phase=state['phase'], action_id=state['action_id'])
                     else:
