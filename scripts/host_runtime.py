@@ -76,9 +76,11 @@ def health_identity(root, session):
     source = PrometheusSource(endpoint)
     try: configuration = source.verify_configuration()
     finally: source.close()
+    recorded = session.get('arguments', [])
+    profile = {'source_profile': recorded[recorded.index('--source-profile') + 1]} if '--source-profile' in recorded else {}
     worker = HealthWorker(None, ArtifactStore(session['health_store']),
         json.loads((root / 'configs/slo_health_policy.json').read_text()), endpoint=endpoint,
-        environment='local', configuration_hash=configuration['configuration_hash'])
+        environment='local', configuration_hash=configuration['configuration_hash'], **profile)
     async def check():
         collector = NativeIncidentEvidence('sentinelops-b', jaeger_endpoint='http://127.0.0.1:26686',
             prometheus_endpoint=endpoint, commerce_dsn=os.environ.get('COMMERCE_EVIDENCE_DATABASE_URL'))

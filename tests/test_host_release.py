@@ -120,3 +120,10 @@ def test_systemd_link_resolves_only_to_an_owned_bundle_unit(tmp_path, monkeypatc
     result = SimpleNamespace(returncode=0, stdout='LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=123\nFragmentPath='+str(link)+'\n')
     monkeypatch.setattr(host, 'systemctl', lambda *a, **kw: result)
     assert host.state('api')['unit_file'] == str(unit.resolve())
+
+
+def test_host_health_arguments_append_only_an_explicit_profile(tmp_path):
+    v2 = 'prometheus-increase-60s-5s/v2'
+    v1_args = host.arguments('health', tmp_path, None)
+    assert '--source-profile' not in v1_args
+    assert host.arguments('health', tmp_path, None, source_profile=v2) == [*v1_args, '--source-profile', v2]

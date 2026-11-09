@@ -130,14 +130,15 @@ def stream_roots(epoch=None):
     return health, incidents
 
 
-def launch_arguments(command, stream=None, model_store=None, release_ref=None, *, epoch=None):
+def launch_arguments(command, stream=None, model_store=None, release_ref=None, *, epoch=None, source_profile=None):
     if command == 'serve':
         return [sys.executable,'-m','uvicorn','sentinelops.main:app','--app-dir',str(PROJECT/'src'),
                 '--host','127.0.0.1','--port','18000']
     health_root, incident_root = stream_roots(epoch)
     shared = ['--prometheus','http://127.0.0.1:19090','--metrics-otlp-endpoint','http://127.0.0.1:14317']
     if command == 'health':
-        return [sys.executable,'-m','scripts.run_health_worker','--store',str(health_root),*shared]
+        profile = ['--source-profile',source_profile] if source_profile else []
+        return [sys.executable,'-m','scripts.run_health_worker','--store',str(health_root),*shared,*profile]
     if not stream:
         raise ValueError('incident launcher needs the exact READY stream_id from the health worker')
     models = ['--model-store',str(model_store),'--model-release-ref',release_ref] if model_store and release_ref else []
@@ -151,6 +152,8 @@ def main():
     parser.add_argument('command',choices=['config','up','down','status','snapshot','serve','health','incidents'])
     parser.add_argument('--health-stream')
     parser.add_argument('--stream-epoch', help='Explicit B stream and artifact epoch for health and incidents')
+    parser.add_argument('--source-profile',choices=('prometheus-increase-60s-5s/v1','prometheus-increase-60s-5s/v2'),
+                        help='Health source profile; v2 (histogram sum/count) is required by the ADR-016 model')
     parser.add_argument('--model-store',type=Path,help='Explicit H1 materialized trusted store inside artifacts/lane-b/models/')
     parser.add_argument('--model-release-ref',help='Separately accepted immutable H1 release; no automatic activation')
     parser.add_argument('--deployment-ref',help='Explicit immutable local deployment lock; up only, no build/pull fallback')
@@ -160,6 +163,8 @@ def main():
     if args.deployment_ref and args.command != 'up': parser.error('deployment lock is only valid with up')
     if args.stream_epoch is not None and args.command not in ('health', 'incidents'):
         parser.error('stream epoch is only valid for health/incident processes')
+    if args.source_profile and args.command != 'health':
+        parser.error('source profile is only selected for the health process')
     if args.stream_epoch is not None:
         stream_roots(args.stream_epoch)
     environment = runtime_environment(args.model_store,args.model_release_ref) if args.command in ('serve','health','incidents') else None
@@ -193,7 +198,7 @@ def main():
         require_owned_containers()
         os.chdir(PROJECT)
         os.execvpe(sys.executable,launch_arguments(args.command,args.health_stream,args.model_store,args.model_release_ref,
-            epoch=args.stream_epoch),environment)
+            epoch=args.stream_epoch,source_profile=args.source_profile),environment)
 
 
 if __name__ == '__main__':

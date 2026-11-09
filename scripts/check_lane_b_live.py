@@ -82,7 +82,7 @@ def select_current_consumer(rows, identity, *, epoch=None):
     return row["consumer_id"]
 
 
-async def current_consumer(connection, *, epoch=None):
+async def current_consumer(connection, *, epoch=None, source_profile=None):
     health_root, _ = lane_b.stream_roots(epoch)
     source = PrometheusSource("http://127.0.0.1:19090")
     try:
@@ -92,7 +92,8 @@ async def current_consumer(connection, *, epoch=None):
     policy = json.loads((lane_b.PROJECT/"configs/slo_health_policy.json").read_text())
     identity = HealthWorker(None, ArtifactStore(health_root), policy,
         endpoint="http://127.0.0.1:19090", environment="local",
-        configuration_hash=configuration["configuration_hash"]).identity
+        configuration_hash=configuration["configuration_hash"],
+        **({"source_profile": source_profile} if source_profile else {})).identity
     rows = await connection.fetch("""SELECT c.consumer_id,c.health_stream_id,c.identity,s.identity AS health_identity
         FROM sentinel_control.incident_consumers c
         JOIN sentinel_control.health_streams s ON s.stream_id=c.health_stream_id
@@ -100,7 +101,7 @@ async def current_consumer(connection, *, epoch=None):
     return select_current_consumer(rows, identity, epoch=epoch)
 
 
-async def run(epoch=None):
+async def run(epoch=None, source_profile=None):
     lane_b.stream_roots(epoch)
     lane_b.validate_config(json.loads(subprocess.check_output(lane_b.compose('config','--format','json'),
         env=lane_b.docker_environment(),text=True)))
@@ -124,7 +125,7 @@ async def run(epoch=None):
         response = await client.get('http://127.0.0.1:18000/ready/incidents',headers=protected); response.raise_for_status()
         connection = await asyncpg.connect(environment['CONTROL_DATABASE_URL'])
         try:
-            consumer = await current_consumer(connection, epoch=epoch)
+            consumer = await current_consumer(connection, epoch=epoch, source_profile=source_profile)
             before = {row['incident_id'] for row in await connection.fetch(
                 'SELECT incident_id FROM sentinel_control.incident_jobs WHERE consumer_id=$1',consumer)}
             original = (await client.get('http://127.0.0.1:18002/internal/faults')).json()
@@ -198,4 +199,7 @@ async def run(epoch=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stream-epoch', help='Verify the matching B health/incident epoch')
-    asyncio.run(run(parser.parse_args().stream_epoch))
+    parser.add_argument('--source-profile', choices=('prometheus-increase-60s-5s/v1', 'prometheus-increase-60s-5s/v2'),
+                        help='Profile of the health stream to verify (v2 for the ADR-016 model)')
+    parsed = parser.parse_args()
+    asyncio.run(run(parsed.stream_epoch, parsed.source_profile))

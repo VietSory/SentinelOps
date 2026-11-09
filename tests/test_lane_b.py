@@ -99,3 +99,9 @@ def test_h1_activation_is_explicit_paired_owned_and_reuses_existing_loader(tmp_p
     assert not model.exists()  # no fabricated bundle or approval is written
     arguments = lane_b.launch_arguments('incidents','stream',model,release)
     assert arguments[-4:] == ['--model-store',str(model),'--model-release-ref',release]
+
+
+def test_health_source_profile_is_explicit_and_v1_arguments_stay_unchanged():
+    v2 = 'prometheus-increase-60s-5s/v2'
+    assert '--source-profile' not in lane_b.launch_arguments('health')
+    assert lane_b.launch_arguments('health', source_profile=v2)[-2:] == ['--source-profile', v2]
