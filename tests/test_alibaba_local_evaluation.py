@@ -9,6 +9,7 @@ import pytest
 from sentinelops.experiments.local_campaign import planned_slots
 from sentinelops.experiments.local_corpus import ALIBABA_PLAN, load_plan, recipe, register_session
 from sentinelops.experiments.runner import execute
+from sentinelops.ml.alibaba_local_evaluation import metric_event_cases
 from sentinelops.ml.local_data import verify_alibaba_warmup
 from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
 from sentinelops.telemetry.pipeline import process_captures
@@ -59,3 +60,24 @@ def test_alibaba_warmup_requires_every_independently_verified_minute(tmp_path):
     oracle['services']['payment-service']['buckets'][str(int(ends[8].timestamp()) - 60)]['availability'] = 'UNKNOWN'
     with pytest.raises(ValueError, match='payment-service lacks 30 consecutive'):
         verify_alibaba_warmup(store, normalized, observations, oracle, timestamp(warmup_end), 30)
+
+
+def test_alibaba_detector_labels_do_not_mix_http_errors_and_latency():
+    service = 'payment-service'
+    sample = [(900, 0), (100, .2), (900, 0), (100, .2), (None, None), (100, .2), (100, .2)]
+    buckets = {
+        str(int(START.timestamp()) + index * 60): {
+            'availability': 'UNKNOWN' if latency is None else 'VERIFIED',
+            'p95_latency_ms': latency, 'error_rate': errors, 'breach': True if latency is not None else None,
+        }
+        for index, (latency, errors) in enumerate(sample)
+    }
+    composite = {'first_violation_at': timestamp(START), 'buckets': buckets}
+    cases = [{'oracle': {'services': {service: composite}}}]
+    latency, = metric_event_cases(cases, service, 'p95_latency_ms', 750., 2)
+    errors, = metric_event_cases(cases, service, 'error_rate', .05, 2)
+    assert latency['oracle']['services'][service]['first_violation_at'] is None
+    error = errors['oracle']['services'][service]
+    assert error['first_violation_at'] == timestamp(START + timedelta(minutes=5))
+    assert error['confirmed_at'] == timestamp(START + timedelta(minutes=7))
+    assert composite['first_violation_at'] == timestamp(START)

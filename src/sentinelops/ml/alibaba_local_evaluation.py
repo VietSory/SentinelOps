@@ -13,6 +13,7 @@ from sentinelops.experiments.labels import SLOConfig
 from sentinelops.experiments.local_campaign import register_alibaba_epoch
 from sentinelops.experiments.local_corpus import (ALIBABA_PLAN, PROJECT, acquisition_lock, bind, clean_source,
                                                 load_plan, read_alibaba_epoch, read_binding)
+from sentinelops.incidents.health import validate_policy
 from sentinelops.ml.alibaba_live import relative_feature_values
 from sentinelops.ml.detector_evaluation import detector_summary, paired_detector_interval
 from sentinelops.ml.local_data import _inside, audit_alibaba_local
@@ -22,10 +23,9 @@ from sentinelops.telemetry.prometheus import mean_latency_ms
 from sentinelops.telemetry.store import ArtifactStore
 
 
-def score_records(store, cases, detector, risk, config, scoring, protocol):
+def score_records(store, cases, detector, risk, config, scoring, protocol, health_policy):
     """Score only actual receipt-bounded minutes. Local outcomes are used as labels."""
     records = []
-    error_rate = SLOConfig().error_rate
     for case in cases:
         result = store.read(case['source_result_ref'])
         captured = _inside(store.root, result['run_directory'])
@@ -47,8 +47,12 @@ def score_records(store, cases, detector, risk, config, scoring, protocol):
             slots = observations[observation['service']]
             if minute in slots:
                 raise ValueError('ADR-016 source has duplicated eligible minutes')
-            slots[minute] = (mean_latency_ms(raw), observation['measurements']['request_count'],
-                             observation['payload']['error_rate'], utc_time(observation['available_at']))
+            count = observation['measurements']['request_count']
+            error = None
+            if (count >= health_policy['minimum_requests']
+                and observation['quality']['coverage_ratio'] >= health_policy['minimum_coverage']):
+                error = observation['payload']['error_rate']
+            slots[minute] = (mean_latency_ms(raw), count, error, utc_time(observation['available_at']))
         vectors, pending = [], []
         for row in case['rows']:
             cutoff, end = utc_time(row['prediction_cutoff']), utc_time(row['window_end'])
@@ -63,10 +67,12 @@ def score_records(store, cases, detector, risk, config, scoring, protocol):
             records.append(record)
             if not end <= cutoff <= end + timedelta(seconds=180):
                 continue
-            baseline = [error for minute, (_, _, error) in past.items() if anchor - 60 <= minute < anchor]
-            if anchor in past:
+            baseline = [error for minute, (_, _, error) in past.items()
+                        if anchor - 60 <= minute < anchor and error is not None]
+            if (anchor in past and past[anchor][2] is not None
+                and cutoff - end <= timedelta(seconds=health_policy['maximum_lag_seconds'])):
                 current_error = past[anchor][2]
-                record['objective_slo_flag'] = current_error > error_rate
+                record['objective_slo_flag'] = current_error > health_policy['error_rate']
                 if len(baseline) >= config['baseline']['min_minutes']:
                     center = median(baseline)
                     scale = max(1.4826 * median(abs(value - center) for value in baseline),
@@ -95,8 +101,31 @@ def score_records(store, cases, detector, risk, config, scoring, protocol):
     return records
 
 
+def metric_event_cases(cases, service, measure, threshold, persistence):
+    """Derive a dimension-specific event from the independently verified minute grid."""
+    projected = []
+    for case in cases:
+        original = case['oracle']
+        evidence = original['services'][service]
+        buckets, onset, confirmation, streak, previous = {}, None, None, 0, None
+        for key, item in sorted(evidence['buckets'].items(), key=lambda pair: int(pair[0])):
+            minute = int(key)
+            value = item[measure] if item['availability'] == 'VERIFIED' else None
+            breach = value > threshold if value is not None else None
+            streak = streak + 1 if breach and previous == minute - 60 else int(breach is True)
+            if streak == persistence and onset is None:
+                onset = timestamp(datetime.fromtimestamp(minute - 60 * (persistence - 1), timezone.utc))
+                confirmation = timestamp(datetime.fromtimestamp(minute + 60, timezone.utc))
+            previous = minute
+            buckets[key] = {**item, 'breach': breach}
+        selected = {**evidence, 'first_violation_at': onset, 'confirmed_at': confirmation, 'buckets': buckets}
+        projected.append({**case, 'oracle': {**original, 'services': {**original['services'], service: selected}}})
+    return projected
+
+
 def score_by_route(records, cases, protocol):
     """Keep latency, HTTP errors and gradual-forecast denominators separate."""
+    slo = SLOConfig()
     services = {}
     for service in BUSINESS_ROUTES:
         service_rows = [row for row in records if row['service'] == service]
@@ -109,6 +138,8 @@ def score_by_route(records, cases, protocol):
 
         latency_cases, latency_rows = select('latency')
         error_cases, error_rows = select('error')
+        latency_cases = metric_event_cases(latency_cases, service, 'p95_latency_ms', slo.latency_ms, slo.persistence)
+        error_cases = metric_event_cases(error_cases, service, 'error_rate', slo.error_rate, slo.persistence)
         controls = detector_summary([
             {**row, 'isolation_forest_flag': row['objective_slo_flag'], 'median_mad_flag': row['online_error_mad_flag']}
             for row in error_rows], error_cases, service, protocol)
@@ -134,6 +165,8 @@ def evaluate_alibaba_local(store, bundle, manifest_sha256, output, *, project=PR
     source = clean_source(project)
     plan = load_plan(project/'configs'/ALIBABA_PLAN.name)
     protocol = load_protocol(project)
+    health_policy = json.loads((project/'configs'/'slo_health_policy.json').read_bytes())
+    validate_policy(health_policy)
     if (plan['scoring']['event_deadline_seconds'] != protocol['event_deadline_seconds']
         or plan['scoring']['forecast_horizon_seconds'] != protocol['risk_horizon_seconds']):
         raise ValueError('ADR-016 scoring clocks differ from the frozen evaluation protocol')
@@ -162,7 +195,8 @@ def evaluate_alibaba_local(store, bundle, manifest_sha256, output, *, project=PR
 
     from sentinelops.ml.models import load_bundle
     manifest, detector, risk = load_bundle(bundle, expected_manifest_sha256=manifest_sha256)
-    scored = score_records(store, cases, detector, risk, manifest['provenance']['config'], plan['scoring'], protocol)
+    scored = score_records(store, cases, detector, risk, manifest['provenance']['config'], plan['scoring'], protocol,
+                           health_policy)
     summary = score_by_route(scored, cases, protocol)
     output.mkdir(parents=True, exist_ok=False)
     results = ArtifactStore(output)
@@ -172,10 +206,12 @@ def evaluate_alibaba_local(store, bundle, manifest_sha256, output, *, project=PR
         'attempt_ref': attempt_ref, 'candidate_id': epoch['model_version'], 'bundle_manifest_sha256': manifest_sha256,
         'source_commit': source, 'source_profile': plan['source_profile'], 'feature_set_version': plan['feature_set_version'],
         'scoring': plan['scoring'], 'base_protocol_sha256': stable_id(protocol), 'predictions_ref': prediction_ref,
+        'slo_health_policy_sha256': stable_id(health_policy),
         'evaluated_at': timestamp(datetime.now(timezone.utc)), 'services': summary, 'fitting_rows': 0,
         'G3_accepted': False, 'activation_allowed': False, 'holdout_opened': False,
         'limitations': ['Local S0/S1/S3 evidence with recorded source receipt clocks and counterfactual inference.',
-                        'Alibaba models are scored on latency; HTTP 5xx is scored separately for SLO and online error MAD.',
+                        'Latency and HTTP 5xx detector events use separate verified oracle dimensions.',
+                        'Gradual forecasting uses the combined SLO target.',
                         'The local epoch supplies no fitting, calibration or model-selection inputs.'],
     })
     return {'report_ref': report_ref, 'epoch_ref': epoch_ref, 'G3_accepted': False, 'activation_allowed': False}
