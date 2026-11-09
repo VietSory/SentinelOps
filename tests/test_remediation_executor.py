@@ -272,3 +272,27 @@ def test_an_external_spec_change_after_dispatch_is_quarantined_not_accepted_as_o
         assert result['phase']=='escalated' and result['facts']['reason']=='unexpected-external-generation-change'
         assert f.kube.calls.count(False)==1
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('problem',['no-ledger','no-approved-image','approved-after-incident'])
+def test_absent_known_good_blocks_before_any_kubernetes_request(problem):
+    # TECHNICAL_SPEC §13 mandatory safety case "absent known-good": expected blocked, no observe/patch.
+    async def run():
+        f=setup()
+        if problem=='no-ledger':
+            f.executor.registry=None
+        else:
+            class Missing:
+                source,environment=f.recovery.source,'fixture'
+                async def resolve(self,*args,**kwargs):
+                    raise Blocked('no-approved-known-good-for-target' if problem=='no-approved-image'
+                                  else 'known-good-not-approved-before-incident')
+            f.executor.registry=Missing()
+        observed=[]
+        original=f.kube.observe
+        async def spy():
+            observed.append(True);return await original()
+        f.kube.observe=spy
+        result=await f.executor.execute(f.request)
+        assert result['phase']=='blocked' and f.kube.calls==[] and observed==[]
+    asyncio.run(run())

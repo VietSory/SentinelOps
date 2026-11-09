@@ -43,6 +43,33 @@ mutation. No background task failures were recorded in any trial. Q-10 also requ
 mandatory safety cases (negative, crash and concurrency tests); this table is
 only the per-trial input.
 
+## Q-10 mandatory safety cases (TECHNICAL_SPEC §13)
+
+Each case maps to tests that assert the expected outcome and the actual side effects. All
+of them ran in CI on `main` (`foundation`; the native PostgreSQL and kind checks in
+`remediation-integration`).
+
+| Case | Expected | Evidence |
+| --- | --- | --- |
+| Disabled action / kill switch | blocked, no patch | `test_policy_rejections_never_dispatch[disabled]`, `test_db_failure_before_dispatch_and_kill_switch_after_arm_never_send_patch` |
+| Wrong namespace / resource UID | blocked | `test_foreign_parent_identity_or_incomplete_inventory_rejected`, `Target` policy validation; native kind check (RBAC `resourceNames`) |
+| Stale or missing refs | blocked | `[stale]`, `[revision]`, `[wrong-change]`, `[wrong-generation]`; H4 matrix `test_native_h4_requires_verified_kubernetes_model_change_combination` |
+| Low confidence / RCA abstained | blocked | `[unqualified]`, `[abstained]`; H4 matrix `rca-abstained` |
+| Absent known-good | blocked, no Kubernetes request | `test_absent_known_good_blocks_before_any_kubernetes_request` (added 2026-11-09), registry `test_corrupt_or_unscoped_approval_is_not_a_known_good_image`, `test_known_good_must_predate_entire_observed_mutation_interval` |
+| Excessive replicas / blast radius | blocked | `test_blast_radius_and_external_scaling_are_blocked` |
+| Dry-run denial | blocked, no fallback patch | `[dryrun]`, `test_server_dry_run_is_all_and_failed_precondition_has_no_fallback_patch`; native kind dry-run |
+| Duplicate / concurrent requests | one dispatch | `test_concurrent_consumers_only_one_dispatch_and_never_double_recovery`; native store CAS check |
+| DB audit failure | no patch, or committed patch survives | `test_db_failure_before_dispatch…`, `test_committed_dispatch_survives_database_failure_after_patch_receipt`; native DB stop/start |
+| Worker crash before / after patch | never dispatched / reconciled without resend | `test_armed_but_unsent_crash_never_dispatches_and_eventually_quarantines`, `test_restart_observes_uncertain_sent_patch_without_resend_then_verifies` |
+| Kubernetes timeout | reconcile, no resend | `test_timeout_after_server_commit_and_restart_reconcile_without_resending` |
+| Verification success | recovered | `test_patch_is_verifying_until_new_pod_and_current_post_action_telemetry_succeed`; G6 trials 02–11 |
+| Verification failure | escalated | G6 trial 12 (native); `test_forged_recovery_persistence_is_escalated_not_recovered` |
+| Missing telemetry | escalated on timeout | `test_ready_deployment_without_telemetry_times_out_and_no_bad_image_compensation`, verification `test_no_history_and_scan_budget_never_claim_recovery` |
+
+Every case now has at least one test that asserts both the outcome and the side
+effects. This mapping is a self-review by Claude, not an independent audit
+review, which Q-10 also lists.
+
 ## Trial 12 detail
 
 The rollback was dispatched at 08:31:40Z. The harness then scaled the in-cluster
@@ -64,8 +91,8 @@ Measured against Q-09 for this release (no pooling):
 | Per-trial unsafe patches (Q-10 input) | 0 | **0** of 10 mutations |
 
 The release meets the local Q-09 criteria exactly at the threshold. It is not
-yet G6 PASS: Q-10 still requires the mandatory negative, crash and concurrency
-safety cases, and G6 acceptance is an owner decision (`G6_accepted=false` in every
+yet G6 PASS: the Q-10 case mapping above still needs an independent audit review,
+and G6 acceptance is an owner decision (`G6_accepted=false` in every
 receipt). The failed-verify clause rests on a single scenario.
 
 The earlier trial with H1 release `656bc7c5` (2026-11-08, recovered) is reported
