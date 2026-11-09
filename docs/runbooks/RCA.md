@@ -85,6 +85,8 @@ A failed replay leaves its partial output for investigation and does not produce
 a successful evaluation. The software baseline excludes model outputs; it does
 not replace the model-integrated worker evaluation. G4/final/activation/action
 authority remain false regardless of descriptive results. Actual admitted-corpus
-execution waits for G2; fixture checks establish only software behavior.
+execution requires the exact source freeze. The
+[local development baseline](../reports/RCA_DEVELOPMENT.md#corpus-http-local-đã-khóa)
+records a real replay of 15 admitted trials after D-23.
 
 Focused checks: `python -m pytest -q tests/test_local_rca_evaluation.py`.

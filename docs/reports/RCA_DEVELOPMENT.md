@@ -25,6 +25,22 @@ Coverage tối đa 0.40 chưa đạt floor 0.75; thiếu source receipt/SLO/mode
 support. Không suy ra causal/online/MTTD hoặc generalization từ ba case này.
 Chưa có independent-session confidence interval và chưa accepted full G4.
 
+## Corpus HTTP local đã khóa
+
+Replay `local-rca-development/v1` tại commit `ce3d7e5` kiểm lại freeze
+`a5b628bec29f169e3957324f29a0c86e23ff5c4bc39c540f9039be7633388857`
+và chạy đủ 15 lượt development thuộc 5 nhóm. Cả 10 lượt gây lỗi đều có
+SLO breach được xác nhận độc lập và xếp đúng nghi vấn ở vị trí đầu.
+Cả 10 đều abstain, nên qualified top-1 là **0/10**. Không có incident
+group trong 5 lượt healthy.
+
+Coverage của nghi vấn đầu là **0,40** ở cả 10 lượt. Replay v1 có bằng chứng
+trace và log. Nó thiếu điểm anomaly từ model, thứ tự onset đủ phân giải
+và bằng chứng thay đổi deployment. Thêm riêng điểm model sẽ chỉ nâng
+coverage tối đa lên 0,65, dưới ngưỡng 0,75. Dùng bằng chứng live v2 có
+receipt clock cho đánh giá có model. Kết quả này là baseline development
+riêng, chưa nghiệm thu Q-08 hoặc G4.
+
 ## Dùng lại
 
 Theo [native runbook](../runbooks/RCAEVAL_NATIVE.md#reproduce-and-recover) và
