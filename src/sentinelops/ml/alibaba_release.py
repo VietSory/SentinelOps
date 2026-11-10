@@ -114,6 +114,27 @@ COUNT_TOLERANCE = .05
 MEAN_TOLERANCE = .10
 
 
+def derived_features(criteria, service, config):
+    """Recompute P6's final relative window from the P4 counts and P5 means of the eligible P3
+    buckets, with the same training transform as the parity script (Codex review: P6 features
+    must follow from the measurements, not be free numbers)."""
+    import pandas as pd
+    from sentinelops.ml.alibaba_training import service_windows_fast
+    eligible = {i['bucket_end'] for i in criteria['P3']
+                if i.get('service') == service and 'bucket_end' in i and i.get('eligible_for_inference') is True}
+    counts = {i['bucket_end']: i.get('prometheus_count') for i in criteria['P4'] if i.get('service') == service}
+    minutes = {}
+    for item in criteria['P5']:
+        end = item.get('bucket_end')
+        if item.get('service') == service and end in eligible and item.get('prometheus_mean_ms') is not None:
+            minutes[int(utc_time(end).timestamp()) // 60] = (item['prometheus_mean_ms'], float(counts[end] or 0))
+    series = pd.DataFrame.from_dict(minutes, orient='index', columns=['rt', 'rate']).sort_index()
+    rows = service_windows_fast(series, config) if len(series) else []
+    if not rows or rows[-1]['minute'] != max(minutes):
+        return None
+    return dict(zip(config['features'], rows[-1]['features']))
+
+
 def criteria_complete(criteria, model_version, config, scores_for, health_policy):
     """Every P1–P6 criterion needs at least one recorded check, and every check must pass.
 
@@ -169,7 +190,7 @@ def criteria_complete(criteria, model_version, config, scores_for, health_policy
     # of a55bb05): P2 the capture's profile and pinned queries, P3 eligibility and the frozen SLO
     # health policy's maximum lag, P4 no 5xx.
     for item in criteria['P2']:
-        if (item.get('source_profile') != SOURCE_PROFILE_V2
+        if (item.get('source_profile') != SOURCE_PROFILE_V2 or item.get('pod_identity_verified') is not True
                 or item.get('queries_sha256') != stable_id(queries(item['service'], SOURCE_PROFILE_V2))):
             return False
     max_lag = health_policy['maximum_lag_seconds']
@@ -196,6 +217,9 @@ def criteria_complete(criteria, model_version, config, scores_for, health_policy
         if (not isinstance(features, dict) or set(features) != set(config['features'])  # the store sorts JSON keys
                 or not all(_number(v) for v in features.values())
                 or not isinstance(scores, dict) or set(scores) != {'isolation_forest', 'median_mad', 'xgboost'}):
+            return False
+        derived = derived_features(criteria, item['service'], config)
+        if derived is None or not all(_close(features[name], derived[name]) for name in config['features']):
             return False
         expected = scores_for([features[name] for name in config['features']])
         if set(expected) != set(scores) or not all(_close(scores[k], expected[k]) for k in expected):
@@ -268,6 +292,9 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
             or stable_id(provenance['config']) != provenance['config_sha256']
             or repository_config != provenance['config']
             or not re.fullmatch(r'[0-9a-f]{40}', str(parity_verification.get('source_commit', '')))
+            # The scrape configuration the script verified: 5 s profile and a recorded source hash.
+            or parity_verification.get('scrape_interval') != '5s'
+            or not re.fullmatch(r'[0-9a-f]{64}', str(parity_verification.get('configuration_hash', '')))
             or any(parity_verification.get(k) != parity_record.get(k) for k in ('candidate_id', 'environment',
                                                                                  'source_profile', 'verified_at'))
             or not criteria_complete(criteria, model_version, provenance['config'], scores_for, health_policy)):

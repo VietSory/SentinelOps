@@ -134,15 +134,25 @@ async def capture_buckets(client, source, ends, inventory):
                                          for s in SERVICES))
         for capture in current:
             service = capture['service']
+            try:
+                aggregate = float(capture['queries']['requests']['response']['data']['result'][0]['value'][1])
+            except (KeyError, IndexError, TypeError, ValueError):
+                # Prometheus failed this query; PrometheusSource kept the partial capture so the
+                # pipeline quarantines it and evaluate() records FAIL (Codex review): no crash here.
+                continue
             method, route = BUSINESS_ROUTES[service]
             selector = ','.join(k + '=' + json.dumps(v) for k, v in [('service', service), ('method', method), ('route', route)])
             expression = 'sum by (k8s_pod_uid,k8s_namespace_name) (increase(' + REQUESTS + '{' + selector + '}[60s]))'
-            body = (await client.get(source.endpoint + '/api/v1/query',
-                                     params={'query': expression, 'time': end.timestamp()})).raise_for_status().json()
-            pod_count = pod_samples(body, inventory[service], as_of=end)
-            aggregate = float(capture['queries']['requests']['response']['data']['result'][0]['value'][1])
-            if not math.isclose(pod_count, aggregate, rel_tol=1e-8, abs_tol=1e-8):
-                raise ValueError('metric aggregate does not resolve to the observed Kubernetes pod')
+            try:
+                body = (await client.get(source.endpoint + '/api/v1/query',
+                                         params={'query': expression, 'time': end.timestamp()})).raise_for_status().json()
+                pod_count = pod_samples(body, inventory[service], as_of=end)
+                verified = math.isclose(pod_count, aggregate, rel_tol=1e-8, abs_tol=1e-8)
+            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+                verified = False
+            # Recorded and checked in P2: a capture that does not resolve to the observed pod fails
+            # the run with evidence instead of aborting it.
+            capture['pod_identity_verified'] = verified
         captures.extend(current)
         emit('minute-captured', bucket_end=timestamp(end))
     return captures
@@ -164,9 +174,10 @@ def evaluate(root, bundle_parts, captures, logs, ends, policy):
     for raw in captures:
         expected = queries(raw['service'], SOURCE_PROFILE_V2)
         recorded = {k: v['expression'] for k, v in raw['queries'].items()}
-        check('P2', raw['source_profile'] == SOURCE_PROFILE_V2 and recorded == expected,
+        check('P2', raw['source_profile'] == SOURCE_PROFILE_V2 and recorded == expected
+              and raw.get('pod_identity_verified') is True,
               {'service': raw['service'], 'bucket_end': raw['bucket_end'], 'source_profile': raw['source_profile'],
-               'queries_sha256': stable_id(recorded)})
+               'queries_sha256': stable_id(recorded), 'pod_identity_verified': raw.get('pod_identity_verified')})
     store = ArtifactStore(root / 'source')
     normalized = process_captures(captures, store)
     observations = [store.read(ref) for ref in normalized['observation_refs']]
@@ -279,7 +290,8 @@ def main():
                         'source_commit': commit, 'bundle_manifest_sha256': args.manifest_sha256,
                         'config_sha256': stable_id(manifest['provenance']['config']),
                         'criteria': checks, 'failures': failures, 'images': images,
-                        'configuration_hash': config['configuration_hash'], 'normalization_ref': normalization_ref,
+                        'configuration_hash': config['configuration_hash'], 'scrape_interval': config['scrape_interval'],
+                        'normalization_ref': normalization_ref,
                         'activation_allowed': False, 'G3_accepted': False}
         (root / 'verification.json').write_text(json.dumps(verification, indent=2, allow_nan=False) + '\n')
         record = {'parity_version': PARITY_VERSION, **scope, 'status': 'FAIL' if failures else 'PASS',
