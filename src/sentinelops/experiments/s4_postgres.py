@@ -68,6 +68,13 @@ def require_sandbox(project: Path) -> str:
     return name
 
 
+def pressure_stages(active_seconds: int, hold_ms: int, lead_in: bool):
+    main = (("fault", active_seconds, hold_ms),)
+    if lead_in:
+        return (("degrading", 180, 350), *main)
+    return main
+
+
 async def lock_pulses(hold_seconds: float, project: Path, expected_project: str):
     if await asyncio.to_thread(require_sandbox, project) != expected_project:
         raise ValueError("S4 Compose project changed before lock injection")

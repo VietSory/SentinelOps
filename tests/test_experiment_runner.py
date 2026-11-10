@@ -50,6 +50,23 @@ def test_s4_trace_probe_prefers_a_slow_completed_request_for_its_own_entry():
     assert runner.select_trace_probe(probes, "checkout", 100, prefer_slow=True) is probes[1]
 
 
+def test_s4_lead_in_preserves_the_main_phase_and_ordinary_schedule():
+    assert runner.s4_postgres.pressure_stages(300, 1200, lead_in=False) == (("fault", 300, 1200),)
+    assert runner.s4_postgres.pressure_stages(300, 1200, lead_in=True) == (
+        ("degrading", 180, 350), ("fault", 300, 1200))
+
+
+@pytest.mark.parametrize(("config", "reason"), [
+    (runner.ExperimentConfig("S1", "validation"), "only available for S4"),
+    (runner.ExperimentConfig("S4", "validation", warmup_seconds=3600, active_seconds=600,
+                             recovery_seconds=1800), "snapshot budget"),
+])
+def test_s4_lead_in_rejects_unrelated_or_over_budget_experiments(tmp_path, config, reason):
+    with pytest.raises(ValueError, match=reason):
+        asyncio.run(runner.execute(config, project=tmp_path, output=tmp_path / "runs", s4_lead_in=True))
+    assert not (tmp_path / "runs").exists()
+
+
 def test_s4_projects_only_native_wait_events_for_the_selected_database_and_relation():
     prefix = "2026-11-10 02:04:10.250 UTC [42] LOG:  process 42 "
     lines = [

@@ -153,7 +153,8 @@ def select_trace_probe(recent, entry, now, *, prefer_slow=False):
 
 
 async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Path, session_id: str | None = None,
-                  allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE) -> Path:
+                  allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE,
+                  s4_lead_in: bool = False) -> Path:
     config.validate()
     commit,dirty,hashes = checkout_identity(project)
     if dirty and not allow_dirty:
@@ -204,6 +205,12 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         run.update(root_cause_ground_truth="rds", fault_method="db-pressure")
         run["parameters"]["s4_compose_project"] = s4_project
         run["parameters"]["s4_lock_gap_seconds"] = s4_postgres.PULSE_GAP_SECONDS
+        s4_stages = s4_postgres.pressure_stages(config.active_seconds, config.maximum_delay_ms, s4_lead_in)
+        if s4_lead_in:
+            run["parameters"]["s4_pressure_stages"] = [
+                {"phase": phase, "seconds": duration, "lock_hold_ms": delay}
+                for phase, duration, delay in s4_stages
+            ]
     failure = None
     client_clock = ClientClockGuard()
     async with httpx.AsyncClient(timeout=12.,trust_env=False) as client:
@@ -341,16 +348,17 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                 await load("healthy",config.active_seconds)
             elif s4_project:
                 run["fault_start_at"] = timestamp(datetime.now(timezone.utc))
-                pulse = asyncio.create_task(s4_postgres.lock_pulses(config.maximum_delay_ms / 1000, project, s4_project))
-                try:
-                    await load("fault", config.active_seconds)
-                finally:
-                    pulse.cancel()
+                for phase, duration, delay in s4_stages:
+                    pulse = asyncio.create_task(s4_postgres.lock_pulses(delay / 1000, project, s4_project))
                     try:
-                        await pulse
-                    except asyncio.CancelledError:
-                        pass
-                    pulse = None
+                        await load(phase, duration)
+                    finally:
+                        pulse.cancel()
+                        try:
+                            await pulse
+                        except asyncio.CancelledError:
+                            pass
+                        pulse = None
                 run["recovery_start_at"] = timestamp(datetime.now(timezone.utc))
                 await load("recovery", config.recovery_seconds)
             else:
@@ -450,8 +458,15 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
 
 
 async def execute(config: ExperimentConfig, *, project: Path, output: Path, session_id: str | None = None,
-                  allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE) -> Path:
+                  allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE,
+                  s4_lead_in: bool = False) -> Path:
     config.validate()
+    if type(s4_lead_in) is not bool or (s4_lead_in and config.scenario != "S4"):
+        raise ValueError("the lock lead-in is only available for S4 development")
+    if s4_lead_in:
+        stages = s4_postgres.pressure_stages(config.active_seconds, config.maximum_delay_ms, lead_in=True)
+        if config.warmup_seconds + sum(seconds for _, seconds, _ in stages) + config.recovery_seconds > 6000:
+            raise ValueError("S4 with a lock lead-in must fit the bounded snapshot budget")
     if config.scenario == "S4" and (allow_dirty or os.getenv("DATABASE_URL") not in (None, s4_postgres.DATABASE_URL)):
         raise ValueError("S4 requires clean source and the dedicated Compose PostgreSQL connection")
     if source_profile not in (SOURCE_PROFILE, SOURCE_PROFILE_V2):
@@ -463,4 +478,4 @@ async def execute(config: ExperimentConfig, *, project: Path, output: Path, sess
         raise ValueError("ADR-016 capture requires clean S0/S1/S3 validation with all-entry traffic and 30-minute warmup")
     with ExperimentLock(project):
         return await _execute_locked(config, project=project, output=output, session_id=session_id,
-                                     allow_dirty=allow_dirty, source_profile=source_profile)
+                                     allow_dirty=allow_dirty, source_profile=source_profile, s4_lead_in=s4_lead_in)

@@ -130,6 +130,14 @@ The runner retains only the waiting and acquired events for the Payment table
 in its own PostgreSQL database. It records the database and capture clocks
 without SQL statements or bind values.
 
+Use `--s4-lead-in` on a new development run to add a three-minute phase of
+350 ms lock holds before the regular S4 fault phase. The runner records both
+stages in the truth manifest before load. Use the native log and sampling clocks
+to check whether the observed lock waits precede the first downstream SLO
+bucket by more than the RCA policy's onset uncertainty. Check that Inventory
+remains within SLO and that the main phase still produces verified slow
+PostgreSQL spans. A scheduled phase alone cannot establish precedence.
+
 Set `DATABASE_URL` to the owned PostgreSQL testbed using a read-only monitor
 role with `pg_read_all_stats`, then collect a raw observation.
 
