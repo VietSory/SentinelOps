@@ -64,17 +64,28 @@ text above, this section wins.
 **1a. Evidence identity (revised after the second and third reviews).** A version in
 `configs/system_versions.json` has three distinct identities:
 
-- **Run identity: must be equal for any carry-forward.** Model version, bundle
-  manifest, source profile, SLO health policy and scoring protocol. If any of these
-  changes, every service is re-measured.
+- **Run identity: must be equal for any carry-forward.** These are everything the
+  evaluator reads apart from captured data: model version, bundle manifest, source
+  profile, feature set, SLO health policy, plan scoring block, base protocol
+  (`configs/local_model_evaluation.json`: thresholds, persistence, bootstrap), and the
+  git blob ids of the scoring code (evaluator, detector and risk summaries, relative
+  features, SLO labels, latency means, slot admission). If any of these changes,
+  every service is re-measured.
 - **Capture identity: describes the capture, not a carry-forward criterion.** Epoch,
   source commit, evaluation plan and topology hash. These normally change when a
   service is added, because the plan gains kinds and the topology gains a node. A
   change here does not by itself disqualify an old service.
 - **Service identity: the per-service equivalence a carried service must keep.**
   Route, transitive downstream call path, shared infrastructure, code tree
-  (`services/<name>` at the capture's source commit), and the workload kinds
-  measured for it. Version-1 evidence for a service carries forward only if its
+  (`services/<name>` at the capture's source commit), the slot kinds that enter its
+  measurement, and the workload recipe hash. The recipe covers rate, delay,
+  active, warmup and recovery durations, fault mode by parity, seed, healthy-prefault
+  minimum, minimum groups and corpus policy. The current evaluator scores **every**
+  service on **every** slot kind: healthy, all abrupt split by fault mode, and all
+  gradual. So a supplementary epoch that adds a new service's fault kinds changes
+  every old service's measured kinds. An old service can carry forward only if the
+  supplementary epoch's plan pre-registers scoring it on exactly its version-1 kinds,
+  with the same recipe. Version-1 evidence for a service carries forward only if its
   service identity is unchanged and none of its shared build inputs changed.
   Shared build inputs are recorded per version: `services/common`, `src`,
   `contracts`, `Dockerfile.service` and `pyproject.toml`. A change to
@@ -85,7 +96,9 @@ text above, this section wins.
 
 A declared version is immutable. The guard pins each version entry's hash. Editing
 system-v1 in place, for example adding an edge and updating its topology hash,
-fails. A change needs a new version and a new pin. Pins are only ever added. A diff that edits
+fails. A change needs a new version and a new pin. Pins are only ever added. (Exception, recorded here: the system-v1 entry was
+re-pinned on 2026-11-10 during the fourth review, before any carry-forward had used it,
+to add the base protocol, scoring code, measured kinds and workload recipe.) A diff that edits
 an existing pin is a red flag for the reviewer. The current version's run identity must
 also match the repository's SLO health policy, scoring and source profile. The guard also checks that the
 current version's per-service downstream equals the topology's transitive call

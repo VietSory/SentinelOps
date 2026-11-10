@@ -15,7 +15,18 @@
         "bundle_manifest_sha256": "2d1a5376eccdd691da0741b9dc88eecd223d75a85a23fa712e00c1dc53291e62",
         "source_profile": "prometheus-increase-60s-5s/v2",
         "slo_health_policy_sha256": "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560",
-        "scoring_sha256": "d3d928b20ece82476019a40be1fd4fbcb531280efb35e307b7aff91ed4bcf307"
+        "scoring_sha256": "d3d928b20ece82476019a40be1fd4fbcb531280efb35e307b7aff91ed4bcf307",
+        "feature_set_version": "http-relative-5m/v1",
+        "base_protocol_sha256": "1e8a1aa8ecaf2c06316d68486d76d51c5cc3dd5a641312bcd19e1822eadff8d7",
+        "scoring_code_blobs": {
+          "src/sentinelops/ml/alibaba_local_evaluation.py": "0d1794da8c4d58f12df746886a3944ec45bb0199",
+          "src/sentinelops/ml/local_evaluation.py": "6251eb0eb9b7c76dfb83a2337ff1787351a2198e",
+          "src/sentinelops/ml/detector_evaluation.py": "ba4de8b4d3282630bd99fd506d1761d2df2dfa8f",
+          "src/sentinelops/ml/alibaba_live.py": "1052facca0bdd4734f6b7f3db30770b570599885",
+          "src/sentinelops/experiments/labels.py": "5eb3df76d207b5692d02fa3ebfd372ba8b7f5839",
+          "src/sentinelops/telemetry/prometheus.py": "214c25eb4c25bd84622181bea2d16821914eb882",
+          "src/sentinelops/ml/local_data.py": "cabcac0ae60672193cde873cf6292c707232dd7e"
+        }
       },
       "capture_identity": {
         "epoch": "alibaba-layer2 epoch 2 (alb-*)",
@@ -40,9 +51,14 @@
           ],
           "shared_infrastructure": [],
           "code_tree": "b3f5367e598819ccb905f242f69b4689b49af96b",
-          "workload_kinds": [
-            "healthy"
-          ]
+          "measured_kinds": [
+            "healthy",
+            "payment-abrupt",
+            "inventory-abrupt",
+            "payment-gradual",
+            "inventory-gradual"
+          ],
+          "workload_recipe_sha256": "57a54a4726ce9c93c9b636dfc00ac75fbb471d971c2a591c83e7673af0f65086"
         },
         "inventory-service": {
           "route": "GET /v1/inventory/{sku}",
@@ -53,11 +69,14 @@
             "rds"
           ],
           "code_tree": "0b6cacd933346256cf2025921dadc97d08f618ad",
-          "workload_kinds": [
+          "measured_kinds": [
             "healthy",
+            "payment-abrupt",
             "inventory-abrupt",
+            "payment-gradual",
             "inventory-gradual"
-          ]
+          ],
+          "workload_recipe_sha256": "57a54a4726ce9c93c9b636dfc00ac75fbb471d971c2a591c83e7673af0f65086"
         },
         "payment-service": {
           "route": "POST /v1/payments/charge",
@@ -68,11 +87,14 @@
             "rds"
           ],
           "code_tree": "7df33fa2d03712c2eb7deab23050f2cf705d01a4",
-          "workload_kinds": [
+          "measured_kinds": [
             "healthy",
             "payment-abrupt",
-            "payment-gradual"
-          ]
+            "inventory-abrupt",
+            "payment-gradual",
+            "inventory-gradual"
+          ],
+          "workload_recipe_sha256": "57a54a4726ce9c93c9b636dfc00ac75fbb471d971c2a591c83e7673af0f65086"
         }
       }
     }

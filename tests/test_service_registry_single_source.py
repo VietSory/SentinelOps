@@ -14,6 +14,7 @@ import re
 import pytest
 import yaml
 
+from sentinelops.ml.local_evaluation import load_protocol
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,14 +24,21 @@ REGISTRY = json.loads((ROOT / 'configs/system_versions.json').read_text())
 # ADR-017 amendment 1 (1a, revised after the second Codex review). run_identity must be equal
 # for any carry-forward; capture_identity only describes the capture; service_identity is the
 # per-service equivalence a carried service must keep.
-RUN_IDENTITY = ('model_version', 'bundle_manifest_sha256', 'source_profile', 'slo_health_policy_sha256',
-                'scoring_sha256')
+RUN_IDENTITY = ('model_version', 'bundle_manifest_sha256', 'source_profile', 'feature_set_version',
+                'slo_health_policy_sha256', 'scoring_sha256', 'base_protocol_sha256', 'scoring_code_blobs')
 CAPTURE_IDENTITY = ('epoch', 'source_commit', 'evaluation_plan_sha256', 'topology_sha256')
-SERVICE_IDENTITY = ('route', 'downstream', 'shared_infrastructure', 'code_tree', 'workload_kinds')
+SERVICE_IDENTITY = ('route', 'downstream', 'shared_infrastructure', 'code_tree', 'measured_kinds',
+                    'workload_recipe_sha256')
+# Every plan field that shapes the captured traffic or the evidence count (local_corpus.recipe plus
+# the healthy-prefault and group minimums and the corpus policy). Replacement budget is excluded.
+WORKLOAD_FIELDS = ('kinds', 'entry_rps', 'maximum_delay_ms', 'healthy_active_seconds', 'abrupt_active_seconds',
+                   'gradual_active_seconds', 'warmup_seconds', 'recovery_seconds',
+                   'abrupt_fault_mode_by_ordinal_parity', 'seed_base', 'minimum_verified_healthy_prefault_minutes',
+                   'minimum_groups', 'policy_sha256')
 # A declared version is immutable: its whole entry is pinned here. Editing system-v1 in place
 # (e.g. a new edge plus an updated topology hash) fails; a change needs a new version + pin.
 FROZEN_VERSIONS = {
-    'system-v1': 'df96f4a49c96a8a138ff0539ed0e78dfa69895186bc3725a0f9d057b794c91f8',
+    'system-v1': 'e71bb6562e0aa8f9774747a0f5a996ec797658835e3c75493919e8cefa93e265',
 }
 
 
@@ -98,7 +106,8 @@ def registry_errors(registry, contract_paths, routes, topology, pins):
             errors.append(f'{version} lacks capture_identity {list(CAPTURE_IDENTITY)}')
         per_service = entry.get('service_identity', {})
         for service in entry['services']:
-            if not complete(per_service.get(service), ('route', 'code_tree', 'workload_kinds')) or any(
+            if not complete(per_service.get(service), ('route', 'code_tree', 'measured_kinds',
+                                                       'workload_recipe_sha256')) or any(
                     key not in per_service[service] for key in SERVICE_IDENTITY):
                 errors.append(f'{version} lacks service_identity for {service}')
     for service in versions[current]['services']:
@@ -142,6 +151,21 @@ def test_repository_contracts_routes_and_topology_agree():
     assert run['slo_health_policy_sha256'] == stable_id(json.loads((ROOT / 'configs/slo_health_policy.json').read_text()))
     assert run['scoring_sha256'] == stable_id(plan['scoring'])
     assert run['source_profile'] == plan['source_profile']
+    # Codex review 4: the evaluator also reads the base protocol (thresholds, persistence, bootstrap).
+    assert run['base_protocol_sha256'] == stable_id(load_protocol(ROOT))
+    assert run['feature_set_version'] == plan['feature_set_version']
+    # The scoring code itself (evaluator, detector/risk summaries, relative features, SLO labels,
+    # latency means, slot admission) as git blob ids; any edit makes results incomparable.
+    for path, blob in run['scoring_code_blobs'].items():
+        data = (ROOT / path).read_bytes()
+        assert hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest() == blob, path
+    # Codex review 4: what enters each service's measurement. score_by_route scores every service on
+    # every slot kind (healthy, all abrupt split by fault mode, all gradual), so each service's
+    # measured kinds are the plan's kinds, and the traffic recipe must match too.
+    recipe = stable_id({key: plan[key] for key in WORKLOAD_FIELDS})
+    for service, declared in REGISTRY['versions'][REGISTRY['current']]['service_identity'].items():
+        assert declared['measured_kinds'] == plan['kinds'], service
+        assert declared['workload_recipe_sha256'] == recipe, service
 
 
 V1 = ['checkout-service', 'inventory-service', 'payment-service']
@@ -165,7 +189,8 @@ def version(services, topology):
     return {'services': services, 'run_identity': dict.fromkeys(RUN_IDENTITY, 'fixture'),
             'capture_identity': dict.fromkeys(CAPTURE_IDENTITY, 'fixture'),
             'service_identity': {s: {'route': 'GET /' + s, 'downstream': sorted(closure(topology, s)),
-                                     'shared_infrastructure': [], 'code_tree': 'tree-' + s, 'workload_kinds': ['healthy']}
+                                     'shared_infrastructure': [], 'code_tree': 'tree-' + s, 'measured_kinds': ['healthy'],
+                                     'workload_recipe_sha256': 'fixture'}
                                  for s in services}}
 
 
