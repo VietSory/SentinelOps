@@ -17,6 +17,20 @@ from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 from tests.test_alibaba_bundle import synthetic_fit
 
 
+BUCKETS = ('2026-11-09T02:20:00Z', '2026-11-09T02:21:00Z')
+
+
+def criteria(model_version):
+    pairs = [{'service': s, 'bucket_end': b} for s in sorted(BUSINESS_ROUTES) for b in BUCKETS]
+    return {'P1': [{'ok': True, 'model_version': model_version}],
+            'P2': [{'ok': True, **p} for p in pairs],
+            'P3': [{'ok': True, 'what': 'all buckets normalized', 'observations': len(pairs)}]
+                  + [{'ok': True, 'coverage': 1.0, **p} for p in pairs],
+            'P4': [{'ok': True, **p} for p in pairs],
+            'P5': [{'ok': True, **p} for p in pairs],
+            'P6': [{'ok': True, 'service': s} for s in sorted(BUSINESS_ROUTES)]}
+
+
 def evidence(tmp_path):
     fit = synthetic_fit(tmp_path)
     report = json.loads((fit / 'report.json').read_text())
@@ -34,15 +48,14 @@ def evidence(tmp_path):
                 'detector_events': {'isolation_forest': dict(detector), 'median_mad': dict(detector)},
                 'risk': {'xgboost': dict(risk), 'slope': dict(risk)},
                 'paired_service_bootstrap': {'services': 3, 'if_minus_mad_event_f1': dict(interval),
-                                             'xgb_minus_slope_average_precision': dict(interval)}}
+                                             'xgb_minus_slope_average_precision': dict(interval)},
+                'model_artifacts_sha256': dict(manifest['artifacts'])}
     scope = {'candidate_id': manifest['model_version'], 'environment': 'test', 'source_profile': 'prometheus-increase-60s-5s/v2',
              'models': [{'service': s, 'model_version': manifest['model_version']} for s in sorted(BUSINESS_ROUTES)],
              'verified_by': 'test', 'verified_at': '2026-11-09T00:00:00Z'}
     verification = {'version': 'model-source-parity-check/v1', 'criteria_version': 'alibaba-parity-criteria/v1', **scope,
                     'bundle_manifest_sha256': result['manifest_sha256'], 'failures': [],
-                    'criteria': {name: ([{'ok': True, 'model_version': manifest['model_version']}] if name == 'P1' else
-                                         [{'ok': True, 'service': s} for s in sorted(BUSINESS_ROUTES)])
-                                 for name in CRITERIA}}
+                    'criteria': criteria(manifest['model_version'])}
     record = {'parity_version': 'model-source-parity/v1', **scope, 'status': 'PASS',
               'evidence': [parity_verification_ref(verification)]}
     return result['manifest_sha256'], manifest, report, controls, record, verification
@@ -77,13 +90,24 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
     lambda c, v: c['detector_events']['isolation_forest'].update(recall=float('nan')),
     lambda c, v: c['paired_service_bootstrap'].pop('xgb_minus_slope_average_precision'),
     lambda c, v: c['paired_service_bootstrap']['if_minus_mad_event_f1'].update(valid_replicates=0),
-    lambda c, v: v['criteria'].update(P4=[{'ok': True, 'service': 'checkout-service'}]),
+    lambda c, v: v['criteria'].update(P4=[i for i in v['criteria']['P4'] if i['service'] == 'checkout-service']),
+    lambda c, v: v['criteria'].update(P3=[i for i in v['criteria']['P3'] if 'bucket_end' not in i]),
+    lambda c, v: v['criteria'].update(P3=v['criteria']['P3'][:-1]),
+    lambda c, v: v['criteria']['P5'].append({'ok': True, 'service': 'payment-service', 'bucket_end': 'x'}),
+    lambda c, v: v['criteria'].update(P2=[i for i in v['criteria']['P2'] if i != v['criteria']['P2'][-1]]),
+    lambda c, v: v['criteria']['P3'][0].update(observations=1),
+    lambda c, v: c['risk']['xgboost'].update(threshold=4.0),
+    lambda c, v: c['paired_service_bootstrap']['if_minus_mad_event_f1'].update(lower=-2, upper=2),
+    lambda c, v: c['model_artifacts_sha256'].update({'risk.json': '0' * 64}),
+    lambda c, v: c.pop('model_artifacts_sha256'),
     lambda c, v: v['criteria'].update(P6=[i for i in v['criteria']['P6'] if i['service'] != 'payment-service']),
     lambda c, v: v['criteria']['P1'][0].update(model_version='0' * 64),
     lambda c, v: c['risk']['xgboost'].update(precursor_recall_lead_ge_60s=1.5),
     lambda c, v: c['detector_events']['median_mad'].update(false_incidents_per_healthy_service_hour=-0.1),
 ], ids=['empty-P3', 'all-criteria-empty', 'check-without-ok', 'ok-not-true', 'no-risk', 'no-slope-control',
-        'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates', 'P4-one-service',
+        'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates', 'P4-one-service', 'P3-summary-only', 'P3-missing-bucket', 'P5-extra-bucket',
+        'P2-uneven-buckets', 'P3-summary-miscount', 'xgb-threshold-4', 'bootstrap-out-of-range', 'controls-other-risk-model',
+        'controls-without-model-hashes',
         'P6-missing-payment', 'P1-other-model', 'recall-above-one', 'negative-false-incident-rate'])
 def test_evidence_rejects_empty_parity_checks_and_incomplete_controls(tmp_path, mutate):
     sha, manifest, report, controls, record, verification = evidence(tmp_path)

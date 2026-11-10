@@ -91,10 +91,10 @@ tested equal to the single-window reference.
 - **Reading the layer-1 rates (B review, 2026-11-10):** the "alert rate on negatives"
   (XGBoost 0.019, slope 0.011) counts raw per-window threshold crossings *before*
   the entry/exit persistence that serving applies, so it is not the operator-visible
-  alert rate. Precursor recall counts only breach onsets that have at least one valid
-  scored window before them (`eligible_precursor_events`). Onsets with no valid
-  window are outside the denominator, so the 0.24 describes covered onsets, not
-  all breaches.
+  alert rate. The precursor recall denominator (`eligible_precursor_events`) counts only
+  breach onsets that have at least one evaluated window labelled precursor-positive
+  within the forecast horizon before them. Onsets without such a window are outside
+  the denominator, so the 0.24 describes those onsets, not all breaches.
 - **Cold start:** a new service or deployment has no signal until it has 10
   minutes of accepted v2 history. Signals are reported as unavailable, never as zero.
 - **Shared span:** evaluation services share the training services' cluster and

@@ -61,6 +61,9 @@ def controls_complete(controls):
             if not all(0 <= values[m] <= 1 for m in metrics if m in UNIT_INTERVAL) or any(
                     values[m] < 0 for m in metrics):
                 return False
+    # Codex review: a probability threshold outside [0, 1] or a negative slope threshold is invalid.
+    if not 0 <= controls['risk']['xgboost']['threshold'] <= 1 or controls['risk']['slope']['threshold'] < 0:
+        return False
     bootstrap = controls.get('paired_service_bootstrap')
     if not isinstance(bootstrap, dict) or not _number(bootstrap.get('services')) or bootstrap['services'] < 2:
         return False
@@ -69,19 +72,22 @@ def controls_complete(controls):
         if (not isinstance(interval, dict) or not _number(interval.get('valid_replicates'))
                 or interval['valid_replicates'] < 1
                 or not all(_number(interval.get(k)) for k in ('lower', 'upper'))
-                or interval['lower'] > interval['upper']):
-            return False
+                or not -1 <= interval['lower'] <= interval['upper'] <= 1):
+            return False  # differences of two [0, 1] metrics lie in [-1, 1]
     return True
 
 
-PER_SERVICE_CRITERIA = ('P2', 'P4', 'P5', 'P6')
+BUCKET_CRITERIA = ('P3', 'P4', 'P5')
 
 
 def criteria_complete(criteria, model_version):
     """Every P1–P6 criterion needs at least one recorded check, and every check must pass.
 
-    P1 must name this bundle's model version, and the per-service criteria must cover every
-    business route, so a verification run on one service cannot certify all three.
+    P1 must name this bundle's model version. P2 declares the (service, bucket) pairs of the
+    run, one per raw capture, and must cover every business route with the same buckets. P3,
+    P4 and P5 must each check exactly those pairs, and the P3 summary must count them, so a
+    verification that keeps only a summary line or a subset of buckets cannot certify the
+    bundle (Codex review). P6 needs one final window per route.
     """
     if not (isinstance(criteria, dict) and set(criteria) == set(CRITERIA)
             and all(isinstance(criteria[name], list) and criteria[name]
@@ -90,8 +96,23 @@ def criteria_complete(criteria, model_version):
         return False
     if any(item.get('model_version') != model_version for item in criteria['P1']):
         return False
-    return all({item.get('service') for item in criteria[name]} == set(BUSINESS_ROUTES)
-               for name in PER_SERVICE_CRITERIA)
+    def pairs(items):
+        return [(item.get('service'), item.get('bucket_end')) for item in items if 'bucket_end' in item]
+    declared = pairs(criteria['P2'])
+    if len(declared) != len(criteria['P2']) or len(set(declared)) != len(declared):
+        return False
+    buckets = {service: {end for s, end in declared if s == service} for service in BUSINESS_ROUTES}
+    if ({s for s, _ in declared} != set(BUSINESS_ROUTES) or len({frozenset(v) for v in buckets.values()}) != 1
+            or not all(isinstance(end, str) and end for _, end in declared)):
+        return False
+    for name in BUCKET_CRITERIA:
+        checked = pairs(criteria[name])
+        if sorted(checked) != sorted(declared):
+            return False
+    summaries = [item for item in criteria['P3'] if 'bucket_end' not in item]
+    if len(summaries) != 1 or summaries[0].get('observations') != len(declared):
+        return False
+    return sorted(item.get('service') for item in criteria['P6']) == sorted(BUSINESS_ROUTES)
 
 
 def validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256):
@@ -110,6 +131,8 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
         raise ValueError('layer-1 controls do not belong to this fit')
     if not controls_complete(controls):
         raise ValueError('layer-1 controls lack the detector, risk or bootstrap metrics')
+    if controls.get('model_artifacts_sha256') != manifest['artifacts']:
+        raise ValueError('layer-1 controls did not score this bundle\'s model files')
     scope = {'candidate_id': model_version, 'source_profile': SOURCE_PROFILE_V2}
     if (not isinstance(parity_record, dict) or parity_record.get('parity_version') != PARITY_VERSION
             or parity_record.get('status') != 'PASS'
