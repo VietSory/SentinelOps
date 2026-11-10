@@ -287,6 +287,25 @@ def test_context_inspection_cannot_open_sealed_slot(tmp_path, monkeypatch):
         corpus.inspect_completed_capture(ArtifactStore(tmp_path), 'sealed-final-01-healthy')
 
 
+def test_context_inspection_accepts_epoch_plan_slots_and_legacy_alibaba(tmp_path, monkeypatch):
+    store = ArtifactStore(tmp_path)
+    monkeypatch.setattr(corpus, 'clean_source', lambda _: 'a' * 40)
+    def read_binding(_store, path):
+        raise FileNotFoundError(path)
+    monkeypatch.setattr(corpus, 'read_binding', read_binding)
+    plan = corpus.load_plan(corpus.ALIBABA_PLAN)
+    role = 'development-validation'
+    for ordinal in range(1, plan['maximum_groups'][role] + 1):
+        group = corpus.group_name(plan, role, ordinal)
+        for kind in corpus.plan_kinds(plan):
+            with pytest.raises(FileNotFoundError, match='result.json'):
+                corpus.inspect_completed_capture(store, f'{group}-{kind}')
+    with pytest.raises(FileNotFoundError, match='result.json'):
+        corpus.inspect_completed_capture(store, 'ali-05-inventory-gradual')
+    with pytest.raises(ValueError, match='unregistered'):
+        corpus.inspect_completed_capture(store, 'alb-08-healthy')
+
+
 def test_acquisition_and_freeze_lock_is_exclusive_and_recovers_after_failure(tmp_path):
     from sentinelops.experiments.local_corpus import acquisition_lock
     store = ArtifactStore(tmp_path)
