@@ -50,6 +50,24 @@ def test_s4_trace_probe_prefers_a_slow_completed_request_for_its_own_entry():
     assert runner.select_trace_probe(probes, "checkout", 100, prefer_slow=True) is probes[1]
 
 
+def test_s4_projects_only_native_wait_events_for_the_selected_database_and_relation():
+    prefix = "2026-11-10 02:04:10.250 UTC [42] LOG:  process 42 "
+    lines = [
+        prefix + "still waiting for RowExclusiveLock on relation 17 of database 23 after 200.001 ms",
+        prefix + "acquired RowExclusiveLock on relation 17 of database 23 after 520.200 ms at character 13",
+        prefix + "acquired RowExclusiveLock on relation 17 of database 24 after 520.200 ms",
+        prefix + "acquired RowExclusiveLock on relation 18 of database 23 after 520.200 ms",
+        prefix.replace("10.250", "12.250") + "acquired RowExclusiveLock on relation 17 of database 23 after 520.200 ms",
+        "2026-11-10 02:04:10.250 UTC [42] STATEMENT:  INSERT INTO payments VALUES ('secret')",
+    ]
+    assert runner.s4_postgres.project_lock_logs(
+        "\n".join(lines), database=23, relation=17, since="2026-11-10T02:04:10Z", ended="2026-11-10T02:04:11Z",
+    ) == [
+        {"observed_at": "2026-11-10T02:04:10.250000Z", "event": "waiting", "duration_us": 200001},
+        {"observed_at": "2026-11-10T02:04:10.250000Z", "event": "acquired", "duration_us": 520200},
+    ]
+
+
 @pytest.mark.parametrize("interval,accepted",[("5s",True),("15s",False),(None,False)])
 def test_source_profile_verifies_actual_prometheus_configuration(interval,accepted):
     text = "global:\n  scrape_interval: 15s\nscrape_configs:\n- job_name: otel-collector\n"

@@ -117,6 +117,19 @@ applies bounded PostgreSQL locks to Payment writes and records native snapshots
 through warmup, fault and recovery. The source manifest carries the raw snapshot
 references alongside the existing SLO, trace and completion-log evidence.
 
+For native lock-log evidence, add a local override when starting the S4
+testbed. Use the same Compose file set for capture and teardown.
+
+```yaml
+services:
+  postgres:
+    command: ["postgres", "-c", "log_lock_waits=on", "-c", "deadlock_timeout=100ms", "-c", "log_timezone=UTC"]
+```
+
+The runner retains only the waiting and acquired events for the Payment table
+in its own PostgreSQL database. It records the database and capture clocks
+without SQL statements or bind values.
+
 Set `DATABASE_URL` to the owned PostgreSQL testbed using a read-only monitor
 role with `pg_read_all_stats`, then collect a raw observation.
 

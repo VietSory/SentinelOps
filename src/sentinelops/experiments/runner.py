@@ -416,6 +416,15 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         manifest["evidence_refs"] = {"logs":run["logs_ref"],"traces":trace_refs,"infrastructure":infra_refs}
         if s4_project:
             manifest["postgres_lock_wait_refs"] = lock_refs
+            lock_logs = await s4_postgres.capture_lock_logs(project, s4_project, run["started_at"], run["ended_at"])
+            if lock_logs is not None:
+                if not lock_refs:
+                    raise ValueError("S4 lock logs require a matching PostgreSQL observation")
+                snapshot = serving.read(lock_refs[0])
+                identity_keys = ("source_ref", "postgres_started_at", "database_oid")
+                if any(lock_logs[key] != snapshot[key] for key in identity_keys):
+                    raise ValueError("S4 lock logs belong to a different PostgreSQL instance")
+                manifest["postgres_lock_wait_log_ref"] = serving.write("raw", lock_logs)
             if not any(serving.read(ref)["waiting_clients"] for ref in lock_refs):
                 failure = failure or "NoObservedPostgresLockWait"
         run["source_manifest_ref"] = serving.write("manifests",manifest)
