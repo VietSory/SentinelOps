@@ -147,8 +147,10 @@ explicit offset (for example `2026-11-11T18:00:00+07:00`). Before registering a 
 group, the controller compares the group's predeclared budget with the remaining
 window. The budget is every slot's warmup, active and recovery time plus 180 s
 overhead per slot; for the ADR-016 plan it is 4.75 h. If the group does not fit,
-the controller records `PAUSED_AT_GROUP_BOUNDARY` and exits, and the next run
-starts that group. An open group is never paused, because an interrupted group is
+the controller stops the completed, verified group's owned containers and keeps
+its volumes and source records. It then records `PAUSED_AT_GROUP_BOUNDARY` and
+exits so the next run can start the next group on the same ports. An open group
+is never paused, because an interrupted group is
 excluded whole. The ADR-016 plan therefore reserves `maximum_groups` 7: it still
 acquires 5 groups, and up to two `close_interrupted_group.py` replacements are
 possible (2026-11-10, after a host shutdown cut the first epoch's `ali-01`; the

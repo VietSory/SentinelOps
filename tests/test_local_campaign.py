@@ -138,6 +138,62 @@ def test_window_end_pauses_only_at_a_group_boundary_without_starting_capture(tmp
     assert len(started) == 1
 
 
+@pytest.mark.parametrize("stop_ok", [True, False])
+def test_pause_closes_verified_group_before_reporting_boundary(tmp_path, monkeypatch, stop_ok):
+    from sentinelops.experiments import local_campaign as campaign
+    from sentinelops.experiments import local_corpus as corpus
+
+    plan = load_plan(corpus.ALIBABA_PLAN)
+    store = ArtifactStore(tmp_path)
+    group = 'alb-01'
+    project = 'sentinelops-corpus-alb-01'
+    container = 'a' * 64
+    kinds = corpus.plan_kinds(plan)
+    bind(store, corpus.registration_path(store, group), {
+        'group_id': group, 'compose_project': project, 'role': 'development-validation', 'ordinal': 1,
+        'context': {'containers': {'postgres': {'container_id': container}}},
+    })
+    for kind in kinds:
+        bind(store, tmp_path / 'runs' / (group + '-' + kind) / 'result.json',
+             {'status': 'completed'})
+
+    monkeypatch.setattr(campaign, 'clean_source', lambda _: 'a' * 40)
+    monkeypatch.setattr(campaign, 'register_alibaba_epoch', lambda *a, **k: 'epoch')
+    monkeypatch.setattr(campaign, 'register_controller', lambda *a, **k: 'controller')
+    monkeypatch.setattr(campaign, '_audit', lambda *a: ({'status': 'BLOCKED', 'verified_completed_runs': 5}, [], []))
+    monkeypatch.setattr(campaign, 'verify_capture', lambda *a, **k: {
+        'source_result_ref': 'result', 'oracle_ref': 'oracle', 'rows': [],
+    })
+    verified = []
+    monkeypatch.setattr(campaign, 'inspect_completed_capture',
+                        lambda store, slot, **kwargs: verified.append(slot))
+    monkeypatch.setattr(corpus, 'docker', lambda *args:
+        '[{"Config":{"Labels":{"com.docker.compose.project":"sentinelops-corpus-alb-01"}}}]')
+
+    def stop(args, **kwargs):
+        assert args == ['docker', 'stop', container]
+        assert verified == [group + '-' + kind for kind in kinds]
+        if not stop_ok:
+            raise RuntimeError("stop failed")
+
+    monkeypatch.setattr(corpus.subprocess, 'run', stop)
+    now = datetime(2026, 11, 10, 7, tzinfo=timezone.utc)
+    options = dict(plan_path=corpus.ALIBABA_PLAN, bundle='b', manifest_sha256='m',
+                   window_end=now + timedelta(hours=4), clock=lambda: now)
+    if stop_ok:
+        result = campaign.run_campaign(store, **options)
+        assert result['status'] == 'PAUSED_AT_GROUP_BOUNDARY'
+        assert result['next_group'] == 'alb-02'
+    else:
+        with pytest.raises(RuntimeError, match='stop failed'):
+            campaign.run_campaign(store, **options)
+    assert (tmp_path / 'sessions' / group / 'closed.json').exists() == stop_ok
+    events = sorted((tmp_path / 'campaign' / 'events').glob('*.json'))
+    _, latest = corpus.read_binding(store, events[-1])
+    assert latest['status'] == ('PAUSED_AT_GROUP_BOUNDARY' if stop_ok else 'STOPPED_REQUIRES_INVESTIGATION')
+    assert not corpus.registration_path(store, 'alb-02').exists()
+
+
 def test_alibaba_plan_keeps_five_acquired_groups_with_a_replacement_budget():
     from sentinelops.experiments.local_corpus import ALIBABA_PLAN, group_name
     plan = load_plan(ALIBABA_PLAN)

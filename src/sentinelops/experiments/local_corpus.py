@@ -323,7 +323,7 @@ def require_role_order(store, plan, role):
                     raise ValueError('previous acquisition role has incomplete/failed source slots')
 
 
-def close_completed_sessions(store, *, except_group, plan=None):
+def close_completed_sessions(store, *, except_group, plan=None, verified_slots=None):
     plan = load_plan() if plan is None else plan
     for session in registered_sessions(store):
         group = session['group_id']
@@ -335,7 +335,10 @@ def close_completed_sessions(store, *, except_group, plan=None):
             read_abandonment(store, session, plan)
             continue
         for kind in plan_kinds(plan):
-            result = store.root / 'runs' / (group + '-' + kind) / 'result.json'
+            slot = group + '-' + kind
+            if verified_slots is not None and slot not in verified_slots:
+                raise ValueError('refuse to pause with an unverified acquisition group')
+            result = store.root / 'runs' / slot / 'result.json'
             if not result.exists() or read_binding(store, result)[1]['status'] != 'completed':
                 raise ValueError('finish the active acquisition group before preparing another context')
         expected_project = 'sentinelops-corpus-' + group

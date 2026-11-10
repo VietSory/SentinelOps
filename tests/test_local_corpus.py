@@ -212,6 +212,18 @@ def test_new_group_cannot_stop_an_incomplete_source_session(tmp_path, monkeypatc
         corpus.close_completed_sessions(store, except_group='train-02')
 
 
+def test_pause_cannot_stop_a_completed_group_the_controller_did_not_verify(tmp_path, monkeypatch):
+    store = ArtifactStore(tmp_path)
+    group = 'train-01'
+    corpus.bind(store, corpus.registration_path(store, group), {'group_id': group})
+    for kind in corpus.KINDS:
+        corpus.bind(store, tmp_path / 'runs' / (group + '-' + kind) / 'result.json',
+                    {'status': 'completed'})
+    monkeypatch.setattr(corpus, 'docker', lambda *args: pytest.fail('unverified group reached Docker'))
+    with pytest.raises(ValueError, match='unverified acquisition group'):
+        corpus.close_completed_sessions(store, except_group=None, verified_slots=set())
+
+
 def mock_registration_context(monkeypatch, *, old_clock=False):
     from datetime import datetime, timezone
     monkeypatch.setattr(corpus, 'clean_source', lambda _: 'a'*40)

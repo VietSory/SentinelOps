@@ -17,7 +17,8 @@ import time
 
 from sentinelops.contracts import utc_time
 from sentinelops.experiments.local_corpus import (ALIBABA_BINDING, ALIBABA_PLAN, DETECTOR_PLAN, KINDS, ROLES, PROJECT,
-    bind, clean_source, group_name, inspect_completed_capture, is_alibaba_plan, is_detector_plan, load_plan,
+    acquisition_lock, bind, clean_source, close_completed_sessions, group_name, inspect_completed_capture,
+    is_alibaba_plan, is_detector_plan, load_plan,
     plan_kinds, plan_roles, read_alibaba_epoch, read_binding, recipe, registered_sessions, registration_path)
 from sentinelops.ml.local_data import audit_alibaba_local, audit_detector_events, audit_local_corpus, verify_capture
 from sentinelops.telemetry.core import stable_id, timestamp
@@ -205,6 +206,7 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=Non
         controller_ref = register_controller(store,project,identity)
         _event(store,{'status':'CONTROLLER_RESUMED','controller_ref':controller_ref})
         previous_role = None
+        verified_slots = set()
         try:
             from sentinelops.experiments.local_recovery import effective_slots
             for role, ordinal, kind in effective_slots(store, plan, planned_slots(plan), project=project):
@@ -222,6 +224,9 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=Non
                     now_at = (clock or (lambda: datetime.now(timezone.utc)))()
                     needed = group_budget_seconds(plan,role,ordinal)
                     if now_at + timedelta(seconds=needed) > window_end:
+                        with acquisition_lock(store):
+                            close_completed_sessions(store, except_group=None, plan=plan,
+                                                     verified_slots=verified_slots)
                         _event(store,{'status':'PAUSED_AT_GROUP_BOUNDARY','next_group':group,
                                       'needed_seconds':needed,'window_end':window_end.isoformat()})
                         return {'status':'PAUSED_AT_GROUP_BOUNDARY','next_group':group,'needed_seconds':needed,
@@ -255,6 +260,7 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=Non
                 inspect_completed_capture(store,slot,project=project)
                 _, session = read_binding(store,registration_path(store,group))
                 verified = verify_capture(store,plan,session,kind,project=project)
+                verified_slots.add(slot)
                 report, _, _ = _audit(store,plan,project)
                 report_ref = store.write('manifests',report)
                 _event(store,{'status':'SOURCE_VERIFIED','slot':slot,'source_result_ref':verified['source_result_ref'],
