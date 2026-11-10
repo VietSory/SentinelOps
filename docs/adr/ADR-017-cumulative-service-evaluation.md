@@ -85,7 +85,9 @@ text above, this section wins.
 
 A declared version is immutable. The guard pins each version entry's hash. Editing
 system-v1 in place, for example adding an edge and updating its topology hash,
-fails. A change needs a new version and a new pin. The guard also checks that the
+fails. A change needs a new version and a new pin. Pins are only ever added. A diff that edits
+an existing pin is a red flag for the reviewer. The current version's run identity must
+also match the repository's SLO health policy, scoring and source profile. The guard also checks that the
 current version's per-service downstream equals the topology's transitive call
 path, and that its routes match `BUSINESS_ROUTES`.
 

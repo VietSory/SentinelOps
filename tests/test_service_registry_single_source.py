@@ -14,7 +14,7 @@ import re
 import pytest
 import yaml
 
-from sentinelops.telemetry.core import BUSINESS_ROUTES
+from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = json.loads((ROOT / 'configs/system_versions.json').read_text())
@@ -135,6 +135,13 @@ def test_repository_contracts_routes_and_topology_agree():
     # Changing the topology means a new system version, never a silent edit of the current one.
     current = REGISTRY['versions'][REGISTRY['current']]['capture_identity']
     assert current['topology_sha256'] == hashlib.sha256((ROOT / 'configs/topology.yaml').read_bytes()).hexdigest()
+    # The same holds for the run identity: a new SLO policy, scoring or source profile invalidates
+    # the current version's evidence for every service (ADR-017 1a), so it needs a new version.
+    run = REGISTRY['versions'][REGISTRY['current']]['run_identity']
+    plan = json.loads((ROOT / 'configs/alibaba_local_evaluation.json').read_text())
+    assert run['slo_health_policy_sha256'] == stable_id(json.loads((ROOT / 'configs/slo_health_policy.json').read_text()))
+    assert run['scoring_sha256'] == stable_id(plan['scoring'])
+    assert run['source_profile'] == plan['source_profile']
 
 
 V1 = ['checkout-service', 'inventory-service', 'payment-service']
