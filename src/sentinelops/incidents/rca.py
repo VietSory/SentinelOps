@@ -11,7 +11,7 @@ from sentinelops.telemetry.core import stable_id, timestamp
 
 COMPONENTS = ("anomaly_strength", "temporal_precedence", "dependency_trace_relevance", "log_support", "recent_change_support")
 METHODS = {
-    "anomaly_strength": {"if-normalized-score/v1", "infra-connection-pressure/v1"},
+    "anomaly_strength": {"if-normalized-score/v1", "infra-connection-pressure/v1", "infra-lock-wait-presence/v1"},
     "temporal_precedence": {"disjoint-onset-intervals/v1"},
     "dependency_trace_relevance": {"native-span-duration-share/v1", "native-direct-span-duration-share/v1", "native-span-terminal-error/v1"},
     "log_support": {"business-completion-support/v1"},
@@ -75,7 +75,7 @@ def _score(components: dict, facts: dict, service: str, policy: dict, *, methods
             raise ValueError("RCA component evidence belongs to a different candidate")
         if name == "temporal_precedence" and len({facts[ref]["service"] for ref in refs if facts[ref]["type"] == "timeline"}) < 2:
             raise ValueError("RCA temporal support needs an explicit comparison")
-        if card["method"] == "infra-connection-pressure/v1" and service != "rds":
+        if card["method"] in ("infra-connection-pressure/v1", "infra-lock-wait-presence/v1") and service != "rds":
             raise ValueError("infrastructure rule cannot impersonate a business-service IF score")
         if service == "rds" and card["method"] in ("if-normalized-score/v1", "business-completion-support/v1"):
             raise ValueError("RDS evidence cannot be fabricated as HTTP/IF output")

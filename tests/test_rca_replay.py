@@ -21,7 +21,7 @@ TOPOLOGY=yaml.safe_load((ROOT/'configs/topology.yaml').read_text())
 TRACE='0123456789abcdef0123456789abcdef'
 
 
-def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False,entry=None):
+def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False,entry=None,lock=None):
     telemetry=ArtifactStore(tmp_path/'source')
     captured=[capture(0),capture(1)]
     if healthy:
@@ -78,6 +78,18 @@ def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False
     infra_ref=telemetry.write('observations',infrastructure)
     source={k:v for k,v in norm.items() if k!='manifest_ref'}
     source.update(normalization_manifest_ref=norm['manifest_ref'],evidence_refs={'traces':[trace_ref],'logs':logs_ref,'infrastructure':[infra_ref]})
+    if lock:
+        observed = END+timedelta(milliseconds=1013.5 if lock != "disjoint" else 1500)
+        point = {'kind':'postgres-lock-wait-snapshot/v1','source_ref':'postgres-stat://fixture:5432',
+                 'database_oid':40,'postgres_started_at':timestamp(END-timedelta(minutes=10)),
+                 'observed_at':timestamp(observed),
+                 'earliest_wait_start':timestamp(observed-timedelta(milliseconds=.2)),
+                 'available_at':timestamp(END+timedelta(seconds=180 if lock == "future" else 3)),
+                 'waiting_clients':2}
+        point['record_id'] = stable_id({k:v for k,v in point.items() if k != 'available_at'})
+        if lock == "bad-id":
+            point['waiting_clients'] = 3
+        source['postgres_lock_wait_refs'] = [telemetry.write('raw',point)]
     source_ref=telemetry.write('manifests',source)
     health=replay_health_manifest(telemetry,source_ref,HEALTH_POLICY,tmp_path/'health')
     health_store=ArtifactStore(tmp_path/'health')
@@ -102,6 +114,28 @@ def test_verified_raw_adapter_scores_actual_fields_and_archives_a_portable_repla
     copied=replay_rca(archived,archived,archived,ref,POLICY,tmp_path/'portable')
     assert copied==first and first['source_health_ref'] is not None
     with pytest.raises(FileExistsError):replay_rca(source,health,correlation,ref,POLICY,tmp_path/'one')
+
+
+@pytest.mark.parametrize('lock', ['overlap', 'disjoint', 'future', 'unknown-trace-receipt', 'bad-id'])
+def test_rca_corroborates_postgres_lock_wait_only_with_in_scope_trace(tmp_path, lock):
+    source, health, correlation, ref, _ = source_scope(tmp_path, fresh=lock != "unknown-trace-receipt", lock=lock)
+    args = (source, health, correlation, ref, POLICY, tmp_path/'replay')
+    cutoff = END+timedelta(seconds=130)
+    if lock == 'bad-id':
+        with pytest.raises(ValueError, match='snapshot identity differs'):
+            replay_rca(*args, as_of=cutoff)
+        assert not (tmp_path/'replay').exists()
+        return
+    report = replay_rca(*args, as_of=cutoff)
+    rca = report['results'][0]['rca']
+    component = next(c for c in rca['candidates'] if c['service']=='rds')['components']['anomaly_strength']
+    assert component['method'] == ('infra-lock-wait-presence/v1' if lock == 'overlap' else 'infra-connection-pressure/v1')
+    assert rca['abstained'] and not rca['actions_allowed']
+    if lock == 'overlap':
+        fact = next(item for item in rca['evidence'] if item['id'] in component['evidence_refs'])
+        assert fact['service'] == 'rds' and fact['source_ref'] in report['source_artifact_refs']
+        archive = ArtifactStore(tmp_path/'replay')
+        assert replay_rca(archive, archive, archive, ref, POLICY, tmp_path/'portable', as_of=cutoff) == report
 
 
 def test_known_future_receipts_cannot_enter_the_declared_analytical_cutoff(tmp_path):

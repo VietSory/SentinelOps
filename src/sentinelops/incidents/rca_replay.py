@@ -66,6 +66,35 @@ def _trace_support(trace,service):
     return min(1.,residual/trace["root_duration_ns"]),duration_method,f"server_duration_ns={server['timing']['duration_ns']}; sum_observed_direct_client_duration_ns={total}; observed_residual_lower_bound_ns={residual}; reference_server_duration_ns={trace['root_duration_ns']}"
 
 
+def lock_wait_support(scope, traces, lower, upper, as_of, latency_ms):
+    # Compare independent observations with contained database spans of violating
+    # requests. Matching time ranges corroborate pressure, not request identity.
+    intervals = []
+    for trace in traces:
+        if trace["received_at"] is None:
+            continue
+        for service, spans in trace["children"].items():
+            parent = trace["servers"][service]["timing"]
+            if trace["statuses"][service] < 500 and parent["duration_ns"] <= latency_ms * 1_000_000:
+                continue
+            for span in spans:
+                tags = span_tags(span)
+                if tags.get("peer.service") != "rds" or tags.get("db.system.name") != "postgresql":
+                    continue
+                timing = span["timing"]
+                start, end = timing["start_unix_ns"], timing["end_unix_ns"]
+                if parent["start_unix_ns"] <= start <= end <= parent["end_unix_ns"]:
+                    intervals.append((start, end))
+    matches = []
+    for ref, item in scope.get("postgres_lock_waits", []):
+        if not item["waiting_clients"] or utc_time(item["available_at"]) > as_of:
+            continue
+        observed = utc_time(item["observed_at"])
+        if lower <= observed <= upper and any(start <= epoch_ns(observed) <= end for start, end in intervals):
+            matches.append((ref, item))
+    return max(matches, key=lambda match: match[1]["waiting_clients"], default=None)
+
+
 def group_severity(telemetry, group, signals):
     critical=False
     for signal_id in group["signal_ids"]:
@@ -151,6 +180,14 @@ def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts,*,clo
             identifier=evidence.add("metric","rds",point["observed_at"],reference,
                 f"Observed client-connection capacity pressure: {metrics['db_connections_count']}/({metrics['max_connections']}-{metrics['reserved_connections']}) = {metrics['db_connections_pct']} percent; fixed capacity fraction rule, not IF or overall DB health",point["available_at"])
             components["rds"]["anomaly_strength"]=card(value,"infra-connection-pressure/v1",[identifier])
+        lock = (lock_wait_support(scope, traces, lower, upper, as_of, scope["health"]["policy"]["latency_ms"])
+                if clock_mode == "replay" else None)
+        if lock:
+            reference, snapshot = lock
+            identifier = evidence.add("metric", "rds", snapshot["observed_at"], reference,
+                f"Observed {snapshot['waiting_clients']} PostgreSQL client(s) waiting for locks during a verified database span",
+                snapshot["available_at"])
+            components["rds"]["anomaly_strength"] = card(1, "infra-lock-wait-presence/v1", [identifier])
     result=evaluate_rca(correlation,group["group_id"],list(evidence.facts.values()),
         [{"service":service,"components":value} for service,value in components.items()],policy,as_of=as_of,
         evidence_availability=evidence.available,source_refs=scope["allowed_refs"])
