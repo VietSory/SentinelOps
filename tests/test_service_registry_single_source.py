@@ -6,8 +6,10 @@ current version unless it is listed in `frozen_contracts`, which pins an older c
 to the version it was written for. Adding a service in a new contract version therefore
 leaves the old contract valid, while forgetting any current enumeration fails here.
 """
+import hashlib
 import json
 from pathlib import Path
+import re
 
 import pytest
 import yaml
@@ -18,18 +20,33 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = json.loads((ROOT / 'configs/system_versions.json').read_text())
 
 
-def service_lists(paths, known):
-    """Every string list in a contract that names at least one known business service."""
+# ADR-017 amendment 1 (1a): evidence carries forward only under an identical identity.
+EVIDENCE_IDENTITY = ('source_commit', 'model_version', 'bundle_manifest_sha256', 'source_profile',
+                     'slo_health_policy_sha256', 'evaluation_plan_sha256', 'topology_sha256')
+SERVICE_NAME = re.compile(r'[a-z][a-z0-9]*(?:-[a-z0-9]+)*-service')
+
+
+def service_names(paths, ignored):
+    """Every string list and every scalar string in a contract that looks like a service name.
+
+    Selection is by shape, not by membership in a known list, so an enumeration whose
+    names are all misspelt (e.g. ["paymant-service"]) is still checked (Codex review).
+    """
+    def named(value):
+        return isinstance(value, str) and value not in ignored and SERVICE_NAME.fullmatch(value)
     for path in paths:
         def walk(node, pointer):
             if isinstance(node, dict):
                 for key, value in node.items():
                     yield from walk(value, pointer + '/' + key)
             elif isinstance(node, list):
-                if node and all(isinstance(item, str) for item in node) and known & set(node):
-                    yield path.name, pointer, node
+                if any(named(item) for item in node):
+                    yield path.name, pointer, 'list', [item for item in node if named(item)]
                 for index, value in enumerate(node):
-                    yield from walk(value, f'{pointer}[{index}]')
+                    if not isinstance(value, str):
+                        yield from walk(value, f'{pointer}[{index}]')
+            elif named(node):
+                yield path.name, pointer, 'scalar', [node]
         yield from walk(json.loads(path.read_text()), '')
 
 
@@ -47,21 +64,27 @@ def registry_errors(registry, contract_paths, routes, topology):
     for service, downstream in topology.items():
         if not all(item in topology for item in downstream):
             errors.append(f'{service} depends on an undeclared component')
+    for version, entry in versions.items():
+        identity = entry.get('evidence_identity')
+        if not isinstance(identity, dict) or any(not isinstance(identity.get(key), str) or not identity[key]
+                                                 for key in EVIDENCE_IDENTITY):
+            errors.append(f'{version} lacks the ADR-017 evidence identity {list(EVIDENCE_IDENTITY)}')
     names = {path.name for path in contract_paths}
     for name, version in registry['frozen_contracts'].items():
         if name not in names:
             errors.append(f'frozen contract {name} does not exist')
         if version not in versions or version == current:
             errors.append(f'frozen contract {name} must pin an older declared version, not {version}')
-    known = set().union(*(set(v['services']) for v in versions.values()))
     found = 0
-    for name, pointer, values in service_lists(contract_paths, known):
-        found += 1
+    for name, pointer, shape, listed in service_names(contract_paths, set(registry.get('non_service_tokens', ()))):
         version = registry['frozen_contracts'].get(name, current)
         expected = set(versions[version]['services'])
-        listed = {value for value in values if value.endswith('-service')}
-        if listed != expected:
-            errors.append(f'{name}{pointer} ({version}) lists {sorted(listed)}, expected {sorted(expected)}')
+        if shape == 'list':
+            found += 1
+            if set(listed) != expected:
+                errors.append(f'{name}{pointer} ({version}) lists {sorted(listed)}, expected {sorted(expected)}')
+        elif listed[0] not in expected:
+            errors.append(f'{name}{pointer} ({version}) names unknown service {listed[0]}')
     if not found:
         errors.append('expected schema enumerations of business services')
     return errors
@@ -71,6 +94,9 @@ def test_repository_contracts_routes_and_topology_agree():
     topology = yaml.safe_load((ROOT / 'configs/topology.yaml').read_text())['dependencies']
     paths = sorted((ROOT / 'contracts').glob('*.json'))
     assert registry_errors(REGISTRY, paths, BUSINESS_ROUTES, topology) == []
+    # Changing the topology means a new system version, never a silent edit of the current one.
+    current = REGISTRY['versions'][REGISTRY['current']]['evidence_identity']
+    assert current['topology_sha256'] == hashlib.sha256((ROOT / 'configs/topology.yaml').read_bytes()).hexdigest()
 
 
 V1 = ['checkout-service', 'inventory-service', 'payment-service']
@@ -81,13 +107,18 @@ TOPOLOGY_V2 = {'checkout-service': ['payment-service', 'inventory-service'], 'pa
 
 def contracts(tmp_path, files):
     for name, services in files.items():
-        (tmp_path / name).write_text(json.dumps({'properties': {'service': {'enum': services}}}))
+        body = {'properties': {'service': {'enum': services}}} if isinstance(services, list) else services
+        (tmp_path / name).write_text(json.dumps(body))
     return sorted(tmp_path.glob('*.json'))
+
+
+IDENTITY = dict.fromkeys(EVIDENCE_IDENTITY, 'fixture')
 
 
 def registry(frozen):
     return {'current': 'system-v2', 'frozen_contracts': frozen,
-            'versions': {'system-v1': {'services': V1}, 'system-v2': {'services': V2}}}
+            'versions': {'system-v1': {'services': V1, 'evidence_identity': dict(IDENTITY)},
+                         'system-v2': {'services': V2, 'evidence_identity': dict(IDENTITY)}}}
 
 
 def test_adding_a_service_in_a_new_contract_version_keeps_the_old_contract_valid(tmp_path):
@@ -98,7 +129,9 @@ def test_adding_a_service_in_a_new_contract_version_keeps_the_old_contract_valid
 
 
 @pytest.mark.parametrize('case', ['current-contract-not-updated', 'old-contract-not-pinned', 'pin-to-current',
-                                  'pin-missing-file', 'routes-not-updated', 'topology-not-updated'])
+                                  'pin-missing-file', 'routes-not-updated', 'topology-not-updated',
+                                  'all-names-misspelt', 'one-name-misspelt', 'misspelt-const',
+                                  'new-version-without-evidence-identity'])
 def test_guard_still_catches_an_incomplete_service_addition(tmp_path, case):
     files = {'health-signal.schema.json': V1, 'health-signal-v2.schema.json': V2}
     frozen = {'health-signal.schema.json': 'system-v1'}
@@ -111,9 +144,18 @@ def test_guard_still_catches_an_incomplete_service_addition(tmp_path, case):
         frozen = {'health-signal.schema.json': 'system-v2'}
     if case == 'pin-missing-file':
         frozen['gone.schema.json'] = 'system-v1'
+    if case == 'all-names-misspelt':
+        files['action-v2.schema.json'] = ['paymant-service']
+    if case == 'one-name-misspelt':
+        files['action-v2.schema.json'] = ['checkout-service', 'inventory-service', 'paymant-service', 'fraud-service']
+    if case == 'misspelt-const':
+        files['action-v2.schema.json'] = {'properties': {'deployment': {'const': 'paymant-service'}}}
     if case == 'routes-not-updated':
         routes = dict.fromkeys(V1)
     if case == 'topology-not-updated':
         topology.pop('fraud-service')
         topology['payment-service'] = ['rds']
-    assert registry_errors(registry(frozen), contracts(tmp_path, files), routes, topology)
+    declared = registry(frozen)
+    if case == 'new-version-without-evidence-identity':
+        declared['versions']['system-v2']['evidence_identity'].pop('slo_health_policy_sha256')
+    assert registry_errors(declared, contracts(tmp_path, files), routes, topology)

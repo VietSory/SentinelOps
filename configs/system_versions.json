@@ -4,9 +4,26 @@
   "current": "system-v1",
   "versions": {
     "system-v1": {
-      "services": ["checkout-service", "inventory-service", "payment-service"],
-      "topology": "configs/topology.yaml"
+      "services": [
+        "checkout-service",
+        "inventory-service",
+        "payment-service"
+      ],
+      "topology": "configs/topology.yaml",
+      "evidence_identity": {
+        "epoch": "alibaba-layer2 epoch 2 (alb-*)",
+        "source_commit": "3b172053ccb948dc0a7b3dd7bba0f89b1118285f",
+        "model_version": "badf9da0b563f4900fa099b11ba9223ee864d414ef3aa9af82a534db962d85e3",
+        "bundle_manifest_sha256": "2d1a5376eccdd691da0741b9dc88eecd223d75a85a23fa712e00c1dc53291e62",
+        "source_profile": "prometheus-increase-60s-5s/v2",
+        "slo_health_policy_sha256": "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560",
+        "evaluation_plan_sha256": "97cbf5f3e85717ecab14c57bc0292e983111556d3cc54f75ba9b4de6a6830ca8",
+        "topology_sha256": "d1265592881a04d07bb6ed992baa59d43610c90cd76cb3565cc75dd53d0df9a3"
+      }
     }
   },
-  "frozen_contracts": {}
+  "frozen_contracts": {},
+  "non_service_tokens": [
+    "single-service"
+  ]
 }

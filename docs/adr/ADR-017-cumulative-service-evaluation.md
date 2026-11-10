@@ -61,6 +61,17 @@ blocked a correct migration. Nothing has been added under the original wording, 
 these changes are made in place and are recorded here. Where they conflict with the
 text above, this section wins.
 
+**1a. Evidence identity (second review).** A system version is identified by more than
+routes and topology. `configs/system_versions.json` records the identity of the
+evidence each version carries: business-service source commit, model version, bundle
+manifest, source profile, SLO health policy, evaluation plan (workload recipe and
+scoring), and topology hash. Version-1 evidence carries forward to a later version
+only if every one of these is unchanged for the carried service. A change to the
+bundle, source profile, SLO policy or scoring plan applies to all services, so every
+service is re-measured. A source change applies to each service whose code or image
+it changes. Changing `configs/topology.yaml` without declaring a new version fails
+the guard.
+
 **3a. Which existing services are re-measured.** Before capture, the topology diff
 and an infrastructure inventory are declared. An existing service is re-measured if
 any of the following holds:
@@ -84,7 +95,10 @@ evidence on the new version, that service's Q-07 result is reported as
 each system version's services and which version is current. The current version must
 equal `BUSINESS_ROUTES` and the RCA topology. A contract belongs to the current version
 unless `frozen_contracts` pins it to an older declared version. Adding a service
-therefore means a new contract version (ADR-007) plus a pin for the old one. The guard
+therefore means a new contract version (ADR-007) plus a pin for the old one. Names are
+recognised by their shape (`*-service`), not by membership in a known list, so an
+enumeration whose names are all misspelt is still caught. Every declared version must
+carry the evidence identity of 1a. The guard
 `tests/test_service_registry_single_source.py` checks every contract against its own
 version, so a valid v1 contract keeps passing while any forgotten current enumeration
 fails.
