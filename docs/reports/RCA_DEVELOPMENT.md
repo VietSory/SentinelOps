@@ -41,6 +41,14 @@ coverage tối đa lên 0,65, dưới ngưỡng 0,75. Dùng bằng chứng live 
 receipt clock cho đánh giá có model. Kết quả này là baseline development
 riêng, chưa nghiệm thu Q-08 hoặc G4.
 
+Đối chứng `local-rca-development/v2` tại `ae91e54` dùng lại đúng freeze
+và 10 lượt lỗi trên. RCA đầy đủ ở mức nghi vấn và baseline topology/thời
+gian cùng đạt top-1 10/10, top-3 10/10 và MRR 1,00. Hai nhánh còn lại
+đạt 0/10, 0/10 và MRR 0,00. Nhánh RCA đủ ngưỡng abstain ở cả 10 lượt.
+Nhánh chỉ dùng anomaly chỉ có số đo áp lực kết nối và xếp RDS đầu cả
+10 lượt lỗi Payment/Inventory. Kết quả này chưa cho thấy RCA đầy đủ
+xếp hạng tốt hơn topology/thời gian trên tập development đã khóa.
+
 ## Dùng lại
 
 Theo [native runbook](../runbooks/RCAEVAL_NATIVE.md#reproduce-and-recover) và
