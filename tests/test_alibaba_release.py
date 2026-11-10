@@ -21,9 +21,9 @@ from tests.test_alibaba_bundle import synthetic_fit
 BUCKETS = tuple(f'2026-11-09T02:{minute:02d}:00Z' for minute in range(20, 31))  # window 5 + baseline 5 + 1
 
 
-def criteria(model_version, config, scorer):
-    pairs = [{'service': s, 'bucket_end': b} for s in sorted(BUSINESS_ROUTES) for b in BUCKETS]
-    means = {b: 15.0 + i * 0.2 for i, b in enumerate(BUCKETS)}  # a gentle trend, so features are non-trivial
+def criteria(model_version, config, scorer, buckets=BUCKETS):
+    pairs = [{'service': s, 'bucket_end': b} for s in sorted(BUSINESS_ROUTES) for b in buckets]
+    means = {b: 15.0 + i * 0.2 for i, b in enumerate(buckets)}  # a gentle trend, so features are non-trivial
     built = {'P1': [{'ok': True, 'model_version': model_version}],
              'P2': [{'ok': True, 'source_profile': SOURCE_PROFILE_V2, 'pod_identity_verified': True,
                      'queries_sha256': stable_id(queries(p['service'], SOURCE_PROFILE_V2)), **p} for p in pairs],
@@ -31,13 +31,14 @@ def criteria(model_version, config, scorer):
                    + [{'ok': True, 'coverage': 1.0, 'lag_seconds': 35.0, 'eligible_for_inference': True,
                       'maximum_lag_seconds': 60, **p} for p in pairs],
              'P4': [{'ok': True, 'prometheus_count': 58.0, 'server_completions': 60,
-                     'relative_difference': abs(58.0 / 60 - 1), 'error_count': 0, **p} for p in pairs],
+                     'relative_difference': abs(58.0 / 60 - 1), 'error_count': 0, 'failed_requests': 0, **p}
+                   for p in pairs],
              'P5': [{'ok': True, 'prometheus_mean_ms': means[p['bucket_end']], 'exact_mean_ms': means[p['bucket_end']] * 0.99,
                      'relative_difference': abs(1 / 0.99 - 1), **p} for p in pairs]}
     built['P6'] = []
     for service in sorted(BUSINESS_ROUTES):
         features = derived_features(built, service, config)
-        built['P6'].append({'ok': True, 'service': service, 'window_end': BUCKETS[-1], 'features': features,
+        built['P6'].append({'ok': True, 'service': service, 'window_end': buckets[-1], 'features': features,
                             'scores': scorer([features[name] for name in config['features']])})
     return built
 
@@ -165,6 +166,7 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
     lambda c, v: v.pop('configuration_hash'),
     lambda c, v: v.update(scrape_interval='15s'),
     lambda c, v: v['criteria']['P2'][4].update(pod_identity_verified=False),
+    lambda c, v: v['criteria']['P4'][6].update(failed_requests=2),
 ], ids=['empty-P3', 'all-criteria-empty', 'check-without-ok', 'ok-not-true', 'no-risk', 'no-slope-control',
         'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates', 'P4-one-service', 'P3-summary-only', 'P3-missing-bucket', 'P5-extra-bucket',
         'P2-uneven-buckets', 'P3-summary-miscount', 'xgb-threshold-4', 'bootstrap-out-of-range', 'controls-other-risk-model',
@@ -174,7 +176,7 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
         'P4-zero-count-claims-zero-diff', 'controls-f1-not-from-counts', 'P3-boolean-coverage', 'unaligned-minutes',
         'P5-diff-not-from-means', 'P6-score-not-from-bundle', 'prevalence-not-from-counts',
         'precursor-recall-above-detected', 'P3-no-lag', 'P3-lag-over-policy', 'P3-not-eligible', 'P4-5xx',
-        'P4-no-error-count', 'P2-other-profile', 'P2-other-queries', 'verified-other-config', 'no-source-commit', 'no-configuration-hash', 'scrape-15s', 'P2-pod-not-verified'])
+        'P4-no-error-count', 'P2-other-profile', 'P2-other-queries', 'verified-other-config', 'no-source-commit', 'no-configuration-hash', 'scrape-15s', 'P2-pod-not-verified', 'P4-failed-requests'])
 def test_evidence_rejects_empty_parity_checks_and_incomplete_controls(tmp_path, mutate):
     sha, manifest, report, controls, record, verification = evidence(tmp_path)
     c, v = copy.deepcopy(controls), copy.deepcopy(verification)
@@ -228,7 +230,7 @@ def test_parity_script_records_every_field_the_validator_rechecks():
     required = {'P1': {'model_version'}, 'P2': {'service', 'bucket_end', 'source_profile', 'queries_sha256', 'pod_identity_verified'},
                 'P3': {'service', 'bucket_end', 'coverage', 'lag_seconds', 'eligible_for_inference', 'observations'},
                 'P4': {'service', 'bucket_end', 'prometheus_count', 'server_completions', 'relative_difference',
-                       'error_count'},
+                       'error_count', 'failed_requests'},
                 'P5': {'service', 'bucket_end', 'prometheus_mean_ms', 'exact_mean_ms', 'relative_difference'},
                 'P6': {'service', 'window_end', 'features', 'scores'}}
     for name, keys in required.items():
@@ -314,3 +316,37 @@ def test_pod_identity_failure_is_recorded_not_raised():
     end = datetime(2026, 11, 9, 2, 20, tzinfo=timezone.utc)
     captures = asyncio.run(script.capture_buckets(Client(), Source(), [end], {}))
     assert [c['pod_identity_verified'] for c in captures] == [False] * len(script.SERVICES)
+
+
+def test_parity_must_have_exactly_the_scripts_minute_count(tmp_path):
+    # Codex review of af37e59: 12 consecutive minutes (one more than minute_count) cannot come from
+    # the script, so they must not certify the bundle even when every derived value is consistent.
+    import importlib
+    script = importlib.import_module('scripts.check_alibaba_source_parity')
+    sha, manifest, report, controls, record, verification = evidence(tmp_path)
+    config, score = manifest['provenance']['config'], scorer(tmp_path, sha)
+    assert script.minute_count(config) == len(BUCKETS)
+    longer = criteria(manifest['model_version'], config, score, buckets=BUCKETS + ('2026-11-09T02:31:00Z',))
+    v = dict(verification, criteria=longer)
+    r = dict(record, evidence=[parity_verification_ref(v)])
+    with pytest.raises(ValueError):
+        validate_evidence(manifest, report, controls, r, v, sha, scores_for=score, repository_config=config)
+
+
+def test_a_5xx_during_the_drive_is_recorded_as_a_p4_failure():
+    # Codex review of af37e59: one non-200 response raised out of drive() before evidence was written.
+    import asyncio
+    import importlib
+    from datetime import timedelta
+    import httpx
+    script = importlib.import_module('scripts.check_alibaba_source_parity')
+    responses = iter([500, 200, 200] * 3)
+
+    class Client:
+        async def request(self, method, url, json=None, headers=None):
+            trace = headers['traceparent'].split('-')[1]
+            return httpx.Response(next(responses), headers={'x-trace-id': trace,
+                                                            'x-correlation-id': headers['x-correlation-id']})
+    targets = {s: 'http://' + s for s in script.SERVICES}
+    rows = asyncio.run(script.drive(Client(), targets, script.utcnow() + timedelta(milliseconds=50)))
+    assert any(row['failed'] for row in rows) and not all(row['failed'] for row in rows)

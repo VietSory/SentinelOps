@@ -69,13 +69,17 @@ async def drive(client, targets, stop):
         body = ({'sku': 'sku-001', 'quantity': 1, 'amount': 9.9} if service == 'checkout-service'
                 else {'order_id': 'direct-' + uuid4().hex, 'amount': 9.9, 'currency': 'USD'} if service == 'payment-service' else None)
         started = utcnow()
-        response = await client.request(method, url + PATHS[service], json=body,
-            headers={'x-correlation-id': correlation, 'traceparent': f'00-{trace}-{uuid4().hex[:16]}-01'})
-        if (response.status_code != 200 or response.headers.get('x-trace-id') != trace
-                or response.headers.get('x-correlation-id') != correlation):
-            raise ValueError(f'unexpected healthy response on {service}: {response.status_code}')
+        try:
+            response = await client.request(method, url + PATHS[service], json=body,
+                headers={'x-correlation-id': correlation, 'traceparent': f'00-{trace}-{uuid4().hex[:16]}-01'})
+            failed = (response.status_code != 200 or response.headers.get('x-trace-id') != trace
+                      or response.headers.get('x-correlation-id') != correlation)
+        except httpx.HTTPError:
+            failed = True
+        # A failed request is recorded and fails P4 for its minute; it never aborts the run
+        # before evidence is written (Codex review).
         rows.append({'request_entry_service': service, 'trace_id': trace, 'correlation_id': correlation,
-                     'started_at': timestamp(started), 'completed_at': timestamp(utcnow())})
+                     'started_at': timestamp(started), 'completed_at': timestamp(utcnow()), 'failed': failed})
 
     loop = asyncio.get_running_loop()
     tick = loop.time()
@@ -87,9 +91,16 @@ async def drive(client, targets, stop):
 
 
 def exact_logs(sandbox, inventory, rows, ends):
+    """Server completions in the run, each marked failed when it is not a clean 200 resolved to
+    its client, pod and route; client-side failures are added as failed records at their time."""
     start_ms, stop_ms = int((ends[0] - timedelta(minutes=1)).timestamp() * 1000), int(ends[-1].timestamp() * 1000)
     clients = {row['correlation_id']: row for row in rows}
     selected = []
+    for row in rows:
+        at = int(datetime.fromisoformat(row['completed_at'].replace('Z', '+00:00')).timestamp() * 1000)
+        if row['failed'] and start_ms < at <= stop_ms:
+            selected.append({'service': row['request_entry_service'], 'timestamp_unix_ms': at, 'failed': True,
+                             'reason': 'client-request-failed'})
     for service in SERVICES:
         method, route = BUSINESS_ROUTES[service]
         for line in sandbox.kubectl('-n', NAMESPACE, 'logs', 'deployment/' + service).decode().splitlines():
@@ -98,12 +109,14 @@ def exact_logs(sandbox, inventory, rows, ends):
             except ValueError:
                 continue
             if (item.get('event') != 'request_completed' or (item.get('method'), item.get('route')) != (method, route)
-                    or not start_ms < item['timestamp_unix_ms'] <= stop_ms):
+                    or not start_ms < item.get('timestamp_unix_ms', -1) <= stop_ms):
                 continue
-            client = clients.get(item['correlation_id'])
-            if (client is None or item['trace_id'] != client['trace_id'] or item['k8s.pod.uid'] != inventory[service]['pod_uid']
-                    or item['status_code'] != 200 or not math.isfinite(item['duration_ms']) or item['duration_ms'] < 0):
-                raise ValueError('server completion does not resolve to its client, pod, route and status')
+            client = clients.get(item.get('correlation_id'))
+            duration = item.get('duration_ms')
+            item['failed'] = (client is None or item.get('trace_id') != client['trace_id']
+                              or item.get('k8s.pod.uid') != inventory[service]['pod_uid'] or item.get('status_code') != 200
+                              or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 0)
+            item['service'] = service
             selected.append(item)
     return selected
 
@@ -202,14 +215,17 @@ def evaluate(root, bundle_parts, captures, logs, ends, policy):
                    'coverage': obs['quality']['coverage_ratio'],
                    'eligible_for_inference': obs['quality']['eligible_for_inference'],
                    'maximum_lag_seconds': policy['maximum_lag_seconds']})
-            records = [r for r in logs if r['service'] == service
-                       and (end.timestamp() - 60) * 1000 < r['timestamp_unix_ms'] <= end.timestamp() * 1000]
+            window = [r for r in logs if r['service'] == service
+                      and (end.timestamp() - 60) * 1000 < r['timestamp_unix_ms'] <= end.timestamp() * 1000]
+            records = [r for r in window if not r.get('failed')]
+            failed_requests = len(window) - len(records)
             count = obs['measurements']['request_count'] or 0
             relative = abs(count / len(records) - 1) if records else None
-            check('P4', relative is not None and relative <= COUNT_TOLERANCE and obs['measurements']['error_count'] == 0,
+            check('P4', relative is not None and relative <= COUNT_TOLERANCE and obs['measurements']['error_count'] == 0
+                  and failed_requests == 0,
                   {'service': service, 'bucket_end': timestamp(end), 'prometheus_count': count,
                    'server_completions': len(records), 'relative_difference': relative,
-                   'error_count': obs['measurements']['error_count']})
+                   'error_count': obs['measurements']['error_count'], 'failed_requests': failed_requests})
             mean = mean_latency_ms(raw)
             exact = sum(r['duration_ms'] for r in records) / len(records) if records else None
             difference = abs(mean / exact - 1) if mean is not None and exact else None
@@ -248,10 +264,13 @@ async def measure(sandbox, root, bundle_parts, policy):
             ends = [datetime.fromtimestamp(first_end + m * 60, timezone.utc) for m in range(count)]
             captures, rows = await asyncio.gather(capture_buckets(client, source, ends, inventory),
                                                   drive(client, targets, ends[-1] + timedelta(seconds=39)))
-            if inventory != await asyncio.to_thread(sandbox.inventory):
-                raise ValueError('workload pod identity changed while sampling')
+            stable = inventory == await asyncio.to_thread(sandbox.inventory)
             logs = await asyncio.to_thread(exact_logs, sandbox, inventory, rows, ends)
-            return evaluate(root, bundle_parts, captures, logs, ends, policy) + (config,)
+            checks, failures, normalization_ref = evaluate(root, bundle_parts, captures, logs, ends, policy)
+            if not stable:
+                # A pod restart during sampling fails the run with evidence instead of aborting it.
+                failures.append({'criterion': 'P2', 'reason': 'workload pod identity changed while sampling'})
+            return checks, failures, normalization_ref, config
     finally:
         source.close()
 

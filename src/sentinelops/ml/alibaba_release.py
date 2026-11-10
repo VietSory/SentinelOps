@@ -176,7 +176,8 @@ def criteria_complete(criteria, model_version, config, scores_for, health_policy
     except (TypeError, ValueError):
         return False
     required = config['window_minutes'] + config['baseline']['min_minutes'] + 1
-    if (len(minutes) < required or any(minute.timestamp() % 60 for minute in minutes)
+    # Exactly the script's minute_count(): it always captures that many buckets (Codex review).
+    if (len(minutes) != required or any(minute.timestamp() % 60 for minute in minutes)
             or any((b - a).total_seconds() != 60 for a, b in zip(minutes, minutes[1:]))):
         return False
     final = timestamp(minutes[-1])
@@ -203,6 +204,7 @@ def criteria_complete(criteria, model_version, config, scores_for, health_policy
         count, completions = item.get('prometheus_count'), item.get('server_completions')
         if not (_number(count) and count >= 0 and _count(completions) and completions > 0
                 and item.get('error_count') == 0 and _count(item.get('error_count'))
+                and item.get('failed_requests') == 0 and _count(item.get('failed_requests'))
                 and _close(item.get('relative_difference'), abs(count / completions - 1))
                 and item['relative_difference'] <= COUNT_TOLERANCE):
             return False
