@@ -1,0 +1,12 @@
+{
+  "registry_version": "sentinelops-system-versions/v1",
+  "authorizing_adr": "ADR-017",
+  "current": "system-v1",
+  "versions": {
+    "system-v1": {
+      "services": ["checkout-service", "inventory-service", "payment-service"],
+      "topology": "configs/topology.yaml"
+    }
+  },
+  "frozen_contracts": {}
+}

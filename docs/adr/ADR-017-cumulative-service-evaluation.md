@@ -3,6 +3,9 @@
 **Status:** Accepted 2026-11-10 — explicit owner approval (D-24). Recorded before the layer-2 epoch 2 (`alb-*`)
 produced any data. The owner asked that later services build on the 3-service
 results instead of restarting.
+**Amended:** 2026-11-10 (Amendment 1, after Codex's independent review, before any
+service was added and before epoch 2 was evaluated). It tightens decisions 3 and 5 and
+relaxes nothing. See the end of this ADR.
 **Related:** ADR-008, ADR-015, ADR-016.
 
 ## Context
@@ -50,3 +53,38 @@ are seen; otherwise a later choice to pool or split could be fitted to the numbe
 - Schemas with service enums need a new contract version per system version (ADR-007).
 - Claims stay per service and per version. There is no single "the model scores X"
   figure across versions unless a pooling rule was pre-registered.
+
+## Amendment 1 — 2026-11-10 (independent review)
+
+Codex's review found that decision 3 was too narrow and that the decision-5 guard
+blocked a correct migration. Nothing has been added under the original wording, so
+these changes are made in place and are recorded here. Where they conflict with the
+text above, this section wins.
+
+**3a. Which existing services are re-measured.** Before capture, the topology diff
+and an infrastructure inventory are declared. An existing service is re-measured if
+any of the following holds:
+
+- its call path changes **directly or transitively**: any component reachable from
+  it gains or loses a downstream edge;
+- it is upstream of the new service;
+- it shares infrastructure with the new service: database or schema, connection pool,
+  queue or broker, cache, gateway or ingress, or the same node or resource pool.
+
+When unsure, the service is re-measured. Only services that meet none of these carry
+their version-1 evidence forward.
+
+**3b. Regression slots cover Q-07.** Healthy plus abrupt slots cannot re-establish Q-07,
+which is about early warning for gradual degradation. Each group for a re-measured
+service therefore contains healthy, one abrupt and one gradual kind. Without gradual
+evidence on the new version, that service's Q-07 result is reported as
+**not re-measured** and is not carried forward.
+
+**5a. Service names per contract version.** `configs/system_versions.json` declares
+each system version's services and which version is current. The current version must
+equal `BUSINESS_ROUTES` and the RCA topology. A contract belongs to the current version
+unless `frozen_contracts` pins it to an older declared version. Adding a service
+therefore means a new contract version (ADR-007) plus a pin for the old one. The guard
+`tests/test_service_registry_single_source.py` checks every contract against its own
+version, so a valid v1 contract keeps passing while any forgotten current enumeration
+fails.
