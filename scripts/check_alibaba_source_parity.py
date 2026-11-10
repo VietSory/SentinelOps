@@ -163,9 +163,10 @@ def evaluate(root, bundle_parts, captures, logs, ends, policy):
     check('P1', bundle_ok, {'model_version': manifest['model_version']})
     for raw in captures:
         expected = queries(raw['service'], SOURCE_PROFILE_V2)
-        check('P2', raw['source_profile'] == SOURCE_PROFILE_V2
-              and {k: v['expression'] for k, v in raw['queries'].items()} == expected,
-              {'service': raw['service'], 'bucket_end': raw['bucket_end']})
+        recorded = {k: v['expression'] for k, v in raw['queries'].items()}
+        check('P2', raw['source_profile'] == SOURCE_PROFILE_V2 and recorded == expected,
+              {'service': raw['service'], 'bucket_end': raw['bucket_end'], 'source_profile': raw['source_profile'],
+               'queries_sha256': stable_id(recorded)})
     store = ArtifactStore(root / 'source')
     normalized = process_captures(captures, store)
     observations = [store.read(ref) for ref in normalized['observation_refs']]
@@ -180,14 +181,17 @@ def evaluate(root, bundle_parts, captures, logs, ends, policy):
             check('P3', obs['quality']['eligible_for_inference'] and obs['quality']['coverage_ratio'] == 1
                   and lag <= policy['maximum_lag_seconds'],
                   {'service': service, 'bucket_end': timestamp(end), 'lag_seconds': lag,
-                   'coverage': obs['quality']['coverage_ratio']})
+                   'coverage': obs['quality']['coverage_ratio'],
+                   'eligible_for_inference': obs['quality']['eligible_for_inference'],
+                   'maximum_lag_seconds': policy['maximum_lag_seconds']})
             records = [r for r in logs if r['service'] == service
                        and (end.timestamp() - 60) * 1000 < r['timestamp_unix_ms'] <= end.timestamp() * 1000]
             count = obs['measurements']['request_count'] or 0
             relative = abs(count / len(records) - 1) if records else None
             check('P4', relative is not None and relative <= COUNT_TOLERANCE and obs['measurements']['error_count'] == 0,
                   {'service': service, 'bucket_end': timestamp(end), 'prometheus_count': count,
-                   'server_completions': len(records), 'relative_difference': relative})
+                   'server_completions': len(records), 'relative_difference': relative,
+                   'error_count': obs['measurements']['error_count']})
             mean = mean_latency_ms(raw)
             exact = sum(r['duration_ms'] for r in records) / len(records) if records else None
             difference = abs(mean / exact - 1) if mean is not None and exact else None

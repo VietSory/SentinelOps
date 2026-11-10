@@ -12,6 +12,7 @@ from sentinelops.ml.alibaba_bundle import package_fit
 from sentinelops.ml.alibaba_release import CRITERIA, build_alibaba_release, bundle_scorer, validate_evidence
 from sentinelops.ml.models import read_bundle_manifest
 from sentinelops.ml.registry import ModelRegistry
+from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2, queries
 from sentinelops.ml.release import parity_verification_ref
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 from tests.test_alibaba_bundle import synthetic_fit
@@ -24,11 +25,13 @@ def criteria(model_version, features, scorer):
     pairs = [{'service': s, 'bucket_end': b} for s in sorted(BUSINESS_ROUTES) for b in BUCKETS]
     values = [0.1] * len(features)
     return {'P1': [{'ok': True, 'model_version': model_version}],
-            'P2': [{'ok': True, **p} for p in pairs],
+            'P2': [{'ok': True, 'source_profile': SOURCE_PROFILE_V2,
+                    'queries_sha256': stable_id(queries(p['service'], SOURCE_PROFILE_V2)), **p} for p in pairs],
             'P3': [{'ok': True, 'what': 'all buckets normalized', 'observations': len(pairs)}]
-                  + [{'ok': True, 'coverage': 1.0, 'lag_seconds': 35.0, **p} for p in pairs],
+                  + [{'ok': True, 'coverage': 1.0, 'lag_seconds': 35.0, 'eligible_for_inference': True,
+                     'maximum_lag_seconds': 60, **p} for p in pairs],
             'P4': [{'ok': True, 'prometheus_count': 58.0, 'server_completions': 60,
-                    'relative_difference': abs(58.0 / 60 - 1), **p} for p in pairs],
+                    'relative_difference': abs(58.0 / 60 - 1), 'error_count': 0, **p} for p in pairs],
             'P5': [{'ok': True, 'prometheus_mean_ms': 15.5, 'exact_mean_ms': 15.4,
                     'relative_difference': abs(15.5 / 15.4 - 1), **p} for p in pairs],
             'P6': [{'ok': True, 'service': s, 'window_end': BUCKETS[-1], 'features': dict(zip(features, values)),
@@ -143,6 +146,12 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
     lambda c, v: c['risk']['slope'].update(prevalence=0.5),
     lambda c, v: c['risk']['xgboost'].update(precursor_recall_lead_ge_60s=0.9),
     lambda c, v: v['criteria']['P3'][5].pop('lag_seconds'),
+    lambda c, v: [i.update(lag_seconds=61.0) for i in v['criteria']['P3'] if 'bucket_end' in i],
+    lambda c, v: v['criteria']['P3'][3].update(eligible_for_inference=False),
+    lambda c, v: v['criteria']['P4'][2].update(error_count=3),
+    lambda c, v: v['criteria']['P4'][2].pop('error_count'),
+    lambda c, v: v['criteria']['P2'][1].update(source_profile='prometheus-increase-60s-5s/v1'),
+    lambda c, v: v['criteria']['P2'][1].update(queries_sha256='0' * 64),
 ], ids=['empty-P3', 'all-criteria-empty', 'check-without-ok', 'ok-not-true', 'no-risk', 'no-slope-control',
         'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates', 'P4-one-service', 'P3-summary-only', 'P3-missing-bucket', 'P5-extra-bucket',
         'P2-uneven-buckets', 'P3-summary-miscount', 'xgb-threshold-4', 'bootstrap-out-of-range', 'controls-other-risk-model',
@@ -151,7 +160,8 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
         'P6-missing-payment', 'P1-other-model', 'recall-above-one', 'negative-false-incident-rate',
         'P4-zero-count-claims-zero-diff', 'controls-f1-not-from-counts', 'P3-boolean-coverage', 'unaligned-minutes',
         'P5-diff-not-from-means', 'P6-score-not-from-bundle', 'prevalence-not-from-counts',
-        'precursor-recall-above-detected', 'P3-no-lag'])
+        'precursor-recall-above-detected', 'P3-no-lag', 'P3-lag-over-policy', 'P3-not-eligible', 'P4-5xx',
+        'P4-no-error-count', 'P2-other-profile', 'P2-other-queries'])
 def test_evidence_rejects_empty_parity_checks_and_incomplete_controls(tmp_path, mutate):
     sha, manifest, report, controls, record, verification = evidence(tmp_path)
     c, v = copy.deepcopy(controls), copy.deepcopy(verification)
@@ -185,3 +195,25 @@ def test_validator_bounds_equal_the_parity_script():
     from sentinelops.ml import alibaba_release
     assert (alibaba_release.COUNT_TOLERANCE, alibaba_release.MEAN_TOLERANCE) == (script.COUNT_TOLERANCE,
                                                                                   script.MEAN_TOLERANCE)
+
+
+def test_parity_script_records_every_field_the_validator_rechecks():
+    """Producer/consumer contract (Codex review of a55bb05): the validator can only re-check what
+    check_alibaba_source_parity writes into each criterion's detail."""
+    import ast
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / 'scripts/check_alibaba_source_parity.py').read_text()
+    recorded = {}
+    for node in ast.walk(ast.parse(source)):
+        if (isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'check' and len(node.args) == 3
+                and isinstance(node.args[0], ast.Constant) and isinstance(node.args[2], ast.Dict)):
+            recorded.setdefault(node.args[0].value, set()).update(
+                k.value for k in node.args[2].keys if isinstance(k, ast.Constant))
+    required = {'P1': {'model_version'}, 'P2': {'service', 'bucket_end', 'source_profile', 'queries_sha256'},
+                'P3': {'service', 'bucket_end', 'coverage', 'lag_seconds', 'eligible_for_inference', 'observations'},
+                'P4': {'service', 'bucket_end', 'prometheus_count', 'server_completions', 'relative_difference',
+                       'error_count'},
+                'P5': {'service', 'bucket_end', 'prometheus_mean_ms', 'exact_mean_ms', 'relative_difference'},
+                'P6': {'service', 'window_end', 'features', 'scores'}}
+    for name, keys in required.items():
+        assert keys <= recorded.get(name, set()), (name, keys - recorded.get(name, set()))

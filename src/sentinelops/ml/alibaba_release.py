@@ -20,12 +20,13 @@ from sentinelops.ml.release import APPROVAL_VERSION, PARITY_VERIFICATION_VERSION
     parity_verification_ref
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.contracts import utc_time
-from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
+from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2, queries
 from sentinelops.telemetry.store import ArtifactStore
 
 PARITY_CRITERIA = 'alibaba-parity-criteria/v1'
 CRITERIA = ('P1', 'P2', 'P3', 'P4', 'P5', 'P6')
 BUNDLE_DIRECTORY = 'alibaba-v2022'
+HEALTH_POLICY = 'configs/slo_health_policy.json'  # the frozen policy the parity script applies
 
 
 def _pinned(path, sha256):
@@ -112,7 +113,7 @@ COUNT_TOLERANCE = .05
 MEAN_TOLERANCE = .10
 
 
-def criteria_complete(criteria, model_version, config, scores_for):
+def criteria_complete(criteria, model_version, config, scores_for, health_policy):
     """Every P1–P6 criterion needs at least one recorded check, and every check must pass.
 
     P1 must name this bundle's model version. P2 declares the (service, bucket) pairs of the
@@ -163,13 +164,23 @@ def criteria_complete(criteria, model_version, config, scores_for):
     # Do not trust `ok` alone (Codex reviews): each recorded measurement must satisfy the parity
     # script's bound (same constants, kept equal by a test), the derived difference must follow
     # from the raw values recorded beside it, and P6 scores are recomputed with the bundle itself.
+    # Every condition the parity script checks must be recorded and re-checked here (Codex review
+    # of a55bb05): P2 the capture's profile and pinned queries, P3 eligibility and the frozen SLO
+    # health policy's maximum lag, P4 no 5xx.
+    for item in criteria['P2']:
+        if (item.get('source_profile') != SOURCE_PROFILE_V2
+                or item.get('queries_sha256') != stable_id(queries(item['service'], SOURCE_PROFILE_V2))):
+            return False
+    max_lag = health_policy['maximum_lag_seconds']
     for item in criteria['P3']:
         if 'bucket_end' in item and not (_number(item.get('coverage')) and item['coverage'] == 1
-                                         and _number(item.get('lag_seconds')) and item['lag_seconds'] >= 0):
+                                         and item.get('eligible_for_inference') is True
+                                         and _number(item.get('lag_seconds')) and 0 <= item['lag_seconds'] <= max_lag):
             return False
     for item in criteria['P4']:
         count, completions = item.get('prometheus_count'), item.get('server_completions')
         if not (_number(count) and count >= 0 and _count(completions) and completions > 0
+                and item.get('error_count') == 0 and _count(item.get('error_count'))
                 and _close(item.get('relative_difference'), abs(count / completions - 1))
                 and item['relative_difference'] <= COUNT_TOLERANCE):
             return False
@@ -205,7 +216,7 @@ def bundle_scorer(bundle, manifest_sha256):
 
 
 def validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256, *,
-                      scores_for):
+                      scores_for, health_policy=None):
     """Completeness and internal consistency of operator-supplied evidence.
 
     Trust boundary: these documents come from operator-run scripts (alibaba_controls,
@@ -232,6 +243,8 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
         raise ValueError('layer-1 controls lack the detector, risk or bootstrap metrics')
     if controls.get('model_artifacts_sha256') != manifest['artifacts']:
         raise ValueError('layer-1 controls did not score this bundle\'s model files')
+    if health_policy is None:
+        health_policy = json.loads((Path(__file__).resolve().parents[3] / HEALTH_POLICY).read_text())
     scope = {'candidate_id': model_version, 'source_profile': SOURCE_PROFILE_V2}
     if (not isinstance(parity_record, dict) or parity_record.get('parity_version') != PARITY_VERSION
             or parity_record.get('status') != 'PASS'
@@ -246,7 +259,7 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
             or parity_verification.get('bundle_manifest_sha256') != manifest_sha256
             or any(parity_verification.get(k) != parity_record.get(k) for k in ('candidate_id', 'environment',
                                                                                  'source_profile', 'verified_at'))
-            or not criteria_complete(criteria, model_version, provenance['config'], scores_for)):
+            or not criteria_complete(criteria, model_version, provenance['config'], scores_for, health_policy)):
         raise ValueError('source parity verification lacks complete passing P1–P6 checks')
 
 
