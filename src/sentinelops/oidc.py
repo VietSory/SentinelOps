@@ -79,9 +79,18 @@ async def fetch_jwks(url):
         return response.json()
 
 
+# Largest integer a float holds exactly; far beyond any real token time (year ~285 million).
+MAX_NUMERIC_DATE = 2 ** 53
+
+
 def _numeric_date(value) -> bool:
-    return (isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value))
+    """A finite JSON number in [0, 2**53). Checked without converting an int to float,
+    so an arbitrary-precision integer such as 10**400 cannot raise OverflowError."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return 0 <= value < MAX_NUMERIC_DATE
+    return isinstance(value, float) and math.isfinite(value) and 0 <= value < MAX_NUMERIC_DATE
 
 
 class OidcVerifier:

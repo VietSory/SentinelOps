@@ -192,12 +192,12 @@ def _time_claim_cases():
     now = int(time.time())
     return [{'exp': str(now + 300)}, {'iat': str(now)}, {'nbf': str(now - 10)},
             {'exp': float('inf')}, {'exp': float('-inf')}, {'iat': float('inf')}, {'nbf': float('nan')},
-            {'exp': True}, {'iat': [now]}]
+            {'exp': True}, {'iat': [now]}, {'exp': 10 ** 400}, {'exp': 1e300}, {'iat': -1}]
 
 
 @pytest.mark.parametrize('claims', _time_claim_cases(),
                          ids=['exp-str', 'iat-str', 'nbf-str', 'exp-inf', 'exp-neg-inf', 'iat-inf', 'nbf-nan',
-                              'exp-bool', 'iat-list'])
+                              'exp-bool', 'iat-list', 'exp-huge-int', 'exp-huge-float', 'iat-negative'])
 def test_time_claims_must_be_finite_numeric_dates(claims):
     # Codex review 2026-11-10: PyJWT coerces numeric strings with int() and Infinity overflowed into a 500.
     with pytest.raises(TokenRejected):
