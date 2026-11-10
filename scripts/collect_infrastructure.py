@@ -13,12 +13,19 @@ from sentinelops.telemetry.store import ArtifactStore
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
+    parser.add_argument("--lock-waits", action="store_true", help="capture a raw snapshot of PostgreSQL client lock waits")
     args = parser.parse_args()
     dsn = os.getenv("DATABASE_URL")
     if not dsn:
         raise SystemExit("DATABASE_URL is required; credentials are never included in observation output")
-    item = asyncio.run(PostgresInfrastructureSource(dsn).capture())
-    reference = ArtifactStore(args.output).write("observations", item)
+    source = PostgresInfrastructureSource(dsn)
+    if args.lock_waits:
+        item = asyncio.run(source.capture_lock_waits())
+        category = "raw"
+    else:
+        item = asyncio.run(source.capture())
+        category = "observations"
+    reference = ArtifactStore(args.output).write(category, item)
     print(json.dumps({"reference":reference, "observation":item}, indent=2))
 
 

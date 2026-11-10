@@ -101,6 +101,21 @@ The runner restores both original sandbox fault states in `finally`, including p
 Use the manifest assembler above when reproducing historical corpus evidence. A
 new local run is integration or evaluation evidence under ADR-016.
 
+## S4 database lock-wait evidence
+
+Set `DATABASE_URL` to the owned PostgreSQL testbed using a read-only monitor
+role with `pg_read_all_stats`, then collect a raw observation.
+
+```bash
+python -m scripts.collect_infrastructure --lock-waits --output /absolute/evidence/store
+```
+
+The collector records the current database's waiting client count, native lock
+start when available, database observation time and collector receipt time. It
+rejects incomplete activity visibility. The snapshot contains no SQL text and
+stays separate from the existing cluster connection-capacity observation. Capture
+the downstream SLO and traces separately for S4 evaluation.
+
 ## S5 independent-fault development
 
 [s5_development_protocol.json](../../configs/s5_development_protocol.json) predeclares a dual-latency and a blocking-error development case. Both use 300s warmup, 180s active fault and 180s recovery, 3 configured requests/s at each of the three business entry routes, and distinct fixed seeds. Source/config must be committed before capture. Its byte hash is recorded before load and checked again by the evaluator; post-outcome protocol changes cannot be accepted as the original protocol.
