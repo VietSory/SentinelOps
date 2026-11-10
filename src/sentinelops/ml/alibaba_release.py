@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 
@@ -33,6 +34,49 @@ def _pinned(path, sha256):
     return data
 
 
+DETECTOR_METRICS = ('f1', 'precision', 'recall', 'false_incidents_per_healthy_service_hour')
+RISK_METRICS = ('average_precision', 'prevalence', 'precursor_recall_lead_ge_60s', 'actual_alert_rate_on_negatives',
+                'threshold')
+CONTROL_SECTIONS = (('detector_events', ('isolation_forest', 'median_mad'), DETECTOR_METRICS),
+                    ('risk', ('xgboost', 'slope'), RISK_METRICS))
+BOOTSTRAP_INTERVALS = ('if_minus_mad_event_f1', 'xgb_minus_slope_average_precision')
+
+
+def _number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def controls_complete(controls):
+    """The layer-1 comparison the owner reads before G3 must be present, not only its identity."""
+    for section, models, metrics in CONTROL_SECTIONS:
+        block = controls.get(section)
+        if not isinstance(block, dict):
+            return False
+        for model in models:
+            values = block.get(model)
+            if not isinstance(values, dict) or not all(_number(values.get(m)) for m in metrics):
+                return False
+    bootstrap = controls.get('paired_service_bootstrap')
+    if not isinstance(bootstrap, dict) or not _number(bootstrap.get('services')) or bootstrap['services'] < 2:
+        return False
+    for name in BOOTSTRAP_INTERVALS:
+        interval = bootstrap.get(name)
+        if (not isinstance(interval, dict) or not _number(interval.get('valid_replicates'))
+                or interval['valid_replicates'] < 1
+                or not all(_number(interval.get(k)) for k in ('lower', 'upper'))
+                or interval['lower'] > interval['upper']):
+            return False
+    return True
+
+
+def criteria_complete(criteria):
+    """Every P1–P6 criterion needs at least one recorded check, and every check must pass."""
+    return (isinstance(criteria, dict) and set(criteria) == set(CRITERIA)
+            and all(isinstance(criteria[name], list) and criteria[name]
+                    and all(isinstance(item, dict) and item.get('ok') is True for item in criteria[name])
+                    for name in CRITERIA))
+
+
 def validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256):
     provenance = manifest['provenance']
     model_version = manifest['model_version']
@@ -47,6 +91,8 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
             or controls.get('config_sha256') != provenance['config_sha256']
             or controls.get('no_refit_or_retune') is not True):
         raise ValueError('layer-1 controls do not belong to this fit')
+    if not controls_complete(controls):
+        raise ValueError('layer-1 controls lack the detector, risk or bootstrap metrics')
     scope = {'candidate_id': model_version, 'source_profile': SOURCE_PROFILE_V2}
     if (not isinstance(parity_record, dict) or parity_record.get('parity_version') != PARITY_VERSION
             or parity_record.get('status') != 'PASS'
@@ -61,8 +107,7 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
             or parity_verification.get('bundle_manifest_sha256') != manifest_sha256
             or any(parity_verification.get(k) != parity_record.get(k) for k in ('candidate_id', 'environment',
                                                                                  'source_profile', 'verified_at'))
-            or set(criteria) != set(CRITERIA)
-            or not all(item['ok'] for name in CRITERIA for item in criteria[name])):
+            or not criteria_complete(criteria)):
         raise ValueError('source parity verification lacks complete passing P1–P6 checks')
 
 

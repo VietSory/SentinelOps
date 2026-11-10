@@ -25,8 +25,16 @@ def evidence(tmp_path):
     result = package_fit(fit, tmp_path / 'bundle')
     manifest = read_bundle_manifest(tmp_path / 'bundle', expected_manifest_sha256=result['manifest_sha256'])
     report = json.loads((tmp_path / 'bundle' / 'report.json').read_text())
+    detector = {'f1': 0.5, 'precision': 0.5, 'recall': 0.5, 'false_incidents_per_healthy_service_hour': 0.1}
+    risk = {'average_precision': 0.07, 'prevalence': 0.01, 'precursor_recall_lead_ge_60s': 0.2,
+            'actual_alert_rate_on_negatives': 0.02, 'threshold': 0.8}
+    interval = {'valid_replicates': 1000, 'lower': -0.02, 'upper': 0.04}
     controls = {'report_version': 'alibaba-relative-controls/v1', 'fit_report_sha256': stable_id(report),
-                'config_sha256': report['config_sha256'], 'no_refit_or_retune': True}
+                'config_sha256': report['config_sha256'], 'no_refit_or_retune': True,
+                'detector_events': {'isolation_forest': dict(detector), 'median_mad': dict(detector)},
+                'risk': {'xgboost': dict(risk), 'slope': dict(risk)},
+                'paired_service_bootstrap': {'services': 3, 'if_minus_mad_event_f1': dict(interval),
+                                             'xgb_minus_slope_average_precision': dict(interval)}}
     scope = {'candidate_id': manifest['model_version'], 'environment': 'test', 'source_profile': 'prometheus-increase-60s-5s/v2',
              'models': [{'service': s, 'model_version': manifest['model_version']} for s in sorted(BUSINESS_ROUTES)],
              'verified_by': 'test', 'verified_at': '2026-11-09T00:00:00Z'}
@@ -53,6 +61,29 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
             r['evidence'] = [parity_verification_ref(v)]
         with pytest.raises(ValueError):
             validate_evidence(manifest, report, c, r, v, sha)
+
+
+@pytest.mark.parametrize('mutate', [
+    lambda c, v: v['criteria'].update(P3=[]),
+    lambda c, v: v.update(criteria={name: [] for name in CRITERIA}),
+    lambda c, v: v['criteria']['P6'].append({}),
+    lambda c, v: v['criteria']['P2'].append({'ok': 'true'}),
+    lambda c, v: c.pop('risk'),
+    lambda c, v: c['risk'].pop('slope'),
+    lambda c, v: c['risk']['xgboost'].update(precursor_recall_lead_ge_60s=None),
+    lambda c, v: c['detector_events']['median_mad'].pop('f1'),
+    lambda c, v: c['detector_events']['isolation_forest'].update(recall=float('nan')),
+    lambda c, v: c['paired_service_bootstrap'].pop('xgb_minus_slope_average_precision'),
+    lambda c, v: c['paired_service_bootstrap']['if_minus_mad_event_f1'].update(valid_replicates=0),
+], ids=['empty-P3', 'all-criteria-empty', 'check-without-ok', 'ok-not-true', 'no-risk', 'no-slope-control',
+        'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates'])
+def test_evidence_rejects_empty_parity_checks_and_incomplete_controls(tmp_path, mutate):
+    sha, manifest, report, controls, record, verification = evidence(tmp_path)
+    c, v = copy.deepcopy(controls), copy.deepcopy(verification)
+    mutate(c, v)
+    r = dict(record, evidence=[parity_verification_ref(v)])
+    with pytest.raises(ValueError):
+        validate_evidence(manifest, report, c, r, v, sha)
 
 
 def test_release_requires_an_explicit_owner_decision(tmp_path):
