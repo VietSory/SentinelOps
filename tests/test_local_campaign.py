@@ -107,3 +107,39 @@ def test_retry_after_a_failed_provisioning_keeps_the_earlier_log(tmp_path):
     second = attempt_log(store, 'det-04-healthy')
     assert first.name == 'det-04-healthy.log' and second.name == 'det-04-healthy.attempt-2.log'
     assert first.read_text() == 'failed attempt'
+
+
+def test_window_end_pauses_only_at_a_group_boundary_without_starting_capture(tmp_path, monkeypatch):
+    from sentinelops.experiments import local_campaign as campaign
+    from sentinelops.experiments.local_corpus import ALIBABA_PLAN
+    plan = load_plan(ALIBABA_PLAN)
+    store = ArtifactStore(tmp_path)
+    monkeypatch.setattr(campaign, 'clean_source', lambda _: 'a' * 40)
+    monkeypatch.setattr(campaign, 'register_alibaba_epoch', lambda *a, **k: 'artifact://manifests/' + 'e' * 64 + '.json')
+    monkeypatch.setattr(campaign, 'register_controller', lambda *a, **k: 'ref')
+    started = []
+
+    class Started(Exception):
+        pass
+
+    def run(args, **kwargs):
+        started.append(args)
+        raise Started()
+    monkeypatch.setattr(campaign.subprocess, 'run', run)
+    now = datetime(2026, 11, 10, 6, 0, tzinfo=timezone.utc)  # 13:00 at UTC+7
+    needed = campaign.group_budget_seconds(plan, 'development-validation', 1)
+    assert 4 * 3600 < needed < 5 * 3600
+    late = campaign.run_campaign(store, plan_path=ALIBABA_PLAN, bundle='b', manifest_sha256='m',
+                                 window_end=now + timedelta(seconds=needed - 1), clock=lambda: now)
+    assert late['status'] == 'PAUSED_AT_GROUP_BOUNDARY' and late['next_group'] == 'alb-01' and started == []
+    with pytest.raises(Started):  # enough time: the first slot of the group starts
+        campaign.run_campaign(store, plan_path=ALIBABA_PLAN, bundle='b', manifest_sha256='m',
+                              window_end=now + timedelta(seconds=needed), clock=lambda: now)
+    assert len(started) == 1
+
+
+def test_alibaba_plan_keeps_five_acquired_groups_with_a_replacement_budget():
+    from sentinelops.experiments.local_corpus import ALIBABA_PLAN, group_name
+    plan = load_plan(ALIBABA_PLAN)
+    assert {ordinal for _, ordinal, _ in planned_slots(plan)} == {1, 2, 3, 4, 5}
+    assert group_name(plan, 'development-validation', 6) == 'alb-06'  # an interrupted group can be replaced
