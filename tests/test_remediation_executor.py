@@ -296,3 +296,55 @@ def test_absent_known_good_blocks_before_any_kubernetes_request(problem):
         result=await f.executor.execute(f.request)
         assert result['phase']=='blocked' and f.kube.calls==[] and observed==[]
     asyncio.run(run())
+
+
+# Q-10 side effects at the executor level (B review 2026-11-10): the domain tests above prove the
+# rejection; these prove that no dry-run or patch reaches Kubernetes and that the journal records why.
+@pytest.mark.parametrize('observed',[
+    dict(target=replace(TARGET,namespace_uid='foreign-namespace-uid')),
+    dict(target=replace(TARGET,deployment_uid='recreated-deployment')),
+    dict(target=replace(TARGET,cluster_uid='other-cluster')),
+    dict(replicas=2),dict(max_surge=1),dict(hpa=True),dict(paused=True),dict(pods=()),dict(strategy='Recreate'),
+],ids=['namespace-uid','deployment-uid','cluster-uid',
+       'replicas','surge','hpa','paused','no-pods','recreate'])
+def test_wrong_identity_or_blast_radius_never_reaches_kubernetes_mutation(observed):
+    async def run():
+        f=setup()
+        async def foreign(): return observation(observed_at=timestamp(f.clock()),**observed)
+        f.kube.observe=foreign
+        result=await f.executor.execute(f.request)
+        assert result['phase']=='blocked' and result['facts'].get('reason')
+        assert f.kube.calls==[]
+        again=await f.executor.execute(f.request)
+        assert again['phase']=='blocked' and f.kube.calls==[]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('field,value',[('namespace','other-namespace'),('deployment','checkout-service'),
+                                         ('container','sidecar'),('deployment_uid','')])
+def test_target_outside_the_sandbox_cannot_even_be_constructed(field,value):
+    with pytest.raises(Blocked,match='sandbox'): replace(TARGET,**{field:value})
+
+
+@pytest.mark.parametrize('failure',['forged-recovery','new-pod-never-ready','no-telemetry'])
+def test_verification_failure_escalates_once_without_a_second_or_compensating_patch(failure):
+    async def run():
+        f=setup();sent=await f.executor.execute(f.request)
+        assert f.kube.calls==[True,False]
+        if failure=='new-pod-never-ready': f.kube.unready=True
+        if failure=='no-telemetry':
+            async def pending(**kwargs): return {'status':'pending'}
+            f.recovery.verify=pending
+        await f.executor.reconcile(sent['action_id'])
+        if failure=='forged-recovery':
+            f.time[0]+=timedelta(minutes=4);f.recovery.corrupt=True
+        else:
+            f.time[0]+=timedelta(seconds=600)
+        result=await f.executor.reconcile(sent['action_id'])
+        assert result['phase']=='escalated' and result['facts']['reason']
+        assert f.kube.calls==[True,False]
+        f.time[0]+=timedelta(minutes=30)
+        assert (await f.executor.reconcile(sent['action_id']))['phase']=='escalated'
+        assert (await f.executor.execute(f.request))['phase']=='escalated'
+        assert f.kube.calls==[True,False]
+    asyncio.run(run())

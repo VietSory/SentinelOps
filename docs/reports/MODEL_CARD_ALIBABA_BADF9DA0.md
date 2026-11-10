@@ -88,6 +88,13 @@ tested equal to the single-window reference.
   local scenarios are injected faults. Layer 2 measures this transfer.
 - **Weak early warning:** precursor recall misses the Q-07 target. Do not present
   XGBoost as a reliable early-warning system.
+- **Reading the layer-1 rates (B review, 2026-11-10):** the "alert rate on negatives"
+  (XGBoost 0.019, slope 0.011) counts raw per-window threshold crossings *before*
+  the entry/exit persistence that serving applies, so it is not the operator-visible
+  alert rate. Precursor recall counts only breach onsets that have at least one valid
+  scored window before them (`eligible_precursor_events`). Onsets with no valid
+  window are outside the denominator, so the 0.24 describes covered onsets, not
+  all breaches.
 - **Cold start:** a new service or deployment has no signal until it has 10
   minutes of accepted v2 history. Signals are reported as unavailable, never as zero.
 - **Shared span:** evaluation services share the training services' cluster and
