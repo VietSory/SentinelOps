@@ -13,12 +13,13 @@ chứng, rồi hỗ trợ giải thích và remediation có kiểm soát.
 | Kế hoạch hai người và vùng sở hữu | [Delivery plan](docs/delivery/DELIVERY_PLAN.md), [workstream contract](docs/delivery/WORKSTREAM_CONTRACT.md) |
 | Tìm đặc tả, lệnh chạy hoặc quyết định kiến trúc | [Mục lục tài liệu](docs/README.md) |
 
-Local testbed/observability, telemetry/features, persistent incident API và
-health/incident workers đã có. Guarded model/admission software đã có; **G2/G3
-chưa được chấp nhận và chưa có approved model tại checkpoint đã công bố**.
-UI read-only đã có tại `/ui/`, đọc IER/evidence/history thật và hiển thị model
-unavailable; explanation/provider, action execution và AWS còn cần hoàn thiện.
-Inventory/runtime mới nhất phải kiểm tra trên môi trường tương ứng.
+Local testbed/observability, telemetry/features, persistent incident API,
+health/incident workers và UI read-only tại `/ui/` đã có. Model chính thức được
+train trên **Alibaba v2022 theo ADR-016**; owner duyệt G3 **có điều kiện**, chỉ
+cho tích hợp local H4→G6 (D-22). Đã có [báo cáo tích hợp v2 trên máy B](docs/reports/LANE_B_ALIBABA_V2_ACTIVATION.md)
+và [các trial G6 local](docs/reports/G6_LOCAL_ALIBABA_BADF9DA0.md); **G6 chưa
+nghiệm thu**, kết quả chính thức còn chờ lớp đánh giá local v2 và G8. AWS và
+Bedrock chưa triển khai. Runtime hiện tại phải kiểm tra trên môi trường tương ứng.
 
 ## Chạy API local
 
@@ -49,8 +50,16 @@ Theo [runtime B](docs/runbooks/LOCAL_TESTBED.md#lane-b-isolated-application-runt
 - MAD là control, Isolation Forest phát hiện anomaly, XGBoost dự báo pre-SLO gradual.
 - IER và deterministic RCA giữ evidence/ranking/uncertainty; Bedrock chỉ giải thích.
 - Action chỉ dùng runbook được phép, có policy, audit và telemetry verification.
-- Primary fitting dùng prospective local HTTP theo [ADR-014](docs/adr/ADR-014-proposed-local-training-evidence.md);
-  RCAEval chỉ evaluation, GAMMA/v1 giữ lịch sử. Source authorization không phải data/model acceptance.
+- Nguồn train chính thức là trace production Alibaba v2022 theo
+  [ADR-016](docs/adr/ADR-016-public-production-training-source.md); một bundle
+  dùng chung cho ba service, với feature tương đối và mean latency qua source
+  profile v2. Xem [model pipeline](docs/runbooks/MODEL_PIPELINE.md).
+- Dữ liệu local HTTP chỉ dùng evaluation, không dùng fit, chọn model hay chỉnh
+  ngưỡng; đường train local đã gỡ theo D-23. ADR-014 đã được thay thế về nguồn
+  train; RCAEval chỉ dành cho RCA evaluation, GAMMA/v1 giữ làm lịch sử.
+- Alibaba không có trường lỗi 5xx; SLO rule và MAD đảm nhận phần này. Build release
+  không tự bật model; parity phải được đo trên môi trường đích và activation phải
+  nằm trong phạm vi owner duyệt.
 
 Schemas trong `contracts/` là wire truth. Thiết kế ở
 [technical spec](docs/architecture/TECHNICAL_SPEC.md); breaking architecture changes
