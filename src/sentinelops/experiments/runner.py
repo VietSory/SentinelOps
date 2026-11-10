@@ -145,6 +145,13 @@ def serving_logs(project: Path, since: str) -> tuple[list[dict],list[dict]]:
     return all_records,admitted
 
 
+def select_trace_probe(recent, entry, now, *, prefer_slow=False):
+    eligible = (item for item in recent if item["entry_service"] == entry and now - item["completed_at"] >= 10)
+    if prefer_slow:
+        return max(eligible, key=lambda item: item["client_duration_ms"], default=None)
+    return next(eligible, None)
+
+
 async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Path, session_id: str | None = None,
                   allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE) -> Path:
     config.validate()
@@ -231,7 +238,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                            "client_duration_ms":round((time.perf_counter()-began_monotonic)*1000, 3)}
                 outcomes.append(outcome)
                 client_clock.observe(outcome, run["started_at"])
-                recent.append({"trace_id":trace_id,"completed_at":time.time(),"correlation_id":correlation,"entry_service":entry})
+                recent.append({"trace_id":trace_id,"completed_at":time.time(),"correlation_id":correlation,
+                               "entry_service":entry,"client_duration_ms":outcome["client_duration_ms"]})
 
         def capture_trace(probe):
             trace_id=probe["trace_id"];entry=probe["entry_service"]
@@ -266,7 +274,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                     item = await PostgresInfrastructureSource(os.environ["DATABASE_URL"]).capture()
                     infra_refs.append(await asyncio.to_thread(serving.write,"observations",item))
                 for entry in entries:
-                    probe = next((item for item in recent if item["entry_service"]==entry and time.time()-item["completed_at"] >= 10),None)
+                    probe = select_trace_probe(recent, entry, time.time(), prefer_slow=bool(s4_project))
                     if probe:
                         try:
                             trace_refs.append(await asyncio.to_thread(capture_trace,probe))

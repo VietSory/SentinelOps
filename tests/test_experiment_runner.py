@@ -42,6 +42,14 @@ def test_s4_rejects_a_shared_compose_project_before_docker(monkeypatch, tmp_path
         runner.s4_postgres.require_sandbox(tmp_path)
 
 
+def test_s4_trace_probe_prefers_a_slow_completed_request_for_its_own_entry():
+    probes = [{"entry_service": entry, "completed_at": completed, "client_duration_ms": duration}
+              for entry, completed, duration in (("checkout", 75, 10), ("checkout", 85, 990),
+                                                  ("payment", 84, 1200), ("checkout", 98, 1400))]
+    assert runner.select_trace_probe(probes, "checkout", 100) is probes[0]
+    assert runner.select_trace_probe(probes, "checkout", 100, prefer_slow=True) is probes[1]
+
+
 @pytest.mark.parametrize("interval,accepted",[("5s",True),("15s",False),(None,False)])
 def test_source_profile_verifies_actual_prometheus_configuration(interval,accepted):
     text = "global:\n  scrape_interval: 15s\nscrape_configs:\n- job_name: otel-collector\n"
