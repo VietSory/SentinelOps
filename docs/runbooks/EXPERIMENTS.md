@@ -24,9 +24,9 @@ training contracts are historical references.
 | Out-of-band run truth | Fault/scenario/root-cause timing for labeling/evaluation only; excluded from serving model input |
 | Future AWS CloudWatch/X-Ray captures | Separate environment/source profile with parity and activation gates |
 
-The delivery and technical specs cover S0…S5. This CLI supports S0/S1/S3/S5;
-native S2 uses `scripts.run_s2_h4`. S4 still needs a real DB-pressure adapter,
-and final multi-fault evaluation remains a separate holdout. AWS activation
+The delivery and technical specs cover S0…S5. This CLI supports S0/S1/S3/S4/S5;
+native S2 uses `scripts.run_s2_h4`. Final multi-fault evaluation remains a
+separate holdout. AWS activation
 requires parity in the target environment. Pilot fixtures and phase labels
 alone cannot establish detector accuracy or calibrated risk probabilities.
 
@@ -102,6 +102,20 @@ Use the manifest assembler above when reproducing historical corpus evidence. A
 new local run is integration or evaluation evidence under ADR-016.
 
 ## S4 database lock-wait evidence
+
+Run the development scenario from a clean checkout on its own Compose project.
+The experiment ports must be free before starting the stack.
+
+```bash
+export COMPOSE_PROJECT_NAME=sentinelops-s4-development
+docker compose up --build -d --wait checkout-service payment-service inventory-service postgres prometheus otel-collector jaeger
+env -u DATABASE_URL python -m scripts.run_experiment --scenario S4 --split validation --all-entry-traffic --output /absolute/s4/runs
+```
+
+The runner checks that the dedicated project owns the loopback endpoints. It
+applies bounded PostgreSQL locks to Payment writes and records native snapshots
+through warmup, fault and recovery. The source manifest carries the raw snapshot
+references alongside the existing SLO, trace and completion-log evidence.
 
 Set `DATABASE_URL` to the owned PostgreSQL testbed using a read-only monitor
 role with `pg_read_all_stats`, then collect a raw observation.

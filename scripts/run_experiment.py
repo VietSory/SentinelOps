@@ -1,4 +1,4 @@
-"""Run a bounded local S0/S1/S3/S5 experiment with a predeclared data split."""
+"""Run a bounded local S0/S1/S3/S4/S5 experiment with a predeclared data split."""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,7 @@ from sentinelops.telemetry.prometheus import SOURCE_PROFILE, SOURCE_PROFILE_V2
 
 def main() -> None:
     parser=argparse.ArgumentParser()
-    parser.add_argument("--scenario",choices=["S0","S1","S3","S5"],required=True)
+    parser.add_argument("--scenario",choices=["S0","S1","S3","S4","S5"],required=True)
     parser.add_argument("--split",choices=["train","validation","test"],required=True)
     parser.add_argument("--output",type=Path,default=Path("artifacts/experiments"))
     parser.add_argument("--seed",type=int,default=42)

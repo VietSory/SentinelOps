@@ -18,6 +18,7 @@ from sentinelops.telemetry.store import ArtifactStore
     {"rps":True}, {"rps":float("nan")}, {"rps":float("inf")}, {"rps":11},
     {"warmup_seconds":299}, {"active_seconds":119}, {"seed":True},
     {"scenario":"S1","recovery_seconds":0}, {"maximum_delay_ms":4000}, {"scenario":"S5","split":"train"},
+    {"scenario":"S4","split":"train"}, {"scenario":"S4","split":"validation","rps":4},
 ])
 def test_runner_rejects_unsupported_or_unbounded_experiments(changes):
     with pytest.raises(ValueError):
@@ -33,6 +34,12 @@ def test_experiment_lock_prevents_overlap_and_releases_on_failure(tmp_path):
             raise ValueError("simulated run failure")
     with runner.ExperimentLock(tmp_path):
         pass
+
+
+def test_s4_rejects_a_shared_compose_project_before_docker(monkeypatch, tmp_path):
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "sentinelops-corpus-ali-01")
+    with pytest.raises(ValueError, match="dedicated sentinelops-s4"):
+        runner.s4_postgres.require_sandbox(tmp_path)
 
 
 @pytest.mark.parametrize("interval,accepted",[("5s",True),("15s",False),(None,False)])
