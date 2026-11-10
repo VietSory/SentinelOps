@@ -20,9 +20,32 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = json.loads((ROOT / 'configs/system_versions.json').read_text())
 
 
-# ADR-017 amendment 1 (1a): evidence carries forward only under an identical identity.
-EVIDENCE_IDENTITY = ('source_commit', 'model_version', 'bundle_manifest_sha256', 'source_profile',
-                     'slo_health_policy_sha256', 'evaluation_plan_sha256', 'topology_sha256')
+# ADR-017 amendment 1 (1a, revised after the second Codex review). run_identity must be equal
+# for any carry-forward; capture_identity only describes the capture; service_identity is the
+# per-service equivalence a carried service must keep.
+RUN_IDENTITY = ('model_version', 'bundle_manifest_sha256', 'source_profile', 'slo_health_policy_sha256',
+                'scoring_sha256')
+CAPTURE_IDENTITY = ('epoch', 'source_commit', 'evaluation_plan_sha256', 'topology_sha256')
+SERVICE_IDENTITY = ('route', 'downstream', 'shared_infrastructure', 'code_tree', 'workload_kinds')
+# A declared version is immutable: its whole entry is pinned here. Editing system-v1 in place
+# (e.g. a new edge plus an updated topology hash) fails; a change needs a new version + pin.
+FROZEN_VERSIONS = {
+    'system-v1': 'df96f4a49c96a8a138ff0539ed0e78dfa69895186bc3725a0f9d057b794c91f8',
+}
+
+
+def entry_sha256(entry):
+    return hashlib.sha256(json.dumps(entry, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def closure(topology, service):
+    seen, stack = set(), list(topology.get(service, ()))
+    while stack:
+        item = stack.pop()
+        if item not in seen:
+            seen.add(item)
+            stack.extend(topology.get(item, ()))
+    return seen
 SERVICE_NAME = re.compile(r'[a-z][a-z0-9]*(?:-[a-z0-9]+)*-service')
 
 
@@ -50,7 +73,7 @@ def service_names(paths, ignored):
         yield from walk(json.loads(path.read_text()), '')
 
 
-def registry_errors(registry, contract_paths, routes, topology):
+def registry_errors(registry, contract_paths, routes, topology, pins):
     versions = registry['versions']
     current = registry['current']
     errors = []
@@ -64,11 +87,26 @@ def registry_errors(registry, contract_paths, routes, topology):
     for service, downstream in topology.items():
         if not all(item in topology for item in downstream):
             errors.append(f'{service} depends on an undeclared component')
+    def complete(block, keys):
+        return isinstance(block, dict) and all(block.get(key) not in (None, '') for key in keys)
     for version, entry in versions.items():
-        identity = entry.get('evidence_identity')
-        if not isinstance(identity, dict) or any(not isinstance(identity.get(key), str) or not identity[key]
-                                                 for key in EVIDENCE_IDENTITY):
-            errors.append(f'{version} lacks the ADR-017 evidence identity {list(EVIDENCE_IDENTITY)}')
+        if pins.get(version) != entry_sha256(entry):
+            errors.append(f'{version} differs from its frozen pin; declare a new system version instead')
+        if not complete(entry.get('run_identity'), RUN_IDENTITY):
+            errors.append(f'{version} lacks run_identity {list(RUN_IDENTITY)}')
+        if not complete(entry.get('capture_identity'), CAPTURE_IDENTITY):
+            errors.append(f'{version} lacks capture_identity {list(CAPTURE_IDENTITY)}')
+        per_service = entry.get('service_identity', {})
+        for service in entry['services']:
+            if not complete(per_service.get(service), ('route', 'code_tree', 'workload_kinds')) or any(
+                    key not in per_service[service] for key in SERVICE_IDENTITY):
+                errors.append(f'{version} lacks service_identity for {service}')
+    for service in versions[current]['services']:
+        declared = versions[current].get('service_identity', {}).get(service, {})
+        if set(declared.get('downstream', ())) != closure(topology, service):
+            errors.append(f'{current} {service} downstream differs from the topology call path')
+        if isinstance(routes.get(service), tuple) and declared.get('route') != ' '.join(routes[service]):
+            errors.append(f'{current} {service} route differs from BUSINESS_ROUTES')
     names = {path.name for path in contract_paths}
     for name, version in registry['frozen_contracts'].items():
         if name not in names:
@@ -93,9 +131,9 @@ def registry_errors(registry, contract_paths, routes, topology):
 def test_repository_contracts_routes_and_topology_agree():
     topology = yaml.safe_load((ROOT / 'configs/topology.yaml').read_text())['dependencies']
     paths = sorted((ROOT / 'contracts').glob('*.json'))
-    assert registry_errors(REGISTRY, paths, BUSINESS_ROUTES, topology) == []
+    assert registry_errors(REGISTRY, paths, BUSINESS_ROUTES, topology, FROZEN_VERSIONS) == []
     # Changing the topology means a new system version, never a silent edit of the current one.
-    current = REGISTRY['versions'][REGISTRY['current']]['evidence_identity']
+    current = REGISTRY['versions'][REGISTRY['current']]['capture_identity']
     assert current['topology_sha256'] == hashlib.sha256((ROOT / 'configs/topology.yaml').read_bytes()).hexdigest()
 
 
@@ -112,26 +150,40 @@ def contracts(tmp_path, files):
     return sorted(tmp_path.glob('*.json'))
 
 
-IDENTITY = dict.fromkeys(EVIDENCE_IDENTITY, 'fixture')
+TOPOLOGY_V1 = {'checkout-service': ['payment-service', 'inventory-service'], 'payment-service': ['rds'],
+               'inventory-service': ['rds'], 'rds': []}
+
+
+def version(services, topology):
+    return {'services': services, 'run_identity': dict.fromkeys(RUN_IDENTITY, 'fixture'),
+            'capture_identity': dict.fromkeys(CAPTURE_IDENTITY, 'fixture'),
+            'service_identity': {s: {'route': 'GET /' + s, 'downstream': sorted(closure(topology, s)),
+                                     'shared_infrastructure': [], 'code_tree': 'tree-' + s, 'workload_kinds': ['healthy']}
+                                 for s in services}}
 
 
 def registry(frozen):
-    return {'current': 'system-v2', 'frozen_contracts': frozen,
-            'versions': {'system-v1': {'services': V1, 'evidence_identity': dict(IDENTITY)},
-                         'system-v2': {'services': V2, 'evidence_identity': dict(IDENTITY)}}}
+    versions = {'system-v1': version(V1, TOPOLOGY_V1), 'system-v2': version(V2, TOPOLOGY_V2)}
+    return {'current': 'system-v2', 'frozen_contracts': frozen, 'versions': versions}
+
+
+def pins(declared):
+    return {name: entry_sha256(entry) for name, entry in declared['versions'].items()}
 
 
 def test_adding_a_service_in_a_new_contract_version_keeps_the_old_contract_valid(tmp_path):
     # Codex review 2026-11-10: the first guard failed this correct migration.
     paths = contracts(tmp_path, {'health-signal.schema.json': V1, 'health-signal-v2.schema.json': V2})
-    errors = registry_errors(registry({'health-signal.schema.json': 'system-v1'}), paths, dict.fromkeys(V2), TOPOLOGY_V2)
+    declared = registry({'health-signal.schema.json': 'system-v1'})
+    errors = registry_errors(declared, paths, dict.fromkeys(V2), TOPOLOGY_V2, pins(declared))
     assert errors == []
 
 
 @pytest.mark.parametrize('case', ['current-contract-not-updated', 'old-contract-not-pinned', 'pin-to-current',
                                   'pin-missing-file', 'routes-not-updated', 'topology-not-updated',
                                   'all-names-misspelt', 'one-name-misspelt', 'misspelt-const',
-                                  'new-version-without-evidence-identity'])
+                                  'new-version-without-run-identity', 'service-without-identity',
+                                  'v1-edited-in-place', 'new-version-not-pinned', 'downstream-stale'])
 def test_guard_still_catches_an_incomplete_service_addition(tmp_path, case):
     files = {'health-signal.schema.json': V1, 'health-signal-v2.schema.json': V2}
     frozen = {'health-signal.schema.json': 'system-v1'}
@@ -156,6 +208,28 @@ def test_guard_still_catches_an_incomplete_service_addition(tmp_path, case):
         topology.pop('fraud-service')
         topology['payment-service'] = ['rds']
     declared = registry(frozen)
-    if case == 'new-version-without-evidence-identity':
-        declared['versions']['system-v2']['evidence_identity'].pop('slo_health_policy_sha256')
-    assert registry_errors(declared, contracts(tmp_path, files), routes, topology)
+    pinned = pins(declared)
+    if case == 'new-version-without-run-identity':
+        declared['versions']['system-v2']['run_identity'].pop('slo_health_policy_sha256')
+        pinned = pins(declared)
+    if case == 'service-without-identity':
+        declared['versions']['system-v2']['service_identity'].pop('fraud-service')
+        pinned = pins(declared)
+    if case == 'v1-edited-in-place':
+        # Codex re-review: add Checkout -> RDS and update the hash inside system-v1; the pin must catch it.
+        declared['versions']['system-v1']['capture_identity']['topology_sha256'] = 'edited'
+        declared['versions']['system-v1']['service_identity']['checkout-service']['downstream'].append('rds-direct')
+    if case == 'new-version-not-pinned':
+        pinned.pop('system-v2')
+    if case == 'downstream-stale':
+        topology['checkout-service'] = ['payment-service', 'inventory-service', 'rds']
+        topology['inventory-service'] = []
+    assert registry_errors(declared, contracts(tmp_path, files), routes, topology, pinned)
+
+
+def test_editing_the_repository_system_v1_in_place_fails_the_pin():
+    edited = json.loads(json.dumps(REGISTRY))
+    v1 = edited['versions']['system-v1']
+    v1['service_identity']['checkout-service']['downstream'] = ['inventory-service', 'payment-service', 'rds']
+    v1['capture_identity']['topology_sha256'] = '0' * 64
+    assert entry_sha256(v1) != FROZEN_VERSIONS['system-v1']

@@ -10,15 +10,70 @@
         "payment-service"
       ],
       "topology": "configs/topology.yaml",
-      "evidence_identity": {
-        "epoch": "alibaba-layer2 epoch 2 (alb-*)",
-        "source_commit": "3b172053ccb948dc0a7b3dd7bba0f89b1118285f",
+      "run_identity": {
         "model_version": "badf9da0b563f4900fa099b11ba9223ee864d414ef3aa9af82a534db962d85e3",
         "bundle_manifest_sha256": "2d1a5376eccdd691da0741b9dc88eecd223d75a85a23fa712e00c1dc53291e62",
         "source_profile": "prometheus-increase-60s-5s/v2",
         "slo_health_policy_sha256": "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560",
+        "scoring_sha256": "d3d928b20ece82476019a40be1fd4fbcb531280efb35e307b7aff91ed4bcf307"
+      },
+      "capture_identity": {
+        "epoch": "alibaba-layer2 epoch 2 (alb-*)",
+        "source_commit": "3b172053ccb948dc0a7b3dd7bba0f89b1118285f",
         "evaluation_plan_sha256": "97cbf5f3e85717ecab14c57bc0292e983111556d3cc54f75ba9b4de6a6830ca8",
         "topology_sha256": "d1265592881a04d07bb6ed992baa59d43610c90cd76cb3565cc75dd53d0df9a3"
+      },
+      "shared_build_inputs": {
+        "services/common": "dfa33fec68c6d8fc3512287287cbf954567bf434",
+        "src": "26f7b1c4592f9dfcf1ac3ba31017a32ecc808592",
+        "contracts": "a5266683ee6d3045359357aada2c8e94037207c7",
+        "docker/Dockerfile.service": "5f797fb53c6072c5b3c37b42b47b3ae603057b46",
+        "pyproject.toml": "6f327034509c1895d8d83fe039118c80edfe6ce2"
+      },
+      "service_identity": {
+        "checkout-service": {
+          "route": "POST /v1/checkout",
+          "downstream": [
+            "inventory-service",
+            "payment-service",
+            "rds"
+          ],
+          "shared_infrastructure": [],
+          "code_tree": "b3f5367e598819ccb905f242f69b4689b49af96b",
+          "workload_kinds": [
+            "healthy"
+          ]
+        },
+        "inventory-service": {
+          "route": "GET /v1/inventory/{sku}",
+          "downstream": [
+            "rds"
+          ],
+          "shared_infrastructure": [
+            "rds"
+          ],
+          "code_tree": "0b6cacd933346256cf2025921dadc97d08f618ad",
+          "workload_kinds": [
+            "healthy",
+            "inventory-abrupt",
+            "inventory-gradual"
+          ]
+        },
+        "payment-service": {
+          "route": "POST /v1/payments/charge",
+          "downstream": [
+            "rds"
+          ],
+          "shared_infrastructure": [
+            "rds"
+          ],
+          "code_tree": "7df33fa2d03712c2eb7deab23050f2cf705d01a4",
+          "workload_kinds": [
+            "healthy",
+            "payment-abrupt",
+            "payment-gradual"
+          ]
+        }
       }
     }
   },

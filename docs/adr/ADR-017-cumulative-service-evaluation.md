@@ -61,16 +61,33 @@ blocked a correct migration. Nothing has been added under the original wording, 
 these changes are made in place and are recorded here. Where they conflict with the
 text above, this section wins.
 
-**1a. Evidence identity (second review).** A system version is identified by more than
-routes and topology. `configs/system_versions.json` records the identity of the
-evidence each version carries: business-service source commit, model version, bundle
-manifest, source profile, SLO health policy, evaluation plan (workload recipe and
-scoring), and topology hash. Version-1 evidence carries forward to a later version
-only if every one of these is unchanged for the carried service. A change to the
-bundle, source profile, SLO policy or scoring plan applies to all services, so every
-service is re-measured. A source change applies to each service whose code or image
-it changes. Changing `configs/topology.yaml` without declaring a new version fails
-the guard.
+**1a. Evidence identity (revised after the second and third reviews).** A version in
+`configs/system_versions.json` has three distinct identities:
+
+- **Run identity: must be equal for any carry-forward.** Model version, bundle
+  manifest, source profile, SLO health policy and scoring protocol. If any of these
+  changes, every service is re-measured.
+- **Capture identity: describes the capture, not a carry-forward criterion.** Epoch,
+  source commit, evaluation plan and topology hash. These normally change when a
+  service is added, because the plan gains kinds and the topology gains a node. A
+  change here does not by itself disqualify an old service.
+- **Service identity: the per-service equivalence a carried service must keep.**
+  Route, transitive downstream call path, shared infrastructure, code tree
+  (`services/<name>` at the capture's source commit), and the workload kinds
+  measured for it. Version-1 evidence for a service carries forward only if its
+  service identity is unchanged and none of its shared build inputs changed.
+  Shared build inputs are recorded per version: `services/common`, `src`,
+  `contracts`, `Dockerfile.service` and `pyproject.toml`. A change to
+  `services/common`, the Dockerfile or `pyproject.toml` re-measures every service. A
+  change to `src` or `contracts` re-measures every service unless a diff declared
+  before capture shows it touches no module or contract the service image uses. When
+  unsure, re-measure.
+
+A declared version is immutable. The guard pins each version entry's hash. Editing
+system-v1 in place, for example adding an edge and updating its topology hash,
+fails. A change needs a new version and a new pin. The guard also checks that the
+current version's per-service downstream equals the topology's transitive call
+path, and that its routes match `BUSINESS_ROUTES`.
 
 **3a. Which existing services are re-measured.** Before capture, the topology diff
 and an infrastructure inventory are declared. An existing service is re-measured if
@@ -98,7 +115,7 @@ unless `frozen_contracts` pins it to an older declared version. Adding a service
 therefore means a new contract version (ADR-007) plus a pin for the old one. Names are
 recognised by their shape (`*-service`), not by membership in a known list, so an
 enumeration whose names are all misspelt is still caught. Every declared version must
-carry the evidence identity of 1a. The guard
+carry the run, capture and service identities of 1a, and is pinned. The guard
 `tests/test_service_registry_single_source.py` checks every contract against its own
 version, so a valid v1 contract keeps passing while any forgotten current enumeration
 fails.
