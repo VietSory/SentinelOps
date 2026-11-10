@@ -39,6 +39,8 @@ RISK_METRICS = ('average_precision', 'prevalence', 'precursor_recall_lead_ge_60s
                 'threshold')
 CONTROL_SECTIONS = (('detector_events', ('isolation_forest', 'median_mad'), DETECTOR_METRICS),
                     ('risk', ('xgboost', 'slope'), RISK_METRICS))
+UNIT_INTERVAL = {'f1', 'precision', 'recall', 'average_precision', 'prevalence', 'precursor_recall_lead_ge_60s',
+                 'actual_alert_rate_on_negatives'}
 BOOTSTRAP_INTERVALS = ('if_minus_mad_event_f1', 'xgb_minus_slope_average_precision')
 
 
@@ -56,6 +58,9 @@ def controls_complete(controls):
             values = block.get(model)
             if not isinstance(values, dict) or not all(_number(values.get(m)) for m in metrics):
                 return False
+            if not all(0 <= values[m] <= 1 for m in metrics if m in UNIT_INTERVAL) or any(
+                    values[m] < 0 for m in metrics):
+                return False
     bootstrap = controls.get('paired_service_bootstrap')
     if not isinstance(bootstrap, dict) or not _number(bootstrap.get('services')) or bootstrap['services'] < 2:
         return False
@@ -69,12 +74,24 @@ def controls_complete(controls):
     return True
 
 
-def criteria_complete(criteria):
-    """Every P1–P6 criterion needs at least one recorded check, and every check must pass."""
-    return (isinstance(criteria, dict) and set(criteria) == set(CRITERIA)
+PER_SERVICE_CRITERIA = ('P2', 'P4', 'P5', 'P6')
+
+
+def criteria_complete(criteria, model_version):
+    """Every P1–P6 criterion needs at least one recorded check, and every check must pass.
+
+    P1 must name this bundle's model version, and the per-service criteria must cover every
+    business route, so a verification run on one service cannot certify all three.
+    """
+    if not (isinstance(criteria, dict) and set(criteria) == set(CRITERIA)
             and all(isinstance(criteria[name], list) and criteria[name]
                     and all(isinstance(item, dict) and item.get('ok') is True for item in criteria[name])
-                    for name in CRITERIA))
+                    for name in CRITERIA)):
+        return False
+    if any(item.get('model_version') != model_version for item in criteria['P1']):
+        return False
+    return all({item.get('service') for item in criteria[name]} == set(BUSINESS_ROUTES)
+               for name in PER_SERVICE_CRITERIA)
 
 
 def validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256):
@@ -107,7 +124,7 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
             or parity_verification.get('bundle_manifest_sha256') != manifest_sha256
             or any(parity_verification.get(k) != parity_record.get(k) for k in ('candidate_id', 'environment',
                                                                                  'source_profile', 'verified_at'))
-            or not criteria_complete(criteria)):
+            or not criteria_complete(criteria, model_version)):
         raise ValueError('source parity verification lacks complete passing P1–P6 checks')
 
 

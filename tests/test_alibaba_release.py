@@ -40,7 +40,9 @@ def evidence(tmp_path):
              'verified_by': 'test', 'verified_at': '2026-11-09T00:00:00Z'}
     verification = {'version': 'model-source-parity-check/v1', 'criteria_version': 'alibaba-parity-criteria/v1', **scope,
                     'bundle_manifest_sha256': result['manifest_sha256'], 'failures': [],
-                    'criteria': {name: [{'ok': True}] for name in CRITERIA}}
+                    'criteria': {name: ([{'ok': True, 'model_version': manifest['model_version']}] if name == 'P1' else
+                                         [{'ok': True, 'service': s} for s in sorted(BUSINESS_ROUTES)])
+                                 for name in CRITERIA}}
     record = {'parity_version': 'model-source-parity/v1', **scope, 'status': 'PASS',
               'evidence': [parity_verification_ref(verification)]}
     return result['manifest_sha256'], manifest, report, controls, record, verification
@@ -75,8 +77,14 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
     lambda c, v: c['detector_events']['isolation_forest'].update(recall=float('nan')),
     lambda c, v: c['paired_service_bootstrap'].pop('xgb_minus_slope_average_precision'),
     lambda c, v: c['paired_service_bootstrap']['if_minus_mad_event_f1'].update(valid_replicates=0),
+    lambda c, v: v['criteria'].update(P4=[{'ok': True, 'service': 'checkout-service'}]),
+    lambda c, v: v['criteria'].update(P6=[i for i in v['criteria']['P6'] if i['service'] != 'payment-service']),
+    lambda c, v: v['criteria']['P1'][0].update(model_version='0' * 64),
+    lambda c, v: c['risk']['xgboost'].update(precursor_recall_lead_ge_60s=1.5),
+    lambda c, v: c['detector_events']['median_mad'].update(false_incidents_per_healthy_service_hour=-0.1),
 ], ids=['empty-P3', 'all-criteria-empty', 'check-without-ok', 'ok-not-true', 'no-risk', 'no-slope-control',
-        'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates'])
+        'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates', 'P4-one-service',
+        'P6-missing-payment', 'P1-other-model', 'recall-above-one', 'negative-false-incident-rate'])
 def test_evidence_rejects_empty_parity_checks_and_incomplete_controls(tmp_path, mutate):
     sha, manifest, report, controls, record, verification = evidence(tmp_path)
     c, v = copy.deepcopy(controls), copy.deepcopy(verification)

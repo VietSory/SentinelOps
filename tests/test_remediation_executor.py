@@ -326,7 +326,8 @@ def test_target_outside_the_sandbox_cannot_even_be_constructed(field,value):
     with pytest.raises(Blocked,match='sandbox'): replace(TARGET,**{field:value})
 
 
-@pytest.mark.parametrize('failure',['forged-recovery','new-pod-never-ready','no-telemetry'])
+@pytest.mark.parametrize('failure',['forged-recovery','new-pod-never-ready','no-telemetry','telemetry-inconclusive',
+                                     'hpa-after-dispatch','scaled-after-dispatch'])
 def test_verification_failure_escalates_once_without_a_second_or_compensating_patch(failure):
     async def run():
         f=setup();sent=await f.executor.execute(f.request)
@@ -335,10 +336,21 @@ def test_verification_failure_escalates_once_without_a_second_or_compensating_pa
         if failure=='no-telemetry':
             async def pending(**kwargs): return {'status':'pending'}
             f.recovery.verify=pending
+        if failure=='telemetry-inconclusive':
+            async def inconclusive(**kwargs): return {'status':'inconclusive'}
+            f.recovery.verify=inconclusive
+        if failure in ('hpa-after-dispatch','scaled-after-dispatch'):
+            # Blast radius that appears during verification (Q-10): escalate, never patch again.
+            original=f.kube.observe
+            change=dict(hpa=True) if failure=='hpa-after-dispatch' else dict(replicas=2)
+            async def widened(): return replace(await original(),**change)
+            f.kube.observe=widened
         await f.executor.reconcile(sent['action_id'])
         if failure=='forged-recovery':
             f.time[0]+=timedelta(minutes=4);f.recovery.corrupt=True
-        else:
+        elif failure=='telemetry-inconclusive':
+            f.time[0]+=timedelta(minutes=4)
+        elif failure not in ('hpa-after-dispatch','scaled-after-dispatch'):
             f.time[0]+=timedelta(seconds=600)
         result=await f.executor.reconcile(sent['action_id'])
         assert result['phase']=='escalated' and result['facts']['reason']

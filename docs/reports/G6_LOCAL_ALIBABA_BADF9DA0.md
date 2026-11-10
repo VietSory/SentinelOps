@@ -63,7 +63,7 @@ of them ran in CI on `main` (`foundation`; the native PostgreSQL and kind checks
 | Worker crash before / after patch | never dispatched / reconciled without resend | `test_armed_but_unsent_crash_never_dispatches_and_eventually_quarantines`, `test_restart_observes_uncertain_sent_patch_without_resend_then_verifies` |
 | Kubernetes timeout | reconcile, no resend | `test_timeout_after_server_commit_and_restart_reconcile_without_resending` |
 | Verification success | recovered | `test_patch_is_verifying_until_new_pod_and_current_post_action_telemetry_succeed`; G6 trials 02–11 |
-| Verification failure | escalated, exactly one patch, no compensation | G6 trial 12 (native); `test_verification_failure_escalates_once_without_a_second_or_compensating_patch` (forged recovery, new pod never ready, no telemetry: one dry-run and one patch in total, escalation stays terminal on later reconcile and re-request) |
+| Verification failure | escalated, exactly one patch, no compensation | G6 trial 12 (native); `test_verification_failure_escalates_once_without_a_second_or_compensating_patch` (forged recovery, new pod never ready, no telemetry, inconclusive telemetry, HPA or extra replicas appearing during verification: one dry-run and one patch in total, escalation stays terminal on later reconcile and re-request; a mutant that compensates on any escalation fails all six) |
 | Missing telemetry | escalated on timeout | `test_ready_deployment_without_telemetry_times_out_and_no_bad_image_compensation`, verification `test_no_history_and_scan_budget_never_claim_recovery` |
 
 Every case now has at least one test that asserts both the outcome and the side
