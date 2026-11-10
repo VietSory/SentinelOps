@@ -186,3 +186,31 @@ def test_provider_outage_backs_off_and_stale_keys_expire():
     clock[0] = 241.  # past 4 cache lifetimes without a successful refresh
     with pytest.raises(VerifierUnavailable):
         identify(v, token())
+
+
+def _time_claim_cases():
+    now = int(time.time())
+    return [{'exp': str(now + 300)}, {'iat': str(now)}, {'nbf': str(now - 10)},
+            {'exp': float('inf')}, {'exp': float('-inf')}, {'iat': float('inf')}, {'nbf': float('nan')},
+            {'exp': True}, {'iat': [now]}]
+
+
+@pytest.mark.parametrize('claims', _time_claim_cases(),
+                         ids=['exp-str', 'iat-str', 'nbf-str', 'exp-inf', 'exp-neg-inf', 'iat-inf', 'nbf-nan',
+                              'exp-bool', 'iat-list'])
+def test_time_claims_must_be_finite_numeric_dates(claims):
+    # Codex review 2026-11-10: PyJWT coerces numeric strings with int() and Infinity overflowed into a 500.
+    with pytest.raises(TokenRejected):
+        identify(verifier(), token('sentinelops/incidents.write', **claims))
+
+
+def test_api_answers_401_not_500_for_invalid_time_claims():
+    app = create_app(Settings(environment='aws', oidc=verifier().config), repository=Repository(),
+                     identity_verifier=verifier())
+    with TestClient(app, raise_server_exceptions=False) as api:
+        for claims in _time_claim_cases():
+            answer = api.get('/ready/incidents',
+                             headers={'Authorization': 'Bearer ' + token('sentinelops/incidents.read', **claims)})
+            assert answer.status_code == 401, claims
+        assert api.get('/ready/incidents', headers={
+            'Authorization': 'Bearer ' + token('sentinelops/incidents.read', nbf=int(time.time()) - 10)}).status_code == 200
