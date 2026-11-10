@@ -528,14 +528,23 @@ def audit_alibaba_local(store, plan, *, project=PROJECT, now=None):
     if ordered and created < max(end for _, end in ordered):
         raise ValueError('ADR-016 epoch audit precedes a captured source end')
     role = 'development-validation'
-    expected = {group_name(plan, role, ordinal) + '-' + kind
-                for ordinal in range(1, plan['maximum_groups'][role]+1) for kind in plan_kinds(plan)}
+    minimum = plan['minimum_groups'][role]
+    # _collect_sources has already verified each immutable whole-group closure.
+    # Follow only the replacements reachable from the scheduled acquisition groups.
+    replacements = {item['group_id']: item['replacement_group_id'] for item in excluded}
+    groups = set()
+    for ordinal in range(1, minimum + 1):
+        group = group_name(plan, role, ordinal)
+        while group in replacements:
+            group = replacements.pop(group)
+        groups.add(group)
+    expected = {group + '-' + kind for group in groups for kind in plan_kinds(plan)}
     actual = {case['group_id'] + '-' + case['kind'] for case in cases}
     unverified_controls = sorted(case['group_id'] + '-' + case['kind'] for case in cases if
         (case['kind'].endswith('-abrupt') and case.get('abrupt_control_verified') is not True)
         or (case['kind'].endswith('-gradual') and case['gradual_control_verified'] is not True))
-    ready = actual == expected and len(actual) == len(cases) and not (
-        pending or failed or quarantine or excluded or unverified_controls)
+    ready = len(groups) == minimum and actual == expected and len(actual) == len(cases) and not (
+        pending or failed or quarantine or replacements or unverified_controls)
     report = {
         'dataset_version': 'alibaba-local-evaluation-admission/v1', 'epoch_ref': epoch_ref,
         'authorizing_adr': 'ADR-016', 'plan_sha256': stable_id(plan), 'created_at': timestamp(created),

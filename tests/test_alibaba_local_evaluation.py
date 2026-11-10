@@ -10,12 +10,43 @@ from sentinelops.experiments.local_campaign import planned_slots
 from sentinelops.experiments.local_corpus import ALIBABA_PLAN, load_plan, recipe, register_session
 from sentinelops.experiments.runner import execute
 from sentinelops.ml.alibaba_local_evaluation import metric_event_cases
+from sentinelops.ml import local_data
 from sentinelops.ml.local_data import verify_alibaba_warmup
 from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
 from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 from test_health_source import START, capture
+
+
+@pytest.mark.parametrize('mode', ['planned', 'replacement', 'chain', 'missing', 'unsolicited', 'shared'])
+def test_epoch_audit_needs_exact_planned_groups_or_verified_replacements(tmp_path, monkeypatch, mode):
+    plan = load_plan(ALIBABA_PLAN)
+    groups = ['alb-01', 'alb-02', 'alb-03', 'alb-04', 'alb-05']
+    replacements = {}
+    if mode in ('replacement', 'chain', 'missing', 'shared'):
+        replacements['alb-01'] = 'alb-06'
+        groups[0] = 'alb-06'
+    if mode == 'chain':
+        replacements['alb-06'] = 'alb-07'
+        groups[0] = 'alb-07'
+    if mode == 'missing':
+        groups.pop(0)
+    if mode == 'unsolicited':
+        groups[0] = 'alb-06'
+    if mode == 'shared':
+        replacements['alb-02'] = 'alb-06'
+        groups.pop(1)
+    cases = [{'group_id': group, 'kind': kind, 'abrupt_control_verified': True, 'gradual_control_verified': True,
+              'source_result_ref': f'{group}-{kind}', 'oracle_ref': f'{group}-{kind}-oracle'}
+             for group in groups for kind in plan['kinds']]
+    excluded = [{'group_id': group, 'replacement_group_id': replacement, 'excluded_whole_group': True}
+                for group, replacement in replacements.items()]
+    monkeypatch.setattr(local_data, 'read_alibaba_epoch', lambda *_: ('epoch-ref', {}))
+    monkeypatch.setattr(local_data, '_collect_sources', lambda *_: (cases, [], [], [], [], [], {}, excluded))
+    report, _, _ = local_data.audit_alibaba_local(ArtifactStore(tmp_path), plan)
+    assert report['evaluation_ready'] is (mode in ('planned', 'replacement', 'chain'))
+    assert report['fitting_rows'] == 0 and report['excluded_groups'] == excluded
 
 
 def test_alibaba_epoch_is_evaluation_only_and_binds_candidate_before_docker(tmp_path, monkeypatch):
