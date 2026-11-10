@@ -35,7 +35,10 @@ uvicorn sentinelops.main:app --app-dir src --host 127.0.0.1 --port 8000
 
 Liveness: `http://127.0.0.1:8000/health`; OpenAPI: `http://127.0.0.1:8000/docs`.
 Lệnh này chưa dựng control DB/worker/model. Incident API cần DB và bearer identity;
-inference trả 503 khi thiếu model hợp lệ. Theo [API runbook](docs/runbooks/INCIDENT_API.md)
+inference trả 503 khi thiếu model hợp lệ. Với release Alibaba, `/v1/detect` và `/v1/risk`
+trả 409 `model_requires_stream_history`; kết quả model nằm ở `service_signals` của
+`GET /v1/incidents/{id}?revision=…`. Token tĩnh chỉ dùng cho local/test; môi trường khác
+dùng OIDC. Theo [API runbook](docs/runbooks/INCIDENT_API.md)
 và [local testbed](docs/runbooks/LOCAL_TESTBED.md) để chạy đầy đủ trên tài nguyên riêng.
 
 Lane B: `python -m scripts.lane_b up`, rồi chạy `python -m scripts.lane_b serve`
