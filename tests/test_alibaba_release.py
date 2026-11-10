@@ -20,15 +20,17 @@ from tests.test_alibaba_bundle import synthetic_fit
 BUCKETS = tuple(f'2026-11-09T02:{minute:02d}:00Z' for minute in range(20, 31))  # window 5 + baseline 5 + 1
 
 
-def criteria(model_version):
+def criteria(model_version, features):
     pairs = [{'service': s, 'bucket_end': b} for s in sorted(BUSINESS_ROUTES) for b in BUCKETS]
     return {'P1': [{'ok': True, 'model_version': model_version}],
             'P2': [{'ok': True, **p} for p in pairs],
             'P3': [{'ok': True, 'what': 'all buckets normalized', 'observations': len(pairs)}]
                   + [{'ok': True, 'coverage': 1.0, **p} for p in pairs],
-            'P4': [{'ok': True, **p} for p in pairs],
-            'P5': [{'ok': True, **p} for p in pairs],
-            'P6': [{'ok': True, 'service': s, 'window_end': BUCKETS[-1]} for s in sorted(BUSINESS_ROUTES)]}
+            'P4': [{'ok': True, 'relative_difference': 0.02, **p} for p in pairs],
+            'P5': [{'ok': True, 'relative_difference': 0.01, **p} for p in pairs],
+            'P6': [{'ok': True, 'service': s, 'window_end': BUCKETS[-1], 'features': dict.fromkeys(features, 0.1),
+                    'scores': {'isolation_forest': 0.3, 'median_mad': 1.9, 'xgboost': 0.3}}
+                   for s in sorted(BUSINESS_ROUTES)]}
 
 
 def truncate(v, keep):
@@ -64,7 +66,7 @@ def evidence(tmp_path):
              'verified_by': 'test', 'verified_at': '2026-11-09T00:00:00Z'}
     verification = {'version': 'model-source-parity-check/v1', 'criteria_version': 'alibaba-parity-criteria/v1', **scope,
                     'bundle_manifest_sha256': result['manifest_sha256'], 'failures': [],
-                    'criteria': criteria(manifest['model_version'])}
+                    'criteria': criteria(manifest['model_version'], manifest['provenance']['config']['features'])}
     record = {'parity_version': 'model-source-parity/v1', **scope, 'status': 'PASS',
               'evidence': [parity_verification_ref(verification)]}
     return result['manifest_sha256'], manifest, report, controls, record, verification
@@ -112,6 +114,11 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
     lambda c, v: truncate(v, BUCKETS[-1:]),
     lambda c, v: truncate(v, BUCKETS[:5] + BUCKETS[6:]) or [i.update(window_end=BUCKETS[-1]) for i in v['criteria']['P6']],
     lambda c, v: [i.update(window_end=BUCKETS[-2]) for i in v['criteria']['P6']],
+    lambda c, v: v['criteria']['P4'][3].update(relative_difference=0.5),
+    lambda c, v: v['criteria']['P5'][7].pop('relative_difference'),
+    lambda c, v: v['criteria']['P3'][2].update(coverage=0.9),
+    lambda c, v: v['criteria']['P6'][1]['scores'].update(xgboost=1.5),
+    lambda c, v: v['criteria']['P6'][0].update(features={}),
     lambda c, v: v['criteria'].update(P6=[i for i in v['criteria']['P6'] if i['service'] != 'payment-service']),
     lambda c, v: v['criteria']['P1'][0].update(model_version='0' * 64),
     lambda c, v: c['risk']['xgboost'].update(precursor_recall_lead_ge_60s=1.5),
@@ -120,6 +127,7 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
         'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates', 'P4-one-service', 'P3-summary-only', 'P3-missing-bucket', 'P5-extra-bucket',
         'P2-uneven-buckets', 'P3-summary-miscount', 'xgb-threshold-4', 'bootstrap-out-of-range', 'controls-other-risk-model',
         'controls-without-model-hashes', 'parity-one-minute-each', 'parity-gap', 'P6-not-final-minute',
+        'P4-ok-but-over-tolerance', 'P5-no-measurement', 'P3-partial-coverage', 'P6-probability-above-one', 'P6-no-features',
         'P6-missing-payment', 'P1-other-model', 'recall-above-one', 'negative-false-incident-rate'])
 def test_evidence_rejects_empty_parity_checks_and_incomplete_controls(tmp_path, mutate):
     sha, manifest, report, controls, record, verification = evidence(tmp_path)
@@ -146,3 +154,11 @@ def test_release_loads_as_one_shared_alibaba_registry(tmp_path):
                                    parity_verification=verification, approved_by='owner', decision_note='G3 accepted',
                                    output=tmp_path / 'release')
     assert result['activation_performed'] is False and result['model_version'] == manifest['model_version']
+
+
+def test_validator_bounds_equal_the_parity_script():
+    import importlib
+    script = importlib.import_module('scripts.check_alibaba_source_parity')
+    from sentinelops.ml import alibaba_release
+    assert (alibaba_release.COUNT_TOLERANCE, alibaba_release.MEAN_TOLERANCE) == (script.COUNT_TOLERANCE,
+                                                                                  script.MEAN_TOLERANCE)

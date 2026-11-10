@@ -79,6 +79,9 @@ def controls_complete(controls):
 
 
 BUCKET_CRITERIA = ('P3', 'P4', 'P5')
+# Same bounds as scripts/check_alibaba_source_parity.py (a test keeps them equal).
+COUNT_TOLERANCE = .05
+MEAN_TOLERANCE = .10
 
 
 def criteria_complete(criteria, model_version, config):
@@ -125,8 +128,28 @@ def criteria_complete(criteria, model_version, config):
     if len(minutes) < required or any((b - a).total_seconds() != 60 for a, b in zip(minutes, minutes[1:])):
         return False
     final = timestamp(minutes[-1])
-    return (sorted(item.get('service') for item in criteria['P6']) == sorted(BUSINESS_ROUTES)
-            and all(item.get('window_end') == final for item in criteria['P6']))
+    if not (sorted(item.get('service') for item in criteria['P6']) == sorted(BUSINESS_ROUTES)
+            and all(item.get('window_end') == final for item in criteria['P6'])):
+        return False
+    # Do not trust `ok` alone: the recorded measurements must satisfy the same bounds the
+    # parity script applies (same constants, kept equal by a test), and P6 must carry the
+    # bundle's features and finite IF, MAD and XGBoost scores.
+    def bounded(item, key, limit):
+        return _number(item.get(key)) and 0 <= item[key] <= limit
+    if not all(item.get('coverage') == 1 for item in criteria['P3'] if 'bucket_end' in item):
+        return False
+    if not all(bounded(item, 'relative_difference', COUNT_TOLERANCE) for item in criteria['P4']):
+        return False
+    if not all(bounded(item, 'relative_difference', MEAN_TOLERANCE) for item in criteria['P5']):
+        return False
+    for item in criteria['P6']:
+        features, scores = item.get('features'), item.get('scores')
+        if (not isinstance(features, dict) or set(features) != set(config['features'])  # the store sorts JSON keys
+                or not all(_number(v) for v in features.values())
+                or not isinstance(scores, dict) or set(scores) != {'isolation_forest', 'median_mad', 'xgboost'}
+                or not all(_number(v) for v in scores.values()) or not 0 <= scores['xgboost'] <= 1):
+            return False
+    return True
 
 
 def validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256):
