@@ -26,6 +26,6 @@ Breaking changes require a new ADR before code is merged.
 | [014](ADR-014-proposed-local-training-evidence.md) | **Superseded by 016** (2026-11-08); accepted 2026-10-31 | Prospective local HTTP primary training, independent oracle/labels/groups; versioned v2 contract; readiness not implied |
 | [015](ADR-015-detector-event-evaluation-coverage.md) | Accepted 2026-11-08 — explicit owner approval | Evaluation-only abrupt S1 detector events beside unchanged gradual protocol; H4 via separate Kubernetes S2 |
 | [016](ADR-016-public-production-training-source.md) | Accepted 2026-11-08 — explicit owner approval | IF/XGBoost trained on Alibaba production traces (`http-relative-5m/v1`); local data evaluation-only; supersedes ADR-014 training source |
-| [017](ADR-017-cumulative-service-evaluation.md) | **Proposed** 2026-11-10, before layer-2 epoch 2 data | Evidence per (system version, service, epoch); new services add a supplementary epoch on the same bundle, no full rerun or silent pooling |
+| [017](ADR-017-cumulative-service-evaluation.md) | Accepted 2026-11-10 — explicit owner approval (D-24), before layer-2 epoch 2 data | Evidence per (system version, service, epoch); new services add a supplementary epoch on the same bundle, no full rerun or silent pooling |
 
 ADR-001…005 remain current. ADR-007 supersedes the contradictory unknown-field rule and example wire formats in historical PRODUCT_SPEC v1.0; that source is archived. Numeric thresholds/performance targets are not automatically accepted or measured by these ADRs.

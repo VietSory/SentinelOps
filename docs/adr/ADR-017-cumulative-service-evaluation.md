@@ -1,6 +1,6 @@
 # ADR-017 — Cumulative per-service evaluation when services are added
 
-**Status:** Proposed 2026-11-10, recorded before the layer-2 epoch 2 (`alb-*`)
+**Status:** Accepted 2026-11-10 — explicit owner approval (D-24). Recorded before the layer-2 epoch 2 (`alb-*`)
 produced any data. The owner asked that later services build on the 3-service
 results instead of restarting.
 **Related:** ADR-008, ADR-015, ADR-016.
