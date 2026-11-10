@@ -20,9 +20,12 @@ def at(minute):
 
 def diagnostic(rank=None, *, abstained=True, onset=5, identifier='first'):
     rank = [] if rank is None else rank
-    group = {'group_id': identifier, 'first_onset_at': at(onset)}
+    group = {'group_id': identifier, 'first_onset_at': at(onset), 'structural_candidates': rank}
+    candidates = [{'service': service, 'score': 1 / position, 'components': {
+        'anomaly_strength': {'value': None}, 'temporal_precedence': {'value': None}}}
+        for position, service in enumerate(rank, start=1)]
     return {'report_ref': 'artifact://manifests/' + 'd' * 64 + '.json', 'results': [{
-        'group_id': identifier, 'rca': {'correlation': {'groups': [group]}, 'ranking': rank,
+        'group_id': identifier, 'rca': {'correlation': {'groups': [group]}, 'ranking': rank, 'candidates': candidates,
         'abstained': abstained, 'abstention_reasons': ['insufficient-coverage'] if abstained else [],
         'actions_allowed': False}}]}
 
@@ -70,6 +73,31 @@ def test_missing_group_abstention_wrong_root_and_no_confirmed_slo_keep_trial_den
     only_abstained = evaluation.summarize_trials([abstained])
     assert only_abstained['conditional_qualified_top1'] is None
     assert evaluation.summarize_trials([])['qualified_top1_per_fault_trial'] is None
+
+
+def test_ablation_metrics_count_missing_groups_and_ties_without_breaking_abstention():
+    payment, inventory = 'payment-service', 'inventory-service'
+    run = {'root_cause_ground_truth': payment}
+    source = diagnostic([payment, inventory])
+    candidates = source['results'][0]['rca']['candidates']
+    for candidate in candidates:
+        candidate['components']['anomaly_strength']['value'] = .5
+    candidates[0]['components']['temporal_precedence']['value'] = 1
+    abstained = evaluation.trial_result(trial(), run, source)
+    assert abstained['comparison_ranks']['anomaly-only'] == {payment: 2, inventory: 2}
+    assert abstained['comparison_ranks']['topology-time-only'] == {payment: 2, inventory: 2}
+    assert abstained['comparison_ranks']['full-qualified'] == {}
+    candidates[1]['components']['temporal_precedence']['value'] = 0
+    separated = evaluation.trial_result(trial(), run, source)
+    assert separated['comparison_ranks']['topology-time-only'] == {payment: 1, inventory: 2}
+
+    missing = evaluation.trial_result(trial(), run, {'report_ref': 'none', 'results': []})
+    metrics = evaluation.summarize_comparisons([abstained, separated, missing])
+    assert metrics['full-qualified']['mrr'] == 0
+    assert metrics['full-diagnostic']['mrr'] == pytest.approx(2 / 3)
+    assert metrics['anomaly-only'] == {'fault_trials': 3, 'ranked_fault_trials': 2,
+                                      'top1': 0, 'top3': pytest.approx(2 / 3), 'mrr': pytest.approx(1 / 3)}
+    assert metrics['topology-time-only']['mrr'] == .5
 
 
 def test_truth_mismatch_and_action_authority_are_rejected():

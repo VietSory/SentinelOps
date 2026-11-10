@@ -86,7 +86,17 @@ the denominator of descriptive trial-level top-1/top-3 counts; conditional
 qualified top-1 has a separate denominator and is null when none qualify. Healthy
 trials with an incident group are reported separately. These are not the
 incident-level Q-04/Q-05 metrics. Trials within a whole source context are
-correlated; no IID confidence interval or quality promotion is claimed.
+correlated, so the report makes no IID confidence interval or quality claim.
+
+The v2 evaluation report also compares top-1, top-3 and mean reciprocal rank
+(MRR) across four views of the same selected group. Full diagnostic uses every
+positive RCA score. Full qualified keeps a ranking only if RCA did not abstain.
+Anomaly-only uses positive measured anomaly strengths. Topology/time-only uses
+the correlation group's structural candidates and orders them by verified onset
+precedence when every candidate has that evidence. Otherwise they share a tie.
+Each tied candidate receives the last position in the tie. All four views divide
+by every fault trial, including missing rankings, and report how many trials
+each view could rank. These comparisons do not change RCA weights or decisions.
 
 The output contains `evaluation.json` and per-run health/correlation/RCA archives.
 Original corpus objects and Git history are still needed to recompute admission.
