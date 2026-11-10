@@ -49,6 +49,14 @@ def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+def _count(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _close(recorded, derived):
+    return _number(recorded) and math.isclose(recorded, derived, rel_tol=1e-9, abs_tol=1e-12)
+
+
 def controls_complete(controls):
     """The layer-1 comparison the owner reads before G3 must be present, not only its identity."""
     for section, models, metrics in CONTROL_SECTIONS:
@@ -65,6 +73,26 @@ def controls_complete(controls):
     # Codex review: a probability threshold outside [0, 1] or a negative slope threshold is invalid.
     if not 0 <= controls['risk']['xgboost']['threshold'] <= 1 or controls['risk']['slope']['threshold'] < 0:
         return False
+    # Codex review: rates must follow from the counts recorded beside them, not be free numbers.
+    for model in ('isolation_forest', 'median_mad'):
+        d = controls['detector_events'][model]
+        if not all(_count(d.get(k)) for k in ('tp', 'fp', 'fn')):
+            return False
+        tp, fp, fn = d['tp'], d['fp'], d['fn']
+        if not (_close(d['precision'], tp / (tp + fp) if tp + fp else 0.0)
+                and _close(d['recall'], tp / (tp + fn) if tp + fn else 0.0)
+                and _close(d['f1'], 2 * tp / (2 * tp + fp + fn) if 2 * tp + fp + fn else 0.0)):
+            return False
+    for model in ('xgboost', 'slope'):
+        r = controls['risk'][model]
+        if not all(_count(r.get(k)) for k in ('positives', 'windows', 'eligible_precursor_events',
+                                               'detected_precursor_events')):
+            return False
+        if (r['windows'] < 1 or r['positives'] > r['windows'] or not _close(r['prevalence'], r['positives'] / r['windows'])
+                or r['eligible_precursor_events'] < 1 or r['detected_precursor_events'] > r['eligible_precursor_events']
+                or r['precursor_recall_lead_ge_60s'] > r['detected_precursor_events'] / r['eligible_precursor_events']
+                + 1e-12):
+            return False
     bootstrap = controls.get('paired_service_bootstrap')
     if not isinstance(bootstrap, dict) or not _number(bootstrap.get('services')) or bootstrap['services'] < 2:
         return False
@@ -84,7 +112,7 @@ COUNT_TOLERANCE = .05
 MEAN_TOLERANCE = .10
 
 
-def criteria_complete(criteria, model_version, config):
+def criteria_complete(criteria, model_version, config, scores_for):
     """Every P1–P6 criterion needs at least one recorded check, and every check must pass.
 
     P1 must name this bundle's model version. P2 declares the (service, bucket) pairs of the
@@ -125,34 +153,68 @@ def criteria_complete(criteria, model_version, config):
     except (TypeError, ValueError):
         return False
     required = config['window_minutes'] + config['baseline']['min_minutes'] + 1
-    if len(minutes) < required or any((b - a).total_seconds() != 60 for a, b in zip(minutes, minutes[1:])):
+    if (len(minutes) < required or any(minute.timestamp() % 60 for minute in minutes)
+            or any((b - a).total_seconds() != 60 for a, b in zip(minutes, minutes[1:]))):
         return False
     final = timestamp(minutes[-1])
     if not (sorted(item.get('service') for item in criteria['P6']) == sorted(BUSINESS_ROUTES)
             and all(item.get('window_end') == final for item in criteria['P6'])):
         return False
-    # Do not trust `ok` alone: the recorded measurements must satisfy the same bounds the
-    # parity script applies (same constants, kept equal by a test), and P6 must carry the
-    # bundle's features and finite IF, MAD and XGBoost scores.
-    def bounded(item, key, limit):
-        return _number(item.get(key)) and 0 <= item[key] <= limit
-    if not all(item.get('coverage') == 1 for item in criteria['P3'] if 'bucket_end' in item):
-        return False
-    if not all(bounded(item, 'relative_difference', COUNT_TOLERANCE) for item in criteria['P4']):
-        return False
-    if not all(bounded(item, 'relative_difference', MEAN_TOLERANCE) for item in criteria['P5']):
-        return False
+    # Do not trust `ok` alone (Codex reviews): each recorded measurement must satisfy the parity
+    # script's bound (same constants, kept equal by a test), the derived difference must follow
+    # from the raw values recorded beside it, and P6 scores are recomputed with the bundle itself.
+    for item in criteria['P3']:
+        if 'bucket_end' in item and not (_number(item.get('coverage')) and item['coverage'] == 1
+                                         and _number(item.get('lag_seconds')) and item['lag_seconds'] >= 0):
+            return False
+    for item in criteria['P4']:
+        count, completions = item.get('prometheus_count'), item.get('server_completions')
+        if not (_number(count) and count >= 0 and _count(completions) and completions > 0
+                and _close(item.get('relative_difference'), abs(count / completions - 1))
+                and item['relative_difference'] <= COUNT_TOLERANCE):
+            return False
+    for item in criteria['P5']:
+        mean, exact = item.get('prometheus_mean_ms'), item.get('exact_mean_ms')
+        if not (_number(mean) and mean > 0 and _number(exact) and exact > 0
+                and _close(item.get('relative_difference'), abs(mean / exact - 1))
+                and item['relative_difference'] <= MEAN_TOLERANCE):
+            return False
     for item in criteria['P6']:
         features, scores = item.get('features'), item.get('scores')
         if (not isinstance(features, dict) or set(features) != set(config['features'])  # the store sorts JSON keys
                 or not all(_number(v) for v in features.values())
-                or not isinstance(scores, dict) or set(scores) != {'isolation_forest', 'median_mad', 'xgboost'}
-                or not all(_number(v) for v in scores.values()) or not 0 <= scores['xgboost'] <= 1):
+                or not isinstance(scores, dict) or set(scores) != {'isolation_forest', 'median_mad', 'xgboost'}):
+            return False
+        expected = scores_for([features[name] for name in config['features']])
+        if set(expected) != set(scores) or not all(_close(scores[k], expected[k]) for k in expected):
             return False
     return True
 
 
-def validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256):
+def bundle_scorer(bundle, manifest_sha256):
+    """Score one feature vector with the bundle's own models, exactly as the parity script's P6."""
+    from sentinelops.ml.models import load_bundle
+    _, detector, risk = load_bundle(Path(bundle), expected_manifest_sha256=manifest_sha256)
+
+    def scores_for(values):
+        detection = detector.predict([values])
+        scores = {name: float(item['raw_score'][0]) for name, item in detection.items()}
+        scores['xgboost'] = float(risk.predict_proba([values])[0, 1])
+        return scores
+    return scores_for
+
+
+def validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256, *,
+                      scores_for):
+    """Completeness and internal consistency of operator-supplied evidence.
+
+    Trust boundary: these documents come from operator-run scripts (alibaba_controls,
+    check_alibaba_source_parity) and are not signed. This check proves that they are complete,
+    bound to this bundle, and consistent with the raw values recorded inside them, and it
+    recomputes P6 with the bundle. It cannot prove that the recorded raw values were measured
+    rather than written by hand. That rests on the operator who runs parity on the target
+    environment and on the owner's G3 decision recorded with the release.
+    """
     provenance = manifest['provenance']
     model_version = manifest['model_version']
     if (manifest.get('bundle_version') != BUNDLE_VERSION or manifest.get('origin') != ORIGIN
@@ -184,7 +246,7 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
             or parity_verification.get('bundle_manifest_sha256') != manifest_sha256
             or any(parity_verification.get(k) != parity_record.get(k) for k in ('candidate_id', 'environment',
                                                                                  'source_profile', 'verified_at'))
-            or not criteria_complete(criteria, model_version, provenance['config'])):
+            or not criteria_complete(criteria, model_version, provenance['config'], scores_for)):
         raise ValueError('source parity verification lacks complete passing P1–P6 checks')
 
 
@@ -200,7 +262,8 @@ def build_alibaba_release(bundle, manifest_sha256, *, controls, parity_record, p
             raise ValueError(name + ' must be a nonempty explicit owner decision')
     manifest = read_bundle_manifest(bundle, expected_manifest_sha256=manifest_sha256)
     report = json.loads(_pinned(bundle / 'report.json', manifest['provenance']['report_sha256']))
-    validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256)
+    validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256,
+                      scores_for=bundle_scorer(bundle, manifest_sha256))
     decided = timestamp(now or datetime.now(timezone.utc))
     staging = output.with_name('.' + output.name + '.staging')
     if staging.exists():

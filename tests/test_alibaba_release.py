@@ -9,7 +9,7 @@ pytest.importorskip("sklearn")
 pytest.importorskip("xgboost")
 
 from sentinelops.ml.alibaba_bundle import package_fit
-from sentinelops.ml.alibaba_release import CRITERIA, build_alibaba_release, validate_evidence
+from sentinelops.ml.alibaba_release import CRITERIA, build_alibaba_release, bundle_scorer, validate_evidence
 from sentinelops.ml.models import read_bundle_manifest
 from sentinelops.ml.registry import ModelRegistry
 from sentinelops.ml.release import parity_verification_ref
@@ -20,17 +20,23 @@ from tests.test_alibaba_bundle import synthetic_fit
 BUCKETS = tuple(f'2026-11-09T02:{minute:02d}:00Z' for minute in range(20, 31))  # window 5 + baseline 5 + 1
 
 
-def criteria(model_version, features):
+def criteria(model_version, features, scorer):
     pairs = [{'service': s, 'bucket_end': b} for s in sorted(BUSINESS_ROUTES) for b in BUCKETS]
+    values = [0.1] * len(features)
     return {'P1': [{'ok': True, 'model_version': model_version}],
             'P2': [{'ok': True, **p} for p in pairs],
             'P3': [{'ok': True, 'what': 'all buckets normalized', 'observations': len(pairs)}]
-                  + [{'ok': True, 'coverage': 1.0, **p} for p in pairs],
-            'P4': [{'ok': True, 'relative_difference': 0.02, **p} for p in pairs],
-            'P5': [{'ok': True, 'relative_difference': 0.01, **p} for p in pairs],
-            'P6': [{'ok': True, 'service': s, 'window_end': BUCKETS[-1], 'features': dict.fromkeys(features, 0.1),
-                    'scores': {'isolation_forest': 0.3, 'median_mad': 1.9, 'xgboost': 0.3}}
-                   for s in sorted(BUSINESS_ROUTES)]}
+                  + [{'ok': True, 'coverage': 1.0, 'lag_seconds': 35.0, **p} for p in pairs],
+            'P4': [{'ok': True, 'prometheus_count': 58.0, 'server_completions': 60,
+                    'relative_difference': abs(58.0 / 60 - 1), **p} for p in pairs],
+            'P5': [{'ok': True, 'prometheus_mean_ms': 15.5, 'exact_mean_ms': 15.4,
+                    'relative_difference': abs(15.5 / 15.4 - 1), **p} for p in pairs],
+            'P6': [{'ok': True, 'service': s, 'window_end': BUCKETS[-1], 'features': dict(zip(features, values)),
+                    'scores': scorer(values)} for s in sorted(BUSINESS_ROUTES)]}
+
+
+def scorer(tmp_path, sha):
+    return bundle_scorer(tmp_path / 'bundle', sha)
 
 
 def truncate(v, keep):
@@ -50,8 +56,10 @@ def evidence(tmp_path):
     result = package_fit(fit, tmp_path / 'bundle')
     manifest = read_bundle_manifest(tmp_path / 'bundle', expected_manifest_sha256=result['manifest_sha256'])
     report = json.loads((tmp_path / 'bundle' / 'report.json').read_text())
-    detector = {'f1': 0.5, 'precision': 0.5, 'recall': 0.5, 'false_incidents_per_healthy_service_hour': 0.1}
-    risk = {'average_precision': 0.07, 'prevalence': 0.01, 'precursor_recall_lead_ge_60s': 0.2,
+    detector = {'tp': 10, 'fp': 30, 'fn': 20, 'precision': 10 / 40, 'recall': 10 / 30, 'f1': 20 / 70,
+                'false_incidents_per_healthy_service_hour': 0.1}
+    risk = {'average_precision': 0.07, 'positives': 10, 'windows': 1000, 'prevalence': 0.01,
+            'eligible_precursor_events': 20, 'detected_precursor_events': 5, 'precursor_recall_lead_ge_60s': 0.2,
             'actual_alert_rate_on_negatives': 0.02, 'threshold': 0.8}
     interval = {'valid_replicates': 1000, 'lower': -0.02, 'upper': 0.04}
     controls = {'report_version': 'alibaba-relative-controls/v1', 'fit_report_sha256': stable_id(report),
@@ -66,7 +74,8 @@ def evidence(tmp_path):
              'verified_by': 'test', 'verified_at': '2026-11-09T00:00:00Z'}
     verification = {'version': 'model-source-parity-check/v1', 'criteria_version': 'alibaba-parity-criteria/v1', **scope,
                     'bundle_manifest_sha256': result['manifest_sha256'], 'failures': [],
-                    'criteria': criteria(manifest['model_version'], manifest['provenance']['config']['features'])}
+                    'criteria': criteria(manifest['model_version'], manifest['provenance']['config']['features'],
+                                         bundle_scorer(tmp_path / 'bundle', result['manifest_sha256']))}
     record = {'parity_version': 'model-source-parity/v1', **scope, 'status': 'PASS',
               'evidence': [parity_verification_ref(verification)]}
     return result['manifest_sha256'], manifest, report, controls, record, verification
@@ -74,7 +83,7 @@ def evidence(tmp_path):
 
 def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
     sha, manifest, report, controls, record, verification = evidence(tmp_path)
-    validate_evidence(manifest, report, controls, record, verification, sha)
+    validate_evidence(manifest, report, controls, record, verification, sha, scores_for=scorer(tmp_path, sha))
     for mutate in (lambda c, r, v: c.update(fit_report_sha256='0' * 64),
                    lambda c, r, v: r.update(status='FAIL'),
                    lambda c, r, v: v['criteria']['P5'].append({'ok': False}),
@@ -86,7 +95,7 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
         if r is not record and r.get('evidence') == record['evidence'] and v != verification:
             r['evidence'] = [parity_verification_ref(v)]
         with pytest.raises(ValueError):
-            validate_evidence(manifest, report, c, r, v, sha)
+            validate_evidence(manifest, report, c, r, v, sha, scores_for=scorer(tmp_path, sha))
 
 
 @pytest.mark.parametrize('mutate', [
@@ -123,19 +132,33 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
     lambda c, v: v['criteria']['P1'][0].update(model_version='0' * 64),
     lambda c, v: c['risk']['xgboost'].update(precursor_recall_lead_ge_60s=1.5),
     lambda c, v: c['detector_events']['median_mad'].update(false_incidents_per_healthy_service_hour=-0.1),
+    lambda c, v: v['criteria']['P4'][0].update(prometheus_count=0, relative_difference=0.0),
+    lambda c, v: c['detector_events']['isolation_forest'].update(f1=0.99),
+    lambda c, v: [i.update(coverage=True) for i in v['criteria']['P3'] if 'bucket_end' in i],
+    lambda c, v: [i.update(bucket_end=i['bucket_end'].replace(':00Z', ':30Z')) for name in ('P2', 'P3', 'P4', 'P5')
+                  for i in v['criteria'][name] if 'bucket_end' in i]
+                 and [i.update(window_end=BUCKETS[-1].replace(':00Z', ':30Z')) for i in v['criteria']['P6']],
+    lambda c, v: v['criteria']['P5'][4].update(exact_mean_ms=30.0),
+    lambda c, v: v['criteria']['P6'][2]['scores'].update(isolation_forest=v['criteria']['P6'][2]['scores']['isolation_forest'] + 0.01),
+    lambda c, v: c['risk']['slope'].update(prevalence=0.5),
+    lambda c, v: c['risk']['xgboost'].update(precursor_recall_lead_ge_60s=0.9),
+    lambda c, v: v['criteria']['P3'][5].pop('lag_seconds'),
 ], ids=['empty-P3', 'all-criteria-empty', 'check-without-ok', 'ok-not-true', 'no-risk', 'no-slope-control',
         'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates', 'P4-one-service', 'P3-summary-only', 'P3-missing-bucket', 'P5-extra-bucket',
         'P2-uneven-buckets', 'P3-summary-miscount', 'xgb-threshold-4', 'bootstrap-out-of-range', 'controls-other-risk-model',
         'controls-without-model-hashes', 'parity-one-minute-each', 'parity-gap', 'P6-not-final-minute',
         'P4-ok-but-over-tolerance', 'P5-no-measurement', 'P3-partial-coverage', 'P6-probability-above-one', 'P6-no-features',
-        'P6-missing-payment', 'P1-other-model', 'recall-above-one', 'negative-false-incident-rate'])
+        'P6-missing-payment', 'P1-other-model', 'recall-above-one', 'negative-false-incident-rate',
+        'P4-zero-count-claims-zero-diff', 'controls-f1-not-from-counts', 'P3-boolean-coverage', 'unaligned-minutes',
+        'P5-diff-not-from-means', 'P6-score-not-from-bundle', 'prevalence-not-from-counts',
+        'precursor-recall-above-detected', 'P3-no-lag'])
 def test_evidence_rejects_empty_parity_checks_and_incomplete_controls(tmp_path, mutate):
     sha, manifest, report, controls, record, verification = evidence(tmp_path)
     c, v = copy.deepcopy(controls), copy.deepcopy(verification)
     mutate(c, v)
     r = dict(record, evidence=[parity_verification_ref(v)])
     with pytest.raises(ValueError):
-        validate_evidence(manifest, report, c, r, v, sha)
+        validate_evidence(manifest, report, c, r, v, sha, scores_for=scorer(tmp_path, sha))
 
 
 def test_release_requires_an_explicit_owner_decision(tmp_path):
