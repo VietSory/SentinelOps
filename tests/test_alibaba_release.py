@@ -17,7 +17,7 @@ from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 from tests.test_alibaba_bundle import synthetic_fit
 
 
-BUCKETS = ('2026-11-09T02:20:00Z', '2026-11-09T02:21:00Z')
+BUCKETS = tuple(f'2026-11-09T02:{minute:02d}:00Z' for minute in range(20, 31))  # window 5 + baseline 5 + 1
 
 
 def criteria(model_version):
@@ -28,7 +28,16 @@ def criteria(model_version):
                   + [{'ok': True, 'coverage': 1.0, **p} for p in pairs],
             'P4': [{'ok': True, **p} for p in pairs],
             'P5': [{'ok': True, **p} for p in pairs],
-            'P6': [{'ok': True, 'service': s} for s in sorted(BUSINESS_ROUTES)]}
+            'P6': [{'ok': True, 'service': s, 'window_end': BUCKETS[-1]} for s in sorted(BUSINESS_ROUTES)]}
+
+
+def truncate(v, keep):
+    # Codex review: cut every service's P2–P5 uniformly and fix the P3 count accordingly.
+    kept = set(keep)
+    for name in ('P2', 'P3', 'P4', 'P5'):
+        v['criteria'][name] = [i for i in v['criteria'][name] if 'bucket_end' not in i or i['bucket_end'] in kept]
+    summary = next(i for i in v['criteria']['P3'] if 'bucket_end' not in i)
+    summary['observations'] = len(kept) * len(BUSINESS_ROUTES)
 
 
 def evidence(tmp_path):
@@ -100,6 +109,9 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
     lambda c, v: c['paired_service_bootstrap']['if_minus_mad_event_f1'].update(lower=-2, upper=2),
     lambda c, v: c['model_artifacts_sha256'].update({'risk.json': '0' * 64}),
     lambda c, v: c.pop('model_artifacts_sha256'),
+    lambda c, v: truncate(v, BUCKETS[-1:]),
+    lambda c, v: truncate(v, BUCKETS[:5] + BUCKETS[6:]) or [i.update(window_end=BUCKETS[-1]) for i in v['criteria']['P6']],
+    lambda c, v: [i.update(window_end=BUCKETS[-2]) for i in v['criteria']['P6']],
     lambda c, v: v['criteria'].update(P6=[i for i in v['criteria']['P6'] if i['service'] != 'payment-service']),
     lambda c, v: v['criteria']['P1'][0].update(model_version='0' * 64),
     lambda c, v: c['risk']['xgboost'].update(precursor_recall_lead_ge_60s=1.5),
@@ -107,7 +119,7 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
 ], ids=['empty-P3', 'all-criteria-empty', 'check-without-ok', 'ok-not-true', 'no-risk', 'no-slope-control',
         'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates', 'P4-one-service', 'P3-summary-only', 'P3-missing-bucket', 'P5-extra-bucket',
         'P2-uneven-buckets', 'P3-summary-miscount', 'xgb-threshold-4', 'bootstrap-out-of-range', 'controls-other-risk-model',
-        'controls-without-model-hashes',
+        'controls-without-model-hashes', 'parity-one-minute-each', 'parity-gap', 'P6-not-final-minute',
         'P6-missing-payment', 'P1-other-model', 'recall-above-one', 'negative-false-incident-rate'])
 def test_evidence_rejects_empty_parity_checks_and_incomplete_controls(tmp_path, mutate):
     sha, manifest, report, controls, record, verification = evidence(tmp_path)

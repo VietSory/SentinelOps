@@ -19,6 +19,7 @@ from sentinelops.ml.alibaba_bundle import BUNDLE_VERSION, ORIGIN
 from sentinelops.ml.release import APPROVAL_VERSION, PARITY_VERIFICATION_VERSION, PARITY_VERSION, RELEASE_VERSION, \
     parity_verification_ref
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
+from sentinelops.contracts import utc_time
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
 
@@ -80,7 +81,7 @@ def controls_complete(controls):
 BUCKET_CRITERIA = ('P3', 'P4', 'P5')
 
 
-def criteria_complete(criteria, model_version):
+def criteria_complete(criteria, model_version, config):
     """Every P1–P6 criterion needs at least one recorded check, and every check must pass.
 
     P1 must name this bundle's model version. P2 declares the (service, bucket) pairs of the
@@ -112,7 +113,20 @@ def criteria_complete(criteria, model_version):
     summaries = [item for item in criteria['P3'] if 'bucket_end' not in item]
     if len(summaries) != 1 or summaries[0].get('observations') != len(declared):
         return False
-    return sorted(item.get('service') for item in criteria['P6']) == sorted(BUSINESS_ROUTES)
+    # The run must span the bundle's own minimum history as consecutive minutes (window plus
+    # minimum baseline plus one spare, as check_alibaba_source_parity derives it), and P6 must
+    # score the final minute of that run for every route (Codex review: a uniformly truncated
+    # parity of one minute per service, or a gap, must not certify the bundle).
+    try:
+        minutes = sorted(utc_time(end) for end in next(iter(buckets.values())))
+    except (TypeError, ValueError):
+        return False
+    required = config['window_minutes'] + config['baseline']['min_minutes'] + 1
+    if len(minutes) < required or any((b - a).total_seconds() != 60 for a, b in zip(minutes, minutes[1:])):
+        return False
+    final = timestamp(minutes[-1])
+    return (sorted(item.get('service') for item in criteria['P6']) == sorted(BUSINESS_ROUTES)
+            and all(item.get('window_end') == final for item in criteria['P6']))
 
 
 def validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256):
@@ -147,7 +161,7 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
             or parity_verification.get('bundle_manifest_sha256') != manifest_sha256
             or any(parity_verification.get(k) != parity_record.get(k) for k in ('candidate_id', 'environment',
                                                                                  'source_profile', 'verified_at'))
-            or not criteria_complete(criteria, model_version)):
+            or not criteria_complete(criteria, model_version, provenance['config'])):
         raise ValueError('source parity verification lacks complete passing P1–P6 checks')
 
 
