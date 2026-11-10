@@ -61,48 +61,44 @@ blocked a correct migration. Nothing has been added under the original wording, 
 these changes are made in place and are recorded here. Where they conflict with the
 text above, this section wins.
 
-**1a. Evidence identity (revised after the second and third reviews).** A version in
-`configs/system_versions.json` has three distinct identities:
+**1a. Evidence identity (final form after five reviews).** A version in
+`configs/system_versions.json` has a `declared` part and a `computed` part.
 
-- **Run identity: must be equal for any carry-forward.** These are everything the
-  evaluator reads apart from captured data: model version, bundle manifest, source
-  profile, feature set, SLO health policy, plan scoring block, base protocol
-  (`configs/local_model_evaluation.json`: thresholds, persistence, bootstrap), and the
-  git blob ids of the scoring code (evaluator, detector and risk summaries, relative
-  features, SLO labels, latency means, slot admission). If any of these changes,
-  every service is re-measured.
-- **Capture identity: describes the capture, not a carry-forward criterion.** Epoch,
-  source commit, evaluation plan and topology hash. These normally change when a
-  service is added, because the plan gains kinds and the topology gains a node. A
-  change here does not by itself disqualify an old service.
-- **Service identity: the per-service equivalence a carried service must keep.**
-  Route, transitive downstream call path, shared infrastructure, code tree
-  (`services/<name>` at the capture's source commit), the slot kinds that enter its
-  measurement, and the workload recipe hash. The recipe covers rate, delay,
-  active, warmup and recovery durations, fault mode by parity, seed, healthy-prefault
-  minimum, minimum groups and corpus policy. The current evaluator scores **every**
-  service on **every** slot kind: healthy, all abrupt split by fault mode, and all
-  gradual. So a supplementary epoch that adds a new service's fault kinds changes
-  every old service's measured kinds. An old service can carry forward only if the
-  supplementary epoch's plan pre-registers scoring it on exactly its version-1 kinds,
-  with the same recipe. Version-1 evidence for a service carries forward only if its
-  service identity is unchanged and none of its shared build inputs changed.
-  Shared build inputs are recorded per version: `services/common`, `src`,
-  `contracts`, `Dockerfile.service` and `pyproject.toml`. A change to
-  `services/common`, the Dockerfile or `pyproject.toml` re-measures every service. A
-  change to `src` or `contracts` re-measures every service unless a diff declared
-  before capture shows it touches no module or contract the service image uses. When
-  unsure, re-measure.
+- **Declared** (not derivable from git): epoch, model version, bundle manifest,
+  shared infrastructure per service, and `carry_forward_from` plus
+  `carried_services`.
+- **Computed** by `python -m scripts.system_identity --commit <capture source commit>`
+  from git at the capture's commit, never from the working tree, because `main`
+  keeps moving after a capture. The guard recomputes it in CI, which needs full
+  history.
+  - *Run identity:* source profile, feature set, SLO health policy, plan scoring,
+    base protocol, and the git blob of every file in the evaluator's transitive
+    in-package import closure. The closure includes imports inside functions, for
+    example feature generation in `alibaba_training`.
+  - *Capture identity:* source commit, plan hash and topology hash. These describe
+    the capture and are not a carry-forward criterion.
+  - *Shared build inputs:* `services/common`, `src`, `contracts`,
+    `Dockerfile.service` and `pyproject.toml`.
+  - *Service identity:* route, transitive downstream, `services/<name>` tree, the
+    kinds that enter the service's measurement, and the workload recipe hash.
 
-A declared version is immutable. The guard pins each version entry's hash. Editing
-system-v1 in place, for example adding an edge and updating its topology hash,
-fails. A change needs a new version and a new pin. Pins are only ever added. (Exception, recorded here: the system-v1 entry was
-re-pinned on 2026-11-10 during the fourth review, before any carry-forward had used it,
-to add the base protocol, scoring code, measured kinds and workload recipe.) A diff that edits
-an existing pin is a red flag for the reviewer. The current version's run identity must
-also match the repository's SLO health policy, scoring and source profile. The guard also checks that the
-current version's per-service downstream equals the topology's transitive call
-path, and that its routes match `BUSINESS_ROUTES`.
+**Carry-forward is mechanical.** A version may list `carried_services` only if the
+run identity, model and bundle, shared build inputs, and each carried service's
+identity and shared infrastructure equal the predecessor's. Otherwise the guard fails.
+
+**Consequence for the current evaluator.** `score_by_route` scores every service on
+every plan kind. Adding a new service's fault kinds therefore changes every old
+service's measured kinds, and no old service can carry forward. A per-service
+slot-selection path in the evaluator is a **prerequisite**. It must be built and
+tested with a real supplementary plan before any carry-forward. Building it changes
+the scoring code, so it becomes part of the new version's run identity. It has
+not been built yet: epoch 2 runs on the frozen 3b17205 evaluator, and changing
+scoring code now would not affect it.
+
+A declared version is immutable: the guard pins each entry's hash, and pins are only
+ever added. (Exception, recorded here: system-v1 was re-pinned during the 2026-11-10
+reviews, before any carry-forward had used it.) The current version must match the
+repository's routes and present topology.
 
 **3a. Which existing services are re-measured.** Before capture, the topology diff
 and an infrastructure inventory are declared. An existing service is re-measured if
@@ -130,7 +126,7 @@ unless `frozen_contracts` pins it to an older declared version. Adding a service
 therefore means a new contract version (ADR-007) plus a pin for the old one. Names are
 recognised by their shape (`*-service`), not by membership in a known list, so an
 enumeration whose names are all misspelt is still caught. Every declared version must
-carry the run, capture and service identities of 1a, and is pinned. The guard
+carry the declared and computed identity of 1a, and is pinned. The guard
 `tests/test_service_registry_single_source.py` checks every contract against its own
 version, so a valid v1 contract keeps passing while any forgotten current enumeration
 fails.
