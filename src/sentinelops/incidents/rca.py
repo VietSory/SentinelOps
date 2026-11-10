@@ -14,7 +14,7 @@ METHODS = {
     "anomaly_strength": {"if-normalized-score/v1", "infra-connection-pressure/v1", "infra-lock-wait-presence/v1"},
     "temporal_precedence": {"disjoint-onset-intervals/v1"},
     "dependency_trace_relevance": {"native-span-duration-share/v1", "native-direct-span-duration-share/v1", "native-span-terminal-error/v1"},
-    "log_support": {"business-completion-support/v1"},
+    "log_support": {"business-completion-support/v1", "postgres-lock-wait-log/v1"},
     "recent_change_support": {"observed-deployment/v1"},
 }
 LEGACY_NATIVE_METHODS = {name: set() for name in COMPONENTS}
@@ -77,6 +77,8 @@ def _score(components: dict, facts: dict, service: str, policy: dict, *, methods
             raise ValueError("RCA temporal support needs an explicit comparison")
         if card["method"] in ("infra-connection-pressure/v1", "infra-lock-wait-presence/v1") and service != "rds":
             raise ValueError("infrastructure rule cannot impersonate a business-service IF score")
+        if card["method"] == "postgres-lock-wait-log/v1" and service != "rds":
+            raise ValueError("PostgreSQL lock logs only support the database candidate")
         if service == "rds" and card["method"] in ("if-normalized-score/v1", "business-completion-support/v1"):
             raise ValueError("RDS evidence cannot be fabricated as HTTP/IF output")
         score += policy["weights"][name] * float(value)

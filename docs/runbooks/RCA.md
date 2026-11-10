@@ -23,7 +23,10 @@ The adapter accepts one immutable source manifest with `evidence_refs` for trace
 
 For an S4 development capture, `--post-capture-cutoff` uses the latest recorded
 receipt from the verified operational source and correlation scope, including
-PostgreSQL lock waits. It rejects missing operational receipt clocks. Use the
+PostgreSQL lock waits and projected lock logs. It rejects missing operational
+receipt clocks. A database log contributes RCA support only when its source
+identity matches the lock snapshots and its wait overlaps a verified PostgreSQL
+span from a violating request. Use the
 default correlation cutoff or `--as-of` when replay must represent an earlier
 decision. All three modes preserve the same policy and abstention rules.
 

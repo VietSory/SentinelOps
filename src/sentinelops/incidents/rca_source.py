@@ -72,6 +72,38 @@ def postgres_lock_waits(telemetry: ArtifactStore, source: dict) -> list[tuple[st
     return records
 
 
+def _postgres_lock_log(telemetry, source, lock_waits):
+    if "postgres_lock_wait_log_ref" not in source:
+        return None
+    ref = source["postgres_lock_wait_log_ref"]
+    if not isinstance(ref, str) or not ref.startswith("artifact://raw/") or not lock_waits:
+        raise ValueError("PostgreSQL lock log requires a raw reference and matching lock snapshots")
+    item = telemetry.read(ref)
+    fields = {"kind", "source_ref", "postgres_started_at", "database_oid", "relation_oid", "collected_at", "records"}
+    if (set(item) != fields or item["kind"] != "postgres-lock-wait-log/v1"
+            or type(item["database_oid"]) is not int or type(item["relation_oid"]) is not int
+            or not 0 < item["relation_oid"] <= 0xffffffff
+            or not isinstance(item["collected_at"], str)
+            or not isinstance(item["records"], list) or len(item["records"]) >= 20000):
+        raise ValueError("invalid PostgreSQL lock log")
+    identity = lock_waits[0][1]
+    if any(item[key] != identity[key] for key in ("source_ref", "postgres_started_at", "database_oid")):
+        raise ValueError("PostgreSQL lock log belongs to a different database instance")
+    started, receipt = utc_time(item["postgres_started_at"]), utc_time(item["collected_at"])
+    if receipt < started:
+        raise ValueError("invalid PostgreSQL lock log receipt clock")
+    for record in item["records"]:
+        if (not isinstance(record, dict) or set(record) != {"observed_at", "event", "duration_us"}
+                or record["event"] not in ("waiting", "acquired")
+                or not isinstance(record["observed_at"], str)
+                or type(record["duration_us"]) is not int or record["duration_us"] <= 0):
+            raise ValueError("invalid PostgreSQL lock log event")
+        observed = utc_time(record["observed_at"])
+        if not started <= observed <= receipt or record["duration_us"] * 1000 > epoch_ns(observed) - epoch_ns(started):
+            raise ValueError("invalid PostgreSQL lock log event clock")
+    return ref, item
+
+
 def verify_scope(telemetry: ArtifactStore, health_store: ArtifactStore, correlation_store: ArtifactStore,
                  correlation_ref: str) -> dict:
     correlated = correlation_store.read(correlation_ref)
@@ -99,9 +131,12 @@ def verify_scope(telemetry: ArtifactStore, health_store: ArtifactStore, correlat
     if any(len(set(refs[key]))!=len(refs[key]) for key in ("traces","infrastructure")):
         raise ValueError("RCA source modality references must not duplicate snapshots")
     lock_waits = postgres_lock_waits(telemetry, source)
+    lock_log = _postgres_lock_log(telemetry, source, lock_waits)
     telemetry_refs=set(source["raw_refs"]+source["observation_refs"]+source["feature_refs"]+source["quarantine_refs"]+
         refs["traces"]+refs["infrastructure"]+[refs["logs"],health["source_manifest_ref"],source.get("normalization_manifest_ref",health["source_manifest_ref"])])
     telemetry_refs.update(ref for ref, _ in lock_waits)
+    if lock_log is not None:
+        telemetry_refs.add(lock_log[0])
     health_refs=set(health["signal_refs"]+[health_ref])
     objects={ref:telemetry for ref in telemetry_refs}
     objects.update({ref:health_store for ref in health_refs});objects[correlation_ref]=correlation_store
@@ -116,7 +151,7 @@ def verify_scope(telemetry: ArtifactStore, health_store: ArtifactStore, correlat
             "source_objects":objects,
             "signals":signals,"logs":logs,"correlation_ref":correlation_ref,
             "traces":[(ref,telemetry.read(ref)) for ref in refs["traces"]],
-            "postgres_lock_waits": lock_waits,
+            "postgres_lock_waits": lock_waits, "postgres_lock_log": lock_log,
             "infrastructure":[(ref,telemetry.read(ref)) for ref in refs["infrastructure"]]}
 
 
