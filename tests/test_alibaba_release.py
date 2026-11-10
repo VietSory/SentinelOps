@@ -77,6 +77,7 @@ def evidence(tmp_path):
              'verified_by': 'test', 'verified_at': '2026-11-09T00:00:00Z'}
     verification = {'version': 'model-source-parity-check/v1', 'criteria_version': 'alibaba-parity-criteria/v1', **scope,
                     'bundle_manifest_sha256': result['manifest_sha256'], 'failures': [],
+                    'config_sha256': manifest['provenance']['config_sha256'], 'source_commit': 'a' * 40,
                     'criteria': criteria(manifest['model_version'], manifest['provenance']['config']['features'],
                                          bundle_scorer(tmp_path / 'bundle', result['manifest_sha256']))}
     record = {'parity_version': 'model-source-parity/v1', **scope, 'status': 'PASS',
@@ -86,7 +87,8 @@ def evidence(tmp_path):
 
 def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
     sha, manifest, report, controls, record, verification = evidence(tmp_path)
-    validate_evidence(manifest, report, controls, record, verification, sha, scores_for=scorer(tmp_path, sha))
+    validate_evidence(manifest, report, controls, record, verification, sha, scores_for=scorer(tmp_path, sha),
+                      repository_config=manifest['provenance']['config'])
     for mutate in (lambda c, r, v: c.update(fit_report_sha256='0' * 64),
                    lambda c, r, v: r.update(status='FAIL'),
                    lambda c, r, v: v['criteria']['P5'].append({'ok': False}),
@@ -98,7 +100,8 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
         if r is not record and r.get('evidence') == record['evidence'] and v != verification:
             r['evidence'] = [parity_verification_ref(v)]
         with pytest.raises(ValueError):
-            validate_evidence(manifest, report, c, r, v, sha, scores_for=scorer(tmp_path, sha))
+            validate_evidence(manifest, report, c, r, v, sha, scores_for=scorer(tmp_path, sha),
+                      repository_config=manifest['provenance']['config'])
 
 
 @pytest.mark.parametrize('mutate', [
@@ -152,6 +155,8 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
     lambda c, v: v['criteria']['P4'][2].pop('error_count'),
     lambda c, v: v['criteria']['P2'][1].update(source_profile='prometheus-increase-60s-5s/v1'),
     lambda c, v: v['criteria']['P2'][1].update(queries_sha256='0' * 64),
+    lambda c, v: v.update(config_sha256='0' * 64),
+    lambda c, v: v.pop('source_commit'),
 ], ids=['empty-P3', 'all-criteria-empty', 'check-without-ok', 'ok-not-true', 'no-risk', 'no-slope-control',
         'precursor-recall-missing', 'detector-f1-missing', 'detector-nan', 'no-ap-interval', 'no-valid-replicates', 'P4-one-service', 'P3-summary-only', 'P3-missing-bucket', 'P5-extra-bucket',
         'P2-uneven-buckets', 'P3-summary-miscount', 'xgb-threshold-4', 'bootstrap-out-of-range', 'controls-other-risk-model',
@@ -161,14 +166,15 @@ def test_evidence_accepts_exact_bundle_and_rejects_drift(tmp_path):
         'P4-zero-count-claims-zero-diff', 'controls-f1-not-from-counts', 'P3-boolean-coverage', 'unaligned-minutes',
         'P5-diff-not-from-means', 'P6-score-not-from-bundle', 'prevalence-not-from-counts',
         'precursor-recall-above-detected', 'P3-no-lag', 'P3-lag-over-policy', 'P3-not-eligible', 'P4-5xx',
-        'P4-no-error-count', 'P2-other-profile', 'P2-other-queries'])
+        'P4-no-error-count', 'P2-other-profile', 'P2-other-queries', 'verified-other-config', 'no-source-commit'])
 def test_evidence_rejects_empty_parity_checks_and_incomplete_controls(tmp_path, mutate):
     sha, manifest, report, controls, record, verification = evidence(tmp_path)
     c, v = copy.deepcopy(controls), copy.deepcopy(verification)
     mutate(c, v)
     r = dict(record, evidence=[parity_verification_ref(v)])
     with pytest.raises(ValueError):
-        validate_evidence(manifest, report, c, r, v, sha, scores_for=scorer(tmp_path, sha))
+        validate_evidence(manifest, report, c, r, v, sha, scores_for=scorer(tmp_path, sha),
+                      repository_config=manifest['provenance']['config'])
 
 
 def test_release_requires_an_explicit_owner_decision(tmp_path):
@@ -181,8 +187,10 @@ def test_release_requires_an_explicit_owner_decision(tmp_path):
 
 
 @pytest.mark.skipif(not hasattr(ModelRegistry(), 'is_alibaba'), reason='registry v3 consumer not merged yet')
-def test_release_loads_as_one_shared_alibaba_registry(tmp_path):
+def test_release_loads_as_one_shared_alibaba_registry(tmp_path, monkeypatch):
     sha, manifest, _, controls, record, verification = evidence(tmp_path)
+    import sentinelops.ml.alibaba_training as training
+    monkeypatch.setattr(training, 'load_config', lambda: manifest['provenance']['config'])
     result = build_alibaba_release(tmp_path / 'bundle', sha, controls=controls, parity_record=record,
                                    parity_verification=verification, approved_by='owner', decision_note='G3 accepted',
                                    output=tmp_path / 'release')
@@ -217,3 +225,30 @@ def test_parity_script_records_every_field_the_validator_rechecks():
                 'P6': {'service', 'window_end', 'features', 'scores'}}
     for name, keys in required.items():
         assert keys <= recorded.get(name, set()), (name, keys - recorded.get(name, set()))
+
+
+def test_release_refuses_a_checkout_whose_alibaba_config_differs_from_the_bundle(tmp_path):
+    sha, manifest, report, controls, record, verification = evidence(tmp_path)
+    other = dict(manifest['provenance']['config'], window_minutes=manifest['provenance']['config']['window_minutes'] + 1)
+    with pytest.raises(ValueError):
+        validate_evidence(manifest, report, controls, record, verification, sha, scores_for=scorer(tmp_path, sha),
+                          repository_config=other)
+
+
+def test_parity_records_a_quarantined_capture_as_fail_instead_of_crashing(tmp_path, monkeypatch):
+    # Codex review of bbe4731: a capture that the pipeline quarantines left no observation, and
+    # next(...) raised StopIteration before parity.json/verification.json were written.
+    import importlib
+    from datetime import datetime, timezone
+    from sentinelops.ml.models import load_bundle
+    script = importlib.import_module('scripts.check_alibaba_source_parity')
+    sha, *_ = evidence(tmp_path)
+    manifest, detector, risk = load_bundle(tmp_path / 'bundle', expected_manifest_sha256=sha)
+    monkeypatch.setattr(script, 'process_captures', lambda captures, store: {
+        'observation_refs': [], 'observation_count': 0, 'quarantine_refs': ['artifact://quarantine/x.json'],
+        'manifest_ref': 'artifact://manifests/m.json'})
+    ends = [datetime(2026, 11, 9, 2, 20, tzinfo=timezone.utc)]
+    checks, failures, _ = script.evaluate(tmp_path, (manifest, detector, risk, True), [], [], ends,
+                                          {'maximum_lag_seconds': 60})
+    assert {f['criterion'] for f in failures} >= {'P3', 'P4', 'P5', 'P6'}
+    assert all(item['ok'] is False for item in checks['P4'])

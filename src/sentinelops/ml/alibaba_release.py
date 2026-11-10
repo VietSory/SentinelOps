@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 
 from sentinelops.ml.alibaba_bundle import BUNDLE_VERSION, ORIGIN
@@ -216,15 +217,16 @@ def bundle_scorer(bundle, manifest_sha256):
 
 
 def validate_evidence(manifest, report, controls, parity_record, parity_verification, manifest_sha256, *,
-                      scores_for, health_policy=None):
+                      scores_for, health_policy=None, repository_config=None):
     """Completeness and internal consistency of operator-supplied evidence.
 
     Trust boundary: these documents come from operator-run scripts (alibaba_controls,
     check_alibaba_source_parity) and are not signed. This check proves that they are complete,
     bound to this bundle, and consistent with the raw values recorded inside them, and it
     recomputes P6 with the bundle. It cannot prove that the recorded raw values were measured
-    rather than written by hand. That rests on the operator who runs parity on the target
-    environment and on the owner's G3 decision recorded with the release.
+    rather than written by hand, nor that `source_commit` and `configuration_hash` describe the
+    sandbox that ran. That rests on the operator who runs parity on the target environment and
+    on the owner's G3 decision recorded with the release.
     """
     provenance = manifest['provenance']
     model_version = manifest['model_version']
@@ -243,6 +245,9 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
         raise ValueError('layer-1 controls lack the detector, risk or bootstrap metrics')
     if controls.get('model_artifacts_sha256') != manifest['artifacts']:
         raise ValueError('layer-1 controls did not score this bundle\'s model files')
+    if repository_config is None:
+        from sentinelops.ml.alibaba_training import load_config  # heavy; only the release builder needs it
+        repository_config = load_config()
     if health_policy is None:
         health_policy = json.loads((Path(__file__).resolve().parents[3] / HEALTH_POLICY).read_text())
     scope = {'candidate_id': model_version, 'source_profile': SOURCE_PROFILE_V2}
@@ -257,6 +262,12 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
             or parity_verification.get('criteria_version') != PARITY_CRITERIA
             or parity_verification.get('failures') != []
             or parity_verification.get('bundle_manifest_sha256') != manifest_sha256
+            # P1's frozen-config identity (Codex review): the verified config is the bundle's own,
+            # and the builder's checkout holds the same Alibaba config the parity script compared.
+            or parity_verification.get('config_sha256') != provenance['config_sha256']
+            or stable_id(provenance['config']) != provenance['config_sha256']
+            or repository_config != provenance['config']
+            or not re.fullmatch(r'[0-9a-f]{40}', str(parity_verification.get('source_commit', '')))
             or any(parity_verification.get(k) != parity_record.get(k) for k in ('candidate_id', 'environment',
                                                                                  'source_profile', 'verified_at'))
             or not criteria_complete(criteria, model_version, provenance['config'], scores_for, health_policy)):

@@ -175,8 +175,15 @@ def evaluate(root, bundle_parts, captures, logs, ends, policy):
     for service in SERVICES:
         minutes = {}
         for end in ends:
-            obs = next(o for o in observations if o['service'] == service and o['bucket_end'] == timestamp(end))
-            raw = next(c for c in captures if c['service'] == service and c['bucket_end'] == timestamp(end))
+            obs = next((o for o in observations if o['service'] == service and o['bucket_end'] == timestamp(end)), None)
+            raw = next((c for c in captures if c['service'] == service and c['bucket_end'] == timestamp(end)), None)
+            if obs is None or raw is None:
+                # A quarantined or missing capture is a parity FAIL, recorded, never a crash (Codex review).
+                missing = {'service': service, 'bucket_end': timestamp(end), 'observation_missing': obs is None,
+                           'capture_missing': raw is None}
+                for name in ('P3', 'P4', 'P5'):
+                    check(name, False, missing)
+                continue
             lag = (datetime.fromisoformat(obs['available_at'].replace('Z', '+00:00')) - end).total_seconds()
             check('P3', obs['quality']['eligible_for_inference'] and obs['quality']['coverage_ratio'] == 1
                   and lag <= policy['maximum_lag_seconds'],
