@@ -21,6 +21,12 @@ The adapter accepts one immutable source manifest with `evidence_refs` for trace
 
 `python -m scripts.replay_rca --help` lists the three source stores, correlation reference, policy, optional analytical cutoff and exclusive output directory. The CLI requires a clean committed tree before actual-source scoring. Each output archives checksum-verified source objects, standalone RCA result objects and a replay report, so the bundle can be reproduced without the original source directories. Fresh Step 4 captures provide an immutable aggregate evidence manifest for this chain; CI consumes it without requiring a chosen root cause or fabricating missing support.
 
+For an S4 development capture, `--post-capture-cutoff` uses the latest recorded
+receipt from the verified operational source and correlation scope, including
+PostgreSQL lock waits. It rejects missing operational receipt clocks. Use the
+default correlation cutoff or `--as-of` when replay must represent an earlier
+decision. All three modes preserve the same policy and abstention rules.
+
 ## Local computed incident producer
 
 Prepare once with `python -m scripts.publish_rca --bundle <archive> --prepare-report-ref <report-ref>`. This verifies the archived raw chain and freezes a new actual emission clock in a content-addressed intent. Then publish with `--bundle <archive> --intent-ref <that-exact-intent-ref>` and `CONTROL_DATABASE_URL` selecting the dedicated localhost `sentinelops_control` database as `control_writer`. Keep credentials in the environment, not logs or command arguments. Reuse the intent reference after a crash; preparing again creates a distinct replay intent.

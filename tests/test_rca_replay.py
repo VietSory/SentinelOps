@@ -138,6 +138,21 @@ def test_rca_corroborates_postgres_lock_wait_only_with_in_scope_trace(tmp_path, 
         assert replay_rca(archive, archive, archive, ref, POLICY, tmp_path/'portable', as_of=cutoff) == report
 
 
+def test_forensic_cutoff_uses_native_postgres_receipt_and_refuses_missing_trace_clocks(tmp_path):
+    source, health, correlation, ref, _ = source_scope(tmp_path/'fresh', fresh=True, lock='future')
+    result = replay_rca(source, health, correlation, ref, POLICY, tmp_path/'forensic', post_capture=True)
+    assert result['as_of'] == timestamp(END+timedelta(seconds=180))
+    rds = next(c for c in result['results'][0]['rca']['candidates'] if c['service'] == 'rds')
+    assert rds['components']['anomaly_strength']['method'] == 'infra-lock-wait-presence/v1'
+    assert not result['historical_emissions_verified'] and not result['actions_allowed']
+    archive = ArtifactStore(tmp_path/'forensic')
+    assert replay_rca(archive, archive, archive, ref, POLICY, tmp_path/'portable', post_capture=True) == result
+    source, health, correlation, ref, _ = source_scope(tmp_path/'legacy')
+    with pytest.raises(ValueError, match='original operational receipt clocks'):
+        replay_rca(source, health, correlation, ref, POLICY, tmp_path/'unavailable', post_capture=True)
+    assert not (tmp_path/'unavailable').exists()
+
+
 def test_known_future_receipts_cannot_enter_the_declared_analytical_cutoff(tmp_path):
     source,health,correlation,ref,_=source_scope(tmp_path,fresh=True,future=True)
     report=replay_rca(source,health,correlation,ref,POLICY,tmp_path/'out')

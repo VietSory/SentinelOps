@@ -195,15 +195,29 @@ def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts,*,clo
     return {"group_id":group["group_id"],"rca":result,"severity":severity,"source_counts":dict(counts)}
 
 
+def _post_capture_cutoff(scope: dict):
+    """Compute a forensic cutoff from captured receipts, without filling missing clocks."""
+    receipts = [scope["logs"].get("collected_at")]
+    receipts.extend(trace.get("collected_at") for _, trace in scope["traces"])
+    receipts.extend(point.get("available_at") for _, point in scope["infrastructure"])
+    receipts.extend(point["available_at"] for _, point in scope["postgres_lock_waits"])
+    if any(not isinstance(value, str) for value in receipts):
+        raise ValueError("post-capture RCA requires original operational receipt clocks")
+    return max(utc_time(value) for value in [scope["correlation"]["as_of"], *receipts])
+
+
 def replay_rca(telemetry: ArtifactStore,health_store: ArtifactStore,correlation_store: ArtifactStore,
-               correlation_ref: str,policy: dict,output: Path,*,project: Path|None=None,as_of=None) -> dict:
+               correlation_ref: str,policy: dict,output: Path,*,project: Path|None=None,as_of=None,
+               post_capture=False) -> dict:
+    if post_capture and as_of is not None:
+        raise ValueError("choose an explicit cutoff or a post-capture cutoff")
     validate_policy(policy);commit=None
     if project is not None:
         commit=subprocess.check_output(["git","rev-parse","HEAD"],cwd=project,text=True).strip()
         if subprocess.check_output(["git","status","--porcelain"],cwd=project,text=True).strip():
             raise ValueError("commit RCA source adapter/policy before actual replay")
     scope=verify_scope(telemetry,health_store,correlation_store,correlation_ref)
-    decision=as_of or utc_time(scope["correlation"]["as_of"])
+    decision = _post_capture_cutoff(scope) if post_capture else as_of or utc_time(scope["correlation"]["as_of"])
     rows,lookup,counts=business_logs(scope)
     groups=scope["correlation"]["groups"]
     if len(groups)>100:raise ValueError("RCA replay exceeds its bounded group profile")

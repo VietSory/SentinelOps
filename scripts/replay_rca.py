@@ -15,11 +15,15 @@ def main():
     parser.add_argument('--correlation-store',type=Path,required=True)
     parser.add_argument('--correlation-ref',required=True)
     parser.add_argument('--policy',type=Path,default=Path('configs/rca_policy.json'))
-    parser.add_argument('--as-of',help='UTC analytical cutoff; does not claim an actual historical emission')
+    cutoff = parser.add_mutually_exclusive_group()
+    cutoff.add_argument('--as-of', help='UTC analytical cutoff; does not claim an actual historical emission')
+    cutoff.add_argument('--post-capture-cutoff', action='store_true',
+                        help='derive a forensic cutoff from verified captured receipt clocks')
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     report=replay_rca(ArtifactStore(args.telemetry_store),ArtifactStore(args.health_store),ArtifactStore(args.correlation_store),
-        args.correlation_ref,json.loads(args.policy.read_text()),args.output,project=Path.cwd(),as_of=utc_time(args.as_of) if args.as_of else None)
+        args.correlation_ref,json.loads(args.policy.read_text()),args.output,project=Path.cwd(),
+        as_of=utc_time(args.as_of) if args.as_of else None,post_capture=args.post_capture_cutoff)
     summary={key:value for key,value in report.items() if key not in ('results','source_artifact_refs')}
     summary['results']=[{'group_id':row['group_id'],'severity':row['severity'],'ranking':row['rca']['ranking'],
         'scores':{candidate['service']:candidate['score'] for candidate in row['rca']['candidates']},
