@@ -31,9 +31,12 @@ from sentinelops.telemetry.store import ArtifactStore
 VERSION = 'local-http-owner-exclusion/v1'
 REASON = 'owner-excluded-incident'
 PAUSE_SECONDS = 300  # the client schedules a request about every second; a pause is unmistakable
+# The one verifier failure a host pause causes. It is raised only after every identity,
+# provenance, recipe and oracle check of verify_capture has passed for the slot.
+WARMUP_COVERAGE = re.compile(r'ADR-016 [a-z-]+ lacks [0-9]+ consecutive verified healthy pre-fault minutes')
 
 
-def pause_witness(store, slot):
+def pause_witness(store, slot, group):
     """Re-read the slot's registered, completed capture; report client start gaps over PAUSE_SECONDS.
 
     Only a completed slot qualifies: its bound result names the registration and the
@@ -53,19 +56,21 @@ def pause_witness(store, slot):
     if (result.get('status') != 'completed' or result.get('registration_ref') != registration_ref
         or result.get('run_sha256') != stable_id(run) or run_path.parent.parent != root / 'captures'
         or not re.fullmatch('run-[0-9a-f]{32}', run_path.parent.name) or truth.read(run_ref) != run
-        or run.get('status') != 'completed'):
+        or run.get('status') != 'completed' or run.get('run_id') != run_path.parent.name
+        or run.get('session_id') != group or not slot.startswith(group + '-')):
         raise ValueError('host-pause witness differs from the registered completed capture')
-    begin, end = utc_time(run['started_at']), utc_time(run['ended_at'])
+    begin, warmup, end = utc_time(run['started_at']), utc_time(run['warmup_end_at']), utc_time(run['ended_at'])
     starts = sorted(utc_time(row['started_at']) for row in truth.read(run['request_outcomes_ref'])['outcomes'])
-    if not starts or starts[0] < begin or starts[-1] > end:
+    if not starts or starts[0] < begin or starts[-1] > end or not begin < warmup < end:
         raise ValueError('host-pause witness ledger lies outside its run interval')
+    # Only a pause inside the warmup can cause the warmup-coverage failure it explains.
     gaps = [{'after': timestamp(a), 'seconds': round((b - a).total_seconds(), 3)}
-            for a, b in zip(starts, starts[1:]) if (b - a).total_seconds() > PAUSE_SECONDS]
+            for a, b in zip(starts, starts[1:]) if (b - a).total_seconds() > PAUSE_SECONDS and b <= warmup]
     return {'run_ref': run_ref, 'attempts': len(starts), 'pause_seconds': PAUSE_SECONDS, 'gaps': gaps} if gaps else None
 
 
-def _witnesses(store, status):
-    found = {slot: pause_witness(store, slot) for slot, value in status.items() if value == 'FAILED_VERIFICATION'}
+def _witnesses(store, group, status):
+    found = {slot: pause_witness(store, slot, group) for slot, value in status.items() if value == 'FAILED_WARMUP_COVERAGE'}
     return {slot: value for slot, value in found.items() if value}
 
 
@@ -79,8 +84,8 @@ def _slot_status(store, plan, session, project, as_of):
             continue
         try:
             verify_capture(store, plan, session, kind, project=project, as_of=as_of)
-        except ValueError:
-            status[slot] = 'FAILED_VERIFICATION'
+        except ValueError as exc:
+            status[slot] = 'FAILED_WARMUP_COVERAGE' if WARMUP_COVERAGE.fullmatch(str(exc)) else 'FAILED_VERIFICATION'
         else:
             status[slot] = 'SOURCE_VERIFIED'
     return status
@@ -135,7 +140,7 @@ def exclude_group(store, plan, *, role, ordinal, replacement_ordinal, decision, 
         status = _slot_status(store, plan, session, project, closed_at)
         if all(value == 'SOURCE_VERIFIED' for value in status.values()):
             raise ValueError('a fully verified group cannot be excluded')
-        witnesses = _witnesses(store, status)
+        witnesses = _witnesses(store, session['group_id'], status)
         if not witnesses:
             raise ValueError('owner exclusion needs a host-pause witness in an unverified slot')
         before = _inventory(store, group, plan)
@@ -183,7 +188,7 @@ def read_owner_exclusion(store, session, plan, closed, reference, *, project=PRO
     status = _slot_status(store, plan, session, project, utc_time(closed['closed_at']))
     if status != closed['slot_status'] or all(value == 'SOURCE_VERIFIED' for value in status.values()):
         raise ValueError('owner exclusion slot status differs from the original source')
-    if not closed['host_pause_witness'] or _witnesses(store, status) != closed['host_pause_witness']:
+    if not closed['host_pause_witness'] or _witnesses(store, session['group_id'], status) != closed['host_pause_witness']:
         raise ValueError('owner exclusion host-pause witness differs from the original ledger')
     return reference, closed
 
