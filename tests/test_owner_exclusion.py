@@ -15,18 +15,30 @@ DECISION = 'Owner 2026-11-11: host slept 7h48m inside alb-04; exclude the whole 
 ROLE = 'development-validation'
 
 
-def write_ledger(store, slot, *, gap_seconds):
-    """An original client ledger: one request a second, with one gap after the tenth."""
+def write_ledger(store, slot, *, gap_seconds, bound=True):
+    """A registered, completed capture whose immutable client ledger has one gap after the tenth request."""
+    import shutil
     from datetime import datetime, timedelta, timezone
-    run_dir = store.root / 'runs' / slot / 'captures' / ('run-' + '1' * 32)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    root = store.root / 'runs' / slot
+    shutil.rmtree(root, ignore_errors=True)
+    run_dir = root / 'captures' / ('run-' + '1' * 32)
+    run_dir.mkdir(parents=True)
     start = datetime(2026, 11, 11, 3, 55, tzinfo=timezone.utc)
     times = [start + timedelta(seconds=i + (gap_seconds if i >= 10 else 0)) for i in range(20)]
     stamp = lambda t: t.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-    ledger = {'outcomes': [{'started_at': stamp(t), 'completed_at': stamp(t + timedelta(milliseconds=20))}
-                           for t in times]}
-    ref = ArtifactStore(run_dir / 'truth').write('raw', ledger)
-    (run_dir / 'run.json').write_text(json.dumps({'run_id': 'run-' + '1' * 32, 'request_outcomes_ref': ref}))
+    truth = ArtifactStore(run_dir / 'truth')
+    ledger_ref = truth.write('raw', {'outcomes': [{'started_at': stamp(t), 'completed_at': stamp(t + timedelta(milliseconds=20))}
+                                                  for t in times]})
+    run = {'run_id': run_dir.name, 'status': 'completed', 'request_outcomes_ref': ledger_ref,
+           'started_at': stamp(start - timedelta(seconds=1)), 'ended_at': stamp(times[-1] + timedelta(seconds=1))}
+    (run_dir / 'run.json').write_text(json.dumps(run))
+    if not bound:
+        return
+    truth.write('manifests', run)
+    registration_ref = corpus.bind(store, root / 'registration.json', {'fixture_only': True, 'slot_id': slot})
+    corpus.bind(store, root / 'result.json', {'status': 'completed', 'registration_ref': registration_ref,
+                                              'run_sha256': stable_id(run),
+                                              'run_directory': run_dir.relative_to(store.root).as_posix()})
 
 
 @pytest.fixture
@@ -39,7 +51,7 @@ def epoch(tmp_path, monkeypatch):
                'compose_project': 'sentinelops-corpus-alb-04', 'registered_at': '2026-11-11T02:10:00Z',
                'plan_sha256': stable_id(plan), 'context': {'containers': containers}}
     corpus.bind(store, corpus.registration_path(store, 'alb-04'), session)
-    for kind in ('healthy', 'payment-abrupt', 'inventory-abrupt'):
+    for kind in ('healthy', 'payment-abrupt'):
         root = store.root / 'runs' / ('alb-04-' + kind)
         root.mkdir(parents=True)
         corpus.bind(store, root / 'result.json', {'fixture_only': True, 'kind': kind})
@@ -198,3 +210,22 @@ def test_the_schedule_follows_the_exclusion_to_its_replacement(epoch):
     groups = {f'alb-0{i}' for i in (1, 2, 3, 5)}
     slots = recovery.effective_slots(store, plan, planned_slots(plan))
     assert {f'alb-0{ordinal}' for _, ordinal, _ in slots} == groups | {'alb-06'}
+
+
+def test_loose_files_in_an_incomplete_slot_are_never_a_witness(epoch):
+    store, plan, _, state = epoch
+    write_ledger(store, 'alb-04-inventory-abrupt', gap_seconds=0)
+    write_ledger(store, 'alb-04-payment-gradual', gap_seconds=28094, bound=False)  # forged, unregistered
+    with pytest.raises(ValueError, match='host-pause witness'):
+        exclude(epoch)
+    assert state['stopped'] == []
+
+
+def test_a_ledger_that_is_not_the_bound_capture_is_refused(epoch):
+    store, plan, _, state = epoch
+    run_json = next((store.root / 'runs/alb-04-inventory-abrupt/captures').glob('run-*/run.json'))
+    run = json.loads(run_json.read_text())
+    run_json.write_text(json.dumps({**run, 'ended_at': '2030-01-01T00:00:00.000000Z'}))
+    with pytest.raises(ValueError, match='registered completed capture'):
+        exclude(epoch)
+    assert state['stopped'] == []
