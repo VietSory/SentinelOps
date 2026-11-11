@@ -15,7 +15,7 @@ DECISION = 'Owner 2026-11-11: host slept 7h48m inside alb-04; exclude the whole 
 ROLE = 'development-validation'
 
 
-def write_ledger(store, slot, *, gap_seconds, bound=True):
+def write_ledger(store, slot, *, gap_seconds, bound=True, gap_after_warmup=False):
     """A registered, completed capture whose immutable client ledger has one gap after the tenth request."""
     import shutil
     from datetime import datetime, timedelta, timezone
@@ -29,8 +29,10 @@ def write_ledger(store, slot, *, gap_seconds, bound=True):
     truth = ArtifactStore(run_dir / 'truth')
     ledger_ref = truth.write('raw', {'outcomes': [{'started_at': stamp(t), 'completed_at': stamp(t + timedelta(milliseconds=20))}
                                                   for t in times]})
-    run = {'run_id': run_dir.name, 'status': 'completed', 'request_outcomes_ref': ledger_ref,
-           'started_at': stamp(start - timedelta(seconds=1)), 'ended_at': stamp(times[-1] + timedelta(seconds=1))}
+    warmup = times[-1] if not gap_after_warmup else times[9] + timedelta(milliseconds=500)
+    run = {'run_id': run_dir.name, 'session_id': slot[:6], 'status': 'completed', 'request_outcomes_ref': ledger_ref,
+           'started_at': stamp(start - timedelta(seconds=1)), 'warmup_end_at': stamp(warmup),
+           'ended_at': stamp(times[-1] + timedelta(seconds=1))}
     (run_dir / 'run.json').write_text(json.dumps(run))
     if not bound:
         return
@@ -72,7 +74,7 @@ def epoch(tmp_path, monkeypatch):
 
     def verify(store_, plan_, session_, kind, **_):
         if session_['group_id'] + '-' + kind in state['failing']:
-            raise ValueError('lacks 30 consecutive verified healthy pre-fault minutes')
+            raise ValueError(state.get('error', 'ADR-016 checkout-service lacks 30 consecutive verified healthy pre-fault minutes'))
         return {}
 
     monkeypatch.setattr(owner, 'docker', docker)
@@ -96,7 +98,7 @@ def test_owner_exclusion_keeps_every_byte_stops_the_group_and_names_the_successo
     result = exclude(epoch)
     assert result['replacement_group_id'] == 'alb-06' and result['successor_source_commit'] == SUCCESSOR
     assert result['slot_status'] == {'alb-04-healthy': 'SOURCE_VERIFIED', 'alb-04-payment-abrupt': 'SOURCE_VERIFIED',
-                                     'alb-04-inventory-abrupt': 'FAILED_VERIFICATION',
+                                     'alb-04-inventory-abrupt': 'FAILED_WARMUP_COVERAGE',
                                      'alb-04-payment-gradual': 'INCOMPLETE', 'alb-04-inventory-gradual': 'INCOMPLETE'}
     assert sorted(state['stopped']) == sorted(c['container_id'] for c in session['context']['containers'].values())
     assert recovery._inventory(store, 'alb-04', plan) == before
@@ -227,5 +229,21 @@ def test_a_ledger_that_is_not_the_bound_capture_is_refused(epoch):
     run = json.loads(run_json.read_text())
     run_json.write_text(json.dumps({**run, 'ended_at': '2030-01-01T00:00:00.000000Z'}))
     with pytest.raises(ValueError, match='registered completed capture'):
+        exclude(epoch)
+    assert state['stopped'] == []
+
+
+def test_any_other_verifier_failure_is_never_explained_by_a_pause(epoch):
+    store, plan, _, state = epoch
+    state['error'] = 'prospective result/recipe/role differs from pre-traffic registration'
+    with pytest.raises(ValueError, match='host-pause witness'):
+        exclude(epoch)
+    assert state['stopped'] == []
+
+
+def test_a_pause_after_the_warmup_does_not_explain_a_warmup_failure(epoch):
+    store, plan, _, state = epoch
+    write_ledger(store, 'alb-04-inventory-abrupt', gap_seconds=28094, gap_after_warmup=True)
+    with pytest.raises(ValueError, match='host-pause witness'):
         exclude(epoch)
     assert state['stopped'] == []
