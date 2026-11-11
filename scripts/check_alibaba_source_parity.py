@@ -325,6 +325,38 @@ def describe(exc):
     return type(exc).__name__
 
 
+CREDENTIALS = ('runtime-token', 'observer-token', 'kubeconfig')  # created by the sandbox inside the output
+
+
+def scrub_credentials(root):
+    """The output directory is evidence; sandbox credentials never stay in it, even after a failed cleanup."""
+    for name in CREDENTIALS:
+        (root / name).unlink(missing_ok=True)
+
+
+def write_diagnostics(sandbox, root):
+    """Pod/node status and event reasons only: free-text event messages can carry arguments."""
+    result = {}
+    for key, arguments in (('pods', ('-n', NAMESPACE, 'get', 'pods', '-o', 'json')),
+                           ('events', ('-n', NAMESPACE, 'get', 'events', '-o', 'json')),
+                           ('nodes', ('get', 'nodes', '-o', 'json'))):
+        try:
+            items = json.loads(sandbox.kubectl(*arguments))['items']
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError, KeyError):
+            result[key] = 'diagnostics-unavailable'
+            continue
+        if key == 'events':
+            result[key] = [{'reason': i.get('reason'), 'type': i.get('type'),
+                            'object': (i.get('involvedObject') or {}).get('name')} for i in items]
+        else:
+            result[key] = [{'name': i.get('metadata', {}).get('name'),
+                            'phase': i.get('status', {}).get('phase'),
+                            'conditions': [{'type': c.get('type'), 'status': c.get('status'), 'reason': c.get('reason')}
+                                           for c in i.get('status', {}).get('conditions', [])]} for i in items]
+    with (root / 'diagnostics.json').open('x') as stream:
+        json.dump(result, stream, indent=2)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--kind', required=True)
@@ -337,13 +369,16 @@ def main():
 
     def terminate(signum, frame):
         raise KeyboardInterrupt
-    # Installed before any output exists, so an interrupt always lands in the handler below.
     signal.signal(signal.SIGTERM, terminate)
     # Evidence must name a clean commit; a dirty checkout is refused before any output exists.
     commit = clean_commit()
     root = args.output.resolve()
+    # SIGTERM/SIGINT stay pending from just before the output exists until the handler below is
+    # active, so no interrupt can leave an output directory without FAIL evidence.
+    interrupts = {signal.SIGTERM, signal.SIGINT}
+    signal.pthread_sigmask(signal.SIG_BLOCK, interrupts)
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
-    state = {'manifest': None, 'images': None, 'measured': None, 'bundle_checked': False}
+    state = {'manifest': None, 'images': None, 'measured': None, 'bundle_checked': False, 'sandbox': None}
 
     def scope():
         version = state['manifest']['model_version'] if state['manifest'] else None
@@ -358,6 +393,7 @@ def main():
         return written
 
     try:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, interrupts)
         try:
             bundle_parts = verify_bundle(args.bundle.resolve(strict=True), args.manifest_sha256)
         except Exception as exc:  # unreadable bundle or manifest hash mismatch is a P1 failure, not a crash
@@ -371,17 +407,20 @@ def main():
             record(failure_checks('P1', reason, state['manifest']), [{'criterion': 'P1', 'reason': reason}])
             raise SystemExit('P1: bundle does not verify; no sandbox started')
         policy = json.loads((PROJECT / 'configs/slo_health_policy.json').read_text())
-        sandbox = BusinessSandbox(root, args.kind)
+        sandbox = state['sandbox'] = BusinessSandbox(root, args.kind)
         try:
             state['images'] = deploy(sandbox)
             state['measured'] = asyncio.run(measure(sandbox, root, bundle_parts, policy))
         except subprocess.CalledProcessError as exc:
             if sandbox.kubeconfig.exists():
-                sandbox.diagnostics()
+                write_diagnostics(sandbox, root)
             emit('command-failed', operation=Path(exc.cmd[0]).name, code=exc.returncode)
             raise
         finally:
-            sandbox.cleanup()  # a cleanup failure is an environment failure and must not leave a PASS
+            try:
+                sandbox.cleanup()  # a cleanup failure is an environment failure and must not leave a PASS
+            finally:
+                scrub_credentials(root)
             emit('owned-sandbox-cleaned', cluster=sandbox.name)
         checks, failures, normalization_ref, config = state['measured']
         if record(checks, failures, config, normalization_ref)['status'] != 'PASS':
@@ -390,6 +429,7 @@ def main():
         raise
     except (Exception, KeyboardInterrupt) as exc:
         # Bundle, sandbox, deployment, measurement, cleanup or an interrupt: the run still leaves FAIL evidence.
+        scrub_credentials(root)
         criterion = 'P2' if state['bundle_checked'] else 'P1'
         failure = {'criterion': criterion, 'reason': 'run aborted: ' + describe(exc)}
         if state['measured'] is not None:

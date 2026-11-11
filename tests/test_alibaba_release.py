@@ -371,6 +371,8 @@ def run_parity_main(tmp_path, monkeypatch, *, bundle_ok=True, verify_bundle=None
 
         def __init__(self, root, kind):
             started.append(kind)
+            for name in script.CREDENTIALS:  # what a real sandbox leaves inside the output directory
+                (root / name).write_text('SECRET-' + name)
 
         def forward(self, service, port):
             return 'http://fixture/' + service
@@ -414,6 +416,8 @@ def run_parity_main(tmp_path, monkeypatch, *, bundle_ok=True, verify_bundle=None
     monkeypatch.setattr(script, 'wait_ready', ready or always_ready)
     monkeypatch.setattr(script, 'deploy', deploy or (lambda sandbox: [{'image': 'fixture'}]))
     monkeypatch.setattr(script.signal, 'signal', lambda *args: None)
+    masks = []
+    monkeypatch.setattr(script.signal, 'pthread_sigmask', lambda how, signals: masks.append((how, output.exists())))
     if measure is not None:
         monkeypatch.setattr(script, 'measure', measure)
     monkeypatch.setattr(sys, 'argv', ['check_alibaba_source_parity.py', '--kind', 'unused', '--bundle', str(bundle),
@@ -423,9 +427,13 @@ def run_parity_main(tmp_path, monkeypatch, *, bundle_ok=True, verify_bundle=None
         script.main()
     if isinstance(exited.value, SystemExit):
         assert exited.value.code not in (0, None)
+    # Interrupts are held from before the output exists until the evidence handler is active.
+    assert masks == [(script.signal.SIG_BLOCK, False), (script.signal.SIG_UNBLOCK, True)]
     verification = json.loads((output / 'verification.json').read_text())
     record = json.loads((output / 'parity.json').read_text())
     assert record['status'] == 'FAIL' and record['evidence'] == [parity_verification_ref(verification)]
+    leftovers = [p for p in output.rglob('*') if p.is_file() and 'SECRET' in p.read_text(errors='replace')]
+    assert leftovers == [] and not any((output / name).exists() for name in script.CREDENTIALS)
     assert verification['failures'] and verification['activation_allowed'] is False
     return verification, started, subprocess
 
@@ -509,3 +517,21 @@ def test_an_interrupt_before_the_bundle_is_checked_still_leaves_p1_evidence(tmp_
     verification, started, _ = run_parity_main(tmp_path, monkeypatch, verify_bundle=interrupted)
     assert started == []
     assert verification['failures'] == [{'criterion': 'P1', 'reason': 'run aborted: KeyboardInterrupt'}]
+
+
+def test_parity_diagnostics_keep_status_and_reasons_but_no_free_text(tmp_path):
+    import importlib
+    script = importlib.import_module('scripts.check_alibaba_source_parity')
+
+    class Sandbox:
+        def kubectl(self, *args):
+            if 'events' in args:
+                return json.dumps({'items': [{'reason': 'Failed', 'type': 'Warning', 'message': 'pull --token=SECRET',
+                                              'involvedObject': {'name': 'inventory-service-1'}}]}).encode()
+            return json.dumps({'items': [{'metadata': {'name': 'n1'}, 'status': {
+                'phase': 'Running', 'message': 'SECRET', 'conditions': [{'type': 'Ready', 'status': 'True',
+                                                                          'message': 'SECRET'}]}}]}).encode()
+    script.write_diagnostics(Sandbox(), tmp_path)
+    written = (tmp_path / 'diagnostics.json').read_text()
+    assert 'SECRET' not in written
+    assert json.loads(written)['events'] == [{'reason': 'Failed', 'type': 'Warning', 'object': 'inventory-service-1'}]
