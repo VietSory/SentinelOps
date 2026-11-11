@@ -264,15 +264,15 @@ async def measure(sandbox, root, bundle_parts, policy):
                 for url in (*[t + '/ready' for t in targets.values()], source.endpoint + '/-/ready'):
                     await wait_ready(client, url)
             except Exception as exc:
-                return preflight_failure('readiness check failed: ' + str(exc))
+                return preflight_failure('readiness check failed: ' + describe(exc))
             try:
                 config = await asyncio.to_thread(source.verify_configuration)
             except Exception as exc:
-                return preflight_failure('Prometheus configuration preflight failed: ' + str(exc))
+                return preflight_failure('Prometheus configuration preflight failed: ' + describe(exc))
             try:
                 inventory = await asyncio.to_thread(sandbox.inventory)
             except Exception as exc:
-                return preflight_failure('sandbox inventory preflight failed: ' + str(exc), config)
+                return preflight_failure('sandbox inventory preflight failed: ' + describe(exc), config)
             first_end = (int(utcnow().timestamp()) // 60 + 2) * 60
             count = minute_count(bundle_parts[0]['provenance']['config'])
             ends = [datetime.fromtimestamp(first_end + m * 60, timezone.utc) for m in range(count)]
@@ -314,19 +314,15 @@ def failure_checks(criterion, reason, manifest):
     return {criterion: [detail]}
 
 
-def write_failure(root, scope, commit, manifest, manifest_sha256, criterion, reason, **extra):
-    """Record a run that stopped before all criteria could be measured; it never certifies."""
-    _, record = write_evidence(root, scope, commit, manifest, manifest_sha256,
-                               failure_checks(criterion, reason, manifest),
-                               [{'criterion': criterion, 'reason': reason}], **extra)
-    emit('parity-complete', status=record['status'], failures=1, record=str(root / 'parity.json'))
-
-
-def abort_reason(exc):
-    if isinstance(exc, subprocess.CalledProcessError):
-        # Command arguments stay out of the evidence; the operation name and exit code identify the step.
-        return f'run aborted: command {Path(exc.cmd[0]).name} exited {exc.returncode}'
-    return f'run aborted: {type(exc).__name__}: {exc}'
+def describe(exc):
+    """Evidence names the failure without its message: messages and commands may carry arguments or secrets."""
+    if isinstance(exc, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
+        command = exc.cmd if isinstance(exc.cmd, (list, tuple)) else str(exc.cmd).split()
+        name = Path(str(command[0])).name if command else 'unknown'
+        if isinstance(exc, subprocess.TimeoutExpired):
+            return f'command {name} timed out'
+        return f'command {name} exited {exc.returncode}'
+    return type(exc).__name__
 
 
 def main():
@@ -338,57 +334,70 @@ def main():
     parser.add_argument('--verified-by', required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+
+    def terminate(signum, frame):
+        raise KeyboardInterrupt
+    # Installed before any output exists, so an interrupt always lands in the handler below.
+    signal.signal(signal.SIGTERM, terminate)
     # Evidence must name a clean commit; a dirty checkout is refused before any output exists.
     commit = clean_commit()
     root = args.output.resolve()
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
-    load_error = None
+    state = {'manifest': None, 'images': None, 'measured': None, 'bundle_checked': False}
+
+    def scope():
+        version = state['manifest']['model_version'] if state['manifest'] else None
+        return {'candidate_id': version, 'environment': args.environment, 'source_profile': SOURCE_PROFILE_V2,
+                'models': [{'service': s, 'model_version': version} for s in sorted(BUSINESS_ROUTES)],
+                'verified_by': args.verified_by, 'verified_at': timestamp(utcnow())}
+
+    def record(checks, failures, config=None, normalization_ref=None):
+        _, written = write_evidence(root, scope(), commit, state['manifest'], args.manifest_sha256, checks, failures,
+                                    images=state['images'], config=config, normalization_ref=normalization_ref)
+        emit('parity-complete', status=written['status'], failures=len(failures), record=str(root / 'parity.json'))
+        return written
+
     try:
-        bundle_parts = verify_bundle(args.bundle.resolve(strict=True), args.manifest_sha256)
-    except Exception as exc:  # unreadable bundle or manifest hash mismatch is a P1 failure, not a crash
-        bundle_parts, load_error = (None, None, None, False), f'{type(exc).__name__}: {exc}'
-    manifest = bundle_parts[0]
-    model_version = manifest['model_version'] if manifest else None
-    scope = {'candidate_id': model_version, 'environment': args.environment,
-             'source_profile': SOURCE_PROFILE_V2,
-             'models': [{'service': s, 'model_version': model_version} for s in sorted(BUSINESS_ROUTES)],
-             'verified_by': args.verified_by, 'verified_at': timestamp(utcnow())}
-    if not bundle_parts[3]:
-        reason = 'bundle verification failed' + (': ' + load_error if load_error else '') + '; no sandbox started'
-        write_failure(root, scope, commit, manifest, args.manifest_sha256, 'P1', reason)
-        raise SystemExit('P1: bundle does not verify; no sandbox started')
-    try:
+        try:
+            bundle_parts = verify_bundle(args.bundle.resolve(strict=True), args.manifest_sha256)
+        except Exception as exc:  # unreadable bundle or manifest hash mismatch is a P1 failure, not a crash
+            bundle_parts, load_error = (None, None, None, False), describe(exc)
+        else:
+            load_error = None
+        state['manifest'] = bundle_parts[0]
+        state['bundle_checked'] = True
+        if not bundle_parts[3]:
+            reason = 'bundle verification failed' + (': ' + load_error if load_error else '') + '; no sandbox started'
+            record(failure_checks('P1', reason, state['manifest']), [{'criterion': 'P1', 'reason': reason}])
+            raise SystemExit('P1: bundle does not verify; no sandbox started')
         policy = json.loads((PROJECT / 'configs/slo_health_policy.json').read_text())
         sandbox = BusinessSandbox(root, args.kind)
-    except Exception as exc:
-        write_failure(root, scope, commit, manifest, args.manifest_sha256, 'P2', abort_reason(exc))
-        raise
-
-    def terminate(signum, frame):
-        raise KeyboardInterrupt
-    signal.signal(signal.SIGTERM, terminate)
-    images, written = None, False
-    try:
-        images = deploy(sandbox)
-        checks, failures, normalization_ref, config = asyncio.run(measure(sandbox, root, bundle_parts, policy))
-        _, record = write_evidence(root, scope, commit, manifest, args.manifest_sha256, checks, failures,
-                                   images=images, config=config, normalization_ref=normalization_ref)
-        written = True
-        emit('parity-complete', status=record['status'], failures=len(failures), record=str(root / 'parity.json'))
-        if failures:
-            raise SystemExit('source parity failed; evidence written to ' + str(root))
-    except (Exception, KeyboardInterrupt) as exc:
-        # Deployment, measurement or an interrupt that stops the run still leaves FAIL evidence.
-        if not written:
-            write_failure(root, scope, commit, manifest, args.manifest_sha256, 'P2', abort_reason(exc), images=images)
-        if isinstance(exc, subprocess.CalledProcessError):
+        try:
+            state['images'] = deploy(sandbox)
+            state['measured'] = asyncio.run(measure(sandbox, root, bundle_parts, policy))
+        except subprocess.CalledProcessError as exc:
             if sandbox.kubeconfig.exists():
                 sandbox.diagnostics()
             emit('command-failed', operation=Path(exc.cmd[0]).name, code=exc.returncode)
+            raise
+        finally:
+            sandbox.cleanup()  # a cleanup failure is an environment failure and must not leave a PASS
+            emit('owned-sandbox-cleaned', cluster=sandbox.name)
+        checks, failures, normalization_ref, config = state['measured']
+        if record(checks, failures, config, normalization_ref)['status'] != 'PASS':
+            raise SystemExit('source parity failed; evidence written to ' + str(root))
+    except SystemExit:
         raise
-    finally:
-        sandbox.cleanup()
-        emit('owned-sandbox-cleaned', cluster=sandbox.name)
+    except (Exception, KeyboardInterrupt) as exc:
+        # Bundle, sandbox, deployment, measurement, cleanup or an interrupt: the run still leaves FAIL evidence.
+        criterion = 'P2' if state['bundle_checked'] else 'P1'
+        failure = {'criterion': criterion, 'reason': 'run aborted: ' + describe(exc)}
+        if state['measured'] is not None:
+            checks, failures, normalization_ref, config = state['measured']
+            record(checks, [*failures, failure], config, normalization_ref)
+        else:
+            record(failure_checks(criterion, failure['reason'], state['manifest']), [failure])
+        raise
 
 
 if __name__ == '__main__':

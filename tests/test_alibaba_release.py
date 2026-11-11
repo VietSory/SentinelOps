@@ -354,7 +354,7 @@ def test_a_5xx_during_the_drive_is_recorded_as_a_p4_failure():
 
 
 def run_parity_main(tmp_path, monkeypatch, *, bundle_ok=True, verify_bundle=None, deploy=None, ready=None,
-                    configuration=None, inventory=None):
+                    configuration=None, inventory=None, cleanup=None, measure=None):
     """Drive check_alibaba_source_parity.main with every sandbox/HTTP edge mocked: no Docker, network or port."""
     import importlib
     import subprocess
@@ -379,7 +379,7 @@ def run_parity_main(tmp_path, monkeypatch, *, bundle_ok=True, verify_bundle=None
             return (inventory or (lambda: {}))()
 
         def cleanup(self):
-            pass
+            (cleanup or (lambda: None))()
 
     class Source:
         endpoint = 'http://fixture/prometheus'
@@ -414,17 +414,19 @@ def run_parity_main(tmp_path, monkeypatch, *, bundle_ok=True, verify_bundle=None
     monkeypatch.setattr(script, 'wait_ready', ready or always_ready)
     monkeypatch.setattr(script, 'deploy', deploy or (lambda sandbox: [{'image': 'fixture'}]))
     monkeypatch.setattr(script.signal, 'signal', lambda *args: None)
+    if measure is not None:
+        monkeypatch.setattr(script, 'measure', measure)
     monkeypatch.setattr(sys, 'argv', ['check_alibaba_source_parity.py', '--kind', 'unused', '--bundle', str(bundle),
                                       '--manifest-sha256', 'b' * 64, '--environment', 'test', '--verified-by', 'tester',
                                       '--output', str(output)])
-    with pytest.raises((SystemExit, Exception)) as exited:
+    with pytest.raises((SystemExit, Exception, KeyboardInterrupt)) as exited:
         script.main()
     if isinstance(exited.value, SystemExit):
         assert exited.value.code not in (0, None)
     verification = json.loads((output / 'verification.json').read_text())
     record = json.loads((output / 'parity.json').read_text())
     assert record['status'] == 'FAIL' and record['evidence'] == [parity_verification_ref(verification)]
-    assert len(verification['failures']) == 1 and verification['activation_allowed'] is False
+    assert verification['failures'] and verification['activation_allowed'] is False
     return verification, started, subprocess
 
 
@@ -442,7 +444,8 @@ def test_parity_main_writes_p1_failure_when_the_bundle_cannot_be_loaded(tmp_path
     verification, started, _ = run_parity_main(tmp_path, monkeypatch, verify_bundle=unloadable)
     assert started == [] and verification['candidate_id'] is None and verification['config_sha256'] is None
     assert verification['failures'] == [{'criterion': 'P1', 'reason': 'bundle verification failed: '
-                                         'ValueError: manifest hash mismatch; no sandbox started'}]
+                                         'ValueError; no sandbox started'}]
+    assert 'manifest hash mismatch' not in json.dumps(verification)
 
 
 def _raise(message):
@@ -456,9 +459,9 @@ async def _not_ready(*args):
 
 
 @pytest.mark.parametrize(('override', 'reason'), [
-    ({'ready': _not_ready}, 'readiness check failed: fixture readiness failure'),
-    ({'configuration': _raise('scrape interval 15s')}, 'Prometheus configuration preflight failed: scrape interval 15s'),
-    ({'inventory': _raise('0/2 pods ready')}, 'sandbox inventory preflight failed: 0/2 pods ready'),
+    ({'ready': _not_ready}, 'readiness check failed: RuntimeError'),
+    ({'configuration': _raise('scrape interval 15s')}, 'Prometheus configuration preflight failed: RuntimeError'),
+    ({'inventory': _raise('0/2 pods ready')}, 'sandbox inventory preflight failed: RuntimeError'),
 ])
 def test_parity_main_writes_p2_failure_when_preflight_fails(tmp_path, monkeypatch, override, reason):
     verification, _, _ = run_parity_main(tmp_path, monkeypatch, **override)
@@ -474,3 +477,35 @@ def test_parity_main_writes_p2_failure_when_deployment_fails(tmp_path, monkeypat
     verification, _, _ = run_parity_main(tmp_path, monkeypatch, deploy=broken)
     assert verification['failures'] == [{'criterion': 'P2', 'reason': 'run aborted: command kind exited 1'}]
     assert '--secret-arg' not in json.dumps(verification)
+
+
+def test_parity_evidence_never_carries_a_timed_out_command_line(tmp_path, monkeypatch):
+    import subprocess
+
+    def hung(sandbox):
+        raise subprocess.TimeoutExpired(['/usr/bin/kubectl', '--token=SECRET', 'apply'], 30)
+    verification, _, _ = run_parity_main(tmp_path, monkeypatch, deploy=hung)
+    assert verification['failures'] == [{'criterion': 'P2', 'reason': 'run aborted: command kubectl timed out'}]
+    assert 'SECRET' not in json.dumps(verification)
+
+
+def test_a_cleanup_failure_after_a_clean_measurement_is_recorded_as_fail(tmp_path, monkeypatch):
+    checks = {'P1': [{'ok': True, 'model_version': 'fixture-model'}]}
+    config = {'configuration_hash': 'c' * 64, 'scrape_interval': '5s'}
+
+    async def measured(*args):
+        return checks, [], 'artifact://manifests/' + 'd' * 64 + '.json', config
+
+    def cleanup():
+        raise ValueError('node identity changed')
+    verification, _, _ = run_parity_main(tmp_path, monkeypatch, measure=measured, cleanup=cleanup)
+    assert verification['failures'] == [{'criterion': 'P2', 'reason': 'run aborted: ValueError'}]
+    assert verification['criteria'] == checks and verification['configuration_hash'] == 'c' * 64
+
+
+def test_an_interrupt_before_the_bundle_is_checked_still_leaves_p1_evidence(tmp_path, monkeypatch):
+    def interrupted(*args):
+        raise KeyboardInterrupt
+    verification, started, _ = run_parity_main(tmp_path, monkeypatch, verify_bundle=interrupted)
+    assert started == []
+    assert verification['failures'] == [{'criterion': 'P1', 'reason': 'run aborted: KeyboardInterrupt'}]
