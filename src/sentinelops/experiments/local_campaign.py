@@ -161,7 +161,9 @@ def register_alibaba_epoch(store, plan, source, bundle, manifest_sha256):
     path = store.root/ALIBABA_BINDING
     if path.exists():
         reference, previous = read_alibaba_epoch(store, plan)
-        if any(previous[k] != v for k, v in value.items()):
+        from sentinelops.experiments.owner_exclusion import epoch_sources
+        if (any(previous[k] != v for k, v in value.items() if k != 'source_commit')
+                or source not in epoch_sources(store, plan)):
             raise ValueError('ADR-016 epoch is already registered to another bundle or source')
         return reference
     if registered_sessions(store):
