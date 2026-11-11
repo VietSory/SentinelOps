@@ -250,15 +250,29 @@ def evaluate(root, bundle_parts, captures, logs, ends, policy):
     return checks, failures, normalized['manifest_ref']
 
 
+def preflight_failure(reason, config=None):
+    """Readiness or source configuration not established: P2 cannot be shown, so nothing is measured."""
+    return failure_checks('P2', reason, None), [{'criterion': 'P2', 'reason': reason}], None, config
+
+
 async def measure(sandbox, root, bundle_parts, policy):
     targets = {s: sandbox.forward(s, 8000) for s in SERVICES}
     source = PrometheusSource(sandbox.forward('prometheus', 9090))
     try:
         async with httpx.AsyncClient(timeout=8, trust_env=False) as client:
-            for url in (*[t + '/ready' for t in targets.values()], source.endpoint + '/-/ready'):
-                await wait_ready(client, url)
-            config = await asyncio.to_thread(source.verify_configuration)
-            inventory = await asyncio.to_thread(sandbox.inventory)
+            try:
+                for url in (*[t + '/ready' for t in targets.values()], source.endpoint + '/-/ready'):
+                    await wait_ready(client, url)
+            except Exception as exc:
+                return preflight_failure('readiness check failed: ' + str(exc))
+            try:
+                config = await asyncio.to_thread(source.verify_configuration)
+            except Exception as exc:
+                return preflight_failure('Prometheus configuration preflight failed: ' + str(exc))
+            try:
+                inventory = await asyncio.to_thread(sandbox.inventory)
+            except Exception as exc:
+                return preflight_failure('sandbox inventory preflight failed: ' + str(exc), config)
             first_end = (int(utcnow().timestamp()) // 60 + 2) * 60
             count = minute_count(bundle_parts[0]['provenance']['config'])
             ends = [datetime.fromtimestamp(first_end + m * 60, timezone.utc) for m in range(count)]
@@ -275,6 +289,46 @@ async def measure(sandbox, root, bundle_parts, policy):
         source.close()
 
 
+def write_evidence(root, scope, commit, manifest, manifest_sha256, checks, failures, *, images=None, config=None,
+                   normalization_ref=None):
+    """Write the producer schema for both complete runs and early, non-certifying failures."""
+    verification = {'version': PARITY_VERIFICATION_VERSION, 'criteria_version': CRITERIA_VERSION, **scope,
+                    'source_commit': commit, 'bundle_manifest_sha256': manifest_sha256,
+                    'config_sha256': stable_id(manifest['provenance']['config']) if manifest else None,
+                    'criteria': checks, 'failures': failures, 'images': images or [],
+                    'configuration_hash': config.get('configuration_hash') if config else None,
+                    'scrape_interval': config.get('scrape_interval') if config else None,
+                    'normalization_ref': normalization_ref,
+                    'activation_allowed': False, 'G3_accepted': False}
+    (root / 'verification.json').write_text(json.dumps(verification, indent=2, allow_nan=False) + '\n')
+    record = {'parity_version': PARITY_VERSION, **scope, 'status': 'FAIL' if failures else 'PASS',
+              'evidence': [parity_verification_ref(verification)]}
+    (root / 'parity.json').write_text(json.dumps(record, indent=2) + '\n')
+    return verification, record
+
+
+def failure_checks(criterion, reason, manifest):
+    detail = {'ok': False, 'reason': reason}
+    if criterion == 'P1':
+        detail['model_version'] = manifest['model_version'] if manifest else None
+    return {criterion: [detail]}
+
+
+def write_failure(root, scope, commit, manifest, manifest_sha256, criterion, reason, **extra):
+    """Record a run that stopped before all criteria could be measured; it never certifies."""
+    _, record = write_evidence(root, scope, commit, manifest, manifest_sha256,
+                               failure_checks(criterion, reason, manifest),
+                               [{'criterion': criterion, 'reason': reason}], **extra)
+    emit('parity-complete', status=record['status'], failures=1, record=str(root / 'parity.json'))
+
+
+def abort_reason(exc):
+    if isinstance(exc, subprocess.CalledProcessError):
+        # Command arguments stay out of the evidence; the operation name and exit code identify the step.
+        return f'run aborted: command {Path(exc.cmd[0]).name} exited {exc.returncode}'
+    return f'run aborted: {type(exc).__name__}: {exc}'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--kind', required=True)
@@ -284,43 +338,53 @@ def main():
     parser.add_argument('--verified-by', required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    # Evidence must name a clean commit; a dirty checkout is refused before any output exists.
     commit = clean_commit()
-    bundle = args.bundle.resolve(strict=True)
-    bundle_parts = verify_bundle(bundle, args.manifest_sha256)
-    if not bundle_parts[3]:
-        raise SystemExit('P1: bundle does not verify; no sandbox started')
-    policy = json.loads((PROJECT / 'configs/slo_health_policy.json').read_text())
     root = args.output.resolve()
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
-    sandbox = BusinessSandbox(root, args.kind)
+    load_error = None
+    try:
+        bundle_parts = verify_bundle(args.bundle.resolve(strict=True), args.manifest_sha256)
+    except Exception as exc:  # unreadable bundle or manifest hash mismatch is a P1 failure, not a crash
+        bundle_parts, load_error = (None, None, None, False), f'{type(exc).__name__}: {exc}'
+    manifest = bundle_parts[0]
+    model_version = manifest['model_version'] if manifest else None
+    scope = {'candidate_id': model_version, 'environment': args.environment,
+             'source_profile': SOURCE_PROFILE_V2,
+             'models': [{'service': s, 'model_version': model_version} for s in sorted(BUSINESS_ROUTES)],
+             'verified_by': args.verified_by, 'verified_at': timestamp(utcnow())}
+    if not bundle_parts[3]:
+        reason = 'bundle verification failed' + (': ' + load_error if load_error else '') + '; no sandbox started'
+        write_failure(root, scope, commit, manifest, args.manifest_sha256, 'P1', reason)
+        raise SystemExit('P1: bundle does not verify; no sandbox started')
+    try:
+        policy = json.loads((PROJECT / 'configs/slo_health_policy.json').read_text())
+        sandbox = BusinessSandbox(root, args.kind)
+    except Exception as exc:
+        write_failure(root, scope, commit, manifest, args.manifest_sha256, 'P2', abort_reason(exc))
+        raise
 
     def terminate(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)
+    images, written = None, False
     try:
         images = deploy(sandbox)
         checks, failures, normalization_ref, config = asyncio.run(measure(sandbox, root, bundle_parts, policy))
-        manifest = bundle_parts[0]
-        scope = {'candidate_id': manifest['model_version'], 'environment': args.environment,
-                 'source_profile': SOURCE_PROFILE_V2,
-                 'models': [{'service': s, 'model_version': manifest['model_version']} for s in sorted(BUSINESS_ROUTES)],
-                 'verified_by': args.verified_by, 'verified_at': timestamp(utcnow())}
-        verification = {'version': PARITY_VERIFICATION_VERSION, 'criteria_version': CRITERIA_VERSION, **scope,
-                        'source_commit': commit, 'bundle_manifest_sha256': args.manifest_sha256,
-                        'config_sha256': stable_id(manifest['provenance']['config']),
-                        'criteria': checks, 'failures': failures, 'images': images,
-                        'configuration_hash': config['configuration_hash'], 'scrape_interval': config['scrape_interval'],
-                        'normalization_ref': normalization_ref,
-                        'activation_allowed': False, 'G3_accepted': False}
-        (root / 'verification.json').write_text(json.dumps(verification, indent=2, allow_nan=False) + '\n')
-        record = {'parity_version': PARITY_VERSION, **scope, 'status': 'FAIL' if failures else 'PASS',
-                  'evidence': [parity_verification_ref(verification)]}
-        (root / 'parity.json').write_text(json.dumps(record, indent=2) + '\n')
+        _, record = write_evidence(root, scope, commit, manifest, args.manifest_sha256, checks, failures,
+                                   images=images, config=config, normalization_ref=normalization_ref)
+        written = True
         emit('parity-complete', status=record['status'], failures=len(failures), record=str(root / 'parity.json'))
-    except subprocess.CalledProcessError as exc:
-        if sandbox.kubeconfig.exists():
-            sandbox.diagnostics()
-        emit('command-failed', operation=Path(exc.cmd[0]).name, code=exc.returncode)
+        if failures:
+            raise SystemExit('source parity failed; evidence written to ' + str(root))
+    except (Exception, KeyboardInterrupt) as exc:
+        # Deployment, measurement or an interrupt that stops the run still leaves FAIL evidence.
+        if not written:
+            write_failure(root, scope, commit, manifest, args.manifest_sha256, 'P2', abort_reason(exc), images=images)
+        if isinstance(exc, subprocess.CalledProcessError):
+            if sandbox.kubeconfig.exists():
+                sandbox.diagnostics()
+            emit('command-failed', operation=Path(exc.cmd[0]).name, code=exc.returncode)
         raise
     finally:
         sandbox.cleanup()

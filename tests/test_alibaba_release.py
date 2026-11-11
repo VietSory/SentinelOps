@@ -350,3 +350,127 @@ def test_a_5xx_during_the_drive_is_recorded_as_a_p4_failure():
     targets = {s: 'http://' + s for s in script.SERVICES}
     rows = asyncio.run(script.drive(Client(), targets, script.utcnow() + timedelta(milliseconds=50)))
     assert any(row['failed'] for row in rows) and not all(row['failed'] for row in rows)
+
+
+
+def run_parity_main(tmp_path, monkeypatch, *, bundle_ok=True, verify_bundle=None, deploy=None, ready=None,
+                    configuration=None, inventory=None):
+    """Drive check_alibaba_source_parity.main with every sandbox/HTTP edge mocked: no Docker, network or port."""
+    import importlib
+    import subprocess
+    import sys
+    script = importlib.import_module('scripts.check_alibaba_source_parity')
+    bundle, output = tmp_path / 'bundle', tmp_path / 'output'
+    bundle.mkdir()
+    manifest = {'model_version': 'fixture-model', 'provenance': {'config': {'fixture': True}}}
+    started = []
+
+    class Sandbox:
+        name = 'fixture-sandbox'
+        kubeconfig = tmp_path / 'missing-kubeconfig'
+
+        def __init__(self, root, kind):
+            started.append(kind)
+
+        def forward(self, service, port):
+            return 'http://fixture/' + service
+
+        def inventory(self):
+            return (inventory or (lambda: {}))()
+
+        def cleanup(self):
+            pass
+
+    class Source:
+        endpoint = 'http://fixture/prometheus'
+
+        def __init__(self, endpoint):
+            pass
+
+        def verify_configuration(self):
+            return (configuration or (lambda: {'configuration_hash': 'c' * 64, 'scrape_interval': '5s'}))()
+
+        def close(self):
+            pass
+
+    class Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def always_ready(*args):
+        pass
+
+    monkeypatch.setattr(script, 'clean_commit', lambda: 'a' * 40)
+    monkeypatch.setattr(script, 'verify_bundle', verify_bundle or (lambda *args: (manifest, None, None, bundle_ok)))
+    monkeypatch.setattr(script, 'BusinessSandbox', Sandbox)
+    monkeypatch.setattr(script, 'PrometheusSource', Source)
+    monkeypatch.setattr(script.httpx, 'AsyncClient', Client)
+    monkeypatch.setattr(script, 'wait_ready', ready or always_ready)
+    monkeypatch.setattr(script, 'deploy', deploy or (lambda sandbox: [{'image': 'fixture'}]))
+    monkeypatch.setattr(script.signal, 'signal', lambda *args: None)
+    monkeypatch.setattr(sys, 'argv', ['check_alibaba_source_parity.py', '--kind', 'unused', '--bundle', str(bundle),
+                                      '--manifest-sha256', 'b' * 64, '--environment', 'test', '--verified-by', 'tester',
+                                      '--output', str(output)])
+    with pytest.raises((SystemExit, Exception)) as exited:
+        script.main()
+    if isinstance(exited.value, SystemExit):
+        assert exited.value.code not in (0, None)
+    verification = json.loads((output / 'verification.json').read_text())
+    record = json.loads((output / 'parity.json').read_text())
+    assert record['status'] == 'FAIL' and record['evidence'] == [parity_verification_ref(verification)]
+    assert len(verification['failures']) == 1 and verification['activation_allowed'] is False
+    return verification, started, subprocess
+
+
+def test_parity_main_writes_p1_failure_before_starting_a_sandbox(tmp_path, monkeypatch):
+    verification, started, _ = run_parity_main(tmp_path, monkeypatch, bundle_ok=False)
+    assert started == []
+    assert verification['failures'] == [{'criterion': 'P1', 'reason': 'bundle verification failed; no sandbox started'}]
+    assert verification['criteria']['P1'] == [{'ok': False, 'reason': 'bundle verification failed; no sandbox started',
+                                               'model_version': 'fixture-model'}]
+
+
+def test_parity_main_writes_p1_failure_when_the_bundle_cannot_be_loaded(tmp_path, monkeypatch):
+    def unloadable(*args):
+        raise ValueError('manifest hash mismatch')
+    verification, started, _ = run_parity_main(tmp_path, monkeypatch, verify_bundle=unloadable)
+    assert started == [] and verification['candidate_id'] is None and verification['config_sha256'] is None
+    assert verification['failures'] == [{'criterion': 'P1', 'reason': 'bundle verification failed: '
+                                         'ValueError: manifest hash mismatch; no sandbox started'}]
+
+
+def _raise(message):
+    def fail(*args):
+        raise RuntimeError(message)
+    return fail
+
+
+async def _not_ready(*args):
+    raise RuntimeError('fixture readiness failure')
+
+
+@pytest.mark.parametrize(('override', 'reason'), [
+    ({'ready': _not_ready}, 'readiness check failed: fixture readiness failure'),
+    ({'configuration': _raise('scrape interval 15s')}, 'Prometheus configuration preflight failed: scrape interval 15s'),
+    ({'inventory': _raise('0/2 pods ready')}, 'sandbox inventory preflight failed: 0/2 pods ready'),
+])
+def test_parity_main_writes_p2_failure_when_preflight_fails(tmp_path, monkeypatch, override, reason):
+    verification, _, _ = run_parity_main(tmp_path, monkeypatch, **override)
+    assert verification['failures'] == [{'criterion': 'P2', 'reason': reason}]
+    assert verification['criteria'] == {'P2': [{'ok': False, 'reason': reason}]}
+
+
+def test_parity_main_writes_p2_failure_when_deployment_fails(tmp_path, monkeypatch):
+    import subprocess
+
+    def broken(sandbox):
+        raise subprocess.CalledProcessError(1, ['/usr/bin/kind', 'create', 'cluster', '--secret-arg'])
+    verification, _, _ = run_parity_main(tmp_path, monkeypatch, deploy=broken)
+    assert verification['failures'] == [{'criterion': 'P2', 'reason': 'run aborted: command kind exited 1'}]
+    assert '--secret-arg' not in json.dumps(verification)
