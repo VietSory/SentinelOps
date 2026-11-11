@@ -152,7 +152,9 @@ def verify_capture(store, plan, session, kind, *, project=PROJECT, as_of=None):
         raise ValueError('registered session changed the pre-capture plan')
     if is_alibaba_plan(plan):
         epoch_ref, epoch = read_alibaba_epoch(store, plan)
-        if (session.get('evaluation_epoch_ref') != epoch_ref or session['source_commit'] != epoch['source_commit']
+        from sentinelops.experiments.owner_exclusion import epoch_sources
+        if (session.get('evaluation_epoch_ref') != epoch_ref
+            or session['source_commit'] not in epoch_sources(store, plan, project=project)
             or utc_time(epoch['registered_at']) > utc_time(session['context_created_after'])):
             raise ValueError('ADR-016 source context predates or changes the pinned candidate')
     slot = group + '-' + kind

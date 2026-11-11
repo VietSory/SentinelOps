@@ -358,7 +358,8 @@ def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=Fal
     epoch_ref = None
     if is_alibaba_plan(plan):
         epoch_ref, epoch = read_alibaba_epoch(store, plan)
-        if epoch['source_commit'] != source:
+        from sentinelops.experiments.owner_exclusion import epoch_sources
+        if source not in epoch_sources(store, plan, project=project):
             raise ValueError('ADR-016 capture differs from the preregistered plan and source')
     require_role_order(store, plan, role)
     path = registration_path(store, group)

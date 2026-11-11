@@ -92,6 +92,9 @@ def read_abandonment(store, session, plan, *, project=PROJECT, as_of=None):
     if not path.exists():
         return None
     ref, closed = read_binding(store, path)
+    if closed.get("closure_version") == "local-http-owner-exclusion/v1":
+        from sentinelops.experiments.owner_exclusion import read_owner_exclusion
+        return read_owner_exclusion(store, session, plan, closed, ref, project=project, as_of=as_of)
     if closed.get("closure_version") == "local-http-clock-discontinuity/v1":
         from sentinelops.experiments.clock_recovery import read_clock_abandonment
         return read_clock_abandonment(store, session, plan, closed, ref, project=project, as_of=as_of)
