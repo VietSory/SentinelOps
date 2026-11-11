@@ -7,7 +7,7 @@ every source byte, its owned containers are stopped (never removed), and a new o
 beyond the reserved minimum replaces it. The decision alone is not enough: a slot that
 did not verify must carry an independent host-pause witness in its original client
 ledger (consecutive request starts more than PAUSE_SECONDS apart, against a scheduled
-spacing of about a second). A group whose every slot verifies, or whose failure has no
+spacing of about a second), bound to the slot's registered, completed capture. A group whose every slot verifies, or whose failure has no
 such witness, cannot be excluded, so the action cannot drop data based on outcomes.
 
 The commit that records the exclusion becomes the epoch's successor capture source: it
@@ -34,21 +34,38 @@ PAUSE_SECONDS = 300  # the client schedules a request about every second; a paus
 
 
 def pause_witness(store, slot):
-    """Re-read the slot's original client ledger; report start gaps longer than PAUSE_SECONDS."""
-    paths = list((store.root / 'runs' / slot / 'captures').glob('run-*/run.json'))
-    if len(paths) != 1 or not re.fullmatch('run-[0-9a-f]{32}', paths[0].parent.name):
+    """Re-read the slot's registered, completed capture; report client start gaps over PAUSE_SECONDS.
+
+    Only a completed slot qualifies: its bound result names the registration and the
+    exact run, the run is the manifest in its immutable truth store, and the ledger is a
+    content-addressed object of that store. Loose files in an incomplete slot never count.
+    """
+    from sentinelops.ml.local_data import _inside
+    root = store.root / 'runs' / slot
+    if not (root / 'result.json').exists():
         return None
-    run = json.loads(paths[0].read_bytes())
-    outcomes = ArtifactStore(paths[0].parent / 'truth').read(run['request_outcomes_ref'])['outcomes']
-    starts = sorted(utc_time(row['started_at']) for row in outcomes)
+    registration_ref, _ = read_binding(store, root / 'registration.json')
+    _, result = read_binding(store, root / 'result.json')
+    run_path = _inside(store.root, result['run_directory'] + '/run.json')
+    run = json.loads(run_path.read_bytes())
+    run_ref = 'artifact://manifests/' + stable_id(run) + '.json'
+    truth = ArtifactStore(run_path.parent / 'truth')
+    if (result.get('status') != 'completed' or result.get('registration_ref') != registration_ref
+        or result.get('run_sha256') != stable_id(run) or run_path.parent.parent != root / 'captures'
+        or not re.fullmatch('run-[0-9a-f]{32}', run_path.parent.name) or truth.read(run_ref) != run
+        or run.get('status') != 'completed'):
+        raise ValueError('host-pause witness differs from the registered completed capture')
+    begin, end = utc_time(run['started_at']), utc_time(run['ended_at'])
+    starts = sorted(utc_time(row['started_at']) for row in truth.read(run['request_outcomes_ref'])['outcomes'])
+    if not starts or starts[0] < begin or starts[-1] > end:
+        raise ValueError('host-pause witness ledger lies outside its run interval')
     gaps = [{'after': timestamp(a), 'seconds': round((b - a).total_seconds(), 3)}
             for a, b in zip(starts, starts[1:]) if (b - a).total_seconds() > PAUSE_SECONDS]
-    return {'run_ref': 'artifact://manifests/' + stable_id(run) + '.json', 'attempts': len(outcomes),
-            'pause_seconds': PAUSE_SECONDS, 'gaps': gaps} if gaps else None
+    return {'run_ref': run_ref, 'attempts': len(starts), 'pause_seconds': PAUSE_SECONDS, 'gaps': gaps} if gaps else None
 
 
 def _witnesses(store, status):
-    found = {slot: pause_witness(store, slot) for slot, value in status.items() if value != 'SOURCE_VERIFIED'}
+    found = {slot: pause_witness(store, slot) for slot, value in status.items() if value == 'FAILED_VERIFICATION'}
     return {slot: value for slot, value in found.items() if value}
 
 
