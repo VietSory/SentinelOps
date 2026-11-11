@@ -4,8 +4,11 @@ An incident the frozen recovery dispositions do not name (2026-11-11: the host s
 for 7 h 48 min inside alb-04-inventory-abrupt) leaves an epoch unable to finish. The
 owner may exclude that whole group once, with a written decision. The group keeps
 every source byte, its owned containers are stopped (never removed), and a new ordinal
-beyond the reserved minimum replaces it. A group whose every slot verifies cannot be
-excluded, so the action cannot drop good data based on outcomes.
+beyond the reserved minimum replaces it. The decision alone is not enough: a slot that
+did not verify must carry an independent host-pause witness in its original client
+ledger (consecutive request starts more than PAUSE_SECONDS apart, against a scheduled
+spacing of about a second). A group whose every slot verifies, or whose failure has no
+such witness, cannot be excluded, so the action cannot drop data based on outcomes.
 
 The commit that records the exclusion becomes the epoch's successor capture source: it
 must descend from the epoch source, and replacement groups are captured from it.
@@ -14,6 +17,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import re
 import subprocess
 
 from sentinelops.contracts import utc_time
@@ -22,9 +26,30 @@ from sentinelops.experiments.local_corpus import (
     read_alibaba_epoch, read_binding, registered_sessions, registration_path,
 )
 from sentinelops.telemetry.core import stable_id, timestamp
+from sentinelops.telemetry.store import ArtifactStore
 
 VERSION = 'local-http-owner-exclusion/v1'
 REASON = 'owner-excluded-incident'
+PAUSE_SECONDS = 300  # the client schedules a request about every second; a pause is unmistakable
+
+
+def pause_witness(store, slot):
+    """Re-read the slot's original client ledger; report start gaps longer than PAUSE_SECONDS."""
+    paths = list((store.root / 'runs' / slot / 'captures').glob('run-*/run.json'))
+    if len(paths) != 1 or not re.fullmatch('run-[0-9a-f]{32}', paths[0].parent.name):
+        return None
+    run = json.loads(paths[0].read_bytes())
+    outcomes = ArtifactStore(paths[0].parent / 'truth').read(run['request_outcomes_ref'])['outcomes']
+    starts = sorted(utc_time(row['started_at']) for row in outcomes)
+    gaps = [{'after': timestamp(a), 'seconds': round((b - a).total_seconds(), 3)}
+            for a, b in zip(starts, starts[1:]) if (b - a).total_seconds() > PAUSE_SECONDS]
+    return {'run_ref': 'artifact://manifests/' + stable_id(run) + '.json', 'attempts': len(outcomes),
+            'pause_seconds': PAUSE_SECONDS, 'gaps': gaps} if gaps else None
+
+
+def _witnesses(store, status):
+    found = {slot: pause_witness(store, slot) for slot, value in status.items() if value != 'SOURCE_VERIFIED'}
+    return {slot: value for slot, value in found.items() if value}
 
 
 def _slot_status(store, plan, session, project, as_of):
@@ -93,6 +118,9 @@ def exclude_group(store, plan, *, role, ordinal, replacement_ordinal, decision, 
         status = _slot_status(store, plan, session, project, closed_at)
         if all(value == 'SOURCE_VERIFIED' for value in status.values()):
             raise ValueError('a fully verified group cannot be excluded')
+        witnesses = _witnesses(store, status)
+        if not witnesses:
+            raise ValueError('owner exclusion needs a host-pause witness in an unverified slot')
         before = _inventory(store, group, plan)
         _stop_owned_containers(session)
         if _inventory(store, group, plan) != before or clean_source(project) != source:
@@ -101,6 +129,7 @@ def exclude_group(store, plan, *, role, ordinal, replacement_ordinal, decision, 
                   'session_ref': 'artifact://manifests/' + stable_id(session) + '.json',
                   'plan_sha256': stable_id(plan), 'closed_at': timestamp(closed_at),
                   'reason': REASON, 'owner_decision': decision.strip(), 'slot_status': status,
+                  'host_pause_witness': witnesses,
                   'inventory_ref': store.write('manifests', {'inventory_version': VERSION, 'group_id': group,
                                                              'files': before}),
                   'successor_source_commit': source, 'excluded_whole_group': True, 'source_preserved': True,
@@ -117,7 +146,8 @@ def read_owner_exclusion(store, session, plan, closed, reference, *, project=PRO
     _, epoch = read_alibaba_epoch(store, plan)
     replacement = group_name(plan, session['role'], closed['replacement_ordinal'])
     if (set(closed) != {'closure_version', 'group_id', 'session_ref', 'plan_sha256', 'closed_at', 'reason',
-                        'owner_decision', 'slot_status', 'inventory_ref', 'successor_source_commit',
+                        'owner_decision', 'slot_status', 'host_pause_witness', 'inventory_ref',
+                        'successor_source_commit',
                         'excluded_whole_group', 'source_preserved', 'replacement_ordinal', 'replacement_group_id'}
         or closed['group_id'] != session['group_id']
         or closed['session_ref'] != 'artifact://manifests/' + stable_id(session) + '.json'
@@ -136,6 +166,8 @@ def read_owner_exclusion(store, session, plan, closed, reference, *, project=PRO
     status = _slot_status(store, plan, session, project, utc_time(closed['closed_at']))
     if status != closed['slot_status'] or all(value == 'SOURCE_VERIFIED' for value in status.values()):
         raise ValueError('owner exclusion slot status differs from the original source')
+    if not closed['host_pause_witness'] or _witnesses(store, status) != closed['host_pause_witness']:
+        raise ValueError('owner exclusion host-pause witness differs from the original ledger')
     return reference, closed
 
 

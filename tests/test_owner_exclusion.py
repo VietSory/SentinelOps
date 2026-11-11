@@ -15,6 +15,20 @@ DECISION = 'Owner 2026-11-11: host slept 7h48m inside alb-04; exclude the whole 
 ROLE = 'development-validation'
 
 
+def write_ledger(store, slot, *, gap_seconds):
+    """An original client ledger: one request a second, with one gap after the tenth."""
+    from datetime import datetime, timedelta, timezone
+    run_dir = store.root / 'runs' / slot / 'captures' / ('run-' + '1' * 32)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    start = datetime(2026, 11, 11, 3, 55, tzinfo=timezone.utc)
+    times = [start + timedelta(seconds=i + (gap_seconds if i >= 10 else 0)) for i in range(20)]
+    stamp = lambda t: t.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    ledger = {'outcomes': [{'started_at': stamp(t), 'completed_at': stamp(t + timedelta(milliseconds=20))}
+                           for t in times]}
+    ref = ArtifactStore(run_dir / 'truth').write('raw', ledger)
+    (run_dir / 'run.json').write_text(json.dumps({'run_id': 'run-' + '1' * 32, 'request_outcomes_ref': ref}))
+
+
 @pytest.fixture
 def epoch(tmp_path, monkeypatch):
     store = ArtifactStore(tmp_path / 'corpus')
@@ -30,6 +44,7 @@ def epoch(tmp_path, monkeypatch):
         root.mkdir(parents=True)
         corpus.bind(store, root / 'result.json', {'fixture_only': True, 'kind': kind})
         (root / 'raw.json').write_bytes(b'{"fixture_only":true}')
+    write_ledger(store, 'alb-04-inventory-abrupt', gap_seconds=28094)
     state = {'failing': {'alb-04-inventory-abrupt'}, 'stopped': [], 'running': True}
     inspected = [{'Id': item['container_id'], 'Config': {'Labels': {'com.docker.compose.project': session['compose_project']}},
                   'State': {'Running': True}} for item in containers.values()]
@@ -138,3 +153,48 @@ def test_only_one_owner_exclusion_per_epoch(epoch):
     corpus.bind(store, corpus.registration_path(store, 'alb-05'), other)
     with pytest.raises(ValueError):
         owner.exclude_group(store, plan, role=ROLE, ordinal=5, replacement_ordinal=7, decision=DECISION)
+
+
+def test_a_failure_without_a_host_pause_witness_cannot_be_excluded(tmp_path, monkeypatch, epoch):
+    store, plan, _, state = epoch
+    write_ledger(store, 'alb-04-inventory-abrupt', gap_seconds=0)  # same run directory, regular ledger
+    with pytest.raises(ValueError, match='host-pause witness'):
+        exclude(epoch)
+    assert not (store.root / 'sessions/alb-04/closed.json').exists() and state['stopped'] == []
+
+
+def test_the_witness_is_recorded_and_replayed_from_the_original_ledger(epoch):
+    store, plan, session, _ = epoch
+    result = exclude(epoch)
+    witness = result['host_pause_witness']['alb-04-inventory-abrupt']
+    assert witness['gaps'][0]['seconds'] > owner.PAUSE_SECONDS and witness['attempts'] == 20
+    path = store.root / 'sessions/alb-04/closed.json'
+    ref, closed = corpus.read_binding(store, path)
+    forged = {**closed, 'host_pause_witness': {'alb-04-payment-gradual': witness}}
+    with pytest.raises(ValueError, match='witness differs'):
+        owner.read_owner_exclusion(store, session, plan, forged, ref)
+
+
+def test_the_operator_command_requires_the_written_decision(monkeypatch, tmp_path, capsys):
+    import runpy
+    import sys
+    calls = []
+    monkeypatch.setattr(owner, 'exclude_group', lambda *args, **kwargs: calls.append(kwargs) or {'ok': True})
+    script = str(owner.PROJECT / 'scripts/exclude_incident_group.py')
+    monkeypatch.setattr(sys, 'argv', [script, '--root', str(tmp_path), '--group', '4', '--replacement-group', '6'])
+    with pytest.raises(SystemExit):
+        runpy.run_path(script, run_name='__main__')
+    assert calls == []
+    monkeypatch.setattr(sys, 'argv', [script, '--root', str(tmp_path), '--group', '4', '--replacement-group', '6',
+                                      '--decision', DECISION])
+    runpy.run_path(script, run_name='__main__')
+    assert calls == [{'role': ROLE, 'ordinal': 4, 'replacement_ordinal': 6, 'decision': DECISION}]
+
+
+def test_the_schedule_follows_the_exclusion_to_its_replacement(epoch):
+    from sentinelops.experiments.local_campaign import planned_slots
+    store, plan, _, _ = epoch
+    exclude(epoch)
+    groups = {f'alb-0{i}' for i in (1, 2, 3, 5)}
+    slots = recovery.effective_slots(store, plan, planned_slots(plan))
+    assert {f'alb-0{ordinal}' for _, ordinal, _ in slots} == groups | {'alb-06'}

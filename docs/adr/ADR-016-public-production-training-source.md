@@ -117,8 +117,11 @@ verified healthy pre-fault minutes). The frozen dispositions cover a host restar
 invalid client UTC only. Owner decision: treat it as a one-off incident, exclude the
 whole group, replace it and finish the epoch; no measurement criterion changes.
 
-`scripts/exclude_incident_group.py` records that decision once per epoch
-(`local-http-owner-exclusion/v1`). It refuses a fully verified group, keeps and binds
+`python -m scripts.exclude_incident_group --root STORE --group 4 --replacement-group 6
+--decision TEXT` records that decision once per epoch
+(`local-http-owner-exclusion/v1`). It refuses a fully verified group and a failure
+without an independent host-pause witness (an unverified slot whose original client
+ledger has request starts more than 300 s apart), keeps and binds
 every source byte, stops (never removes) the group's containers and uses an ordinal
 beyond the reserved minimum (`alb-04` → `alb-06`). Its commit, a descendant of the
 epoch source that changes only the recovery and source-binding code, becomes the
