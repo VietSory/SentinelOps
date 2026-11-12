@@ -2,8 +2,9 @@
 export class ApiFailure extends Error {
   constructor(status, code, requestId = null) {
     const messages = {
-      unauthorized: 'Token was rejected. Connect again with your local API token.',
-      authentication_unavailable: 'API authentication is not configured for this environment.',
+      unauthorized: 'Token was rejected. Connect again with a valid access token.',
+      insufficient_scope: 'This token cannot read incidents. Connect with a token that has incident read permission.',
+      authentication_unavailable: 'Authentication is unavailable. Check the API identity configuration or retry when its provider is available.',
       authentication_adapter_unavailable: 'Authentication is unavailable for this environment. Check its identity adapter.',
       incident_store_unavailable: 'The incident store is unavailable. Previously loaded data may be stale.',
       incident_not_found: 'This incident or revision could not be found.',
@@ -74,7 +75,32 @@ export class IncidentClient {
     }
     return body;
   }
-  readiness(signal) { return this.get('/ready',signal,{allowUnavailable:true}); }
+  async readiness(signal) {
+    // Public readiness describes configuration, not the bearer token's permissions.
+    const publicProbe = this.get('/ready',signal,{allowUnavailable:true})
+      .then(body => ({body}),error => ({error}));
+    // Start both probes together, but handle protected denial first. A faster public
+    // network failure must not hide a 401/403 and leave the private session open.
+    const permission = await this.get('/ready/incidents',signal).catch(error => {
+      if (error.status === 503 && ['control_store_unavailable','incident_store_unavailable'].includes(error.code)) {
+        return error;
+      }
+      throw error;
+    });
+    const result = await publicProbe;
+    if (result.error) throw result.error;
+    const body = result.body;
+    // Keep an explicit store outage reported by both endpoints. An identity-provider
+    // failure or contradictory observation must not become successful readiness.
+    if (permission instanceof ApiFailure) {
+      if (body?.dependencies?.incident_store !== false) throw permission;
+      return body;
+    }
+    if (permission?.status !== 'ready' || permission.component !== 'incident-store') {
+      throw new ApiFailure(200,'invalid_response');
+    }
+    return body;
+  }
   async explanation(id, revision, evidenceIds, signal) {
     if (!Number.isSafeInteger(revision) || revision < 1) throw new ApiFailure(0,'invalid_response');
     // The backend provider has a ten-second total deadline before fallback.

@@ -80,7 +80,8 @@ def fixture_quarantine(action_id):
 
 def exercise_fixtures(page, base, output, expect):
     token = 'fixture-browser-token-not-a-real-secret'*2
-    outage = {'active':False,'actions':False,'quarantine':False,'explanation':False}
+    outage = {'active':False,'actions':False,'quarantine':False,'explanation':False,
+              'read_scope':False,'expired':False,'identity_provider':False,'model_available':False}
     records = [{'incident_id':'INC-FIXTURE-A','revision':3,'state':'escalated','severity':'high','detected_at':'2026-01-01T00:00:00Z',
         'affected_services':['payment-service','checkout-service']},
         {'incident_id':'INC-FIXTURE-B','revision':1,'state':'incident','severity':'medium','detected_at':'2026-01-01T01:00:00Z',
@@ -88,12 +89,23 @@ def exercise_fixtures(page, base, output, expect):
     def reply(route):
         url = urlsplit(route.request.url); query = parse_qs(url.query)
         if url.path == '/ready':
-            route.fulfill(status=503,json={'status':'not_ready','dependencies':{'incident_store':not outage['active'],
-                'model':False,'authentication':True},'demo_mode':False}); return
+            ready = outage['model_available'] and not outage['active']
+            route.fulfill(status=200 if ready else 503,json={'status':'ready' if ready else 'not_ready',
+                'dependencies':{'incident_store':not outage['active'],'model':outage['model_available'],
+                    'authentication':True},'demo_mode':False,'direct_inference':False}); return
         if route.request.headers.get('authorization') != 'Bearer '+token:
             route.fulfill(status=401,json={'code':'unauthorized','message':'Denied','request_id':'fixture-request'}); return
+        if url.path == '/ready/incidents':
+            if outage['read_scope']:
+                route.fulfill(status=403,json={'code':'insufficient_scope','request_id':'fixture-scope'});return
+            if outage['expired']:
+                route.fulfill(status=401,json={'code':'unauthorized','request_id':'fixture-expired'});return
+            if outage['identity_provider']:
+                route.fulfill(status=503,json={'code':'authentication_unavailable','request_id':'fixture-identity'});return
         if outage['active']:
             route.fulfill(status=503,json={'code':'incident_store_unavailable','message':'Unavailable','request_id':'fixture-outage'}); return
+        if url.path == '/ready/incidents':
+            route.fulfill(json={'status':'ready','component':'incident-store'}); return
         if url.path == '/v1/incidents':
             filtered = [row for row in records if (not query.get('state') or row['state']==query['state'][0]) and
                         (not query.get('service') or query['service'][0] in row['affected_services'])]
@@ -118,7 +130,8 @@ def exercise_fixtures(page, base, output, expect):
                 route.fulfill(status=503,json={'code':'stored_action_unavailable','request_id':'fixture-quarantine-outage'});return
             route.fulfill(json=fixture_quarantine(url.path.split('/')[-2]));return
         route.fulfill(status=404,json={'code':'not_found','message':'Not found','request_id':'fixture-request'})
-    page.route('**/ready',reply); page.route('**/v1/incidents**',reply);page.route('**/v1/actions/**',reply)
+    page.route('**/ready',reply);page.route('**/ready/incidents',reply)
+    page.route('**/v1/incidents**',reply);page.route('**/v1/actions/**',reply)
     page.goto(base+'/ui/',wait_until='networkidle')
     page.locator('#api-token').focus(); page.keyboard.press('Tab')
     expect(page.get_by_role('button',name='Connect',exact=True)).to_be_focused()
@@ -216,17 +229,53 @@ def exercise_fixtures(page, base, output, expect):
     expect(page.locator('#connect-title')).to_be_visible()
     assert page.locator('[data-testid=incident-row]').count() == 0
     assert page.locator('#detail-title').count() == 0
+    outage['active'] = False
+    outage['model_available'] = True  # Readiness fixture only: no scores or approved model are fabricated.
+    for problem, notice in (('identity_provider',None),('read_scope','cannot read incidents'),('expired','Token was rejected')):
+        page.locator('#api-token').fill(token);page.get_by_role('button',name='Connect',exact=True).click()
+        expect(page.locator('[data-testid=incident-row]')).to_have_count(1)
+        expect(page.locator('#model-status')).to_have_text('Available')
+        page.get_by_role('button',name='Open INC-FIXTURE-A, revision 3',exact=True).click()
+        expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
+        page.get_by_role('button',name='Explanation',exact=True).click()
+        expect(page.locator('.explanation-summary')).to_contain_text('revision 3')
+        outage[problem] = True
+        # Trigger only the visible-session heartbeat, not list refresh. Public /ready
+        # still reports configured authentication, so it cannot detect these failures.
+        page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        if notice:
+            expect(page.locator('#notice')).to_contain_text(notice)
+            expect(page.locator('#connect-title')).to_be_visible()
+            expect(page.locator('[data-testid=incident-row]')).to_have_count(0)
+            expect(page.locator('#detail-title')).to_have_count(0)
+            expect(page.locator('.explanation-summary')).to_have_count(0)
+        else:
+            expect(page.locator('#readiness-error')).to_contain_text('Authentication is unavailable')
+            expect(page.locator('#store-status')).to_have_text('Unknown')
+            expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
+            page.locator('#disconnect').click()
+        outage[problem] = False
+        assert page.evaluate('localStorage.length + sessionStorage.length') == 0
+        assert token not in page.locator('body').inner_text()
     return {'scope':'fixture-browser-software-test-not-source-or-research-evidence',
         'checks':['authentication','pagination','filters','revision-pinning','timeline-pagination','model-unavailable',
                   'unknown-context','XSS-safe-facts-and-references','missing-timestamp','mobile-layout','store-outage','logout-clears-data',
                   'read-only-action-audit','action-pagination','action-revision-scope','action-outage','XSS-safe-action-reason',
                   'manual-quarantine-receipt-not-recovery','quarantine-outage','quarantine-keyboard-focus','XSS-safe-operator-identity',
                   'explanation-revision-pinning','explanation-fallback','explanation-outage-clears-text',
-                  'explanation-reference-navigation','XSS-safe-explanation','explanation-keyboard-focus']}
+                  'explanation-reference-navigation','XSS-safe-explanation','explanation-keyboard-focus',
+                  'protected-session-heartbeat','permission-loss-clears-private-data','expired-token-clears-private-data',
+                  'identity-provider-outage-keeps-records-unknown-readiness','configured-model-availability']}
 
 
 def exercise_native(page, base, output, incident, token, expect):
     with httpx.Client(base_url=base,headers={'Authorization':'Bearer '+token},trust_env=False) as client:
+        readiness = client.get('/ready')
+        if readiness.status_code not in (200,503):
+            readiness.raise_for_status()
+        model_available = readiness.json().get('dependencies',{}).get('model')
+        if type(model_available) is not bool:
+            raise ValueError('native UI verification requires explicit model availability')
         if not incident:
             response = client.get('/v1/incidents'); response.raise_for_status()
             items = response.json()['items']
@@ -255,7 +304,7 @@ def exercise_native(page, base, output, incident, token, expect):
     page.locator('#api-token').fill(token); page.get_by_role('button',name='Connect',exact=True).click()
     expect(page.locator('#detail-title')).to_have_text(incident)
     expect(page.locator('#revision-input')).to_have_value(str(original['revision']))
-    expect(page.locator('#model-status')).to_have_text('Unavailable')
+    expect(page.locator('#model-status')).to_have_text('Available' if model_available else 'Unavailable')
     page.get_by_role('button',name='Explanation',exact=True).click()
     expect(page.get_by_text('Deterministic fallback',exact=True)).to_be_visible()
     expect(page.locator('.explanation-summary')).to_have_text(explanation['payload']['summary'])
@@ -276,6 +325,7 @@ def exercise_native(page, base, output, incident, token, expect):
         after.raise_for_status();assert after.json()==original
     return {'scope':'actual-source-backed-incident-API-browser-read','incident_id':incident,
         'revision':original['revision'],'evidence_items':len(original['payload']['evidence']),
+        'model_available':model_available,
         'explanation_provider':explanation['provider'],'explanation_claims':len(explanation['payload']['claims']),
         'explanation_refs_in_pinned_ier':True,'pinned_ier_unchanged':True,
         'source_refs':original['context']['source_refs'],'diagnostic_accuracy_claim':False}

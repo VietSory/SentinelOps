@@ -25,7 +25,9 @@ export class Workspace {
     try { const value = await action(controller.signal); if (current()) success(value); }
     catch (error) {
       if (!current() || error.name === 'AbortError') return;
-      if (error.status === 401) { this.disconnect(error.message); return; }
+      if (error.status === 401 || (error.status === 403 && error.code === 'insufficient_scope')) {
+        this.disconnect(error.message); return;
+      }
       failure(error instanceof ApiFailure ? error : new ApiFailure(0,'invalid_response'));
     } finally { if (current()) { this.#tasks.delete(key); end(); this.emit(); } }
   }

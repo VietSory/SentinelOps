@@ -45,7 +45,7 @@ function render(state) {
   }
   $('#connection').hidden = state.session;
   $('#disconnect').hidden = !state.session;
-  $('#session-label').textContent = state.session ? 'Local session · read-only' : 'Not connected';
+  $('#session-label').textContent = state.session ? 'Connected · read-only console' : 'Not connected';
   $('#refresh').disabled = !state.session || state.listLoading;
   $('#state-filter').disabled = $('#service-filter').disabled = !state.session;
   $('#filter-form button').disabled = !state.session;
@@ -344,7 +344,7 @@ function renderDetail(state) {
 
 $('#connect-form').addEventListener('submit',async event => {
   event.preventDefault(); const token = $('#api-token').value.trim(); $('#api-token').value = '';
-  if (token.length < 32) { $('#notice').textContent = 'Enter a local API token of at least 32 characters.'; $('#notice').hidden = false; return; }
+  if (token.length < 32) { $('#notice').textContent = 'Enter an access token of at least 32 characters.'; $('#notice').hidden = false; return; }
   await workspace.connect(token);
   if (workspace.state.session && !workspace.state.listError) {
     const query = new URLSearchParams(location.hash.slice(1)), id = query.get('incident'), rev = query.get('revision');
@@ -355,6 +355,8 @@ $('#disconnect').addEventListener('click',() => { workspace.disconnect(); histor
 $('#refresh').addEventListener('click',() => Promise.all([workspace.loadList(),workspace.checkReadiness()]));
 $('#load-more').addEventListener('click',() => workspace.loadList(true));
 $('#filter-form').addEventListener('submit',event => { event.preventDefault(); tab = 'overview'; workspace.filter({state:$('#state-filter').value,service:$('#service-filter').value}); });
-setInterval(() => { if (!document.hidden) workspace.checkReadiness(); },30000);
+const checkVisibleSession = () => { if (!document.hidden) workspace.checkReadiness(); };
+setInterval(checkVisibleSession,30000);
+document.addEventListener('visibilitychange',checkVisibleSession);
 window.addEventListener('pagehide',() => workspace.disconnect());
 workspace.emit();

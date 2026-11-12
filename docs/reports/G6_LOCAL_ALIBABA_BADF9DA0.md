@@ -71,8 +71,39 @@ effects. B's independent review (2026-11-10) found three cases whose side effect
 were asserted only at the domain level: wrong namespace/UID, blast radius and
 verification failure. The executor-level tests above close them. Each was
 mutation-checked: removing the pre-dispatch validation fails 9 of them, and adding a
-compensating patch on timeout fails the verification cases. B has not yet
-re-reviewed the added tests.
+compensating patch on timeout fails the verification cases.
+
+### B follow-up review — 2026-11-12
+
+Codex reviewed the added executor-level cases against `RollbackExecutor`,
+`Deployment.validate`, the Kubernetes adapter, the resume-only worker and the
+journal's claim/release semantics at `fa51a72`. The three findings from the
+2026-11-10 review are closed: invalid identity/blast radius is rejected before
+dry-run or mutation, and failed verification stays escalated without another
+patch. No production guard or policy change was necessary.
+
+`tests/test_remediation_transport.py` (`fbc6568`) adds eight executor/adapter integration
+checks using the real `LocalKubernetes` implementation with HTTP fixtures:
+three foreign UIDs, excessive replicas, HPA, dry-run denial, and loss of a patch
+response followed by restart with successful or missing recovery telemetry.
+The last two observe one real-request PATCH plus one `dryRun=All` request,
+never a resend or compensation. These are protocol fixtures, not new native
+rollback trials or independent RCA evidence.
+
+The remediation suite (executor, adapter, registry, verification, worker and
+transport) passed 111 tests. The separately owned PostgreSQL check also passed:
+CAS/dispatch budget, immutable audit, outage/restart, quarantine and read-only
+HTTP. Its incidents/action outcomes are fixtures, and it performs no Kubernetes
+mutation. Reproduce with:
+
+```sh
+python -m pytest -q tests/test_remediation_executor.py tests/test_remediation_kubernetes.py tests/test_remediation_registry.py tests/test_remediation_verification.py tests/test_remediation_worker.py tests/test_remediation_transport.py
+python -m scripts.check_remediation_store --output <new-output.json>
+```
+
+This closes the code/test follow-up review, not G6 acceptance. The 9/10 native
+golden-path and 1/1 failed-verify denominators above are unchanged. The owner's
+gate decision and full-system evidence requirements remain separate.
 
 ## Trial 12 detail
 
@@ -95,8 +126,8 @@ Measured against Q-09 for this release (no pooling):
 | Per-trial unsafe patches (Q-10 input) | 0 | **0** of 10 mutations |
 
 The release meets the local Q-09 criteria exactly at the threshold. It is not
-yet G6 PASS: the Q-10 case mapping above still needs an independent audit review,
-and G6 acceptance is an owner decision (`G6_accepted=false` in every
+yet G6 PASS: B's follow-up review above closes the three test findings, while
+G6 acceptance is an owner decision (`G6_accepted=false` in every
 receipt). The failed-verify clause rests on a single scenario.
 
 The earlier trial with H1 release `656bc7c5` (2026-11-08, recovered) is reported

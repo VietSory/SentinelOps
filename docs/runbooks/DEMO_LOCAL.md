@@ -1,9 +1,20 @@
 # Local demo guide — lane B
 
-A walkthrough of what SentinelOps can actually be shown doing today, on one
-machine, with no cloud and no accepted model. Every command and every expected
+A reproducible **no-model baseline** on one machine, with no cloud. Every command and every expected
 value below was executed against the real lane B stack on 2026-11-05; where a
 step could not be executed, that is stated rather than implied.
+
+Current handoff (2026-11-12) has two distinct modes. This walkthrough keeps the
+original no-model observations; they do not describe every later deployment.
+For the conditionally approved Alibaba release, follow the
+[v2 activation report](../reports/LANE_B_ALIBABA_V2_ACTIVATION.md) and
+[model runbook](MODEL_PIPELINE.md#source-parity-and-serving-release).
+Inference was observed on machine B; `/detect` and `/risk` return 409 because
+the bundle requires stream history. Read the pinned IER's `service_signals`.
+Do not replace a running release or start duplicate foreground roles just to
+reproduce this baseline. The [layer-2 FAIL results](../reports/LAYER2_LOCAL_ALIBABA_BADF9DA0.md)
+and the [G6 trial limits](../reports/G6_LOCAL_ALIBABA_BADF9DA0.md) remain visible;
+neither demonstration grants model, action or cloud acceptance.
 
 ## What this demo proves, and what it does not
 
@@ -13,14 +24,14 @@ revisions in PostgreSQL, read back over authenticated HTTP by a read-only
 operator UI, explained by the deterministic grounded backend, and the worker
 pipeline itself observed through Prometheus rules and a Grafana console.
 
-**It does not show, and cannot:**
+**This no-model walkthrough does not demonstrate:**
 
 | Not demonstrable | Why |
 | --- | --- |
-| Model inference / anomaly scores | No model has passed G2/G3; `/v1/detect` answers 503 by design |
+| Model inference / anomaly scores | No model is selected in this baseline; `/v1/detect` answers 503. Alibaba inference has separate conditional evidence linked above |
 | RCA diagnostic accuracy | Full G4 is unaccepted; rankings are suspects with evidence, not confirmed causes |
 | Bedrock explanations | G5 unaccepted; the demo uses the real deterministic fallback |
-| Automatic Payment rollback | G6 unaccepted; no approved known-good ledger and auto-action is off |
+| Automatic Payment rollback | This walkthrough does not dispatch. Native trial ledgers/outcomes are reported separately; G6 remains unaccepted |
 | Anything on AWS | Not deployed. IaC is described and validated only; see [AWS baseline](AWS_BASELINE.md) |
 
 A limited demo is deliverable early, but it does not substitute for acceptance of
@@ -85,10 +96,11 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" \
 Observed: `200`, **`503`**, `200`.
 
 This is the single most important thing to explain in the demo. `/health` is
-liveness. `/ready` is **503 on purpose** because no accepted model exists.
+liveness. `/ready` is **503 on purpose** because this baseline selects no model.
 `/ready/incidents` is 200 because incident storage genuinely is ready. A 503
 from `/ready` is not a broken demo; a demo that showed 200 there would be
-claiming a model it does not have.
+claiming a model this baseline did not select. A separately selected Alibaba
+release can report model availability; that does not certify model quality.
 
 ## 4. Show the credential boundary
 
@@ -105,8 +117,9 @@ Observed: `401` unauthenticated; the operator token reads the incident list; the
 operator POST is **`403`**. The operator credential can read everything the UI
 needs and import nothing. Only `artifacts/lane-b/api-token` retains write scope.
 
-These are static local development credentials. Production authentication is not
-implemented and fails closed elsewhere — do not present this as an auth demo.
+These are static local development credentials. The OIDC/JWKS adapter exists,
+but a real provider/deployment must be configured separately; absent that
+configuration, non-local authentication fails closed. This is only a local auth demo.
 
 ## 5. Show model unavailability honestly
 
@@ -200,7 +213,7 @@ fault configuration in `finally`. Output lands under `artifacts/lane-b/live-*`.
 This is operational integration evidence. It is **not** admitted training data,
 predictive labels, online RCA accuracy or remediation acceptance.
 
-> **Could not be executed in the current environment.** The check requires
+> **Historical result on 2026-11-05:** could not be executed on that environment. The check requires
 > exactly one lane B incident consumer and refuses otherwise:
 > `ValueError: start exactly one native B consumer before this workload`.
 > This environment now has two, because a source-configuration change forked the
@@ -220,7 +233,14 @@ python -m scripts.lane_b down          # preserves all volumes
 another project. Do not add `--volumes`: the control database holds the IER
 revisions and audit history this demo reads.
 
-## Known caveat: a Prometheus configuration change forks the health stream
+## Historical caveat: source identity before the v2 fix
+
+The cause below was fixed by A's source-identity v2, and the v2 rollout plus
+live-check PASS on machine B is recorded in the activation report above.
+Keep old streams/checkpoints intact and use the
+[rollover runbook](OBSERVABILITY.md#prometheus-source-identity-and-stream-rollover)
+on another installation. The following records the original failure, not an
+instruction to delete a checkpoint or an assertion about today's processes.
 
 The health worker derives its source identity from
 `stable_id(<entire running Prometheus configuration>)`, read from

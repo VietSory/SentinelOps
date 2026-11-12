@@ -136,6 +136,43 @@ Health never accepts model settings. Optional action observations for the API us
 15433; existing API SELECT-only readiness checks still reject writer credentials.
 This does not expose action execution or production authentication.
 
+## API-only UI rollout
+
+An API/UI change does not require restarting the health or incident roles. Record
+their selected releases, stream and checkpoint first. Build/verify a new immutable
+host release, retain the API's existing private credentials and optional action
+reader, and explicitly carry forward its current model store/release pair:
+
+```sh
+python -m scripts.lane_b_host verify --release-id <new-release>
+python -m scripts.lane_b_host stop --role api
+python -m scripts.lane_b_host start --role api --release-id <new-release> \
+  --model-store <same-owned-model-store> --model-release-ref <same-release-ref>
+python -m scripts.check_operator_ui --incident-id <existing-native-SLO-incident> \
+  --output <new-output-directory>
+python -m scripts.lane_b_host restart --role api
+```
+
+Omit the model pair only when the prior API selection had no model. Never print
+private session JSON or substitute new credential files for the selected values.
+Confirm protected store readiness, installed asset checksums, the pinned incident
+revision after restart, and unchanged worker sessions/checkpoints. If selection
+or readiness fails, restore the previous API release/configuration; do not reset
+data or start a second listener. Reading historical incidents needs the owned
+control DB, not a new business workload or a worker restart.
+
+On `local-nixos-host`, 2026-11-12, the API-only preview of PR #45 was verified:
+release `c1e600f429564ea195db097ddb256deb`, source `3782984`, manifest SHA-256
+`1a5f9ca0e33985bb2dd90c3fe7a6676ac1382a2310acfe15eac1615a66d28cfb`.
+Browser readback of the documented native incident at revision 4 resolved 19
+evidence items and 12 deterministic explanation claims. All 16 control tables
+(including 16 IER revisions) were unchanged across readback and API restart.
+The prior model release/credentials stayed selected; both workers stayed inactive
+with unchanged sessions. The incident was detected on 2026-11-09: this is
+historical readback, not new online detection or fresh model inference.
+Local evidence is under `artifacts/lane-b/api-ui-rollout-20261112-f7f04431/`;
+it is not a portable release or shared artifact handoff.
+
 Release/session stores and the local user manager are trusted operator boundaries.
 Hashes detect changed bytes, not a hostile owner who can rewrite code and systemd
 configuration. No cloud credentials, raw corpus, sealed holdout or action writer is
