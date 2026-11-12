@@ -13,6 +13,13 @@ chưa có model được chấp nhận, UI dùng được và môi trường tri
 [PROJECT_STATUS.md](../PROJECT_STATUS.md); tiêu chí G0–G8 vẫn ở
 [CONSTRAINTS_AND_GATES.md](../architecture/CONSTRAINTS_AND_GATES.md).
 
+**Đối chiếu 2026-11-12:** các mốc xuất phát dưới đây là baseline lịch sử, không
+phải checklist phải làm lại. ADR-016 đã thay nguồn fitting bằng Alibaba, D-22 chỉ
+duyệt G3 có điều kiện local H4→G6; local training đã gỡ D-23. B1/B2 local, OIDC
+adapter và model rollover đã có; Q-09 native 9/10, Q-10 đã được B review lại nhưng
+G6 vẫn chờ owner nghiệm thu. Lớp 2 Q-04/Q-05/Q-07 FAIL; ADR-018 còn Proposed.
+Việc còn lại và mức bằng chứng ở [checkpoint mục 9](LANE_B_CHECKPOINT.md#9-b-follow-up--2026-11-12).
+
 ## 1. Phân công và kết quả cuối của từng người
 
 Tên A/B là vai trò để owner gán người, không suy ra danh tính từ Git author.

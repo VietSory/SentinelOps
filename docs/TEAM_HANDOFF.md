@@ -1,7 +1,7 @@
 # SentinelOps — bắt đầu làm việc trong đội hai người
 
-Baseline: `main` sau PR #24, merge `f4891cf`, 2026-10-31. Đây là context sản phẩm
-cho checkout mới; không chứng minh máy mới đã có data/model/runtime.
+Baseline lịch sử: `main` sau PR #24, merge `f4891cf`, 2026-10-31. Trạng thái
+bàn giao cập nhật 2026-11-12; không chứng minh máy mới đã có data/model/runtime.
 
 ## 1. Sản phẩm và trạng thái hiện tại
 
@@ -16,11 +16,13 @@ từ từ trước SLO trong horizon 300 giây. Deterministic RCA xếp hạng s
 abstain. Bedrock giải thích facts đã có. Action chỉ dùng runbook được phép và
 verify bằng telemetry. Missing data là UNKNOWN, không phải healthy.
 
-**Đã có:** workload/observability, telemetry/features/replay, experiment controller,
-prospective admission, guarded fitting/loading, health/incident workers, persistent
-API và conservative RCA; UI đọc IER thật và H2 explanation/fallback pin revision
-đã có local. **Chưa được chấp nhận:** dataset/models G2/G3, RCA quality đầy đủ,
-G5/provider cloud. **Chưa hoàn thành:** action activation sản phẩm và AWS.
+**Đã có:** workload/observability, telemetry/features/replay, guarded fitting/loading,
+health/incident workers, persistent API, conservative RCA, UI/H2 pin revision,
+local operator/producer scopes và OIDC adapter. Model Alibaba `badf9da0` được
+duyệt có điều kiện cho local H4→G6 (D-22), đã có source parity và inference trên
+máy B. Native trials ghi 9/10 recovered, 1/1 failed-verify escalated; B đã review
+lại safety tests. **Chưa nghiệm thu:** chất lượng model đầy đủ (local Q-04/Q-05/
+Q-07 FAIL), full G4, G5, G6 và G8. AWS/provider identity thật chưa triển khai.
 Không làm lại những module đã có hoặc coi fixture model là model đã được chấp nhận.
 Report cũ có thể ghi active capture; đó là quan sát tại thời điểm report, không
 phải xác nhận controller vẫn sống hôm nay. Kiểm tra trên đúng máy trước khi tiếp tục.
@@ -34,21 +36,22 @@ trước, sau đó đọc caller/code bị tác động. Không cần đọc to�
 | --- | --- |
 | Trạng thái / phần chưa đạt | [PROJECT_STATUS.md](PROJECT_STATUS.md), đối chiếu Git/CI/runtime của mình |
 | Sản phẩm / thiết kế / acceptance | [PRODUCT_SPEC.md](architecture/PRODUCT_SPEC.md), [TECHNICAL_SPEC.md](architecture/TECHNICAL_SPEC.md), [gates](architecture/CONSTRAINTS_AND_GATES.md), [ADR index](adr/README.md) |
-| A: data/model hiện tại | [ADR-014](adr/ADR-014-proposed-local-training-evidence.md), [v2 contract](../configs/training_data_contract_v2.json), [corpus](runbooks/LOCAL_HTTP_CORPUS.md), [models](runbooks/MODEL_PIPELINE.md) |
+| A: data/model hiện tại | [ADR-016](adr/ADR-016-public-production-training-source.md), [model packet](reports/G3_CANDIDATE_ALIBABA_BADF9DA0.md), [layer 2](reports/LAYER2_LOCAL_ALIBABA_BADF9DA0.md), [models](runbooks/MODEL_PIPELINE.md); [ADR-018](adr/ADR-018-proposed-monotone-latency-detector.md) còn Proposed |
 | A: worker/RCA | [health](runbooks/HEALTH_WORKER.md), [incident](runbooks/INCIDENT_WORKER.md), [RCA](runbooks/RCA.md), [RCAEval](runbooks/RCAEVAL_NATIVE_DEVELOPMENT.md) |
 | B: API/DB/UI | [API runbook](runbooks/INCIDENT_API.md), [storage](runbooks/INCIDENT_STORE.md), `src/sentinelops/api.py`, `contracts/` |
 | B: deploy/action | [ADR-006](adr/ADR-006-control-plane-and-storage.md), [ADR-009](adr/ADR-009-payment-rollback-runbook.md), technical spec §13–14, Compose/infra/observability |
 
 ## 3. Quyết định không cần research lại
 
-1. Nguồn hiện tại là **prospective local HTTP v2**; pinned RCAEval chỉ RCA evaluation.
-   GAMMA/v1 và pilot/worker captures cũ là lịch sử, không fitting mới, không ghép
-   rows hoặc thêm nguồn thứ ba. Source authorization không phải admission PASS.
-2. Giữ group trước windowing, chronology, train-only fitting, calibration riêng,
-   final sealed. Không đổi label/SLO vì data/score không đạt. G2 cần 300/100 healthy
-   train/calibration windows mỗi service và support/group/precursor theo contract.
-3. Feature `http-red-5m/v1`, source local `prometheus-increase-60s-5s/v1`.
-   Model thiếu thì inference 503; risk quá phút anchor unavailable, không backdate.
+1. Nguồn fitting hiện hành là **Alibaba v2022, ADR-016**, một bundle dùng chung
+   cho ba service. Local HTTP và RCAEval chỉ evaluation; đường fitting local đã
+   gỡ theo D-23. ADR-014/contract v2 là lịch sử, không tái dùng để fitting mới.
+2. Giữ native service splits, train-only fitting, calibration riêng và source
+   provenance theo ADR-016; local không fit/chọn model/chỉnh ngưỡng. ADR-017 pin
+   identity của từng epoch, không tự gộp kết quả giữa các phiên bản. Final sealed.
+3. Feature Alibaba `http-relative-5m/v1`, source `prometheus-increase-60s-5s/v2`.
+   Thiếu model trả 503; thiếu history thì signal unavailable. Release Alibaba cần
+   history nên `/detect` và `/risk` trả 409; đọc `service_signals` trong IER.
 4. IER là authoritative record, schema strict; metadata bổ sung ở envelope versioned.
    Payment/Inventory độc lập nhưng cùng Checkout không được gộp/chọn một root tùy ý.
 5. Bedrock không sửa ranking/facts, quyết định root hoặc gọi action. UI vẫn đọc
@@ -99,8 +102,9 @@ Uvicorn chỉ bật API, không tự dựng DB/workers/models. Theo API runbook:
 và `SENTINELOPS_API_TOKEN` cho producer nhập/sửa IER. Hai token khác nhau, mỗi token
 ít nhất 32 ký tự; `.env` không tự load. Launcher B tạo hai file private riêng và
 không đổi token cũ. Dựng DB/testbed của B sau
-khi cô lập ports theo contract. Không reuse volume/secret A. Production auth chưa
-có; public API local bằng static token không phải AWS acceptance.
+khi cô lập ports theo contract. Không reuse volume/secret A. OIDC adapter đã có
+code/tests; provider thật còn thuộc giai đoạn deployment. Public API local bằng
+static token không phải AWS acceptance.
 
 B có [host releases/user services](runbooks/HOST_PROCESSES.md): wheel/config/CLI
 và dependency được copy, lifecycle do systemd quản lý; source/root/checkpoint giữ
