@@ -1,9 +1,10 @@
 # ADR-018 — Proposed: serve the bundled MAD as the latency detector, confirm on a fresh epoch
 
-**Status:** Proposed 2026-11-12. Needs explicit owner approval. It changes which
-methods Q-04/Q-06/Q-07 judge and removes Q-05 and the XGBoost-versus-slope comparison
-from this profile's gates. That is a change to gate scope, so the operator cannot
-adopt it alone.
+**Status:** Rejected 2026-11-12 by the owner, before any `alc` evaluation. The owner
+requires trained models (Isolation Forest/XGBoost) to drive detection, not the MAD/slope
+controls. The partial `alc` capture was stopped unevaluated and deleted. MAD/slope stay
+evaluation-only controls. The successor is a retrained Alibaba candidate under a new ADR.
+The original proposal is kept below as the record.
 **Related:** ADR-002 (IF/XGBoost roles; this would amend it for serving), ADR-015, ADR-016, ADR-017, [layer-2 report](../reports/LAYER2_LOCAL_ALIBABA_BADF9DA0.md).
 
 ## Context

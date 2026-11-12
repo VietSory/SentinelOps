@@ -20,8 +20,8 @@ report hoặc CI cũ không thay kết quả đó.
 [ADR-016](adr/ADR-016-public-production-training-source.md) thay nguồn fitting bằng
 Alibaba v2022; ADR-014/contract v2 và candidate local giữ lịch sử theo D-23.
 Local HTTP và RCAEval chỉ evaluation, không fitting/tuning.
-[ADR-018](adr/ADR-018-proposed-monotone-latency-detector.md) vẫn Proposed: chưa
-đổi serving method hoặc gate; evaluation epoch `alc` chờ owner phê duyệt.
+[ADR-018](adr/ADR-018-proposed-monotone-latency-detector.md) bị owner từ chối 2026-11-12:
+detection phải do model đã train quyết định, không dùng MAD/slope; epoch `alc` dừng khi chưa chấm và đã xoá.
 
 B có [business manifests renderer](runbooks/AWS_BASELINE.md#offline-business-service-manifests)
 cho ba service với digest/Secret reference/probes, được kiểm input và schema
@@ -88,11 +88,11 @@ lớp 2 bên dưới.
 - **Source parity profile v2 PASS** (P1–P6): mean latency Prometheus lệch tối đa 4,3% so với log server.
 - **H4 PASS:** health stream v2, 11 phút healthy trước image xấu; IF Alibaba cho `anomaly_strength` 0,989, Payment score 0,797, coverage 0,80, `dispatch_authority=true`.
 - **G6 local Q-09 đạt đúng ngưỡng** ([báo cáo](reports/G6_LOCAL_ALIBABA_BADF9DA0.md)): 9/10 golden-path recovered (trial 04 blocked do race của harness, vẫn tính); 1/1 failed-verify escalated với audit đầy đủ; 0 patch không an toàn trên 10 lần mutate. **G6 chưa PASS**: B đã review lại Q-10 và bổ sung kiểm executor/adapter; owner chưa quyết định nghiệm thu.
-- **Lớp 2 xong 2026-11-12** ([báo cáo](reports/LAYER2_LOCAL_ALIBABA_BADF9DA0.md)): 5 nhóm, 25 run, chạy evaluation đúng một lần, không fit, không chỉnh ngưỡng. Nhóm `alb-04` bị owner loại cả nhóm vì máy ngủ trong lúc warmup, quyết định ghi trước khi có điểm. **Model Alibaba không chuyển được sang lỗi local ở ngưỡng đã đóng băng:** IF bắt 1/12 sự cố latency, MAD bắt 12/12 (6 báo nhầm ở checkout); XGBoost precursor recall 0/20, slope 20/20; lỗi 5xx do SLO rule bắt 8/8. Q-04, Q-05, Q-07 **FAIL** (development). Candidate kế nhiệm cần thiết kế mới trên Alibaba và epoch mới; ADR-018 đề xuất phục vụ MAD/slope trong bundle hiện có nhưng vẫn chờ phê duyệt, không tự chọn lại theo kết quả đã xem.
+- **Lớp 2 xong 2026-11-12** ([báo cáo](reports/LAYER2_LOCAL_ALIBABA_BADF9DA0.md)): 5 nhóm, 25 run, chạy evaluation đúng một lần, không fit, không chỉnh ngưỡng. Nhóm `alb-04` bị owner loại cả nhóm vì máy ngủ trong lúc warmup, quyết định ghi trước khi có điểm. **Model Alibaba không chuyển được sang lỗi local ở ngưỡng đã đóng băng:** IF bắt 1/12 sự cố latency, MAD bắt 12/12 (6 báo nhầm ở checkout); XGBoost precursor recall 0/20, slope 20/20; lỗi 5xx do SLO rule bắt 8/8. Q-04, Q-05, Q-07 **FAIL** (development). Candidate kế nhiệm cần thiết kế mới trên Alibaba và epoch mới; ADR-018 (phục vụ MAD/slope) bị owner từ chối; hướng tiếp theo là train lại IF/XGBoost trên Alibaba.
 
 ## Việc tiếp theo
 
-- **A:** chốt hướng model/ADR-018 và epoch xác nhận theo quyền đã cấp; giữ các FAIL lớp 2 và full G4/G8 chưa nghiệm thu.
+- **A:** thiết kế và train lại IF/XGBoost trên Alibaba (ADR mới), rồi một epoch xác nhận; giữ các FAIL lớp 2 và full G4/G8 chưa nghiệm thu.
 - **B:** giao review Alibaba/Q-10 và hồ sơ G6 cho owner; provider identity, EKS policy/adapter và AWS chỉ triển khai khi đủ quyền/phạm vi. UI/packaging/monitoring local không cần làm lại.
 
 [Lane B checkpoint](delivery/LANE_B_CHECKPOINT.md) chốt mức bằng chứng từng
