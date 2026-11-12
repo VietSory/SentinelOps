@@ -143,11 +143,59 @@ What survives on purpose, and must be handled explicitly:
 
 This slice delivers the described, validated baseline. It does not deliver:
 
-- Workload manifests pinned by image digest for the AWS cluster (local renderer
-  exists in `scripts/kubernetes_testbed.py`).
+- An applied workload bundle. The business-service slice can now be rendered
+  offline as described below; API/workers/observability manifests and their
+  deployment bindings remain separate work.
 - An applied environment, live CloudWatch/X-Ray source capture, or H3 handoff.
 - A Grafana/operational dashboard.
 - Model activation (H1/G3) or remediation acceptance (H4/G6).
 
 G7 requires an applied environment with real adapters, source quality, action and
 verify. None of that is claimed here.
+
+## Offline business-service manifests
+
+`scripts/render_business_manifests.py` renders Checkout, Payment and Inventory
+from the existing shared application image, pinned by registry digest. It reuses
+the existing service names, call paths, pod identity fields and container entry
+points. The namespace is `sentinelops`, matching the declared IAM baseline; it
+does not change the local `sentinelops-b-actions` remediation policy or adapter.
+
+Supply a real published image digest and the explicit environment/collector
+endpoint. Supply the **name** of an externally provisioned commerce Secret whose
+`database-url` key contains a valid runtime commerce DSN. The control RDS database
+and bootstrap credential are not commerce credentials. The renderer accepts no
+password or DSN value and creates no Secret or database/init resource.
+
+```sh
+mkdir -p artifacts/deployment
+python -m scripts.render_business_manifests \
+  --application-image "$BUSINESS_IMAGE_DIGEST" \
+  --environment aws-dev \
+  --otlp-endpoint "$OTLP_ENDPOINT" \
+  --commerce-secret commerce-runtime \
+  --output artifacts/deployment/business.yaml
+```
+
+The nine objects are a Namespace, token-disabled business ServiceAccount, public
+runtime ConfigMap, and three Deployments/ClusterIP Services. There is no RBAC,
+IRSA annotation, ingress, LoadBalancer, model selection or action authority.
+Fault injection is off. Startup/liveness use `/health`; readiness uses `/ready`.
+Pods run as non-root, drop capabilities, have a read-only root filesystem and a
+bounded temporary volume. Mutable images, invalid resource names and endpoint
+credentials/query strings are rejected. Outputs are deterministic and exclusive:
+an existing output file is never overwritten.
+
+```sh
+python -m pytest -q tests/test_business_manifests.py tests/test_kubernetes_testbed.py tests/test_aws_iac.py
+kubeconform -strict -summary -kubernetes-version 1.34.0 artifacts/deployment/business.yaml
+```
+
+Schema validation was executed with kubeconform 0.7.0 and Kubernetes 1.34.0:
+9 valid resources, no invalid/errors/skips; a second run used cached schemas
+without network access. The checked image reference was explicitly a software
+fixture, not a verified/published deployment image. No registry, cluster or AWS
+API was called by rendering/validation. Image availability, external commerce
+schema/Secret, collector reachability and target admission/RBAC remain deployment
+prerequisites. This is configuration evidence, not a running AWS workload, H3
+source parity, known-good approval or G7 acceptance.
