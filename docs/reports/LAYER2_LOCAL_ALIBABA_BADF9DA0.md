@@ -55,6 +55,41 @@ crosses its watch threshold before a breach. The simple controls shipped in the
 same bundle (MAD, slope) and the SLO rule catch every event. This matches the
 layer-1 limitation "scenario shift" in the [model card](MODEL_CARD_ALIBABA_BADF9DA0.md).
 
+## Why the detectors miss (diagnosis, 2026-11-12)
+
+The diagnosis re-scores the recorded prediction table
+(`artifact://manifests/24e6caae…`) with the frozen bundle. It is not used to change
+this candidate.
+
+- **IF saturates at its own threshold.** On healthy local windows, IF raw scores are
+  0.32–0.42. On windows with a latency increase (relative level ≥ 0.5) they range
+  0.52–0.65, and 605 of 665 sit on a plateau of 0.60–0.65. Isolation path length
+  stops shrinking once a point lies outside the training range. The frozen threshold 0.636 (Alibaba calibration,
+  1% budget) lies inside that plateau, so fault windows cross it only now and then.
+  In the 12 runs that carry a latency event, IF flags at most one consecutive
+  decision in 10 runs and none in 1. Persistence needs 2 (`entry_windows`), so all
+  11 are misses. The one detected run had 3 consecutive flags. MAD flags 4–15
+  consecutive decisions in every one of these runs. A probe from a healthy median
+  window shows the ceiling: raising level and peak from 1 to 6.8 leaves the IF score
+  at 0.526.
+- **XGBoost is below its alert threshold on the scored windows.** On the 632
+  windows with a gradual-risk label, scores range 0.29–0.79: positives 0.772–0.788,
+  while negatives reach the same 0.779 at their 90th percentile. The frozen alert
+  threshold is 0.8 (`risk_threshold` in `configs/local_model_evaluation.json`, the
+  bundle's `degrading` level), so no labelled window alerts. Unlabelled windows reach
+  0.88; 39 of them cross 0.8, but they are outside the Q-07 denominator. Its ranking is
+  above prevalence but below the slope control on every service.
+- **MAD and slope work because they are unbounded.** The MAD score is a maximum
+  absolute z-score, and the slope control is a raw slope. Both keep growing with the
+  fault, where the tree scores level off.
+
+Direction for a successor, to be fixed on Alibaba data before any new local epoch:
+reject a fit whose IF threshold falls on the score plateau of out-of-range inputs.
+Prefer a detector score that stays monotone in relative latency, such as the bundled
+MAD or a bounded-feature IF. Calibrate the risk alert threshold on the calibration
+split instead of the fixed 0.8. Then evaluate on a fresh local epoch; this epoch's
+groups are now development data.
+
 These numbers must not be used to retune thresholds or retrain this candidate:
 that would turn the local epoch into training data (ADR-016). A successor candidate
 needs its own fit on Alibaba data and a fresh evaluation epoch.
