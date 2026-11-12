@@ -20,6 +20,10 @@
   "entry_rps": 1.0,
   "maximum_delay_ms": 1200,
   "seed_base": 20261400,
+  "candidate": {
+    "model_version": "de38fc6bb89896856556e13e7c6142ba21c8d0fea88ebd082f95e96d4e5b0e57",
+    "manifest_sha256": "d52df5846ac5027507d96b67c751f02f2c5519e3ea970fbdc3599207d18eb84e"
+  },
   "evaluation_protocol": "alibaba-relative-local-evaluation/v1",
   "scoring": {
     "clock": "recorded-source-availability-counterfactual",
