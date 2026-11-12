@@ -35,6 +35,19 @@ test('protected readiness preserves the public no-model state and rejects an inv
   }
 });
 
+test('a public-probe network error cannot mask a later protected permission rejection',async () => {
+  const protectedReply=deferred();
+  const client=new IncidentClient('fixture',async path => {
+    if (path==='/ready') throw new Error('fixture public-probe network failure');
+    return protectedReply.promise;
+  });
+  const outcome=client.readiness().then(() => null,error => error);
+  await new Promise(resolve => setImmediate(resolve));
+  protectedReply.resolve(new Response(JSON.stringify({code:'insufficient_scope'}),{status:403}));
+  const error=await outcome;
+  assert.equal(error.status,403);assert.equal(error.code,'insufficient_scope');
+});
+
 test('observed loss of incident-read scope clears all private state during the readiness heartbeat',async () => {
   let denied=false;
   const workspace=new Workspace(() => {},() => factory({

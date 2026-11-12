@@ -77,15 +77,19 @@ export class IncidentClient {
   }
   async readiness(signal) {
     // Public readiness describes configuration, not the bearer token's permissions.
-    const [body, permission] = await Promise.all([
-      this.get('/ready',signal,{allowUnavailable:true}),
-      this.get('/ready/incidents',signal).catch(error => {
-        if (error.status === 503 && ['control_store_unavailable','incident_store_unavailable'].includes(error.code)) {
-          return error;
-        }
-        throw error;
-      }),
-    ]);
+    const publicProbe = this.get('/ready',signal,{allowUnavailable:true})
+      .then(body => ({body}),error => ({error}));
+    // Start both probes together, but handle protected denial first. A faster public
+    // network failure must not hide a 401/403 and leave the private session open.
+    const permission = await this.get('/ready/incidents',signal).catch(error => {
+      if (error.status === 503 && ['control_store_unavailable','incident_store_unavailable'].includes(error.code)) {
+        return error;
+      }
+      throw error;
+    });
+    const result = await publicProbe;
+    if (result.error) throw result.error;
+    const body = result.body;
     // Keep an explicit store outage reported by both endpoints. An identity-provider
     // failure or contradictory observation must not become successful readiness.
     if (permission instanceof ApiFailure) {
