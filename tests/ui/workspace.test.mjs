@@ -10,6 +10,84 @@ const envelope = (id, revision, next=null) => ({incident_id:id,revision,context:
 const factory = overrides => ({list:async () => ({items:[],next_cursor:null}),readiness:async () => ({dependencies:{model:false,incident_store:true}}),
   context:async (id,rev) => envelope(id,rev),...overrides});
 
+test('readiness authenticates against protected incident readiness even when public readiness succeeds',async () => {
+  const body={status:'ready',dependencies:{model:true,incident_store:true,authentication:true},direct_inference:false};
+  for (const [status,code] of [[401,'unauthorized'],[403,'insufficient_scope']]) {
+    const calls=[];
+    const client=new IncidentClient('private-fixture-token',async (path,options) => {
+      calls.push({path,options});
+      return new Response(JSON.stringify(path==='/ready' ? body : {code}),{status:path==='/ready' ? 200 : status});
+    });
+    await assert.rejects(() => client.readiness(),error => error.status===status && error.code===code);
+    assert.deepEqual(calls.map(call => call.path).sort(),['/ready','/ready/incidents']);
+    assert.ok(calls.every(call => call.options.headers.Authorization==='Bearer private-fixture-token' &&
+      call.options.credentials==='omit'));
+  }
+});
+
+test('protected readiness preserves the public no-model state and rejects an invalid protected response',async () => {
+  const body={status:'not_ready',dependencies:{model:false,incident_store:true,authentication:true}};
+  for (const protectedBody of [{status:'ready',component:'incident-store'},{}]) {
+    const client=new IncidentClient('fixture',async path => new Response(JSON.stringify(
+      path==='/ready' ? body : protectedBody),{status:path==='/ready' ? 503 : 200}));
+    if (protectedBody.component) assert.deepEqual(await client.readiness(),body);
+    else await assert.rejects(() => client.readiness(),error => error.code==='invalid_response');
+  }
+});
+
+test('observed loss of incident-read scope clears all private state during the readiness heartbeat',async () => {
+  let denied=false;
+  const workspace=new Workspace(() => {},() => factory({
+    list:async () => ({items:[{incident_id:'private-record',revision:1}],next_cursor:null}),
+    readiness:async () => {
+      if (denied) throw new ApiFailure(403,'insufficient_scope');
+      return {dependencies:{model:false,incident_store:true}};
+    },
+  }));
+  await workspace.connect('fixture');await workspace.select('private-record',1);
+  denied=true;await workspace.checkReadiness();
+  assert.equal(workspace.state.session,false);assert.deepEqual(workspace.state.rows,[]);
+  assert.equal(workspace.state.detail,null);assert.equal(workspace.state.readiness,null);
+  assert.equal(workspace.state.actions,null);assert.equal(workspace.state.explanation,null);
+  assert.match(workspace.state.notice,/cannot read incidents/);
+});
+
+test('readiness retains a confirmed store outage but never swallows identity failures or contradictory status',async () => {
+  for (const [store,code,accepted] of [[false,'control_store_unavailable',true],
+    [true,'control_store_unavailable',false],[false,'authentication_unavailable',false]]) {
+    const body={status:'not_ready',dependencies:{incident_store:store,model:false,authentication:true}};
+    const client=new IncidentClient('fixture',async path => new Response(JSON.stringify(
+      path==='/ready' ? body : {code}),{status:503}));
+    if (accepted) assert.deepEqual(await client.readiness(),body);
+    else await assert.rejects(() => client.readiness(),error => error.status===503 && error.code===code);
+  }
+});
+
+test('a late permission failure from an old connection cannot disconnect its replacement',async () => {
+  const late=deferred();let connection=0;
+  const workspace=new Workspace(() => {},() => {
+    const current=++connection;
+    return factory({readiness:() => current===1 ? late.promise : Promise.resolve({dependencies:{model:false}})});
+  });
+  const old=workspace.connect('old-fixture');await workspace.connect('new-fixture');
+  await workspace.select('current-private-record',1);
+  late.reject(new ApiFailure(403,'insufficient_scope'));await old;
+  assert.equal(workspace.state.session,true);assert.equal(workspace.state.notice,null);
+  assert.equal(workspace.state.detail.incident_id,'current-private-record');
+});
+
+test('identity-provider outage preserves readable records with unknown readiness, without calling them healthy',async () => {
+  let down=false;
+  const workspace=new Workspace(() => {},() => factory({readiness:async () => {
+    if (down) throw new ApiFailure(503,'authentication_unavailable');
+    return {dependencies:{model:false,incident_store:true}};
+  }}));
+  await workspace.connect('fixture');await workspace.select('private-record',1);
+  down=true;await workspace.checkReadiness();
+  assert.equal(workspace.state.session,true);assert.equal(workspace.state.detail.incident_id,'private-record');
+  assert.equal(workspace.state.readiness,null);assert.equal(workspace.state.readinessError.code,'authentication_unavailable');
+});
+
 test('an unavailable identity adapter is displayed as authentication failure rather than store outage',async () => {
   const client=new IncidentClient('fixture-token',async () => new Response(JSON.stringify({
     code:'authentication_adapter_unavailable',request_id:'fixture-request'}),{status:503}));
