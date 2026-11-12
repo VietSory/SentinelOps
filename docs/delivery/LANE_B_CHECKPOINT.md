@@ -389,5 +389,7 @@ trên AWS, không thay EKS remediation policy hoặc cấp model/action authorit
 
 Thứ tự còn lại: owner review hồ sơ G6/Q-10; B chuẩn bị deployment/provider và
 H3 theo phạm vi cloud được cấp; A chốt hướng detector và giao release hợp lệ.
-ADR-018 vẫn **Proposed**: capture `alc` có thể chạy theo ADR nhưng evaluation
-chờ phê duyệt; B không đổi serving method hoặc gate theo proposal.
+ADR-018 bị owner **từ chối** 2026-11-12: detection do model đã train quyết định, không
+phục vụ MAD/slope; epoch `alc` dừng khi chưa chấm và đã xoá. A train lại IF/XGBoost trên
+Alibaba. Parity/release trên máy B chỉ đo lại khi có bundle mới; trong lúc chờ, B chuẩn bị
+môi trường (`kind` v0.30.0 đúng SHA-256, `kubectl`) và việc không phụ thuộc model.
