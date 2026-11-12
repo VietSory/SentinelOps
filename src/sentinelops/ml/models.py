@@ -158,28 +158,3 @@ def load_bundle(output: Path, *, expected_manifest_sha256: str):
         from xgboost import XGBClassifier
         risk = XGBClassifier(); risk.load_model(output / "risk.json")
     return manifest, detector, risk
-
-
-def train_gamma(store, dataset_ref: str, output: Path):
-    report = store.read(dataset_ref)
-    # Deliberately before estimator construction, table access or output.
-    require_training_ready(report)
-    from sentinelops.ml.corpus import load_training_rows
-    rows = load_training_rows(store, report)
-    # Validate every service before writing any artifact. All final/test refs stay closed.
-    artifacts = []
-    output.mkdir(parents=True, exist_ok=False)
-    for service in sorted(report["services"]):
-        train = [r for r in rows if r["service"] == service and r["split"] == "train"]
-        calibration = [r for r in rows if r["service"] == service and r["split"] == "calibration" and r["healthy"]]
-        detector = fit_detector([r["features"] for r in train if r["healthy"]], [r["features"] for r in calibration], report["ordered_features"])
-        risk = fit_risk([r["features"] for r in train], [r["risk_label"] for r in train], report["ordered_features"])
-        manifest = save_bundle(output / stable_id(service), detector, risk=risk, provenance={"origin": "admitted-gamma",
-            "dataset_report": report, "dataset_ref": dataset_ref, "service": service, "source_profile": report["source_profile"],
-            "feature_set_version": report["feature_set_version"], "training_rows_sha256": stable_id(train),
-            "calibration_rows_sha256": stable_id(calibration)})
-        artifacts.append({"service": service, "model_version": manifest["model_version"], "activation_allowed": False})
-    result = {"training_manifest_version": "gamma-fit/v1", "dataset_ref": dataset_ref, "models": artifacts,
-              "activation_allowed": False, "holdout_opened": False}
-    (output / "training-manifest.json").write_text(json.dumps(result, indent=2) + "\n")
-    return result

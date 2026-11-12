@@ -10,14 +10,9 @@ Các tài liệu dưới đây giữ bối cảnh, quyết định và kết qu�
 
 ## Nghiên cứu/source plan v1
 
-GAMMA/SMD là lịch sử nghiên cứu/reproduction, không phải nguồn fitting hiện hành.
-Prospective local HTTP theo ADR-014 được hướng dẫn ở
-[runbook hiện tại](../runbooks/LOCAL_HTTP_CORPUS.md).
-
-- GAMMA: [archive acquisition](guides/GAMMA_ARCHIVE_ACQUISITION.md),
-  [resource cohort](guides/GAMMA_RESOURCE_COHORT.md), [resource features](guides/GAMMA_RESOURCE_FEATURES.md),
-  [interference labels](guides/GAMMA_INTERFERENCE_LABELS.md), [native admission](guides/GAMMA_NATIVE_ADMISSION.md),
-  [grouped dataset](guides/GAMMA_GROUPED_DATASET.md), [client capability](guides/GAMMA_CLIENT_CAPABILITY.md).
+GAMMA/SMD là lịch sử nghiên cứu, không phải nguồn fitting. Code, config và hướng dẫn GAMMA/SMD
+đã được gỡ ngày 2026-11-12; tra lại qua Git history khi cần. Nguồn fitting hiện hành là
+Alibaba theo [ADR-016](../adr/ADR-016-public-production-training-source.md).
 
 Chỉ giữ tài liệu lịch sử có giá trị giải thích thiết kế hoặc tái hiện nguồn.
 Report smoke/PASS, checklist hoàn tất và snapshot tiến độ không cần đưa thêm vào archive;
