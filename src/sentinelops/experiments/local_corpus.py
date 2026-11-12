@@ -39,7 +39,7 @@ ALIBABA_BINDING = 'alibaba-epoch.json'
 SOURCE_SERVICES = (*sorted(BUSINESS_ROUTES), 'postgres', 'prometheus', 'otel-collector', 'jaeger')
 SLOT_PATTERN = re.compile(r'(?:(?:train|cal|dev)-[0-9]{2}-(?:healthy|payment-gradual|inventory-gradual)'
                           r'|det-[0-9]{2}-(?:healthy|payment-abrupt|inventory-abrupt)'
-                          r'|(?:ali-0[1-5]|alb-0[1-7]|alc-0[1-7])-(?:healthy|payment-abrupt|inventory-abrupt|payment-gradual|inventory-gradual))')
+                          r'|(?:ali-0[1-5]|alb-0[1-7]|alc-0[1-7]|ald-0[1-7])-(?:healthy|payment-abrupt|inventory-abrupt|payment-gradual|inventory-gradual))')
 
 
 def is_detector_plan(plan):
@@ -305,7 +305,7 @@ def require_role_order(store, plan, role):
         if role not in DETECTOR_ROLES:
             raise ValueError('detector-event epoch has only a development-validation role')
         return
-    if any(s['group_id'].startswith(('det-', 'ali-', 'alb-', 'alc-')) for s in sessions):
+    if any(s['group_id'].startswith(('det-', 'ali-', 'alb-', 'alc-', 'ald-')) for s in sessions):
         raise ValueError('fitting corpus cannot share a store with a detector-event epoch')
     index = ROLES.index(role)
     if any(ROLES.index(s['role']) > index for s in sessions):

@@ -1,6 +1,6 @@
 {
-  "feature_set_version": "http-relative-5m/v1",
-  "authorizing_adr": "ADR-016",
+  "feature_set_version": "http-relative-5m/v2",
+  "authorizing_adr": "ADR-019",
   "window_minutes": 5,
   "step_seconds": 60,
   "baseline": {"statistic": "median", "max_minutes": 60, "min_minutes": 5, "excludes_window": true},
@@ -9,17 +9,56 @@
     "rt_slope_rel_per_min",
     "rate_log_level_rel",
     "rate_slope_rel_per_min",
-    "rt_log_peak_rel"
+    "rt_log_peak_rel",
+    "rt_log_baseline_to_breach"
   ],
   "label": {
-    "label_version": "relative-latency-breach/v1",
-    "breach_minute": "rt / baseline_rt > 2.0",
+    "label_version": "relative-latency-exceedance/v2",
+    "breach_minute": "rt / baseline_rt > multiplier",
+    "breach_multipliers": [2.0, 4.0, 8.0, 16.0, 32.0, 64.0],
     "breach_onset_requires_consecutive_minutes": 2,
     "horizon_seconds": 300,
     "confirmation_tail_minutes": 2,
-    "healthy_window": "no breach minute within the window or the following horizon+tail",
-    "positive": "no breach minute in the window and a confirmed onset in (t, t+300s]",
-    "negative": "complete observed minutes through t+300s+tail with no breach minute"
+    "healthy_window": "no breach minute within the window or the following horizon+tail, at the first multiplier",
+    "positive": "no breach minute in the window and a confirmed onset in (t, t+300s], per multiplier",
+    "negative": "complete observed minutes through t+300s+tail with no breach minute, per multiplier"
+  },
+  "detector": {
+    "features": ["rt_log_level_rel", "rt_log_peak_rel"]
+  },
+  "risk": {
+    "inputs": ["rt_log_level_to_breach", "rt_log_peak_to_breach", "rt_slope_to_breach_per_min"],
+    "monotone_constraints": [1, 1, 1],
+    "negative_keep_one_in": 10,
+    "estimator": {"n_estimators": 300, "max_depth": 4, "learning_rate": 0.1},
+    "thresholds": {
+      "watch": {"multiplier": 64.0, "false_alert_budget": 0.01},
+      "degrading": {"multiplier": 16.0, "false_alert_budget": 0.01}
+    }
+  },
+  "serving": {
+    "breach_latency_ms": 750.0,
+    "breach_source": "configs/slo_health_policy.json latency_ms"
+  },
+  "fault_shape_gate": {
+    "gate_version": "synthetic-fault-shapes/v1",
+    "base_latency_ms": [3.0, 8.0, 24.0],
+    "noise_sigma": [0.04, 0.10],
+    "seeds_per_cell": 10,
+    "fault_delay_ms": 1200.0,
+    "healthy_minutes_before_fault": 40,
+    "abrupt_minutes": 10,
+    "gradual_minutes": 20,
+    "recovery_minutes": 8,
+    "healthy_only_minutes": 63,
+    "decision_lag_seconds": 30,
+    "pass": {
+      "detector_event_recall": 1.0,
+      "detector_false_alerts": 0,
+      "detector_min_saturation_margin": 0.005,
+      "risk_precursor_recall_lead_60s": 0.9,
+      "risk_false_warnings": 0
+    }
   },
   "splits": {
     "unit": "microservice",

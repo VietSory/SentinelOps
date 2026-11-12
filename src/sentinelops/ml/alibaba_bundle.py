@@ -1,6 +1,6 @@
-"""ADR-016 model bundle (`sentinelops-model/v3`) for Alibaba-trained detectors.
+"""ADR-016/ADR-019 model bundle (`sentinelops-model/v3`) for Alibaba-trained detectors.
 
-One service-agnostic detector and risk model on `http-relative-5m/v1`. The bundle
+One service-agnostic detector and exceedance-risk model on `http-relative-5m/v2`. The bundle
 binds the frozen config, every source archive checksum, the fitting commit and
 the development report; it is never an approval or activation.
 """
@@ -17,7 +17,7 @@ from sentinelops.telemetry.core import stable_id
 
 BUNDLE_VERSION = 'sentinelops-model/v3'
 ORIGIN = 'admitted-alibaba-v2022'
-FEATURE_SET = 'http-relative-5m/v1'
+FEATURE_SET = 'http-relative-5m/v2'
 
 
 def validate_alibaba_manifest(manifest):
@@ -32,7 +32,10 @@ def validate_alibaba_manifest(manifest):
             or not re.fullmatch(r'[0-9a-f]{64}', provenance.get('report_sha256') or '')
             or not archives or any(not re.fullmatch(r'[0-9a-f]{64}', a.get('archive_sha256') or '') for a in archives)
             or len({a['archive'] for a in archives}) != len(archives)
-            or manifest.get('activation_allowed') is not False):
+            or manifest.get('activation_allowed') is not False
+            or not 0 < manifest.get('risk_thresholds', {}).get('watch', 0) < manifest['risk_thresholds'].get('degrading', 0) < 1
+            or manifest.get('fault_shape_gate_passed') is not True
+            or manifest.get('detector_features') != config.get('detector', {}).get('features')):
         raise ValueError('Alibaba bundle provenance, config or feature set differs')
 
 
@@ -43,8 +46,11 @@ def package_fit(fit_dir, output):
     fit_dir, output = Path(fit_dir), Path(output)
     report_bytes = (fit_dir / 'report.json').read_bytes()
     report = json.loads(report_bytes)
-    if report.get('report_version') != 'alibaba-relative-development/v1' or report.get('activation_allowed') is not False:
-        raise ValueError('not an ADR-016 development fit')
+    if (report.get('report_version') != 'alibaba-relative-development/v2' or report.get('activation_allowed') is not False
+            or report.get('development_fit') is not False or not report.get('evaluation')):
+        raise ValueError('not a complete ADR-019 fit (development fits never become bundles)')
+    if report.get('fault_shape_gate', {}).get('passed') is not True:
+        raise ValueError('the fitted models failed the synthetic fault-shape gate')
     detector = joblib.load(fit_dir / 'detector.joblib')
     if not isinstance(detector, Detector) or list(detector.ordered_features) != report['config']['features']:
         raise ValueError('fitted detector differs from the frozen feature config')
@@ -66,7 +72,8 @@ def package_fit(fit_dir, output):
                 'calibration_ecdf_sha256': stable_id({'if': detector.calibration_if.tolist(), 'mad': detector.calibration_mad.tolist()}),
                 'library_versions': {n: importlib.metadata.version(n) for n in ('numpy', 'scikit-learn', 'joblib', 'xgboost-cpu')},
                 'activation_allowed': False, 'validation_status': 'development-evaluated', 'seed': detector.seed,
-                'risk_thresholds': {'watch': .5, 'degrading': .8}, 'detector_config': detector.forest.get_params(),
+                'risk_thresholds': report['risk_thresholds'], 'fault_shape_gate_passed': True,
+                'detector_features': list(detector.detector_features), 'detector_config': detector.forest.get_params(),
                 'preprocessing': 'train-only RobustScaler on service-relative features',
                 'baseline': 'median-MAD control; same train/calibration windows and alert budget'}
     validate_alibaba_manifest(manifest)

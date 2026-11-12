@@ -57,4 +57,48 @@ def test_vectorised_transform_equals_the_reference(seed):
     assert [r['minute'] for r in ref] == [r['minute'] for r in fast]
     for a, b in zip(ref, fast):
         assert a['healthy'] == b['healthy'] and a['risk_label'] == b['risk_label'] and a['onset_minute'] == b['onset_minute']
-        assert np.allclose(a['features'], b['features'], rtol=1e-9, atol=1e-12)
+        assert np.allclose(a['features'], b['features'][:5], rtol=1e-9, atol=1e-12)
+        assert b['features'][5] == pytest.approx(np.log(b['baseline_rt'] / config['serving']['breach_latency_ms']))
+        assert b['risk_labels'][0] == b['risk_label'] and b['baseline_rt'] > 0
+
+
+def test_each_breach_multiplier_has_its_own_onset_labels():
+    from sentinelops.ml.alibaba_training import service_windows_fast
+    config = load_config()
+    multipliers = config['label']['breach_multipliers']
+    rt = [10.0] * 80 + [50.0] * 10 + [10.0] * 30      # 5x baseline from minute 80: breaches 2x and 4x only
+    rows = {r['minute']: r for r in service_windows_fast(series(rt), config)}
+    by = dict(zip(multipliers, rows[79]['risk_labels']))
+    assert by[2.0] == 1 and by[4.0] == 1 and by[8.0] == 0 and by[64.0] == 0
+    inside = dict(zip(multipliers, rows[82]['risk_labels']))
+    assert inside[2.0] is None and inside[4.0] is None    # breach minutes inside the window: neither class
+    assert inside[8.0] == 0                               # below that multiplier the window stays a clean negative
+    assert rows[79]['baseline_rt'] == pytest.approx(10.0)
+
+
+def test_column_builder_matches_rows_and_skips_unrequested_splits():
+    from sentinelops.ml.alibaba_training import build_arrays, build_rows
+    config = load_config()
+    rng = np.random.default_rng(3)
+    frames = []
+    for name in ('MS_a', 'MS_b', 'MS_c', 'MS_d'):
+        rt = rng.lognormal(2.5, 0.3, 150)
+        rt[100:104] *= 5
+        frames.append(pd.DataFrame({'msname': name, 'minute': np.arange(150), 'http_rt_ms': rt,
+                                    'http_mcr_sum': rng.lognormal(0, 0.1, 150)}))
+    data = pd.concat(frames, ignore_index=True)
+    rows, arrays = build_rows(data, config), build_arrays(data, config)
+    assert len(rows) == len(arrays['minute'])
+    assert np.allclose([r['features'][:5] for r in rows], arrays['features'])
+    assert [r['service'] for r in rows] == [arrays['services'][i] for i in arrays['service']]
+    assert [r['split'] for r in rows] == [arrays['service_split'][i] for i in arrays['service']]
+    wanted = {split_of(n) for n in ('MS_a', 'MS_b', 'MS_c', 'MS_d')} - {'evaluation'}
+    partial = build_arrays(data, config, splits=tuple(wanted)) if wanted else None
+    assert partial is None or 'evaluation' not in set(partial['service_split'])
+
+
+def test_serving_breach_is_the_frozen_slo_latency():
+    import json
+    from pathlib import Path
+    policy = json.loads((Path(__file__).resolve().parents[1] / 'configs/slo_health_policy.json').read_text())
+    assert load_config()['serving']['breach_latency_ms'] == policy['latency_ms']

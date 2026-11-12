@@ -23,8 +23,11 @@ from sentinelops.telemetry.prometheus import mean_latency_ms
 from sentinelops.telemetry.store import ArtifactStore
 
 
-def score_records(store, cases, detector, risk, config, scoring, protocol, health_policy):
-    """Score only actual receipt-bounded minutes. Local outcomes are used as labels."""
+def score_records(store, cases, detector, risk, config, scoring, protocol, health_policy, risk_threshold):
+    """Score only actual receipt-bounded minutes. Local outcomes are used as labels.
+
+    ``risk_threshold`` is the bundle's calibrated degrading level (ADR-019), never a local choice.
+    """
     records = []
     for case in cases:
         result = store.read(case['source_result_ref'])
@@ -96,7 +99,7 @@ def score_records(store, cases, detector, risk, config, scoring, protocol, healt
                 if not math.isfinite(value) or not 0 <= value <= 1:
                     raise ValueError('ADR-016 XGBoost returned an invalid probability')
                 slope = max(0., vectors[i][config['features'].index('rt_slope_rel_per_min')])
-                record.update(xgboost_score=value, xgboost_flag=value >= protocol['risk_threshold'],
+                record.update(xgboost_score=value, xgboost_flag=value >= risk_threshold,
                               slope_score=slope, slope_flag=slope > scoring['risk_relative_slope_threshold'])
     return records
 
@@ -196,7 +199,7 @@ def evaluate_alibaba_local(store, bundle, manifest_sha256, output, *, project=PR
     from sentinelops.ml.models import load_bundle
     manifest, detector, risk = load_bundle(bundle, expected_manifest_sha256=manifest_sha256)
     scored = score_records(store, cases, detector, risk, manifest['provenance']['config'], plan['scoring'], protocol,
-                           health_policy)
+                           health_policy, manifest['risk_thresholds']['degrading'])
     summary = score_by_route(scored, cases, protocol)
     output.mkdir(parents=True, exist_ok=False)
     results = ArtifactStore(output)
@@ -206,6 +209,7 @@ def evaluate_alibaba_local(store, bundle, manifest_sha256, output, *, project=PR
         'attempt_ref': attempt_ref, 'candidate_id': epoch['model_version'], 'bundle_manifest_sha256': manifest_sha256,
         'source_commit': source, 'source_profile': plan['source_profile'], 'feature_set_version': plan['feature_set_version'],
         'scoring': plan['scoring'], 'base_protocol_sha256': stable_id(protocol), 'predictions_ref': prediction_ref,
+        'risk_threshold': manifest['risk_thresholds']['degrading'],
         'slo_health_policy_sha256': stable_id(health_policy),
         'evaluated_at': timestamp(datetime.now(timezone.utc)), 'services': summary, 'fitting_rows': 0,
         'G3_accepted': False, 'activation_allowed': False, 'holdout_opened': False,
