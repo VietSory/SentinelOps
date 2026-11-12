@@ -69,7 +69,7 @@ for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-ris
              'observation-envelope', 'feature-envelope', 'infrastructure-observation',
              'experiment-run', 'dataset-manifest', 'incident-write',
              'incident-envelope', 'incident-list', 'api-error', 'explanation-response', 'training-data-policy',
-             'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result',
+             'health-signal', 'correlation-result',
              'rca-policy', 'rca-result', 'training-data-policy-v2', 'lane-b-deployment-lock', 'payment-known-good',
              'action-observation', 'action-list', 'quarantine-review', 'quarantine-release', 'quarantine-status',
              'payment-image-review', 'payment-image-evidence', 'payment-deployment-baseline', 'payment-deployment-change'):

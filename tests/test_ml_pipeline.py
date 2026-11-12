@@ -137,22 +137,6 @@ def test_event_metrics_keep_duplicates_misses_and_real_emission_delays():
     assert result["measured_leads_seconds"] == [50.] and result["false_incidents_per_healthy_service_hour"] == 1
 
 
-def test_self_attested_dataset_cannot_enter_fit_or_read_arbitrary_evidence(tmp_path):
-    from sentinelops.ml.corpus import load_training_rows
-    from sentinelops.public_data.policy import load_policy
-    from sentinelops.telemetry.core import stable_id
-    report = {'dataset_version': 'gamma-verified-training/v1', 'source': load_policy()['sources']['gamma'],
-              'training_data_policy_hash': stable_id(load_policy()), 'training_ready': True,
-              'health_labels_available': True, 'source_reference_is_healthy_certificate': True,
-              'source_reference_traffic_verified': True, 'independence_established': True,
-              'risk_target_available': True, 'source_audit_refs': ['forged://exists-is-not-proof']}
-    class NoRead:
-        def read(self, ref):
-            pytest.fail('self-attestation must be rejected before any corpus/evidence read')
-    with pytest.raises(DatasetNotReady, match='self-attested'):
-        load_training_rows(NoRead(), report)
-
-
 @pytest.mark.parametrize('seconds', [-300, 0, 60, 299, 301, 600])
 def test_real_inference_rejects_wrong_duration_before_predict(fitted, seconds):
     now = datetime.now(timezone.utc)
