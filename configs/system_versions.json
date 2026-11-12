@@ -221,7 +221,7 @@
         },
         "capture_identity": {
           "evaluation_plan_sha256": "affd78a38728a89901ce7c9b28d1ea61470be6e189a5791670cdb81c0dc00191",
-          "source_commit": "9042fd002508896e4a6d705f2f7e67ebeb469a57",
+          "source_commit": "ac491f3af887d970e65bc3e0ab0bb1ec25b94ebe",
           "topology_sha256": "d1265592881a04d07bb6ed992baa59d43610c90cd76cb3565cc75dd53d0df9a3"
         },
         "shared_build_inputs": {
