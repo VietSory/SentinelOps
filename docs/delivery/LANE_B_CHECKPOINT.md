@@ -4,6 +4,10 @@ Các mục 1–3 lưu baseline trên máy B tại `d605826` (2026-11-05) và b�
 sau. Mục 4–5 cập nhật tình trạng bàn giao local ngày 2026-11-08. Bằng chứng trên
 máy A và xác nhận trên môi trường B được ghi riêng.
 
+**Trạng thái hiện hành 2026-11-12 ở mục 9.** Các mục cũ giữ mốc đo và giới hạn
+của thời điểm đó; không dùng câu “chưa có model/rollback/OIDC” của baseline để
+ghi đè báo cáo tích hợp mới.
+
 Đọc cùng [plan hai người](DELIVERY_PLAN.md), [contract](WORKSTREAM_CONTRACT.md)
 và [PROJECT_STATUS](../PROJECT_STATUS.md).
 
@@ -342,17 +346,37 @@ Ràng buộc mới cho B:
 - Kết quả chính thức của model là lớp 2 (đợt đánh giá local v2 đã khóa trước khi
   chạy) và G8, không phải số development trong hồ sơ G3.
 
-## 8. Những gì checkpoint này KHÔNG tuyên bố
+## 8. Giới hạn nghiệm thu hiện hành
 
 - **AWS chưa triển khai.** Không `apply`, không gọi AWS API, không có credential.
-- **Chưa có model được bật trên môi trường của B.** G3 chỉ được duyệt có điều kiện
-  cho tích hợp local (D-19, D-22); kết quả chính thức chờ lớp 2 và G8.
+- **Model Alibaba đã có inference trên máy B**, theo [báo cáo 2026-11-09](../reports/LANE_B_ALIBABA_V2_ACTIVATION.md).
+  G3 chỉ duyệt có điều kiện D-22; lớp 2 đã đo và Q-04/Q-05/Q-07 FAIL. Không coi
+  inference hoạt động là chất lượng đã đạt hoặc là xác nhận runtime hôm nay.
 - **G4 đầy đủ chưa nghiệm thu.** Ranking là suspect kèm evidence, không phải
   nguyên nhân đã xác nhận.
 - **G5 chưa nghiệm thu.** Explanation dùng deterministic fallback thật, không
   phải Bedrock.
-- **G6 chưa nghiệm thu.** Auto action off; chưa có approved known-good ledger và
-  chưa có lần rollback sản phẩm nào được verify.
-- **Production authentication chưa triển khai.** Token local là static development
-  credential; môi trường khác fail closed. Grafana anonymous Viewer là sandbox.
-- Health checkpoint backlog vẫn **UNKNOWN**, không phải healthy/caught-up.
+- **G6 chưa nghiệm thu.** Trials với known-good được duyệt trước thay đổi xấu đã
+  có rollback thật (Q-09: 9/10 recovered và 1/1 failed-verify escalated). Q-10 đã
+  được B review lại; vẫn cần quyết định gate của owner, không bật auto dispatch.
+- **OIDC adapter đã có code/tests**, chưa cấu hình identity provider thật trên
+  môi trường triển khai. Token static chỉ local/test; thiếu OIDC ngoài local thì
+  fail closed. Grafana anonymous Viewer là sandbox.
+- Checkpoint backlog trong các phép đo cũ là **UNKNOWN**, không phải bằng chứng
+  healthy/caught-up hiện tại.
+
+## 9. B follow-up — 2026-11-12
+
+| Mục | Kết luận / phần tiếp theo |
+| --- | --- |
+| B-a review model hiện hành | Codex đọc `alibaba_controls`, `check_alibaba_source_parity`, `ml/alibaba_release` và caller/guards. 102 tests Alibaba training/release/bundle/live/evaluation software PASS với ML dependencies hoạt động. Không chạy lại evaluation một lần trên corpus thật, không thay threshold/approval. Review kiểm software admission, không chứng nhận độ đúng của raw bytes do operator cung cấp hoặc nghiệm thu G3 |
+| B-b / B-c | Candidate local `38bcc766` đã retired D-23. Handoff hiện hành là bundle Alibaba chung `badf9da0`; parity/build/rollover v2 trên máy B đã có [báo cáo](../reports/LANE_B_ALIBABA_V2_ACTIVATION.md). Máy/release mới vẫn phải đo parity; không chạy lại CLI local đã gỡ |
+| B-d / Q-10 | Review lại ba nhóm tests bổ sung đã hoàn tất. Thêm 8 executor/HTTP-adapter checks, remediation suite 111 PASS; PostgreSQL journal check riêng PASS, gồm outage/concurrency/quarantine. Fixture outcomes không tính thêm vào 9/10 trial thật. [Phạm vi review và lệnh tái hiện](../reports/G6_LOCAL_ALIBABA_BADF9DA0.md#b-follow-up-review--2026-11-12) |
+| B-e | OIDC/JWKS adapter và scopes đã có. Còn provider/app client thật + kiểm trên deployment được phép |
+| B2 CI | Job có ML dependencies nay chạy riêng `tests/test_alibaba*.py` sau khi import bắt buộc NumPy/Pandas/PyArrow/sklearn/XGBoost; trước đó foundation không cài ML còn public-data không chọn các suite Alibaba, nên chúng có thể bị skip. Test identity dùng PATH của môi trường thay vì hardcode `/usr/bin:/bin`, giữ nguyên Git fixture identity và assertions |
+| B-f / AWS | Giữ quyết định owner hoãn EKS policy/adapter sang AWS. Chưa apply; region/quota/budget/quyền vẫn cần chốt trước deployment |
+
+Thứ tự còn lại: owner review hồ sơ G6/Q-10; B chuẩn bị deployment/provider và
+H3 theo phạm vi cloud được cấp; A chốt hướng detector và giao release hợp lệ.
+ADR-018 vẫn **Proposed**: capture `alc` có thể chạy theo ADR nhưng evaluation
+chờ phê duyệt; B không đổi serving method hoặc gate theo proposal.

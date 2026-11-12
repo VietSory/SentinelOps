@@ -56,11 +56,13 @@ không chứng minh outage recovery đã được xác nhận trên runtime.
 
 ## 3. H1 — model candidate và activation
 
-**Đã có:** `ModelRegistry`, `sentinelops-model/v2`, operator ledger
+**Đã có:** `ModelRegistry`, `sentinelops-model/v3` cho Alibaba, operator ledger
 `validated-model-release/v1`; xem [models](../runbooks/MODEL_PIPELINE.md).
 
-A giao ba service bundles, `training-manifest.json`, dataset freeze/policy refs,
-checksums, library/code versions, evaluation/model cards và source-parity status.
+Handoff hiện hành từ ADR-016/D-23: A giao **một bundle Alibaba service-agnostic**
+cho ba business routes (`http-relative-5m/v1`), manifest/report/provenance,
+checksums, library/code versions, controls/model card và source-parity status.
+Handoff ba bundle riêng và candidate local `38bcc766` là lịch sử đã retired.
 Handoff URI phải materialize được artifacts mà loader/verifier cần; không chỉ
 copy model/pickle hoặc path tuyệt đối của máy A. Manifest hash là SHA-256 bytes.
 
@@ -76,6 +78,12 @@ trong trusted store, `manifest_sha256`, `validation_ref`. Approval khớp model/
 dataset/policy, có evaluation refs và G2/G3/source_parity/activation đủ điều kiện
 loader; activation trên AWS còn theo môi trường đích/G7. Flag không thay evidence
 hay quyết định operator; training không tự viết approval để bật model.
+
+B đã có wiring/packaging/unavailable UI và [v2 rollout trên máy B](../reports/LANE_B_ALIBABA_V2_ACTIVATION.md)
+trong phạm vi D-22, không coi đây là G3 quality/G8 PASS. Alibaba dùng source
+`prometheus-increase-60s-5s/v2`, cần accepted history; direct detect/risk trả 409,
+consumer đọc `service_signals` của IER. Máy khác phải kiểm parity trên môi trường
+đích; trusted operator approval không chứng thực raw measurements từ xa.
 
 B hoàn thành wiring/packaging/unavailable UI/rollback release trước H1. Chỉ bước
 **bật inference thật** chờ model đủ gate. Activation pin release và restart có
