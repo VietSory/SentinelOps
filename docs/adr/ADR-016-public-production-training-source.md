@@ -106,3 +106,24 @@ publications to notify the maintainers.
    (`admitted_local_rows` and the local branch of `load_training_rows`). The
    capture plan, admission and freeze stay: they are the data pipeline for the
    local RCA development evaluation (Q-08) and the evaluation campaigns.
+
+## Owner exclusion of an incident group (2026-11-11)
+
+Epoch 2 (`alb-*`, source `3b17205`) stopped with `STOPPED_REQUIRES_INVESTIGATION`:
+the host slept for 7 h 48 min inside `alb-04-inventory-abrupt` (systemd: 19 h 33 min
+wall clock against 11 h 44 min monotonic; one 28 094 s gap in that slot's client
+ledger, every other slot ≤ 1.2 s). The slot failed source verification (no 30
+verified healthy pre-fault minutes). The frozen dispositions cover a host restart and
+invalid client UTC only. Owner decision: treat it as a one-off incident, exclude the
+whole group, replace it and finish the epoch; no measurement criterion changes.
+
+`python -m scripts.exclude_incident_group --root STORE --group 4 --replacement-group 6
+--decision TEXT` records that decision once per epoch
+(`local-http-owner-exclusion/v1`). It refuses a fully verified group and a failure
+without an independent host-pause witness (a completed slot whose verifier fails
+only on warmup coverage, after every identity and provenance check, and whose bound
+client ledger has request starts more than 300 s apart inside the warmup), keeps and binds
+every source byte, stops (never removes) the group's containers and uses an ordinal
+beyond the reserved minimum (`alb-04` → `alb-06`). Its commit, a descendant of the
+epoch source that changes only the recovery and source-binding code, becomes the
+epoch's successor capture source for the replacement groups.

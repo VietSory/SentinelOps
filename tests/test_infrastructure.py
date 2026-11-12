@@ -49,3 +49,32 @@ def test_database_failure_closes_connection_without_fabricating_metrics(monkeypa
     with pytest.raises(RuntimeError):
         asyncio.run(PostgresInfrastructureSource("postgresql://local/app").capture())
     assert state["closed"]
+
+
+@pytest.mark.parametrize("case", ["visible", "unknown-onset", "hidden", "future-wait"])
+def test_lock_wait_capture_preserves_missing_visibility_and_native_clocks(monkeypatch, case):
+    measured = datetime.now(timezone.utc) - timedelta(seconds=1)
+    started = measured - timedelta(minutes=5)
+    wait = measured - timedelta(seconds=2)
+    row = {
+        "measured_at": measured, "postgres_started_at": started, "database_oid": 40,
+        "stats_visible": case != "hidden", "waiting_clients": 0 if case == "hidden" else 1,
+        "earliest_wait_start": None if case in ("unknown-onset", "hidden") else wait,
+    }
+    if case == "future-wait":
+        row["earliest_wait_start"] = measured + timedelta(seconds=1)
+    source = PostgresInfrastructureSource("postgresql://private:private-secret@127.0.0.1:5432/app")
+
+    async def fetch(_query):
+        return row
+
+    monkeypatch.setattr(source, "_fetch", fetch)
+    if case in ("hidden", "future-wait"):
+        with pytest.raises(ValueError, match="visibility" if case == "hidden" else "clocks"):
+            asyncio.run(source.capture_lock_waits())
+        return
+    item = asyncio.run(source.capture_lock_waits())
+    assert item["kind"] == "postgres-lock-wait-snapshot/v1"
+    assert item["database_oid"] == 40 and item["waiting_clients"] == 1
+    assert item["earliest_wait_start"] == (None if case == "unknown-onset" else wait.isoformat().replace("+00:00", "Z"))
+    assert "private" not in json.dumps(item)

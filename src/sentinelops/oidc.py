@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import math
 import re
 import time
 from urllib.parse import urlsplit
@@ -78,6 +79,20 @@ async def fetch_jwks(url):
         return response.json()
 
 
+# Largest integer a float holds exactly; far beyond any real token time (year ~285 million).
+MAX_NUMERIC_DATE = 2 ** 53
+
+
+def _numeric_date(value) -> bool:
+    """A finite JSON number in [0, 2**53). Checked without converting an int to float,
+    so an arbitrary-precision integer such as 10**400 cannot raise OverflowError."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return 0 <= value < MAX_NUMERIC_DATE
+    return isinstance(value, float) and math.isfinite(value) and 0 <= value < MAX_NUMERIC_DATE
+
+
 class OidcVerifier:
     def __init__(self, config: OidcConfig, *, fetch=fetch_jwks, clock=time.monotonic):
         self.config, self._fetch, self._clock = config, fetch, clock
@@ -139,9 +154,15 @@ class OidcVerifier:
                                 audience=config.audience if by_aud else None, leeway=config.leeway_seconds,
                                 options={"require": ["exp", "iat", "iss", "sub"] + (["aud"] if by_aud else []),
                                          "verify_aud": by_aud})
-        except (jwt.PyJWTError, TypeError, ValueError):
+        except (jwt.PyJWTError, TypeError, ValueError, OverflowError):
             # TypeError/ValueError: claims of the wrong JSON shape (e.g. an object as iat).
+            # OverflowError: Infinity as a NumericDate.
             raise TokenRejected("token signature or claims are invalid") from None
+        # RFC 7519 NumericDate is a JSON number. PyJWT coerces numeric strings with int(), so a
+        # string exp/iat/nbf would otherwise pass; reject any non-number or non-finite value.
+        for name in ("exp", "iat", "nbf"):
+            if name in claims and not _numeric_date(claims[name]):
+                raise TokenRejected("token time claims are not NumericDate values")
         if not by_aud:
             # Compatibility only for unbound Cognito access tokens: explicit token_use=access and no
             # aud at all. A token bound to another resource (any aud) is never accepted by client_id.

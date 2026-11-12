@@ -130,7 +130,11 @@ The ADR-015 detector epoch is still audited and frozen with
 1. `scripts.check_alibaba_source_parity --kind KIND --bundle BUNDLE --manifest-sha256 SHA
    --environment NAME --verified-by NAME --output DIR` runs the services on an owned
    kind cluster and checks criteria `alibaba-parity-criteria/v1` (P1–P6), fixed
-   before measurement. Any failure makes the record `FAIL`.
+   before measurement. Any failure makes the record `FAIL`; a run that stops early
+   (bundle, readiness, preflight, deployment, interrupt) still writes `FAIL` evidence
+   and exits non-zero. The output keeps the raw Prometheus responses as measurement
+   provenance and a diagnostics file with status and event reasons only; sandbox
+   tokens and the kubeconfig are always removed from it.
 2. The owner decides G3 from the review packet
    ([example](../reports/G3_CANDIDATE_ALIBABA_BADF9DA0.md)).
 3. `scripts.build_alibaba_release --bundle … --manifest-sha256 … --controls …

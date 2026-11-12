@@ -39,7 +39,7 @@ ALIBABA_BINDING = 'alibaba-epoch.json'
 SOURCE_SERVICES = (*sorted(BUSINESS_ROUTES), 'postgres', 'prometheus', 'otel-collector', 'jaeger')
 SLOT_PATTERN = re.compile(r'(?:(?:train|cal|dev)-[0-9]{2}-(?:healthy|payment-gradual|inventory-gradual)'
                           r'|det-[0-9]{2}-(?:healthy|payment-abrupt|inventory-abrupt)'
-                          r'|ali-0[1-5]-(?:healthy|payment-abrupt|inventory-abrupt|payment-gradual|inventory-gradual))')
+                          r'|(?:ali-0[1-5]|alb-0[1-7]|alc-0[1-7])-(?:healthy|payment-abrupt|inventory-abrupt|payment-gradual|inventory-gradual))')
 
 
 def is_detector_plan(plan):
@@ -305,7 +305,7 @@ def require_role_order(store, plan, role):
         if role not in DETECTOR_ROLES:
             raise ValueError('detector-event epoch has only a development-validation role')
         return
-    if any(s['group_id'].startswith(('det-', 'ali-')) for s in sessions):
+    if any(s['group_id'].startswith(('det-', 'ali-', 'alb-', 'alc-')) for s in sessions):
         raise ValueError('fitting corpus cannot share a store with a detector-event epoch')
     index = ROLES.index(role)
     if any(ROLES.index(s['role']) > index for s in sessions):
@@ -323,7 +323,7 @@ def require_role_order(store, plan, role):
                     raise ValueError('previous acquisition role has incomplete/failed source slots')
 
 
-def close_completed_sessions(store, *, except_group, plan=None):
+def close_completed_sessions(store, *, except_group, plan=None, verified_slots=None):
     plan = load_plan() if plan is None else plan
     for session in registered_sessions(store):
         group = session['group_id']
@@ -335,7 +335,10 @@ def close_completed_sessions(store, *, except_group, plan=None):
             read_abandonment(store, session, plan)
             continue
         for kind in plan_kinds(plan):
-            result = store.root / 'runs' / (group + '-' + kind) / 'result.json'
+            slot = group + '-' + kind
+            if verified_slots is not None and slot not in verified_slots:
+                raise ValueError('refuse to pause with an unverified acquisition group')
+            result = store.root / 'runs' / slot / 'result.json'
             if not result.exists() or read_binding(store, result)[1]['status'] != 'completed':
                 raise ValueError('finish the active acquisition group before preparing another context')
         expected_project = 'sentinelops-corpus-' + group
@@ -358,7 +361,8 @@ def register_session(store, plan, *, role, ordinal, project=PROJECT, prepare=Fal
     epoch_ref = None
     if is_alibaba_plan(plan):
         epoch_ref, epoch = read_alibaba_epoch(store, plan)
-        if epoch['source_commit'] != source:
+        from sentinelops.experiments.owner_exclusion import epoch_sources
+        if source not in epoch_sources(store, plan, project=project):
             raise ValueError('ADR-016 capture differs from the preregistered plan and source')
     require_role_order(store, plan, role)
     path = registration_path(store, group)

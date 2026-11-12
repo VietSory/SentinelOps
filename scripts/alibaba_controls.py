@@ -63,11 +63,16 @@ def main():
     if len(evaluation) != counts['windows'] or len(calibration) != fit['counts']['calibration']['healthy']:
         raise SystemExit('rebuilt rows differ from the fit counts')
 
-    detector = joblib.load(args.fit / 'detector.joblib')
+    import hashlib
+    import io
+    # Bind the report to the exact model bytes it scores (Codex review): load from the hashed bytes.
+    model_bytes = {name: (args.fit / name).read_bytes() for name in ('detector.joblib', 'risk.json')}
+    model_artifacts = {name: hashlib.sha256(data).hexdigest() for name, data in model_bytes.items()}
+    detector = joblib.load(io.BytesIO(model_bytes['detector.joblib']))
     if detector.thresholds != fit['thresholds']:
         raise SystemExit('detector thresholds differ from the fit report')
     risk = xgboost.XGBClassifier()
-    risk.load_model(args.fit / 'risk.json')
+    risk.load_model(bytearray(model_bytes['risk.json']))
     values = [r['features'] for r in evaluation]
     detected = detector.predict(values)
     xgb = risk.predict_proba(values)[:, 1]
@@ -147,6 +152,7 @@ def main():
     report = {'report_version': 'alibaba-relative-controls/v1', 'authorizing_adr': 'ADR-016',
               'fit_report_sha256': stable_id(fit), 'config_sha256': fit['config_sha256'],
               'fitting_source_commit': fit['fitting_source_commit'], 'controls_source_commit': commit,
+              'model_artifacts_sha256': model_artifacts,
               'protocol_reused': {k: protocol[k] for k in ('false_alert_budget', 'entry_windows', 'exit_windows',
                                                           'risk_threshold', 'bootstrap_replicates', 'bootstrap_seed',
                                                           'confidence_level')},

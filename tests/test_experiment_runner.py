@@ -18,6 +18,7 @@ from sentinelops.telemetry.store import ArtifactStore
     {"rps":True}, {"rps":float("nan")}, {"rps":float("inf")}, {"rps":11},
     {"warmup_seconds":299}, {"active_seconds":119}, {"seed":True},
     {"scenario":"S1","recovery_seconds":0}, {"maximum_delay_ms":4000}, {"scenario":"S5","split":"train"},
+    {"scenario":"S4","split":"train"}, {"scenario":"S4","split":"validation","rps":4},
 ])
 def test_runner_rejects_unsupported_or_unbounded_experiments(changes):
     with pytest.raises(ValueError):
@@ -33,6 +34,55 @@ def test_experiment_lock_prevents_overlap_and_releases_on_failure(tmp_path):
             raise ValueError("simulated run failure")
     with runner.ExperimentLock(tmp_path):
         pass
+
+
+def test_s4_rejects_a_shared_compose_project_before_docker(monkeypatch, tmp_path):
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "sentinelops-corpus-ali-01")
+    with pytest.raises(ValueError, match="dedicated sentinelops-s4"):
+        runner.s4_postgres.require_sandbox(tmp_path)
+
+
+def test_s4_trace_probe_prefers_a_slow_completed_request_for_its_own_entry():
+    probes = [{"entry_service": entry, "completed_at": completed, "client_duration_ms": duration}
+              for entry, completed, duration in (("checkout", 75, 10), ("checkout", 85, 990),
+                                                  ("payment", 84, 1200), ("checkout", 98, 1400))]
+    assert runner.select_trace_probe(probes, "checkout", 100) is probes[0]
+    assert runner.select_trace_probe(probes, "checkout", 100, prefer_slow=True) is probes[1]
+
+
+def test_s4_lead_in_preserves_the_main_phase_and_ordinary_schedule():
+    assert runner.s4_postgres.pressure_stages(300, 1200, lead_in=False) == (("fault", 300, 1200),)
+    assert runner.s4_postgres.pressure_stages(300, 1200, lead_in=True) == (
+        ("degrading", 180, 350), ("fault", 300, 1200))
+
+
+@pytest.mark.parametrize(("config", "reason"), [
+    (runner.ExperimentConfig("S1", "validation"), "only available for S4"),
+    (runner.ExperimentConfig("S4", "validation", warmup_seconds=3600, active_seconds=600,
+                             recovery_seconds=1800), "snapshot budget"),
+])
+def test_s4_lead_in_rejects_unrelated_or_over_budget_experiments(tmp_path, config, reason):
+    with pytest.raises(ValueError, match=reason):
+        asyncio.run(runner.execute(config, project=tmp_path, output=tmp_path / "runs", s4_lead_in=True))
+    assert not (tmp_path / "runs").exists()
+
+
+def test_s4_projects_only_native_wait_events_for_the_selected_database_and_relation():
+    prefix = "2026-11-10 02:04:10.250 UTC [42] LOG:  process 42 "
+    lines = [
+        prefix + "still waiting for RowExclusiveLock on relation 17 of database 23 after 200.001 ms",
+        prefix + "acquired RowExclusiveLock on relation 17 of database 23 after 520.200 ms at character 13",
+        prefix + "acquired RowExclusiveLock on relation 17 of database 24 after 520.200 ms",
+        prefix + "acquired RowExclusiveLock on relation 18 of database 23 after 520.200 ms",
+        prefix.replace("10.250", "12.250") + "acquired RowExclusiveLock on relation 17 of database 23 after 520.200 ms",
+        "2026-11-10 02:04:10.250 UTC [42] STATEMENT:  INSERT INTO payments VALUES ('secret')",
+    ]
+    assert runner.s4_postgres.project_lock_logs(
+        "\n".join(lines), database=23, relation=17, since="2026-11-10T02:04:10Z", ended="2026-11-10T02:04:11Z",
+    ) == [
+        {"observed_at": "2026-11-10T02:04:10.250000Z", "event": "waiting", "duration_us": 200001},
+        {"observed_at": "2026-11-10T02:04:10.250000Z", "event": "acquired", "duration_us": 520200},
+    ]
 
 
 @pytest.mark.parametrize("interval,accepted",[("5s",True),("15s",False),(None,False)])

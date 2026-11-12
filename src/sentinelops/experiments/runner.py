@@ -23,6 +23,7 @@ from sentinelops.experiments.client_clock import ClientClockGuard
 from sentinelops.contracts import validate_payload
 from sentinelops.experiments.labels import SLOConfig, measure_slo
 from sentinelops.experiments.diagnostics import failure_context
+from sentinelops.experiments import s4_postgres
 from sentinelops.experiments.traffic import server_log_coverage,s1_error_responses,s5_expected_responses
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.infrastructure import PostgresInfrastructureSource
@@ -55,8 +56,8 @@ class ExperimentConfig:
     def validate(self):
         if any(type(value) is not int for value in (self.seed,self.warmup_seconds,self.active_seconds,self.recovery_seconds,self.maximum_delay_ms)):
             raise ValueError("seed, durations and fault delay must be integers")
-        if self.scenario not in ("S0","S1","S3","S5"):
-            raise ValueError("runner supports S0/S1/S3/S5; deployment/DB scenarios require their real adapters")
+        if self.scenario not in ("S0","S1","S3","S4","S5"):
+            raise ValueError("runner supports S0/S1/S3/S4/S5; S2 requires its deployment adapter")
         if self.scenario=="S5" and self.split=="train":
             raise ValueError("S5 is RCA development/heldout evidence, not ML training data")
         if isinstance(self.rps,bool) or not isinstance(self.rps,(int,float)) or not math.isfinite(self.rps):
@@ -75,6 +76,10 @@ class ExperimentConfig:
             raise ValueError("invalid local fault target or entry traffic mode")
         if self.scenario == "S5" and self.target_service != "payment-service":
             raise ValueError("S5 retains its frozen independent Payment/Inventory targets")
+        if self.scenario == "S4" and (self.split != "validation" or self.fault_mode != "latency"
+                or self.target_service != "payment-service" or not 1000 <= self.maximum_delay_ms <= 1500
+                or self.rps > 3 or not 180 <= self.active_seconds <= 600):
+            raise ValueError("S4 requires validation, Payment latency, 1000–1500 ms pulses, at most 3 rps and 180–600 s active")
 
 
 class ExperimentLock:
@@ -140,12 +145,21 @@ def serving_logs(project: Path, since: str) -> tuple[list[dict],list[dict]]:
     return all_records,admitted
 
 
+def select_trace_probe(recent, entry, now, *, prefer_slow=False):
+    eligible = (item for item in recent if item["entry_service"] == entry and now - item["completed_at"] >= 10)
+    if prefer_slow:
+        return max(eligible, key=lambda item: item["client_duration_ms"], default=None)
+    return next(eligible, None)
+
+
 async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Path, session_id: str | None = None,
-                  allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE) -> Path:
+                  allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE,
+                  s4_lead_in: bool = False) -> Path:
     config.validate()
     commit,dirty,hashes = checkout_identity(project)
     if dirty and not allow_dirty:
         raise ValueError("commit source first; --allow-dirty creates non-training pilot evidence only")
+    s4_project = s4_postgres.require_sandbox(project) if config.scenario == "S4" else None
     protocol_hash=None
     if config.scenario=="S5":
         try:protocol_hash=hashlib.sha256((project/"configs"/"s5_development_protocol.json").read_bytes()).hexdigest()
@@ -164,7 +178,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
     ended = None
     originals = {}
     active = set()
-    collector = None
+    collector = lock_sampler = pulse = None
+    lock_refs = []
     run = {
         "schema_version":"1.0","run_id":identifier,"session_id":session_id or "session-"+uuid4().hex,
         "scenario_id":config.scenario,"declared_split":config.split,"environment":"local","source_profile":source_profile,
@@ -186,6 +201,16 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         run["root_causes_ground_truth"]=["payment-service","inventory-service"]
         run["parameters"]["s5_protocol_sha256"]=protocol_hash
         run["parameters"]["role"]="local-RCA-development-or-heldout-only"
+    if s4_project:
+        run.update(root_cause_ground_truth="rds", fault_method="db-pressure")
+        run["parameters"]["s4_compose_project"] = s4_project
+        run["parameters"]["s4_lock_gap_seconds"] = s4_postgres.PULSE_GAP_SECONDS
+        s4_stages = s4_postgres.pressure_stages(config.active_seconds, config.maximum_delay_ms, s4_lead_in)
+        if s4_lead_in:
+            run["parameters"]["s4_pressure_stages"] = [
+                {"phase": phase, "seconds": duration, "lock_hold_ms": delay}
+                for phase, duration, delay in s4_stages
+            ]
     failure = None
     client_clock = ClientClockGuard()
     async with httpx.AsyncClient(timeout=12.,trust_env=False) as client:
@@ -220,7 +245,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                            "client_duration_ms":round((time.perf_counter()-began_monotonic)*1000, 3)}
                 outcomes.append(outcome)
                 client_clock.observe(outcome, run["started_at"])
-                recent.append({"trace_id":trace_id,"completed_at":time.time(),"correlation_id":correlation,"entry_service":entry})
+                recent.append({"trace_id":trace_id,"completed_at":time.time(),"correlation_id":correlation,
+                               "entry_service":entry,"client_duration_ms":outcome["client_duration_ms"]})
 
         def capture_trace(probe):
             trace_id=probe["trace_id"];entry=probe["entry_service"]
@@ -255,7 +281,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                     item = await PostgresInfrastructureSource(os.environ["DATABASE_URL"]).capture()
                     infra_refs.append(await asyncio.to_thread(serving.write,"observations",item))
                 for entry in entries:
-                    probe = next((item for item in recent if item["entry_service"]==entry and time.time()-item["completed_at"] >= 10),None)
+                    probe = select_trace_probe(recent, entry, time.time(), prefer_slow=bool(s4_project))
                     if probe:
                         try:
                             trace_refs.append(await asyncio.to_thread(capture_trace,probe))
@@ -264,6 +290,18 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                 print(f"CAPTURE {identifier} {timestamp(end)} outcomes={dict(counts)}",flush=True)
                 bucket += 60
 
+        async def sample_locks():
+            observer = PostgresInfrastructureSource(s4_postgres.DATABASE_URL)
+            identity = None
+            while True:
+                item = await observer.capture_lock_waits()
+                current = item["database_oid"], item["postgres_started_at"]
+                if identity is not None and current != identity:
+                    raise ValueError("S4 PostgreSQL source changed during collection")
+                identity = current
+                lock_refs.append(serving.write("raw", item))
+                await asyncio.sleep(1)
+
         async def load(phase,duration,ramp=False):
             begin = datetime.now(timezone.utc)
             deadline = time.monotonic()+duration
@@ -271,8 +309,9 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             print(f"PHASE {identifier} {phase} duration={duration}s split={config.split}",flush=True)
             while time.monotonic() < deadline:
                 client_clock.check()
-                if collector and collector.done():
-                    collector.result()
+                for background in (collector, lock_sampler, pulse):
+                    if background and background.done():
+                        background.result()
                 if ramp and time.monotonic() >= next_ramp:
                     progress = max(.05,1-(deadline-time.monotonic())/duration)
                     target = PAYMENT if config.target_service == "payment-service" else INVENTORY
@@ -301,10 +340,27 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             validate_payload("experiment-run.schema.json",run)
             truth.write("manifests",run)  # Split and parameters are committed to truth before load.
             collector = asyncio.create_task(collect())
+            if s4_project:
+                lock_sampler = asyncio.create_task(sample_locks())
             await load("warmup",config.warmup_seconds)
             run["warmup_end_at"] = timestamp(datetime.now(timezone.utc))
             if config.scenario == "S0":
                 await load("healthy",config.active_seconds)
+            elif s4_project:
+                run["fault_start_at"] = timestamp(datetime.now(timezone.utc))
+                for phase, duration, delay in s4_stages:
+                    pulse = asyncio.create_task(s4_postgres.lock_pulses(delay / 1000, project, s4_project))
+                    try:
+                        await load(phase, duration)
+                    finally:
+                        pulse.cancel()
+                        try:
+                            await pulse
+                        except asyncio.CancelledError:
+                            pass
+                        pulse = None
+                run["recovery_start_at"] = timestamp(datetime.now(timezone.utc))
+                await load("recovery", config.recovery_seconds)
             else:
                 mode = "latency" if config.scenario == "S3" else config.fault_mode
                 target = PAYMENT if config.target_service == "payment-service" else INVENTORY
@@ -323,6 +379,14 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             run["parameters"]["failure_context"] = failure_context(exc,project)
             ended = datetime.now(timezone.utc)
         finally:
+            if lock_sampler:
+                lock_sampler.cancel()
+                try:
+                    await lock_sampler
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
+                    failure = failure or type(exc).__name__
             if collector and not collector.done():
                 collector.cancel();await asyncio.gather(collector,return_exceptions=True)
             if active: await asyncio.gather(*tuple(active),return_exceptions=True)
@@ -358,6 +422,19 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         manifest = {key:value for key,value in base.items() if key != "manifest_ref"}
         manifest["normalization_manifest_ref"] = base["manifest_ref"]
         manifest["evidence_refs"] = {"logs":run["logs_ref"],"traces":trace_refs,"infrastructure":infra_refs}
+        if s4_project:
+            manifest["postgres_lock_wait_refs"] = lock_refs
+            lock_logs = await s4_postgres.capture_lock_logs(project, s4_project, run["started_at"], run["ended_at"])
+            if lock_logs is not None:
+                if not lock_refs:
+                    raise ValueError("S4 lock logs require a matching PostgreSQL observation")
+                snapshot = serving.read(lock_refs[0])
+                identity_keys = ("source_ref", "postgres_started_at", "database_oid")
+                if any(lock_logs[key] != snapshot[key] for key in identity_keys):
+                    raise ValueError("S4 lock logs belong to a different PostgreSQL instance")
+                manifest["postgres_lock_wait_log_ref"] = serving.write("raw", lock_logs)
+            if not any(serving.read(ref)["waiting_clients"] for ref in lock_refs):
+                failure = failure or "NoObservedPostgresLockWait"
         run["source_manifest_ref"] = serving.write("manifests",manifest)
         run["infrastructure_refs"] = infra_refs
         run["parameters"]["workload_outcomes"] = dict(counts)
@@ -381,8 +458,17 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
 
 
 async def execute(config: ExperimentConfig, *, project: Path, output: Path, session_id: str | None = None,
-                  allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE) -> Path:
+                  allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE,
+                  s4_lead_in: bool = False) -> Path:
     config.validate()
+    if type(s4_lead_in) is not bool or (s4_lead_in and config.scenario != "S4"):
+        raise ValueError("the lock lead-in is only available for S4 development")
+    if s4_lead_in:
+        stages = s4_postgres.pressure_stages(config.active_seconds, config.maximum_delay_ms, lead_in=True)
+        if config.warmup_seconds + sum(seconds for _, seconds, _ in stages) + config.recovery_seconds > 6000:
+            raise ValueError("S4 with a lock lead-in must fit the bounded snapshot budget")
+    if config.scenario == "S4" and (allow_dirty or os.getenv("DATABASE_URL") not in (None, s4_postgres.DATABASE_URL)):
+        raise ValueError("S4 requires clean source and the dedicated Compose PostgreSQL connection")
     if source_profile not in (SOURCE_PROFILE, SOURCE_PROFILE_V2):
         raise ValueError("unsupported experiment source profile")
     if source_profile == SOURCE_PROFILE_V2 and (
@@ -392,4 +478,4 @@ async def execute(config: ExperimentConfig, *, project: Path, output: Path, sess
         raise ValueError("ADR-016 capture requires clean S0/S1/S3 validation with all-entry traffic and 30-minute warmup")
     with ExperimentLock(project):
         return await _execute_locked(config, project=project, output=output, session_id=session_id,
-                                     allow_dirty=allow_dirty, source_profile=source_profile)
+                                     allow_dirty=allow_dirty, source_profile=source_profile, s4_lead_in=s4_lead_in)

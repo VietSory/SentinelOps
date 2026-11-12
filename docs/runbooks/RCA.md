@@ -21,6 +21,15 @@ The adapter accepts one immutable source manifest with `evidence_refs` for trace
 
 `python -m scripts.replay_rca --help` lists the three source stores, correlation reference, policy, optional analytical cutoff and exclusive output directory. The CLI requires a clean committed tree before actual-source scoring. Each output archives checksum-verified source objects, standalone RCA result objects and a replay report, so the bundle can be reproduced without the original source directories. Fresh Step 4 captures provide an immutable aggregate evidence manifest for this chain; CI consumes it without requiring a chosen root cause or fabricating missing support.
 
+For an S4 development capture, `--post-capture-cutoff` uses the latest recorded
+receipt from the verified operational source and correlation scope, including
+PostgreSQL lock waits and projected lock logs. It rejects missing operational
+receipt clocks. A database log contributes RCA support only when its source
+identity matches the lock snapshots and its wait overlaps a verified PostgreSQL
+span from a violating request. Use the
+default correlation cutoff or `--as-of` when replay must represent an earlier
+decision. All three modes preserve the same policy and abstention rules.
+
 ## Local computed incident producer
 
 Prepare once with `python -m scripts.publish_rca --bundle <archive> --prepare-report-ref <report-ref>`. This verifies the archived raw chain and freezes a new actual emission clock in a content-addressed intent. Then publish with `--bundle <archive> --intent-ref <that-exact-intent-ref>` and `CONTROL_DATABASE_URL` selecting the dedicated localhost `sentinelops_control` database as `control_writer`. Keep credentials in the environment, not logs or command arguments. Reuse the intent reference after a crash; preparing again creates a distinct replay intent.
@@ -77,7 +86,17 @@ the denominator of descriptive trial-level top-1/top-3 counts; conditional
 qualified top-1 has a separate denominator and is null when none qualify. Healthy
 trials with an incident group are reported separately. These are not the
 incident-level Q-04/Q-05 metrics. Trials within a whole source context are
-correlated; no IID confidence interval or quality promotion is claimed.
+correlated, so the report makes no IID confidence interval or quality claim.
+
+The v2 evaluation report also compares top-1, top-3 and mean reciprocal rank
+(MRR) across four views of the same selected group. Full diagnostic uses every
+positive RCA score. Full qualified keeps a ranking only if RCA did not abstain.
+Anomaly-only uses positive measured anomaly strengths. Topology/time-only uses
+the correlation group's structural candidates and orders them by verified onset
+precedence when every candidate has that evidence. Otherwise they share a tie.
+Each tied candidate receives the last position in the tie. All four views divide
+by every fault trial, including missing rankings, and report how many trials
+each view could rank. These comparisons do not change RCA weights or decisions.
 
 The output contains `evaluation.json` and per-run health/correlation/RCA archives.
 Original corpus objects and Git history are still needed to recompute admission.

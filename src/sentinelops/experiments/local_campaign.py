@@ -17,7 +17,8 @@ import time
 
 from sentinelops.contracts import utc_time
 from sentinelops.experiments.local_corpus import (ALIBABA_BINDING, ALIBABA_PLAN, DETECTOR_PLAN, KINDS, ROLES, PROJECT,
-    bind, clean_source, group_name, inspect_completed_capture, is_alibaba_plan, is_detector_plan, load_plan,
+    acquisition_lock, bind, clean_source, close_completed_sessions, group_name, inspect_completed_capture,
+    is_alibaba_plan, is_detector_plan, load_plan,
     plan_kinds, plan_roles, read_alibaba_epoch, read_binding, recipe, registered_sessions, registration_path)
 from sentinelops.ml.local_data import audit_alibaba_local, audit_detector_events, audit_local_corpus, verify_capture
 from sentinelops.telemetry.core import stable_id, timestamp
@@ -160,7 +161,9 @@ def register_alibaba_epoch(store, plan, source, bundle, manifest_sha256):
     path = store.root/ALIBABA_BINDING
     if path.exists():
         reference, previous = read_alibaba_epoch(store, plan)
-        if any(previous[k] != v for k, v in value.items()):
+        from sentinelops.experiments.owner_exclusion import epoch_sources
+        if (any(previous[k] != v for k, v in value.items() if k != 'source_commit')
+                or source not in epoch_sources(store, plan)):
             raise ValueError('ADR-016 epoch is already registered to another bundle or source')
         return reference
     if registered_sessions(store):
@@ -168,8 +171,20 @@ def register_alibaba_epoch(store, plan, source, bundle, manifest_sha256):
     return bind(store, path, {**value, 'registered_at': timestamp(datetime.now(timezone.utc))})
 
 
+SLOT_OVERHEAD_SECONDS = 180  # container start, source verification and audit per slot
+
+
+def group_budget_seconds(plan, role, ordinal):
+    """Predeclared wall time for one whole group: every slot's schedule plus fixed overhead."""
+    total = 0
+    for kind in plan_kinds(plan):
+        config = recipe(plan, role, ordinal, kind)
+        total += config.warmup_seconds + config.active_seconds + config.recovery_seconds + SLOT_OVERHEAD_SECONDS
+    return total
+
+
 def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=None,
-                 bundle=None, manifest_sha256=None):
+                 bundle=None, manifest_sha256=None, window_end=None, clock=None):
     """Acquire exactly the minimum registered nonfinal plan, then report G2.
 
     With the ADR-015 detector plan the same controller acquires the
@@ -193,6 +208,7 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=Non
         controller_ref = register_controller(store,project,identity)
         _event(store,{'status':'CONTROLLER_RESUMED','controller_ref':controller_ref})
         previous_role = None
+        verified_slots = set()
         try:
             from sentinelops.experiments.local_recovery import effective_slots
             for role, ordinal, kind in effective_slots(store, plan, planned_slots(plan), project=project):
@@ -204,6 +220,19 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=Non
                     raise ValueError('corpus is frozen; campaign cannot append acquisition')
                 group = group_name(plan,role,ordinal)
                 slot = group+'-'+kind
+                if window_end is not None and not registration_path(store,group).exists():
+                    # Host availability window: a group must never straddle a shutdown, because an
+                    # interrupted group is excluded whole. Pause at the boundary; nothing is retried.
+                    now_at = (clock or (lambda: datetime.now(timezone.utc)))()
+                    needed = group_budget_seconds(plan,role,ordinal)
+                    if now_at + timedelta(seconds=needed) > window_end:
+                        with acquisition_lock(store):
+                            close_completed_sessions(store, except_group=None, plan=plan,
+                                                     verified_slots=verified_slots)
+                        _event(store,{'status':'PAUSED_AT_GROUP_BOUNDARY','next_group':group,
+                                      'needed_seconds':needed,'window_end':window_end.isoformat()})
+                        return {'status':'PAUSED_AT_GROUP_BOUNDARY','next_group':group,'needed_seconds':needed,
+                                'models_fitted':0,'holdout_opened':False,'activation_allowed':False}
                 root = store.root/'runs'/slot
                 config = recipe(plan,role,ordinal,kind)
                 if not (root/'result.json').exists():
@@ -233,6 +262,7 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=Non
                 inspect_completed_capture(store,slot,project=project)
                 _, session = read_binding(store,registration_path(store,group))
                 verified = verify_capture(store,plan,session,kind,project=project)
+                verified_slots.add(slot)
                 report, _, _ = _audit(store,plan,project)
                 report_ref = store.write('manifests',report)
                 _event(store,{'status':'SOURCE_VERIFIED','slot':slot,'source_result_ref':verified['source_result_ref'],

@@ -69,13 +69,17 @@ async def drive(client, targets, stop):
         body = ({'sku': 'sku-001', 'quantity': 1, 'amount': 9.9} if service == 'checkout-service'
                 else {'order_id': 'direct-' + uuid4().hex, 'amount': 9.9, 'currency': 'USD'} if service == 'payment-service' else None)
         started = utcnow()
-        response = await client.request(method, url + PATHS[service], json=body,
-            headers={'x-correlation-id': correlation, 'traceparent': f'00-{trace}-{uuid4().hex[:16]}-01'})
-        if (response.status_code != 200 or response.headers.get('x-trace-id') != trace
-                or response.headers.get('x-correlation-id') != correlation):
-            raise ValueError(f'unexpected healthy response on {service}: {response.status_code}')
+        try:
+            response = await client.request(method, url + PATHS[service], json=body,
+                headers={'x-correlation-id': correlation, 'traceparent': f'00-{trace}-{uuid4().hex[:16]}-01'})
+            failed = (response.status_code != 200 or response.headers.get('x-trace-id') != trace
+                      or response.headers.get('x-correlation-id') != correlation)
+        except httpx.HTTPError:
+            failed = True
+        # A failed request is recorded and fails P4 for its minute; it never aborts the run
+        # before evidence is written (Codex review).
         rows.append({'request_entry_service': service, 'trace_id': trace, 'correlation_id': correlation,
-                     'started_at': timestamp(started), 'completed_at': timestamp(utcnow())})
+                     'started_at': timestamp(started), 'completed_at': timestamp(utcnow()), 'failed': failed})
 
     loop = asyncio.get_running_loop()
     tick = loop.time()
@@ -87,9 +91,16 @@ async def drive(client, targets, stop):
 
 
 def exact_logs(sandbox, inventory, rows, ends):
+    """Server completions in the run, each marked failed when it is not a clean 200 resolved to
+    its client, pod and route; client-side failures are added as failed records at their time."""
     start_ms, stop_ms = int((ends[0] - timedelta(minutes=1)).timestamp() * 1000), int(ends[-1].timestamp() * 1000)
     clients = {row['correlation_id']: row for row in rows}
     selected = []
+    for row in rows:
+        at = int(datetime.fromisoformat(row['completed_at'].replace('Z', '+00:00')).timestamp() * 1000)
+        if row['failed'] and start_ms < at <= stop_ms:
+            selected.append({'service': row['request_entry_service'], 'timestamp_unix_ms': at, 'failed': True,
+                             'reason': 'client-request-failed'})
     for service in SERVICES:
         method, route = BUSINESS_ROUTES[service]
         for line in sandbox.kubectl('-n', NAMESPACE, 'logs', 'deployment/' + service).decode().splitlines():
@@ -98,12 +109,14 @@ def exact_logs(sandbox, inventory, rows, ends):
             except ValueError:
                 continue
             if (item.get('event') != 'request_completed' or (item.get('method'), item.get('route')) != (method, route)
-                    or not start_ms < item['timestamp_unix_ms'] <= stop_ms):
+                    or not start_ms < item.get('timestamp_unix_ms', -1) <= stop_ms):
                 continue
-            client = clients.get(item['correlation_id'])
-            if (client is None or item['trace_id'] != client['trace_id'] or item['k8s.pod.uid'] != inventory[service]['pod_uid']
-                    or item['status_code'] != 200 or not math.isfinite(item['duration_ms']) or item['duration_ms'] < 0):
-                raise ValueError('server completion does not resolve to its client, pod, route and status')
+            client = clients.get(item.get('correlation_id'))
+            duration = item.get('duration_ms')
+            item['failed'] = (client is None or item.get('trace_id') != client['trace_id']
+                              or item.get('k8s.pod.uid') != inventory[service]['pod_uid'] or item.get('status_code') != 200
+                              or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 0)
+            item['service'] = service
             selected.append(item)
     return selected
 
@@ -134,15 +147,25 @@ async def capture_buckets(client, source, ends, inventory):
                                          for s in SERVICES))
         for capture in current:
             service = capture['service']
+            try:
+                aggregate = float(capture['queries']['requests']['response']['data']['result'][0]['value'][1])
+            except (KeyError, IndexError, TypeError, ValueError):
+                # Prometheus failed this query; PrometheusSource kept the partial capture so the
+                # pipeline quarantines it and evaluate() records FAIL (Codex review): no crash here.
+                continue
             method, route = BUSINESS_ROUTES[service]
             selector = ','.join(k + '=' + json.dumps(v) for k, v in [('service', service), ('method', method), ('route', route)])
             expression = 'sum by (k8s_pod_uid,k8s_namespace_name) (increase(' + REQUESTS + '{' + selector + '}[60s]))'
-            body = (await client.get(source.endpoint + '/api/v1/query',
-                                     params={'query': expression, 'time': end.timestamp()})).raise_for_status().json()
-            pod_count = pod_samples(body, inventory[service], as_of=end)
-            aggregate = float(capture['queries']['requests']['response']['data']['result'][0]['value'][1])
-            if not math.isclose(pod_count, aggregate, rel_tol=1e-8, abs_tol=1e-8):
-                raise ValueError('metric aggregate does not resolve to the observed Kubernetes pod')
+            try:
+                body = (await client.get(source.endpoint + '/api/v1/query',
+                                         params={'query': expression, 'time': end.timestamp()})).raise_for_status().json()
+                pod_count = pod_samples(body, inventory[service], as_of=end)
+                verified = math.isclose(pod_count, aggregate, rel_tol=1e-8, abs_tol=1e-8)
+            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+                verified = False
+            # Recorded and checked in P2: a capture that does not resolve to the observed pod fails
+            # the run with evidence instead of aborting it.
+            capture['pod_identity_verified'] = verified
         captures.extend(current)
         emit('minute-captured', bucket_end=timestamp(end))
     return captures
@@ -163,9 +186,11 @@ def evaluate(root, bundle_parts, captures, logs, ends, policy):
     check('P1', bundle_ok, {'model_version': manifest['model_version']})
     for raw in captures:
         expected = queries(raw['service'], SOURCE_PROFILE_V2)
-        check('P2', raw['source_profile'] == SOURCE_PROFILE_V2
-              and {k: v['expression'] for k, v in raw['queries'].items()} == expected,
-              {'service': raw['service'], 'bucket_end': raw['bucket_end']})
+        recorded = {k: v['expression'] for k, v in raw['queries'].items()}
+        check('P2', raw['source_profile'] == SOURCE_PROFILE_V2 and recorded == expected
+              and raw.get('pod_identity_verified') is True,
+              {'service': raw['service'], 'bucket_end': raw['bucket_end'], 'source_profile': raw['source_profile'],
+               'queries_sha256': stable_id(recorded), 'pod_identity_verified': raw.get('pod_identity_verified')})
     store = ArtifactStore(root / 'source')
     normalized = process_captures(captures, store)
     observations = [store.read(ref) for ref in normalized['observation_refs']]
@@ -174,20 +199,33 @@ def evaluate(root, bundle_parts, captures, logs, ends, policy):
     for service in SERVICES:
         minutes = {}
         for end in ends:
-            obs = next(o for o in observations if o['service'] == service and o['bucket_end'] == timestamp(end))
-            raw = next(c for c in captures if c['service'] == service and c['bucket_end'] == timestamp(end))
+            obs = next((o for o in observations if o['service'] == service and o['bucket_end'] == timestamp(end)), None)
+            raw = next((c for c in captures if c['service'] == service and c['bucket_end'] == timestamp(end)), None)
+            if obs is None or raw is None:
+                # A quarantined or missing capture is a parity FAIL, recorded, never a crash (Codex review).
+                missing = {'service': service, 'bucket_end': timestamp(end), 'observation_missing': obs is None,
+                           'capture_missing': raw is None}
+                for name in ('P3', 'P4', 'P5'):
+                    check(name, False, missing)
+                continue
             lag = (datetime.fromisoformat(obs['available_at'].replace('Z', '+00:00')) - end).total_seconds()
             check('P3', obs['quality']['eligible_for_inference'] and obs['quality']['coverage_ratio'] == 1
                   and lag <= policy['maximum_lag_seconds'],
                   {'service': service, 'bucket_end': timestamp(end), 'lag_seconds': lag,
-                   'coverage': obs['quality']['coverage_ratio']})
-            records = [r for r in logs if r['service'] == service
-                       and (end.timestamp() - 60) * 1000 < r['timestamp_unix_ms'] <= end.timestamp() * 1000]
+                   'coverage': obs['quality']['coverage_ratio'],
+                   'eligible_for_inference': obs['quality']['eligible_for_inference'],
+                   'maximum_lag_seconds': policy['maximum_lag_seconds']})
+            window = [r for r in logs if r['service'] == service
+                      and (end.timestamp() - 60) * 1000 < r['timestamp_unix_ms'] <= end.timestamp() * 1000]
+            records = [r for r in window if not r.get('failed')]
+            failed_requests = len(window) - len(records)
             count = obs['measurements']['request_count'] or 0
             relative = abs(count / len(records) - 1) if records else None
-            check('P4', relative is not None and relative <= COUNT_TOLERANCE and obs['measurements']['error_count'] == 0,
+            check('P4', relative is not None and relative <= COUNT_TOLERANCE and obs['measurements']['error_count'] == 0
+                  and failed_requests == 0,
                   {'service': service, 'bucket_end': timestamp(end), 'prometheus_count': count,
-                   'server_completions': len(records), 'relative_difference': relative})
+                   'server_completions': len(records), 'relative_difference': relative,
+                   'error_count': obs['measurements']['error_count'], 'failed_requests': failed_requests})
             mean = mean_latency_ms(raw)
             exact = sum(r['duration_ms'] for r in records) / len(records) if records else None
             difference = abs(mean / exact - 1) if mean is not None and exact else None
@@ -212,26 +250,111 @@ def evaluate(root, bundle_parts, captures, logs, ends, policy):
     return checks, failures, normalized['manifest_ref']
 
 
+def preflight_failure(reason, config=None):
+    """Readiness or source configuration not established: P2 cannot be shown, so nothing is measured."""
+    return failure_checks('P2', reason, None), [{'criterion': 'P2', 'reason': reason}], None, config
+
+
 async def measure(sandbox, root, bundle_parts, policy):
     targets = {s: sandbox.forward(s, 8000) for s in SERVICES}
     source = PrometheusSource(sandbox.forward('prometheus', 9090))
     try:
         async with httpx.AsyncClient(timeout=8, trust_env=False) as client:
-            for url in (*[t + '/ready' for t in targets.values()], source.endpoint + '/-/ready'):
-                await wait_ready(client, url)
-            config = await asyncio.to_thread(source.verify_configuration)
-            inventory = await asyncio.to_thread(sandbox.inventory)
+            try:
+                for url in (*[t + '/ready' for t in targets.values()], source.endpoint + '/-/ready'):
+                    await wait_ready(client, url)
+            except Exception as exc:
+                return preflight_failure('readiness check failed: ' + describe(exc))
+            try:
+                config = await asyncio.to_thread(source.verify_configuration)
+            except Exception as exc:
+                return preflight_failure('Prometheus configuration preflight failed: ' + describe(exc))
+            try:
+                inventory = await asyncio.to_thread(sandbox.inventory)
+            except Exception as exc:
+                return preflight_failure('sandbox inventory preflight failed: ' + describe(exc), config)
             first_end = (int(utcnow().timestamp()) // 60 + 2) * 60
             count = minute_count(bundle_parts[0]['provenance']['config'])
             ends = [datetime.fromtimestamp(first_end + m * 60, timezone.utc) for m in range(count)]
             captures, rows = await asyncio.gather(capture_buckets(client, source, ends, inventory),
                                                   drive(client, targets, ends[-1] + timedelta(seconds=39)))
-            if inventory != await asyncio.to_thread(sandbox.inventory):
-                raise ValueError('workload pod identity changed while sampling')
+            stable = inventory == await asyncio.to_thread(sandbox.inventory)
             logs = await asyncio.to_thread(exact_logs, sandbox, inventory, rows, ends)
-            return evaluate(root, bundle_parts, captures, logs, ends, policy) + (config,)
+            checks, failures, normalization_ref = evaluate(root, bundle_parts, captures, logs, ends, policy)
+            if not stable:
+                # A pod restart during sampling fails the run with evidence instead of aborting it.
+                failures.append({'criterion': 'P2', 'reason': 'workload pod identity changed while sampling'})
+            return checks, failures, normalization_ref, config
     finally:
         source.close()
+
+
+def write_evidence(root, scope, commit, manifest, manifest_sha256, checks, failures, *, images=None, config=None,
+                   normalization_ref=None):
+    """Write the producer schema for both complete runs and early, non-certifying failures."""
+    verification = {'version': PARITY_VERIFICATION_VERSION, 'criteria_version': CRITERIA_VERSION, **scope,
+                    'source_commit': commit, 'bundle_manifest_sha256': manifest_sha256,
+                    'config_sha256': stable_id(manifest['provenance']['config']) if manifest else None,
+                    'criteria': checks, 'failures': failures, 'images': images or [],
+                    'configuration_hash': config.get('configuration_hash') if config else None,
+                    'scrape_interval': config.get('scrape_interval') if config else None,
+                    'normalization_ref': normalization_ref,
+                    'activation_allowed': False, 'G3_accepted': False}
+    (root / 'verification.json').write_text(json.dumps(verification, indent=2, allow_nan=False) + '\n')
+    record = {'parity_version': PARITY_VERSION, **scope, 'status': 'FAIL' if failures else 'PASS',
+              'evidence': [parity_verification_ref(verification)]}
+    (root / 'parity.json').write_text(json.dumps(record, indent=2) + '\n')
+    return verification, record
+
+
+def failure_checks(criterion, reason, manifest):
+    detail = {'ok': False, 'reason': reason}
+    if criterion == 'P1':
+        detail['model_version'] = manifest['model_version'] if manifest else None
+    return {criterion: [detail]}
+
+
+def describe(exc):
+    """Evidence names the failure without its message: messages and commands may carry arguments or secrets."""
+    if isinstance(exc, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
+        command = exc.cmd if isinstance(exc.cmd, (list, tuple)) else str(exc.cmd).split()
+        name = Path(str(command[0])).name if command else 'unknown'
+        if isinstance(exc, subprocess.TimeoutExpired):
+            return f'command {name} timed out'
+        return f'command {name} exited {exc.returncode}'
+    return type(exc).__name__
+
+
+CREDENTIALS = ('runtime-token', 'observer-token', 'kubeconfig')  # created by the sandbox inside the output
+
+
+def scrub_credentials(root):
+    """The output directory is evidence; sandbox credentials never stay in it, even after a failed cleanup."""
+    for name in CREDENTIALS:
+        (root / name).unlink(missing_ok=True)
+
+
+def write_diagnostics(sandbox, root):
+    """Pod/node status and event reasons only: free-text event messages can carry arguments."""
+    result = {}
+    for key, arguments in (('pods', ('-n', NAMESPACE, 'get', 'pods', '-o', 'json')),
+                           ('events', ('-n', NAMESPACE, 'get', 'events', '-o', 'json')),
+                           ('nodes', ('get', 'nodes', '-o', 'json'))):
+        try:
+            items = json.loads(sandbox.kubectl(*arguments))['items']
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError, KeyError):
+            result[key] = 'diagnostics-unavailable'
+            continue
+        if key == 'events':
+            result[key] = [{'reason': i.get('reason'), 'type': i.get('type'),
+                            'object': (i.get('involvedObject') or {}).get('name')} for i in items]
+        else:
+            result[key] = [{'name': i.get('metadata', {}).get('name'),
+                            'phase': i.get('status', {}).get('phase'),
+                            'conditions': [{'type': c.get('type'), 'status': c.get('status'), 'reason': c.get('reason')}
+                                           for c in i.get('status', {}).get('conditions', [])]} for i in items]
+    with (root / 'diagnostics.json').open('x') as stream:
+        json.dump(result, stream, indent=2)
 
 
 def main():
@@ -243,46 +366,78 @@ def main():
     parser.add_argument('--verified-by', required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    commit = clean_commit()
-    bundle = args.bundle.resolve(strict=True)
-    bundle_parts = verify_bundle(bundle, args.manifest_sha256)
-    if not bundle_parts[3]:
-        raise SystemExit('P1: bundle does not verify; no sandbox started')
-    policy = json.loads((PROJECT / 'configs/slo_health_policy.json').read_text())
-    root = args.output.resolve()
-    root.mkdir(mode=0o700, parents=True, exist_ok=False)
-    sandbox = BusinessSandbox(root, args.kind)
 
     def terminate(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, terminate)
+    # Evidence must name a clean commit; a dirty checkout is refused before any output exists.
+    commit = clean_commit()
+    root = args.output.resolve()
+    # SIGTERM/SIGINT stay pending from just before the output exists until the handler below is
+    # active, so no interrupt can leave an output directory without FAIL evidence.
+    interrupts = {signal.SIGTERM, signal.SIGINT}
+    signal.pthread_sigmask(signal.SIG_BLOCK, interrupts)
+    root.mkdir(mode=0o700, parents=True, exist_ok=False)
+    state = {'manifest': None, 'images': None, 'measured': None, 'bundle_checked': False, 'sandbox': None}
+
+    def scope():
+        version = state['manifest']['model_version'] if state['manifest'] else None
+        return {'candidate_id': version, 'environment': args.environment, 'source_profile': SOURCE_PROFILE_V2,
+                'models': [{'service': s, 'model_version': version} for s in sorted(BUSINESS_ROUTES)],
+                'verified_by': args.verified_by, 'verified_at': timestamp(utcnow())}
+
+    def record(checks, failures, config=None, normalization_ref=None):
+        _, written = write_evidence(root, scope(), commit, state['manifest'], args.manifest_sha256, checks, failures,
+                                    images=state['images'], config=config, normalization_ref=normalization_ref)
+        emit('parity-complete', status=written['status'], failures=len(failures), record=str(root / 'parity.json'))
+        return written
+
     try:
-        images = deploy(sandbox)
-        checks, failures, normalization_ref, config = asyncio.run(measure(sandbox, root, bundle_parts, policy))
-        manifest = bundle_parts[0]
-        scope = {'candidate_id': manifest['model_version'], 'environment': args.environment,
-                 'source_profile': SOURCE_PROFILE_V2,
-                 'models': [{'service': s, 'model_version': manifest['model_version']} for s in sorted(BUSINESS_ROUTES)],
-                 'verified_by': args.verified_by, 'verified_at': timestamp(utcnow())}
-        verification = {'version': PARITY_VERIFICATION_VERSION, 'criteria_version': CRITERIA_VERSION, **scope,
-                        'source_commit': commit, 'bundle_manifest_sha256': args.manifest_sha256,
-                        'config_sha256': stable_id(manifest['provenance']['config']),
-                        'criteria': checks, 'failures': failures, 'images': images,
-                        'configuration_hash': config['configuration_hash'], 'normalization_ref': normalization_ref,
-                        'activation_allowed': False, 'G3_accepted': False}
-        (root / 'verification.json').write_text(json.dumps(verification, indent=2, allow_nan=False) + '\n')
-        record = {'parity_version': PARITY_VERSION, **scope, 'status': 'FAIL' if failures else 'PASS',
-                  'evidence': [parity_verification_ref(verification)]}
-        (root / 'parity.json').write_text(json.dumps(record, indent=2) + '\n')
-        emit('parity-complete', status=record['status'], failures=len(failures), record=str(root / 'parity.json'))
-    except subprocess.CalledProcessError as exc:
-        if sandbox.kubeconfig.exists():
-            sandbox.diagnostics()
-        emit('command-failed', operation=Path(exc.cmd[0]).name, code=exc.returncode)
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, interrupts)
+        try:
+            bundle_parts = verify_bundle(args.bundle.resolve(strict=True), args.manifest_sha256)
+        except Exception as exc:  # unreadable bundle or manifest hash mismatch is a P1 failure, not a crash
+            bundle_parts, load_error = (None, None, None, False), describe(exc)
+        else:
+            load_error = None
+        state['manifest'] = bundle_parts[0]
+        state['bundle_checked'] = True
+        if not bundle_parts[3]:
+            reason = 'bundle verification failed' + (': ' + load_error if load_error else '') + '; no sandbox started'
+            record(failure_checks('P1', reason, state['manifest']), [{'criterion': 'P1', 'reason': reason}])
+            raise SystemExit('P1: bundle does not verify; no sandbox started')
+        policy = json.loads((PROJECT / 'configs/slo_health_policy.json').read_text())
+        sandbox = state['sandbox'] = BusinessSandbox(root, args.kind)
+        try:
+            state['images'] = deploy(sandbox)
+            state['measured'] = asyncio.run(measure(sandbox, root, bundle_parts, policy))
+        except subprocess.CalledProcessError as exc:
+            if sandbox.kubeconfig.exists():
+                write_diagnostics(sandbox, root)
+            emit('command-failed', operation=Path(exc.cmd[0]).name, code=exc.returncode)
+            raise
+        finally:
+            try:
+                sandbox.cleanup()  # a cleanup failure is an environment failure and must not leave a PASS
+            finally:
+                scrub_credentials(root)
+            emit('owned-sandbox-cleaned', cluster=sandbox.name)
+        checks, failures, normalization_ref, config = state['measured']
+        if record(checks, failures, config, normalization_ref)['status'] != 'PASS':
+            raise SystemExit('source parity failed; evidence written to ' + str(root))
+    except SystemExit:
         raise
-    finally:
-        sandbox.cleanup()
-        emit('owned-sandbox-cleaned', cluster=sandbox.name)
+    except (Exception, KeyboardInterrupt) as exc:
+        # Bundle, sandbox, deployment, measurement, cleanup or an interrupt: the run still leaves FAIL evidence.
+        scrub_credentials(root)
+        criterion = 'P2' if state['bundle_checked'] else 'P1'
+        failure = {'criterion': criterion, 'reason': 'run aborted: ' + describe(exc)}
+        if state['measured'] is not None:
+            checks, failures, normalization_ref, config = state['measured']
+            record(checks, [*failures, failure], config, normalization_ref)
+        else:
+            record(failure_checks(criterion, failure['reason'], state['manifest']), [failure])
+        raise
 
 
 if __name__ == '__main__':

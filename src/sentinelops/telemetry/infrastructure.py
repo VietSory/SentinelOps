@@ -18,6 +18,21 @@ SELECT clock_timestamp() AS measured_at,
         WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()) AS connections
 """
 
+LOCK_WAITS_SQL = """
+SELECT clock_timestamp() AS measured_at,
+       pg_postmaster_start_time() AS postgres_started_at,
+       (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()) AS database_oid,
+       pg_has_role('pg_read_all_stats', 'USAGE') AND current_setting('track_activities') = 'on'
+           AND count(*) FILTER (WHERE activity.state IS NULL OR activity.state = 'disabled') = 0
+           AS stats_visible,
+       count(locks.pid) AS waiting_clients,
+       min(locks.waitstart) AS earliest_wait_start
+FROM pg_catalog.pg_stat_activity AS activity
+LEFT JOIN pg_catalog.pg_locks AS locks ON locks.pid = activity.pid AND NOT locks.granted
+WHERE activity.datname = current_database()
+  AND activity.backend_type = 'client backend' AND activity.pid <> pg_backend_pid()
+"""
+
 
 class PostgresInfrastructureSource:
     def __init__(self, dsn: str):
@@ -30,12 +45,15 @@ class PostgresInfrastructureSource:
             host = f"[{host}]"
         self.source_ref = f"postgres-stat://{host}:{parsed.port or 5432}"
 
-    async def capture(self, *, environment: str = "local") -> dict:
+    async def _fetch(self, query: str) -> asyncpg.Record:
         connection = await asyncpg.connect(self._dsn, timeout=5., server_settings={"default_transaction_read_only": "on"})
         try:
-            row = await connection.fetchrow(SQL, timeout=5.)
+            return await connection.fetchrow(query, timeout=5.)
         finally:
             await connection.close()
+
+    async def capture(self, *, environment: str = "local") -> dict:
+        row = await self._fetch(SQL)
         usable = row["max_connections"] - row["reserved_connections"]
         if usable <= 0:
             raise ValueError("database has no measurable usable connection capacity")
@@ -55,4 +73,25 @@ class PostgresInfrastructureSource:
         }
         result["record_id"] = stable_id({key:value for key,value in result.items() if key != "available_at"})
         validate_payload("infrastructure-observation.schema.json", result)
+        return result
+
+    async def capture_lock_waits(self) -> dict:
+        """Collect an operational raw snapshot scoped to the connected database."""
+        row = await self._fetch(LOCK_WAITS_SQL)
+        available = datetime.now(timezone.utc)
+        if row["stats_visible"] is not True:
+            raise ValueError("PostgreSQL lock wait observation requires complete activity visibility")
+        observed, started, wait_start = row["measured_at"], row["postgres_started_at"], row["earliest_wait_start"]
+        if (started.utcoffset() is None or observed.utcoffset() is None
+                or not started <= observed <= available
+                or (wait_start is not None and (wait_start.utcoffset() is None or not started <= wait_start <= observed))):
+            raise ValueError("PostgreSQL lock wait observation has inconsistent source and receipt clocks")
+        result = {
+            "kind": "postgres-lock-wait-snapshot/v1", "source_ref": self.source_ref,
+            "database_oid": row["database_oid"], "postgres_started_at": timestamp(started),
+            "observed_at": timestamp(observed), "available_at": timestamp(available),
+            "waiting_clients": row["waiting_clients"],
+            "earliest_wait_start": timestamp(wait_start) if wait_start is not None else None,
+        }
+        result["record_id"] = stable_id({key: value for key, value in result.items() if key != "available_at"})
         return result

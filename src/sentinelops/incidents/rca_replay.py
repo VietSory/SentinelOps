@@ -66,6 +66,57 @@ def _trace_support(trace,service):
     return min(1.,residual/trace["root_duration_ns"]),duration_method,f"server_duration_ns={server['timing']['duration_ns']}; sum_observed_direct_client_duration_ns={total}; observed_residual_lower_bound_ns={residual}; reference_server_duration_ns={trace['root_duration_ns']}"
 
 
+def postgres_violation_intervals(traces, latency_ms):
+    # Compare independent observations with contained database spans of violating
+    # requests. Matching time ranges corroborate pressure, not request identity.
+    intervals = []
+    for trace in traces:
+        if trace["received_at"] is None:
+            continue
+        for service, spans in trace["children"].items():
+            parent = trace["servers"][service]["timing"]
+            if trace["statuses"][service] < 500 and parent["duration_ns"] <= latency_ms * 1_000_000:
+                continue
+            for span in spans:
+                tags = span_tags(span)
+                if tags.get("peer.service") != "rds" or tags.get("db.system.name") != "postgresql":
+                    continue
+                timing = span["timing"]
+                start, end = timing["start_unix_ns"], timing["end_unix_ns"]
+                if parent["start_unix_ns"] <= start <= end <= parent["end_unix_ns"]:
+                    intervals.append((start, end))
+    return intervals
+
+
+def lock_wait_support(scope, intervals, lower, upper, as_of):
+    matches = []
+    for ref, item in scope.get("postgres_lock_waits", []):
+        if not item["waiting_clients"] or utc_time(item["available_at"]) > as_of:
+            continue
+        observed = utc_time(item["observed_at"])
+        observed_ns = epoch_ns(observed)
+        if lower <= observed <= upper and any(start <= observed_ns <= end for start, end in intervals):
+            matches.append((ref, item))
+    return max(matches, key=lambda match: match[1]["waiting_clients"], default=None)
+
+
+def lock_log_support(lock_log, intervals, lower, upper, as_of):
+    if lock_log is None:
+        return None
+    _, snapshot = lock_log
+    if utc_time(snapshot["collected_at"]) > as_of:
+        return None
+    matches = []
+    for item in snapshot["records"]:
+        if item["event"] != "waiting":
+            continue
+        observed = utc_time(item["observed_at"])
+        observed_ns = epoch_ns(observed)
+        if lower <= observed <= upper and any(start <= observed_ns <= end for start, end in intervals):
+            matches.append(item)
+    return max(matches, key=lambda item: item["duration_us"], default=None)
+
+
 def group_severity(telemetry, group, signals):
     critical=False
     for signal_id in group["signal_ids"]:
@@ -151,6 +202,23 @@ def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts,*,clo
             identifier=evidence.add("metric","rds",point["observed_at"],reference,
                 f"Observed client-connection capacity pressure: {metrics['db_connections_count']}/({metrics['max_connections']}-{metrics['reserved_connections']}) = {metrics['db_connections_pct']} percent; fixed capacity fraction rule, not IF or overall DB health",point["available_at"])
             components["rds"]["anomaly_strength"]=card(value,"infra-connection-pressure/v1",[identifier])
+        intervals = (postgres_violation_intervals(traces, scope["health"]["policy"]["latency_ms"])
+                     if clock_mode == "replay" else [])
+        lock = lock_wait_support(scope, intervals, lower, upper, as_of)
+        if lock:
+            reference, snapshot = lock
+            identifier = evidence.add("metric", "rds", snapshot["observed_at"], reference,
+                f"Observed {snapshot['waiting_clients']} PostgreSQL client(s) waiting for locks during a verified database span",
+                snapshot["available_at"])
+            components["rds"]["anomaly_strength"] = card(1, "infra-lock-wait-presence/v1", [identifier])
+            lock_log = scope.get("postgres_lock_log")
+            event = lock_log_support(lock_log, intervals, lower, upper, as_of)
+            if event:
+                log_ref, log_capture = lock_log
+                log_id = evidence.add("log", "rds", event["observed_at"], log_ref,
+                    f"PostgreSQL logged a {event['duration_us']} us lock wait during a verified database span",
+                    log_capture["collected_at"])
+                components["rds"]["log_support"] = card(1, "postgres-lock-wait-log/v1", [log_id])
     result=evaluate_rca(correlation,group["group_id"],list(evidence.facts.values()),
         [{"service":service,"components":value} for service,value in components.items()],policy,as_of=as_of,
         evidence_availability=evidence.available,source_refs=scope["allowed_refs"])
@@ -158,15 +226,31 @@ def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts,*,clo
     return {"group_id":group["group_id"],"rca":result,"severity":severity,"source_counts":dict(counts)}
 
 
+def _post_capture_cutoff(scope: dict):
+    """Compute a forensic cutoff from captured receipts, without filling missing clocks."""
+    receipts = [scope["logs"].get("collected_at")]
+    receipts.extend(trace.get("collected_at") for _, trace in scope["traces"])
+    receipts.extend(point.get("available_at") for _, point in scope["infrastructure"])
+    receipts.extend(point["available_at"] for _, point in scope["postgres_lock_waits"])
+    if scope["postgres_lock_log"] is not None:
+        receipts.append(scope["postgres_lock_log"][1]["collected_at"])
+    if any(not isinstance(value, str) for value in receipts):
+        raise ValueError("post-capture RCA requires original operational receipt clocks")
+    return max(utc_time(value) for value in [scope["correlation"]["as_of"], *receipts])
+
+
 def replay_rca(telemetry: ArtifactStore,health_store: ArtifactStore,correlation_store: ArtifactStore,
-               correlation_ref: str,policy: dict,output: Path,*,project: Path|None=None,as_of=None) -> dict:
+               correlation_ref: str,policy: dict,output: Path,*,project: Path|None=None,as_of=None,
+               post_capture=False) -> dict:
+    if post_capture and as_of is not None:
+        raise ValueError("choose an explicit cutoff or a post-capture cutoff")
     validate_policy(policy);commit=None
     if project is not None:
         commit=subprocess.check_output(["git","rev-parse","HEAD"],cwd=project,text=True).strip()
         if subprocess.check_output(["git","status","--porcelain"],cwd=project,text=True).strip():
             raise ValueError("commit RCA source adapter/policy before actual replay")
     scope=verify_scope(telemetry,health_store,correlation_store,correlation_ref)
-    decision=as_of or utc_time(scope["correlation"]["as_of"])
+    decision = _post_capture_cutoff(scope) if post_capture else as_of or utc_time(scope["correlation"]["as_of"])
     rows,lookup,counts=business_logs(scope)
     groups=scope["correlation"]["groups"]
     if len(groups)>100:raise ValueError("RCA replay exceeds its bounded group profile")

@@ -34,6 +34,7 @@ PROTOCOL = {
     "activation_allowed": False,
 }
 ROOTS = {"healthy": None, "payment-gradual": "payment-service", "inventory-gradual": "inventory-service"}
+COMPARISONS = ("full-diagnostic", "full-qualified", "anomaly-only", "topology-time-only")
 
 
 def load_protocol(project=PROJECT):
@@ -44,6 +45,46 @@ def load_protocol(project=PROJECT):
     return value
 
 
+def comparison_ranks(rca, group, qualified):
+    # Give tied candidates the last position in the tie, independent of names.
+    def rank(values):
+        return {service: sum(other >= value for other in values.values())
+                for service, value in sorted(values.items())}
+
+    if rca is None:
+        return {method: {} for method in COMPARISONS}
+    candidates = {candidate["service"]: candidate for candidate in rca["candidates"]}
+    full = rank({service: candidate["score"] for service, candidate in candidates.items()
+                 if candidate["score"] is not None and candidate["score"] > 0})
+    anomaly = {service: candidate["components"]["anomaly_strength"]["value"]
+               for service, candidate in candidates.items()}
+    temporal = {service: candidates[service]["components"]["temporal_precedence"]["value"]
+                for service in group["structural_candidates"]}
+    topology_time = ({service: len(temporal) for service in sorted(temporal)}
+                     if None in temporal.values() else rank(temporal))
+    return {"full-diagnostic": full, "full-qualified": full if qualified else {},
+            "anomaly-only": rank({service: value for service, value in anomaly.items()
+                                  if value is not None and value > 0}),
+            "topology-time-only": topology_time}
+
+
+def summarize_comparisons(trials):
+    faults = [trial for trial in trials if trial["expected_intervention_root"] is not None]
+    summary = {}
+    for method in COMPARISONS:
+        ranks = [trial["comparison_ranks"][method] for trial in faults]
+        positions = [ranks_by_service.get(trial["expected_intervention_root"])
+                     for trial, ranks_by_service in zip(faults, ranks)]
+        summary[method] = {
+            "fault_trials": len(faults),
+            "ranked_fault_trials": sum(bool(rank) for rank in ranks),
+            "top1": sum(position == 1 for position in positions) / len(faults) if faults else None,
+            "top3": sum(position is not None and position <= 3 for position in positions) / len(faults) if faults else None,
+            "mrr": sum(1 / position for position in positions if position is not None) / len(faults) if faults else None,
+        }
+    return summary
+
+
 def trial_result(case, run, diagnostic):
     """Evaluate truth only after diagnostics; never choose the most favorable group."""
     expected = ROOTS[case["kind"]]
@@ -52,10 +93,10 @@ def trial_result(case, run, diagnostic):
     results = diagnostic["results"]
     if any(row["rca"]["actions_allowed"] is not False for row in results):
         raise ValueError("development replay cannot grant action authority")
-    ordered = sorted(results, key=lambda row: (
-        utc_time(next(g for g in row["rca"]["correlation"]["groups"]
-                      if g["group_id"] == row["group_id"])["first_onset_at"]), row["group_id"]))
-    first = ordered[0]["rca"] if ordered else None
+    groups = [(next(group for group in row["rca"]["correlation"]["groups"]
+                    if group["group_id"] == row["group_id"]), row["rca"]) for row in results]
+    first_group, first = min(groups, key=lambda entry: (
+        utc_time(entry[0]["first_onset_at"]), entry[0]["group_id"]), default=(None, None))
     ranking = first["ranking"] if first else []
     qualified = first is not None and not first["abstained"]
     oracle = case["oracle"]["services"]
@@ -64,8 +105,9 @@ def trial_result(case, run, diagnostic):
         "source_result_ref": case["source_result_ref"], "oracle_ref": case["oracle_ref"],
         "expected_intervention_root": expected,
         "independent_root_slo_confirmed_at": oracle[expected]["confirmed_at"] if expected else None,
-        "diagnostic_group_count": len(ordered),
-        "selected_group_id": ordered[0]["group_id"] if ordered else None,
+        "diagnostic_group_count": len(groups),
+        "selected_group_id": first_group["group_id"] if first_group else None,
+        "comparison_ranks": comparison_ranks(first, first_group, qualified),
         "diagnostic_ranking": ranking,
         "abstained": first["abstained"] if first else None,
         "abstention_reasons": first["abstention_reasons"] if first else [],
@@ -73,7 +115,7 @@ def trial_result(case, run, diagnostic):
         "diagnostic_top1_hit": bool(expected and ranking and ranking[0] == expected),
         "diagnostic_top3_hit": bool(expected and expected in ranking[:3]),
         "qualified_top1_hit": bool(expected and qualified and ranking[0] == expected),
-        "healthy_trial_with_incident_group": expected is None and bool(ordered),
+        "healthy_trial_with_incident_group": expected is None and bool(groups),
         "rca_report_ref": diagnostic["report_ref"],
     }
 
@@ -169,9 +211,11 @@ def evaluate_local_rca(store, dataset_ref, output, *, project=PROJECT):
         trial.update(health_report_ref=health["report_ref"], correlation_report_ref=correlation["report_ref"],
                      analysis_cutoff=timestamp(cutoff))
         trials.append(trial)
-    result = {"evaluation_version": "local-rca-development/v1", "dataset_ref": dataset_ref,
+    result = {"evaluation_version": "local-rca-development/v2", "dataset_ref": dataset_ref,
         "source_commit": commit, "protocol": protocol, "protocol_sha256": stable_id(protocol),
         "counts": summarize_trials(trials), "trials": trials,
+        "comparison_method": "development-component-ablation/v1",
+        "comparisons": summarize_comparisons(trials),
         "clock_mode": "post-capture-forensic-replay", "model_outputs_available": False,
         "source_corpus_required_for_reverification": True, "historical_emissions_verified": False,
         "full_G4_accepted": False, "holdout_opened": False, "activation_allowed": False,

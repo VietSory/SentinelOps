@@ -1,4 +1,4 @@
-"""Run a bounded local S0/S1/S3/S5 experiment with a predeclared data split."""
+"""Run a bounded local S0/S1/S3/S4/S5 experiment with a predeclared data split."""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,7 @@ from sentinelops.telemetry.prometheus import SOURCE_PROFILE, SOURCE_PROFILE_V2
 
 def main() -> None:
     parser=argparse.ArgumentParser()
-    parser.add_argument("--scenario",choices=["S0","S1","S3","S5"],required=True)
+    parser.add_argument("--scenario",choices=["S0","S1","S3","S4","S5"],required=True)
     parser.add_argument("--split",choices=["train","validation","test"],required=True)
     parser.add_argument("--output",type=Path,default=Path("artifacts/experiments"))
     parser.add_argument("--seed",type=int,default=42)
@@ -25,6 +25,8 @@ def main() -> None:
     parser.add_argument("--source-profile", choices=(SOURCE_PROFILE, SOURCE_PROFILE_V2), default=SOURCE_PROFILE)
     parser.add_argument("--target-service", choices=("payment-service", "inventory-service"), default="payment-service")
     parser.add_argument("--all-entry-traffic", action="store_true")
+    parser.add_argument("--s4-lead-in", action="store_true",
+                        help="Prepend the bounded low-pressure PostgreSQL phase in S4 development.")
     parser.add_argument("--session-id")
     parser.add_argument("--allow-dirty",action="store_true")
     args=parser.parse_args()
@@ -36,7 +38,8 @@ def main() -> None:
     signal.signal(signal.SIGTERM,terminate)
     try:
         asyncio.run(execute(config, project=Path.cwd(), output=args.output, session_id=args.session_id,
-                            allow_dirty=args.allow_dirty, source_profile=args.source_profile))
+                            allow_dirty=args.allow_dirty, source_profile=args.source_profile,
+                            s4_lead_in=args.s4_lead_in))
     except (ValueError,RuntimeError) as exc:
         raise SystemExit(str(exc)) from exc
 

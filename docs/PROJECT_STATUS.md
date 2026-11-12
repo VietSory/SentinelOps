@@ -74,7 +74,7 @@ của G3/G8.
 - **Source parity profile v2 PASS** (P1–P6): mean latency Prometheus lệch tối đa 4,3% so với log server.
 - **H4 PASS:** health stream v2, 11 phút healthy trước image xấu; IF Alibaba cho `anomaly_strength` 0,989, Payment score 0,797, coverage 0,80, `dispatch_authority=true`.
 - **G6 local Q-09 đạt đúng ngưỡng** ([báo cáo](reports/G6_LOCAL_ALIBABA_BADF9DA0.md)): 9/10 golden-path recovered (trial 04 blocked do race của harness, vẫn tính); 1/1 failed-verify escalated với audit đầy đủ; 0 patch không an toàn trên 10 lần mutate. **G6 chưa PASS**: Q-10 còn cần các case safety bắt buộc, và owner chưa quyết định nghiệm thu.
-- **Lớp 2** (local v2 epoch, Codex) đã bắt đầu 2026-11-09 08:42Z, khoảng 25 giờ.
+- **Lớp 2 xong 2026-11-12** ([báo cáo](reports/LAYER2_LOCAL_ALIBABA_BADF9DA0.md)): 5 nhóm, 25 run, chạy evaluation đúng một lần, không fit, không chỉnh ngưỡng. Nhóm `alb-04` bị owner loại cả nhóm vì máy ngủ trong lúc warmup, quyết định ghi trước khi có điểm. **Model Alibaba không chuyển được sang lỗi local ở ngưỡng đã đóng băng:** IF bắt 1/12 sự cố latency, MAD bắt 12/12 (6 báo nhầm ở checkout); XGBoost precursor recall 0/20, slope 20/20; lỗi 5xx do SLO rule bắt 8/8. Q-04, Q-05, Q-07 **FAIL** (development). Cần candidate kế nhiệm fit lại trên Alibaba và một epoch đánh giá mới.
 
 ## Việc tiếp theo
 
