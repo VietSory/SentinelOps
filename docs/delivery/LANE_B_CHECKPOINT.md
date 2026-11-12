@@ -376,6 +376,17 @@ Ràng buộc mới cho B:
 | B2 CI | Job có ML dependencies nay chạy riêng `tests/test_alibaba*.py` sau khi import bắt buộc NumPy/Pandas/PyArrow/sklearn/XGBoost; trước đó foundation không cài ML còn public-data không chọn các suite Alibaba, nên chúng có thể bị skip. Test identity dùng PATH của môi trường thay vì hardcode `/usr/bin:/bin`, giữ nguyên Git fixture identity và assertions |
 | B-f / AWS | Giữ quyết định owner hoãn EKS policy/adapter sang AWS. Chưa apply; region/quota/budget/quyền vẫn cần chốt trước deployment |
 
+API-only preview PR #45 đã kiểm trên máy B ngày 2026-11-12: release `c1e600f4`,
+source `3782984`, browser đọc incident SLO cũ revision 4 (19 evidence/12 claims).
+Restart API giữ nguyên IER và 16 control tables, model/credentials; hai worker
+vẫn dừng và session/checkpoint không đổi. Đây là đọc lịch sử ngày 2026-11-09,
+không phải detection/inference mới; [chi tiết rollout](../runbooks/HOST_PROCESSES.md#api-only-ui-rollout).
+
+B có thêm [renderer business manifests offline](../runbooks/AWS_BASELINE.md#offline-business-service-manifests):
+ba service, image digest, Secret reference, probes và pod hardening. Đã kiểm input,
+determinism/no-overwrite và schema 1.34; không apply, chưa kiểm registry/DB/collector
+trên AWS, không thay EKS remediation policy hoặc cấp model/action authority.
+
 Thứ tự còn lại: owner review hồ sơ G6/Q-10; B chuẩn bị deployment/provider và
 H3 theo phạm vi cloud được cấp; A chốt hướng detector và giao release hợp lệ.
 ADR-018 vẫn **Proposed**: capture `alc` có thể chạy theo ADR nhưng evaluation

@@ -23,6 +23,13 @@ Local HTTP và RCAEval chỉ evaluation, không fitting/tuning.
 [ADR-018](adr/ADR-018-proposed-monotone-latency-detector.md) vẫn Proposed: chưa
 đổi serving method hoặc gate; evaluation epoch `alc` chờ owner phê duyệt.
 
+B có [business manifests renderer](runbooks/AWS_BASELINE.md#offline-business-service-manifests)
+cho ba service với digest/Secret reference/probes, được kiểm input và schema
+Kubernetes 1.34 offline. Đây là configuration-only: chưa deploy, chưa kiểm source
+parity hoặc registry/commerce/collector của AWS. [API-only preview PR #45](runbooks/HOST_PROCESSES.md#api-only-ui-rollout)
+trên máy B đọc IER thật và giữ nguyên DB/model/checkpoint qua restart; incident
+được tạo ngày 2026-11-09, không phải workload hay inference mới.
+
 [CI](https://github.com/VietSory/SentinelOps/actions/workflows/ci.yml) cần đối chiếu
 đúng SHA. Liveness, DB/model readiness, corpus admission và quality gates là các
 trạng thái khác nhau. Raw/model artifacts nằm trên môi trường tương ứng, ngoài Git.
