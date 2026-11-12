@@ -314,8 +314,10 @@ def test_context_inspection_accepts_epoch_plan_slots_and_legacy_alibaba(tmp_path
                 corpus.inspect_completed_capture(store, f'{group}-{kind}')
     with pytest.raises(FileNotFoundError, match='result.json'):
         corpus.inspect_completed_capture(store, 'ali-05-inventory-gradual')
+    with pytest.raises(FileNotFoundError, match='result.json'):
+        corpus.inspect_completed_capture(store, 'alb-05-inventory-gradual')
     with pytest.raises(ValueError, match='unregistered'):
-        corpus.inspect_completed_capture(store, 'alb-08-healthy')
+        corpus.inspect_completed_capture(store, 'alc-08-healthy')
 
 
 def test_acquisition_and_freeze_lock_is_exclusive_and_recovers_after_failure(tmp_path):

@@ -22,20 +22,20 @@ from test_health_source import START, capture
 @pytest.mark.parametrize('mode', ['planned', 'replacement', 'chain', 'missing', 'unsolicited', 'shared'])
 def test_epoch_audit_needs_exact_planned_groups_or_verified_replacements(tmp_path, monkeypatch, mode):
     plan = load_plan(ALIBABA_PLAN)
-    groups = ['alb-01', 'alb-02', 'alb-03', 'alb-04', 'alb-05']
+    groups = ['alc-01', 'alc-02', 'alc-03', 'alc-04', 'alc-05']
     replacements = {}
     if mode in ('replacement', 'chain', 'missing', 'shared'):
-        replacements['alb-01'] = 'alb-06'
-        groups[0] = 'alb-06'
+        replacements['alc-01'] = 'alc-06'
+        groups[0] = 'alc-06'
     if mode == 'chain':
-        replacements['alb-06'] = 'alb-07'
-        groups[0] = 'alb-07'
+        replacements['alc-06'] = 'alc-07'
+        groups[0] = 'alc-07'
     if mode == 'missing':
         groups.pop(0)
     if mode == 'unsolicited':
-        groups[0] = 'alb-06'
+        groups[0] = 'alc-06'
     if mode == 'shared':
-        replacements['alb-02'] = 'alb-06'
+        replacements['alc-02'] = 'alc-06'
         groups.pop(1)
     cases = [{'group_id': group, 'kind': kind, 'abrupt_control_verified': True, 'gradual_control_verified': True,
               'source_result_ref': f'{group}-{kind}', 'oracle_ref': f'{group}-{kind}-oracle'}

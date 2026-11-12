@@ -6,7 +6,7 @@
   "feature_set_version": "http-relative-5m/v1",
   "environment": "local",
   "roles_in_order": ["development-validation"],
-  "group_prefix": "alb",
+  "group_prefix": "alc",
   "kinds": ["healthy", "payment-abrupt", "inventory-abrupt", "payment-gradual", "inventory-gradual"],
   "minimum_groups": {"development-validation": 5},
   "maximum_groups": {"development-validation": 7},
@@ -19,7 +19,7 @@
   "recovery_seconds": 360,
   "entry_rps": 1.0,
   "maximum_delay_ms": 1200,
-  "seed_base": 20261109,
+  "seed_base": 20261113,
   "evaluation_protocol": "alibaba-relative-local-evaluation/v1",
   "scoring": {
     "clock": "recorded-source-availability-counterfactual",
