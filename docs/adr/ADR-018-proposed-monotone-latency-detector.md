@@ -48,7 +48,8 @@ fresh epoch can provide evidence.
    decision 2 are frozen by this ADR before capture, as ADR-017 requires. The epoch
    is registered before capture, 5 whole groups, single evaluation, under the ADR-016
    rules. Epoch-2 groups become development data and are never pooled with it. Under
-   ADR-017 this is a new run identity for system-v1.
+   ADR-017 its seeds and code make it a new system version, `system-v2`, with
+   the same services and no carry-forward from `system-v1`.
    The recipe covers only S1 (abrupt latency/error) and S3 (gradual). The result is
    development evidence for those scenarios. It is not the full S1–S4 scope of Q-04,
    and not G8.
@@ -57,8 +58,14 @@ fresh epoch can provide evidence.
 
 ## Consequences
 
-- If the owner approves, the operator registers epoch 3 and starts capture. One
-  run is about 25 h of host time; the only operator action is the campaign CLI.
+- If the owner approves, the operator first records the approval: this ADR's
+  status becomes Accepted, and a decision row is added to `CONSTRAINTS_AND_GATES.md`
+  together with the gate-scope change. Then the operator pushes the prepared epoch
+  commits, declares `system-v2`, registers epoch 3 and starts capture from a clean
+  checkout at the plan commit. That is the commit `system-v2` is computed at, not the
+  later registry commit. Nothing in code checks the approval, so this order is
+  the control.
+- One run is about 25 h of host time; the only operator action is the campaign CLI.
 - Risk: on checkout in epoch 2, MAD raised 6 false incidents (3.4 per healthy
   service-hour, precision 0.50). Q-04 asks for precision ≥ 0.80 and ≤ 1 false
   incident per service-hour, so it may fail on the fresh epoch. That outcome would be
