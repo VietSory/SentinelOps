@@ -14,6 +14,7 @@ and shared build inputs equal the predecessor's.
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 
@@ -186,7 +187,9 @@ def test_identity_procedure_detects_each_measurement_input(tmp_path, edit):
     if edit == 'slo-policy':
         edit_json('configs/slo_health_policy.json', lambda d: d.update(fixture_edit=True))
     env = {'GIT_AUTHOR_NAME': 'fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
-           'GIT_COMMITTER_NAME': 'fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid', 'PATH': '/usr/bin:/bin'}
+           'GIT_COMMITTER_NAME': 'fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid',
+           # Keep the isolated Git identity without assuming git lives in /usr/bin (e.g. NixOS).
+           'PATH': os.environ.get('PATH', os.defpath)}
     subprocess.run(['git', '-C', str(clone), '-c', 'core.hooksPath=/dev/null', 'commit', '-qam', 'fixture'],
                    check=True, env=env)
     edited = subprocess.run(['git', '-C', str(clone), 'rev-parse', 'HEAD'], check=True, capture_output=True,

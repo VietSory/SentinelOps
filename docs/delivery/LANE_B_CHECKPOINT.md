@@ -369,10 +369,11 @@ Ràng buộc mới cho B:
 
 | Mục | Kết luận / phần tiếp theo |
 | --- | --- |
-| B-a review model hiện hành | Codex đọc `alibaba_controls`, `check_alibaba_source_parity`, `ml/alibaba_release` và caller/guards. 81 tests release/bundle/live PASS với ML dependencies hoạt động. Không chạy lại evaluation một lần, không thay threshold/approval. Review kiểm software admission, không chứng nhận độ đúng của raw bytes do operator cung cấp hoặc nghiệm thu G3 |
+| B-a review model hiện hành | Codex đọc `alibaba_controls`, `check_alibaba_source_parity`, `ml/alibaba_release` và caller/guards. 102 tests Alibaba training/release/bundle/live/evaluation software PASS với ML dependencies hoạt động. Không chạy lại evaluation một lần trên corpus thật, không thay threshold/approval. Review kiểm software admission, không chứng nhận độ đúng của raw bytes do operator cung cấp hoặc nghiệm thu G3 |
 | B-b / B-c | Candidate local `38bcc766` đã retired D-23. Handoff hiện hành là bundle Alibaba chung `badf9da0`; parity/build/rollover v2 trên máy B đã có [báo cáo](../reports/LANE_B_ALIBABA_V2_ACTIVATION.md). Máy/release mới vẫn phải đo parity; không chạy lại CLI local đã gỡ |
 | B-d / Q-10 | Review lại ba nhóm tests bổ sung đã hoàn tất. Thêm 8 executor/HTTP-adapter checks, remediation suite 111 PASS; PostgreSQL journal check riêng PASS, gồm outage/concurrency/quarantine. Fixture outcomes không tính thêm vào 9/10 trial thật. [Phạm vi review và lệnh tái hiện](../reports/G6_LOCAL_ALIBABA_BADF9DA0.md#b-follow-up-review--2026-11-12) |
 | B-e | OIDC/JWKS adapter và scopes đã có. Còn provider/app client thật + kiểm trên deployment được phép |
+| B2 CI | Job có ML dependencies nay chạy riêng `tests/test_alibaba*.py` sau khi import bắt buộc NumPy/Pandas/PyArrow/sklearn/XGBoost; trước đó foundation không cài ML còn public-data không chọn các suite Alibaba, nên chúng có thể bị skip. Test identity dùng PATH của môi trường thay vì hardcode `/usr/bin:/bin`, giữ nguyên Git fixture identity và assertions |
 | B-f / AWS | Giữ quyết định owner hoãn EKS policy/adapter sang AWS. Chưa apply; region/quota/budget/quyền vẫn cần chốt trước deployment |
 
 Thứ tự còn lại: owner review hồ sơ G6/Q-10; B chuẩn bị deployment/provider và
