@@ -391,5 +391,6 @@ Thứ tự còn lại: owner review hồ sơ G6/Q-10; B chuẩn bị deployment/
 H3 theo phạm vi cloud được cấp; A chốt hướng detector và giao release hợp lệ.
 ADR-018 bị owner **từ chối** 2026-11-12: detection do model đã train quyết định, không
 phục vụ MAD/slope; epoch `alc` dừng khi chưa chấm và đã xoá. A train lại IF/XGBoost trên
-Alibaba. Parity/release trên máy B chỉ đo lại khi có bundle mới; trong lúc chờ, B chuẩn bị
-môi trường (`kind` v0.30.0 đúng SHA-256, `kubectl`) và việc không phụ thuộc model.
+Alibaba theo [ADR-019](../adr/ADR-019-breach-relative-retrain.md): bundle **`de38fc6b`** (manifest
+`d52df584…`), gói `alibaba-de38fc6b-for-B.zip` gửi qua kênh riêng. Sau khi owner duyệt G3, B đo parity
+một lần với gói này rồi build release; code từ `main` sau ADR-019 không nạp `badf9da0`.
