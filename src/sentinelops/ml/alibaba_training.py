@@ -126,10 +126,12 @@ def service_windows(series, config):
 
 
 def service_window_arrays(series, config):
-    """Vectorised windows for one service: base features, window baseline and labels per breach multiplier.
+    """Vectorised windows for one service: base features, window baseline and risk labels per multiplier.
 
-    Labels are 1 (confirmed onset in the horizon, clean window), 0 (clean and fully observed through
-    horizon + tail) or -1 (neither). ``healthy`` and ``onset_minute`` refer to the first multiplier.
+    ``healthy`` and ``onset_minute`` keep the ADR-016 detector semantics (first multiplier, per-minute
+    trailing baseline). Risk labels compare future minutes with K times the window's own baseline: 1 when
+    the window stays at or below that level and two consecutive minutes exceed it with the first in
+    (t, t+300s]; 0 when the window and horizon + tail are fully observed at or below it; otherwise -1.
     """
     import numpy as np
     import pandas as pd
@@ -138,7 +140,8 @@ def service_window_arrays(series, config):
     base = config['baseline']
     multipliers = config['label']['breach_multipliers']
     empty = {'minute': np.empty(0, int), 'features': np.empty((0, len(BASE_FEATURES))), 'baseline_rt': np.empty(0),
-             'healthy': np.empty(0, bool), 'labels': np.empty((0, len(multipliers)), np.int8), 'onset_minute': np.empty(0)}
+             'healthy': np.empty(0, bool), 'labels': np.empty((0, len(multipliers)), np.int8),
+             'onsets': np.empty((0, len(multipliers))), 'onset_minute': np.empty(0)}
     if not len(series):
         return empty
     full = series.reindex(range(series.index.min(), series.index.max() + 1))
@@ -180,30 +183,38 @@ def service_window_arrays(series, config):
     ok &= np.isfinite(feats).all(1)
     t = index[pos].astype(float)
     pad = np.full(horizon + tail + consecutive, np.nan)
+    # Detector semantics (ADR-016, first multiplier): per-minute trailing baseline, healthy windows and onsets.
+    breach_s = (ratio > multipliers[0]).astype(float).where(ratio.notna())
+    confirmed = breach_s.rolling(consecutive).sum() == consecutive
+    onset = confirmed & ~confirmed.shift(1, fill_value=False)
+    onset_minute = np.where(onset.to_numpy(), index - (consecutive - 1), np.nan).astype(float)
+    breach = breach_s.to_numpy(float)
+    fut = sliding_window_view(np.concatenate([breach, pad])[1:], horizon + tail)[pos]
+    win = sliding_window_view(breach, w)
+    ons = sliding_window_view(np.concatenate([onset_minute, pad])[1:], horizon + consecutive - 1)[pos]
+    with np.errstate(invalid='ignore'):
+        candidate = np.isfinite(ons) & (ons > t[:, None]) & (ons <= t[:, None] + horizon)
+        healthy = (np.isfinite(win).all(1) & (win == 0).all(1) & np.isfinite(fut).all(1) & (fut == 0).all(1))
+    first = np.where(candidate, ons, np.inf).min(1)
+    onset_first = np.where(candidate.any(1), first, np.nan)
+    # Risk semantics (ADR-019): the breach is K times the window's own baseline, the same level the
+    # breach-relative feature encodes, so training and serving share one target definition.
+    future_rt = sliding_window_view(np.concatenate([rt, pad])[1:], horizon + tail)[pos]
     labels = np.full((len(pos), len(multipliers)), -1, np.int8)
-    healthy = onset_first = None
-    for column, multiplier in enumerate(multipliers):
-        breach_s = (ratio > multiplier).astype(float).where(ratio.notna())
-        confirmed = breach_s.rolling(consecutive).sum() == consecutive
-        onset = confirmed & ~confirmed.shift(1, fill_value=False)
-        onset_minute = np.where(onset.to_numpy(), index - (consecutive - 1), np.nan).astype(float)
-        breach = breach_s.to_numpy(float)
-        fut = sliding_window_view(np.concatenate([breach, pad])[1:], horizon + tail)[pos]
-        win = sliding_window_view(breach, w)
-        ons = sliding_window_view(np.concatenate([onset_minute, pad])[1:], horizon + consecutive - 1)[pos]
-        with np.errstate(invalid='ignore'):
-            candidate = np.isfinite(ons) & (ons > t[:, None]) & (ons <= t[:, None] + horizon)
-            clean = np.isfinite(win).all(1) & (win == 0).all(1)
-            negative = clean & np.isfinite(fut).all(1) & (fut == 0).all(1)
-        positive = clean & candidate.any(1)
-        labels[negative, column] = 0
-        labels[positive, column] = 1
-        if column == 0:
-            healthy = negative
-            first = np.where(candidate, ons, np.inf).min(1)
-            onset_first = np.where(candidate.any(1), first, np.nan)
+    onsets = np.full((len(pos), len(multipliers)), np.nan)
+    with np.errstate(invalid='ignore'):
+        for column, multiplier in enumerate(multipliers):
+            level = (multiplier * b_rt)[:, None]
+            clean = np.isfinite(rt_win).all(1) & (rt_win <= level).all(1)
+            above = future_rt > level
+            starts = above[:, :horizon] & above[:, 1:horizon + 1]
+            negative = clean & np.isfinite(future_rt).all(1) & ~above.any(1)
+            positive = clean & starts.any(1)
+            labels[negative, column] = 0
+            labels[positive, column] = 1
+            onsets[positive, column] = t[positive] + 1 + starts[positive].argmax(1)
     return {'minute': index[pos][ok].astype(int), 'features': feats[ok], 'baseline_rt': b_rt[ok],
-            'healthy': healthy[ok], 'labels': labels[ok], 'onset_minute': onset_first[ok]}
+            'healthy': healthy[ok], 'labels': labels[ok], 'onsets': onsets[ok], 'onset_minute': onset_first[ok]}
 
 
 def serving_breach_feature(baseline_rt, config):
@@ -221,10 +232,10 @@ def service_windows_fast(series, config):
     arrays = service_window_arrays(series, config)
     rows = []
     for i, minute in enumerate(arrays['minute']):
-        label, onset = int(arrays['labels'][i, 0]), arrays['onset_minute'][i]
+        onset = arrays['onset_minute'][i]
         values = [float(v) for v in arrays['features'][i]] + [serving_breach_feature(float(arrays['baseline_rt'][i]), config)]
         rows.append({'minute': int(minute), 'features': values,
-                     'healthy': bool(arrays['healthy'][i]), 'risk_label': None if label < 0 else label,
+                     'healthy': bool(arrays['healthy'][i]),
                      'onset_minute': None if onset != onset else int(onset),
                      'baseline_rt': float(arrays['baseline_rt'][i]),
                      'risk_labels': [None if v < 0 else int(v) for v in arrays['labels'][i]]})

@@ -38,7 +38,18 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=project).strip():
         raise SystemExit('epoch checkout must be clean')
     head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=project, text=True).strip()
-    store = ArtifactStore(args.root)
+    class ReadOnlyStore(ArtifactStore):
+        """Existing content-addressed objects resolve; anything new means the epoch lacks evidence."""
+        def write(self, kind, value):
+            import hashlib
+            data = json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+            digest = hashlib.sha256(data).hexdigest()
+            target = self.root / kind / f'{digest}.json'
+            if not target.is_file() or target.read_bytes() != data:
+                raise SystemExit(f'epoch store lacks derived artifact {kind}/{digest}; refusing to write')
+            return f'artifact://{kind}/{digest}.json'
+
+    store = ReadOnlyStore(args.root)
     if args.output.resolve().is_relative_to(store.root.resolve()):
         raise SystemExit('development output must stay outside the epoch store')
     plan = json.loads((project / 'configs/alibaba_local_evaluation.json').read_bytes())

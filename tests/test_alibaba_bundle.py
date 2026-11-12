@@ -70,6 +70,10 @@ def test_local_epoch_pins_ali_bundle_and_rejects_changed_artifact(tmp_path):
     store = ArtifactStore(tmp_path / 'epoch')
     plan = load_plan(ALIBABA_PLAN)
     digest = packaged['manifest_sha256']
+    wrong = {**plan, 'candidate': {'model_version': 'f' * 64, 'manifest_sha256': digest}}
+    with pytest.raises(ValueError, match='different candidate'):
+        register_alibaba_epoch(store, wrong, 'a' * 40, bundle, digest)
+    plan = {**plan, 'candidate': {'model_version': packaged['model_version'], 'manifest_sha256': digest}}
     pinned = register_alibaba_epoch(store, plan, 'a' * 40, bundle, digest)
     reference, epoch = read_alibaba_epoch(store, plan)
     assert reference == pinned

@@ -56,10 +56,10 @@ def test_vectorised_transform_equals_the_reference(seed):
     ref, fast = service_windows(frame, config), service_windows_fast(frame, config)
     assert [r['minute'] for r in ref] == [r['minute'] for r in fast]
     for a, b in zip(ref, fast):
-        assert a['healthy'] == b['healthy'] and a['risk_label'] == b['risk_label'] and a['onset_minute'] == b['onset_minute']
+        assert a['healthy'] == b['healthy'] and a['onset_minute'] == b['onset_minute']
         assert np.allclose(a['features'], b['features'][:5], rtol=1e-9, atol=1e-12)
         assert b['features'][5] == pytest.approx(np.log(b['baseline_rt'] / config['serving']['breach_latency_ms']))
-        assert b['risk_labels'][0] == b['risk_label'] and b['baseline_rt'] > 0
+        assert b['baseline_rt'] > 0
 
 
 def test_each_breach_multiplier_has_its_own_onset_labels():
@@ -102,3 +102,19 @@ def test_serving_breach_is_the_frozen_slo_latency():
     from pathlib import Path
     policy = json.loads((Path(__file__).resolve().parents[1] / 'configs/slo_health_policy.json').read_text())
     assert load_config()['serving']['breach_latency_ms'] == policy['latency_ms']
+
+
+def test_risk_labels_use_the_window_baseline_not_a_later_minute_baseline():
+    from sentinelops.ml.alibaba_training import service_window_arrays
+    config = load_config()
+    multipliers = config['label']['breach_multipliers']
+    # Only six baseline minutes exist before a ramp; a per-minute baseline would rise with the ramp.
+    rt = [10.0] * 6 + [10.0] * 5 + [15.0, 25.0, 45.0, 85.0, 170.0, 170.0, 170.0] + [10.0] * 10
+    arrays = service_window_arrays(series(rt), config)
+    row = list(arrays['minute']).index(10)                  # window minutes 6..10, baseline 10 ms
+    assert arrays['baseline_rt'][row] == pytest.approx(10.0)
+    labels = dict(zip(multipliers, arrays['labels'][row]))
+    onsets = dict(zip(multipliers, arrays['onsets'][row]))
+    assert labels[8.0] == 1 and onsets[8.0] == 14             # 85 and 170 ms exceed 80 ms from minute 14
+    assert labels[16.0] == 1 and onsets[16.0] == 15           # 170 ms twice exceeds 160 ms from minute 15
+    assert labels[32.0] == 0                                  # never above 320 ms through horizon + tail

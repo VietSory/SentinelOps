@@ -59,16 +59,20 @@ def main():
     arrays = build_arrays(data, config, splits=('calibration', 'evaluation'))
     names = config['features']
     slope_index = names.index(SLOPE)
-    first = config['label']['breach_multipliers'][0]
+    # The risk comparison runs at the multiplier the degrading threshold was calibrated on, so the threshold,
+    # labels and breach-relative inputs describe one operating point. Detector events keep ADR-016 semantics.
+    degrading = config['risk']['thresholds']['degrading']['multiplier']
+    column = config['label']['breach_multipliers'].index(degrading)
     split = arrays['service_split'][arrays['service']]
-    values_at = lambda mask: np.column_stack([arrays['features'][mask], np.full(int(mask.sum()), -math.log(first))])
+    values_at = lambda mask: np.column_stack([arrays['features'][mask], np.full(int(mask.sum()), -math.log(degrading))])
     calibration = values_at((split == 'calibration') & arrays['healthy'])
     selected = split == 'evaluation'
     evaluation = [{'service': arrays['services'][s], 'minute': int(m), 'healthy': bool(h),
-                   'risk_label': None if label < 0 else int(label), 'onset_minute': None if o != o else int(o)}
-                  for s, m, h, label, o in zip(arrays['service'][selected], arrays['minute'][selected],
-                                               arrays['healthy'][selected], arrays['labels'][selected, 0],
-                                               arrays['onset_minute'][selected])]
+                   'risk_label': None if label < 0 else int(label), 'risk_onset_minute': None if ro != ro else int(ro),
+                   'onset_minute': None if o != o else int(o)}
+                  for s, m, h, label, ro, o in zip(arrays['service'][selected], arrays['minute'][selected],
+                                                   arrays['healthy'][selected], arrays['labels'][selected, column],
+                                                   arrays['onsets'][selected, column], arrays['onset_minute'][selected])]
     eval_values = values_at(selected)
     counts = fit['counts']['evaluation']
     if len(evaluation) != counts['windows'] or len(calibration) != fit['counts']['calibration']['healthy']:
@@ -120,10 +124,10 @@ def main():
             for i, s in zip(idx, states[name]):
                 r = evaluation[i]
                 if r['risk_label'] == 1:
-                    lead = 60 * (r['onset_minute'] - r['minute'])
-                    best = eligible.setdefault(r['onset_minute'], None)
+                    lead = 60 * (r['risk_onset_minute'] - r['minute'])
+                    best = eligible.setdefault(r['risk_onset_minute'], None)
                     if s['active'] and s['available'] and (best is None or lead > best):
-                        eligible[r['onset_minute']] = lead
+                        eligible[r['risk_onset_minute']] = lead
             precursor[name][service] = eligible
 
     labelled = np.array([i for i, r in enumerate(evaluation) if r['risk_label'] in (0, 1)])
@@ -168,7 +172,7 @@ def main():
               'model_artifacts_sha256': model_artifacts,
               'protocol_reused': {**{k: protocol[k] for k in ('false_alert_budget', 'entry_windows', 'exit_windows',
                                                              'bootstrap_replicates', 'bootstrap_seed', 'confidence_level')},
-                                  'risk_threshold': risk_threshold, 'risk_breach_multiplier': first},
+                                  'risk_threshold': risk_threshold, 'risk_breach_multiplier': degrading},
               'slope_control_feature': SLOPE, 'detector_events': detector_metrics, 'risk': risk_report,
               'paired_service_bootstrap': {'method': 'paired-whole-service-percentile-bootstrap', 'services': len(services),
                                            'if_minus_mad_event_f1': interval(np.array(f1_diff)),

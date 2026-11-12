@@ -153,6 +153,10 @@ def register_alibaba_epoch(store, plan, source, bundle, manifest_sha256):
         raise ValueError('ADR-016 requires the frozen Alibaba v3 feature contract')
     if set(manifest['artifacts']) != {'detector.joblib', 'risk.json'}:
         raise ValueError('ADR-016 requires both pinned Alibaba estimators')
+    candidate = plan.get('candidate')
+    if candidate is not None and (candidate.get('model_version') != manifest['model_version']
+                                  or candidate.get('manifest_sha256') != manifest_sha256):
+        raise ValueError('ADR-019 epoch plan pins a different candidate bundle')
     for name, digest in manifest['artifacts'].items():
         _pinned(bundle/name, digest)
     _pinned(bundle/'report.json', manifest['provenance']['report_sha256'])
