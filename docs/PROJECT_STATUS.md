@@ -41,6 +41,12 @@ mới truyền hai credential vào API, không truyền cho workers; bundle v2 c
 cấu hình producer-only. Production identity vẫn fail closed. Xem
 [API scopes](runbooks/INCIDENT_API.md) và [host credentials](runbooks/HOST_PROCESSES.md).
 
+UI kiểm bearer permission qua protected readiness khi connect/refresh, mỗi 30 giây
+khi tab visible và khi quay lại tab. Quan sát 401/403 `insufficient_scope` sẽ xóa
+private state; lỗi mạng của public readiness không che được denial này. Provider
+outage giữ các record đã tải với lỗi readiness/UNKNOWN. Các đường này được kiểm
+bằng JS/API và browser HTTP fixtures, không nghiệm thu identity provider thật.
+
 Có [demo guide local](runbooks/DEMO_LOCAL.md) cho đường chạy B hiện tại: stack 9
 container, API/worker, ba loại readiness khác nhau, ranh giới operator/producer,
 UI pin revision, explanation fallback thật và Grafana console. Guide ghi rõ phần

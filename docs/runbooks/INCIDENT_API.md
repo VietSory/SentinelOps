@@ -5,10 +5,25 @@
 The API serves the operator console at `/ui/` from packaged same-origin assets.
 For lane B, follow [the isolated runtime](LOCAL_TESTBED.md#lane-b-isolated-application-runtime)
 and open `http://127.0.0.1:18000/ui/`. Enter the local operator token from the private
-runtime file or your configured environment. Tokens stay in tab memory, are
+runtime file, or an OIDC access token accepted by the configured API. Tokens stay in tab memory, are
 cleared from the input after connecting and are never persisted in browser storage.
 Disconnect clears incident state. No incident writes, fault controls or action
 execution are exposed by this UI.
+
+The visible tab checks both public `/ready` and protected `/ready/incidents`
+on connect/refresh, every 30 seconds, and when the tab becomes visible again.
+Public configuration readiness alone does not verify the bearer token. An observed
+401 or 403 `insufficient_scope` disconnects and clears records, explanations,
+actions and pending requests; a late denial from a prior connection cannot clear
+a newer session. A public-probe network error cannot mask a protected denial.
+The browser does not decode token claims or decide their authority itself.
+
+A provider/JWKS outage is availability failure, not a known permission rejection:
+the UI retains previously loaded records with an explicit readiness error and
+unknown dependency status. When both readiness endpoints report a store outage,
+the existing unavailable-store state remains visible. Neither case establishes
+service health or grants action/model authority. A real provider deployment is
+still separate from these software checks.
 
 The feed uses the existing state/service/cursor API; loaded-row counts are not
 global incident counts. Detail pins a revision of the IncidentEnvelope and its
@@ -51,6 +66,9 @@ its revision/evidence/history on desktop/mobile; it never creates an IER. Output
 are exclusive and never overwrite earlier verification. Tokens and browser request
 traces are not written to artifacts. A screenshot of fixture records is not live
 source or model/RCA quality evidence.
+The checker compares the model badge with explicit API availability, so both
+no-model and selected-model deployments are supported. This checks a loaded
+dependency, not diagnostic quality, fresh inference or direct `/detect` support.
 
 The HTTP incident endpoints now use the [real control repository](INCIDENT_STORE.md). The seven original wire schemas remain unchanged: IER responses have the exact legacy body; revisions and conditional-write metadata use headers or supplemental contracts. This is a deliberate migration from Foundation echo/mock behavior, not completion of RCA/model/recovery gates.
 
