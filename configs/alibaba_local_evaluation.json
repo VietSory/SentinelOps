@@ -19,7 +19,7 @@
   "recovery_seconds": 360,
   "entry_rps": 1.0,
   "maximum_delay_ms": 1200,
-  "seed_base": 20261113,
+  "seed_base": 20261300,
   "evaluation_protocol": "alibaba-relative-local-evaluation/v1",
   "scoring": {
     "clock": "recorded-source-availability-counterfactual",
