@@ -58,13 +58,18 @@ fresh epoch can provide evidence.
 
 ## Consequences
 
-- If the owner approves, the operator first records the approval: this ADR's
-  status becomes Accepted, and a decision row is added to `CONSTRAINTS_AND_GATES.md`
-  together with the gate-scope change. Then the operator pushes the prepared epoch
-  commits, declares `system-v2`, registers epoch 3 and starts capture from a clean
-  checkout at the plan commit. That is the commit `system-v2` is computed at, not the
-  later registry commit. Nothing in code checks the approval, so this order is
-  the control.
+- Capture may start before approval. It is evaluation-only data: no fit, no holdout,
+  no gate reading. The operator chose this on 2026-11-12 under the owner's
+  delegation, to save one capture day. The serving choice and gate scope are frozen
+  by this ADR before the first `alc` capture. The capture runs from a clean checkout
+  at the plan commit. That is the commit `system-v2` is computed at, not the later
+  registry commit.
+- **The evaluation waits for approval.** The operator runs the single `alc`
+  evaluation only after the owner accepts this ADR. Then this ADR's status becomes
+  Accepted, and a decision row is added to `CONSTRAINTS_AND_GATES.md` together with
+  the gate-scope change. Nothing in code checks the approval, so this order is the
+  control. If the owner rejects the ADR, the `alc` capture stays unevaluated for
+  this profile.
 - One run is about 25 h of host time; the only operator action is the campaign CLI.
 - Risk: on checkout in epoch 2, MAD raised 6 false incidents (3.4 per healthy
   service-hour, precision 0.50). Q-04 asks for precision ≥ 0.80 and ≤ 1 false
