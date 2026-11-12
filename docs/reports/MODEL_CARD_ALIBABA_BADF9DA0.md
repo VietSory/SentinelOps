@@ -78,14 +78,15 @@ tested equal to the single-window reference.
 | ADR-015 epoch replay (p95 fallback) | 0 TP for IF and MAD. This is structural: faults start before five minutes of baseline exist. IF false incidents 0.44–1.75 per healthy hour |
 | Source parity, profile v2 (kind) | PASS. Mean latency is within 4.3% of the server log; counts are within 2.6% |
 | Native H4 (S2 Kubernetes) | PASS. IF `anomaly_strength` 0.989, Payment RCA score 0.797, `dispatch_authority=true` |
-| 2 — local v2 epoch (D-21) | Pending. Frozen in advance, ≥ 30 healthy minutes before each fault |
+| 2 — local v2 epoch (run once, [report](LAYER2_LOCAL_ALIBABA_BADF9DA0.md)) | 5 groups, 25 runs. IF detects **1/12** latency events (0 false incidents); bundled MAD 12/12 with 6 false incidents on checkout. Q-04 and Q-05 **FAIL**. XGBoost AP is above prevalence but below the slope control, with precursor recall **0/20** (Q-07 FAIL); slope 20/20. HTTP 5xx: SLO rule 8/8 |
 
 ## Limitations and risks
 
 - **Label noise:** labels are a relative-latency rule on production minutes, not
   operator-confirmed incidents. Low precision partly reflects this.
 - **Scenario shift:** Alibaba breaches are production regressions, while the
-  local scenarios are injected faults. Layer 2 measures this transfer.
+  local scenarios are injected faults. Layer 2 shows the frozen operating points do
+  not transfer: IF and XGBoost stay below their simple controls on local faults.
 - **Weak early warning:** precursor recall misses the Q-07 target. Do not present
   XGBoost as a reliable early-warning system.
 - **Reading the layer-1 rates (B review, 2026-11-10):** the "alert rate on negatives"
