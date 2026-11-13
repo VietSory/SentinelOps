@@ -1,6 +1,6 @@
 # G3 review packet — Alibaba candidate `de38fc6b` (ADR-019)
 
-**Status:** awaiting the owner's G3 decision. Layer 2 (epoch `ald`) is capturing and will be evaluated once.
+**Status:** G3 approved with conditions by the owner on 2026-11-13 ([D-27](../architecture/CONSTRAINTS_AND_GATES.md)). Layer 2 (epoch `ald`) is capturing and will be evaluated once; that result is the official quality evidence.
 Nothing here activates a model, opens a holdout or claims AWS.
 
 | Item | Value |
