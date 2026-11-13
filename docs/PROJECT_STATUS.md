@@ -1,6 +1,6 @@
 # SentinelOps — trạng thái triển khai
 
-Cập nhật: **2026-11-12**. Trang này tóm tắt code và khoảng trống sản phẩm.
+Cập nhật: **2026-11-14**. Trang này tóm tắt code và khoảng trống sản phẩm.
 Service có đang chạy/ready hay không phải kiểm tra trên môi trường hiện tại;
 report hoặc CI cũ không thay kết quả đó.
 
@@ -8,7 +8,7 @@ report hoặc CI cũ không thay kết quả đó.
 | --- | --- | --- |
 | Workload / observability | Có ba services, commerce PostgreSQL, OTel, Prometheus/Jaeger local. Có renderer và sandbox kind cho service thật; đã quan sát Checkout/DB, RED bucket và pod UID nhất quán trong API/metric/trace/log. Đã có parity v2 trên các môi trường được báo cáo và H4 native trong trial; không suy thành G4/G6 hoặc AWS acceptance | [Testbed](runbooks/LOCAL_TESTBED.md), [Kubernetes local](runbooks/KUBERNETES_LOCAL.md), [observability](runbooks/OBSERVABILITY.md) |
 | Telemetry / features | Có raw capture, quality/provenance, 60s buckets / 300s windows và replay | [Telemetry](runbooks/TELEMETRY.md), [timing](architecture/TRACE_TIMING.md) |
-| Data / models | Fitting dùng Alibaba v2022 (ADR-016, ADR-019). Candidate **`de38fc6b`** (ADR-019) thay `badf9da0`: qua cổng chuỗi tổng hợp và kiểm tra phát triển trên `alb` (IF 12/12, precursor 20/20); lớp 1 IF F1 0,336, IF hơn MAD có ý nghĩa. Owner duyệt G3 có điều kiện (D-27); lớp 2 epoch `ald` đang capture, chấm một lần | [G3 packet](reports/G3_CANDIDATE_ALIBABA_DE38FC6B.md), [ADR-019](adr/ADR-019-breach-relative-retrain.md), [model lifecycle](runbooks/MODEL_PIPELINE.md) |
+| Data / models | Fitting dùng Alibaba v2022 (ADR-016, ADR-019). Candidate **`de38fc6b`** (ADR-019) thay `badf9da0`: qua cổng chuỗi tổng hợp và kiểm tra phát triển trên `alb` (IF 12/12, precursor 20/20); lớp 1 IF F1 0,336, IF hơn MAD có ý nghĩa. Owner duyệt G3 có điều kiện (D-27); lớp 2 epoch `ald` chấm một lần 2026-11-14: kết quả phát triển S1/S3 tốt (IF 12/12, 0 báo sai, trễ 150 s; XGB precursor 20/20, AP 0,95 > slope 0,81–0,84) nhưng **chưa nghiệm thu Q-04…Q-07**: thiếu S2/S4, MTTD live và holdout G8 ( [báo cáo](reports/LAYER2_LOCAL_ALIBABA_DE38FC6B.md)) | [G3 packet](reports/G3_CANDIDATE_ALIBABA_DE38FC6B.md), [ADR-019](adr/ADR-019-breach-relative-retrain.md), [model lifecycle](runbooks/MODEL_PIPELINE.md) |
 | Incident pipeline | Có health/incident workers, control DB, IER revisions và protected read API | [Health](runbooks/HEALTH_WORKER.md), [incident](runbooks/INCIDENT_WORKER.md), [API](runbooks/INCIDENT_API.md) |
 | Correlation / RCA | Có conservative grouping/abstention; **full G4 chưa nghiệm thu** | [RCA runbook](runbooks/RCA.md), [research baseline](reports/RCA_DEVELOPMENT.md) |
 | Operator UI / B1 | Có UI read-only cùng origin `/ui/`: token trong tab, list/filter/cursor, revision-pinned detail/history/evidence, UNKNOWN/503 và model-unavailable. Đã chạy trên incident SLO thật của B, 4 immutable revisions, API/DB restart và browser outage/reconnect | [API/UI](runbooks/INCIDENT_API.md), [runtime B](runbooks/LOCAL_TESTBED.md); không coi ranking là root đã xác nhận |
@@ -92,7 +92,7 @@ lớp 2 bên dưới.
 
 ## Việc tiếp theo
 
-- **A:** đã train lại theo ADR-019 (`de38fc6b`); capture epoch `ald` từ 2026-11-13 01:13, chấm một lần khi xong; full G4/G8 chưa nghiệm thu.
+- **A:** đã train lại theo ADR-019 (`de38fc6b`); lớp 2 `ald` (2026-11-14) cho kết quả phát triển S1/S3 tốt, chưa nghiệm thu Q-04…Q-07 (thiếu S2/S4, MTTD live, holdout); full G4/G8 chưa nghiệm thu.
 - **B:** owner đã duyệt G3 `de38fc6b` (D-27); đo parity một lần với gói mới rồi build release; giao review Alibaba/Q-10 và hồ sơ G6 cho owner; provider identity, EKS policy/adapter và AWS chỉ triển khai khi đủ quyền/phạm vi. UI/packaging/monitoring local không cần làm lại.
 
 [Lane B checkpoint](delivery/LANE_B_CHECKPOINT.md) chốt mức bằng chứng từng

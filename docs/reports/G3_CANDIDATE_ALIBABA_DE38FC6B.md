@@ -1,6 +1,6 @@
 # G3 review packet — Alibaba candidate `de38fc6b` (ADR-019)
 
-**Status:** G3 approved with conditions by the owner on 2026-11-13 ([D-27](../architecture/CONSTRAINTS_AND_GATES.md)). Layer 2 (epoch `ald`) is capturing and will be evaluated once; that result is the official quality evidence.
+**Status:** G3 approved with conditions by the owner on 2026-11-13 ([D-27](../architecture/CONSTRAINTS_AND_GATES.md)). Layer 2 (epoch `ald`) was evaluated once on 2026-11-14: thresholds met on development runs within S1/S3 (IF 12/12, 0 false incidents; XGB precursor 20/20, AP above slope). Q-04 is not measured for S2/S4, Q-06 is a replay rather than live MTTD, and Q-07 is not heldout ([report](LAYER2_LOCAL_ALIBABA_DE38FC6B.md)).
 Nothing here activates a model, opens a holdout or claims AWS.
 
 | Item | Value |
@@ -67,7 +67,7 @@ precursor 0/20.
 
 ## 4. Limitations
 
-- Development evidence. Acceptance for Q-04–Q-07 comes from the single `ald` evaluation; `alb` numbers do not count.
+- Development evidence. The official layer-2 result is the single `ald` evaluation; `alb` numbers do not count. Final Q-04–Q-07 acceptance comes only from G8 heldout evaluation.
 - Local scope is S1/S3 (abrupt latency/error, gradual latency) on three services; S2/S4 are not claimed.
 - Features use mean latency while the SLO uses p95; leads are measured, not assumed.
 - 5xx detection is the objective SLO rule; Alibaba has no error field.
