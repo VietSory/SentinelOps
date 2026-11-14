@@ -77,6 +77,12 @@ then clears the systemd failure limit for the reviewed operator retry. It does n
 reset an incident action budget or change a remediation threshold. Corrupt release
 or session bytes keep the existing process running when manual restart is refused.
 
+For a selected inactive role, `start`/`restart` loads the linked unit by name after
+the same integrity and source checks. It skips `reset-failed`: systemd may have
+unloaded an inactive unit during validation and would reject that reset with
+`Unit not loaded`. Failed and active retry paths retain the failure-limit reset;
+errors from validation and lifecycle commands still propagate.
+
 `active`/PID is **process state**, not readiness or SLO health. Status explicitly
 returns readiness `NOT_OBSERVED` and integrity `NOT_CHECKED`; use `verify` for byte
 integrity. `/health` is liveness, protected `/ready/incidents` checks the store and
