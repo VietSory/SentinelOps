@@ -647,3 +647,23 @@ def test_completion_ledger_retains_early_minutes_after_log_rotation(tmp_path):
     assert all(sum(r['service'] == s for r in logs) == 2 for s in SERVICES)
     clients[0]['trace_id'] = 'mismatched'
     assert sum(r['failed'] for r in exact_logs(paths, inventory, clients, ends)) == 1
+
+
+def test_release_accepts_native_prometheus_float_zero_errors(tmp_path):
+    sha, manifest, report, controls, record, verification = evidence(tmp_path)
+    for row in verification['criteria']['P4']:
+        row['error_count'] = 0.0
+    record['evidence'] = [parity_verification_ref(verification)]
+    result = build_alibaba_release(tmp_path / 'bundle', sha, controls=controls,
+        parity_record=record, parity_verification=verification,
+        approved_by='fixture-owner', decision_note='test float-zero admission', output=tmp_path / 'release')
+    assert result['activation_performed'] is False
+
+
+@pytest.mark.parametrize('value', [False, True, '0', None, -0.1, 0.1, float('nan'), float('inf')])
+def test_parity_error_count_still_rejects_nonzero_or_nonnumeric_values(tmp_path, value):
+    from sentinelops.ml.alibaba_release import criteria_complete
+    sha, manifest, report, controls, record, verification = evidence(tmp_path)
+    verification['criteria']['P4'][0]['error_count'] = value
+    assert not criteria_complete(verification['criteria'], manifest['model_version'],
+        manifest['provenance']['config'], scorer(tmp_path, sha), {'maximum_lag_seconds': 60})
