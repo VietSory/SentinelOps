@@ -4,7 +4,7 @@ Các mục 1–3 lưu baseline trên máy B tại `d605826` (2026-11-05) và b�
 sau. Mục 4–5 cập nhật tình trạng bàn giao local ngày 2026-11-08. Bằng chứng trên
 máy A và xác nhận trên môi trường B được ghi riêng.
 
-**Trạng thái hiện hành 2026-11-12 ở mục 9.** Các mục cũ giữ mốc đo và giới hạn
+**Trạng thái hiện hành 2026-11-14 ở mục 9 (cập nhật cuối mục).** Các mục cũ giữ mốc đo và giới hạn
 của thời điểm đó; không dùng câu “chưa có model/rollback/OIDC” của baseline để
 ghi đè báo cáo tích hợp mới.
 
@@ -349,7 +349,7 @@ Ràng buộc mới cho B:
 ## 8. Giới hạn nghiệm thu hiện hành
 
 - **AWS chưa triển khai.** Không `apply`, không gọi AWS API, không có credential.
-- **Model Alibaba đã có inference trên máy B**, theo [báo cáo 2026-11-09](../reports/LANE_B_ALIBABA_V2_ACTIVATION.md).
+- **Mốc lịch sử model `badf9da0` có inference trên máy B**, theo [báo cáo 2026-11-09](../reports/LANE_B_ALIBABA_V2_ACTIVATION.md).
   G3 chỉ duyệt có điều kiện D-22; lớp 2 đã đo và Q-04/Q-05/Q-07 FAIL. Không coi
   inference hoạt động là chất lượng đã đạt hoặc là xác nhận runtime hôm nay.
 - **G4 đầy đủ chưa nghiệm thu.** Ranking là suspect kèm evidence, không phải
@@ -394,3 +394,15 @@ phục vụ MAD/slope; epoch `alc` dừng khi chưa chấm và đã xoá. A trai
 Alibaba theo [ADR-019](../adr/ADR-019-breach-relative-retrain.md): bundle **`de38fc6b`** (manifest
 `d52df584…`), gói `alibaba-de38fc6b-for-B.zip` gửi qua kênh riêng. Sau khi owner duyệt G3, B đo parity
 một lần với gói này rồi build release; code từ `main` sau ADR-019 không nạp `badf9da0`.
+
+
+### Cập nhật máy B 2026-11-14 — bundle `de38fc6b`
+
+Owner đã duyệt G3 có điều kiện D-27. Máy `local-nixos-host` đã pull `main`,
+kiểm checksum, đo parity P1–P6 PASS (0 failure), build model/host release mới
+và rollover sang epoch `alibaba-de38fc6b-20261114b`. Baseline của ba service
+đã đủ accepted history; live-check PASS, `model_dependency=true`, IER có
+model signal tái tính được từ bundle mới. Xem
+[báo cáo tích hợp](../reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md) để lấy
+parity, verification, release ref và live output. Release/store/checkpoint cũ
+giữ nguyên cho rollback. G6–G8 và phạm vi Q-04…Q-07 còn lại vẫn chưa nghiệm thu.
