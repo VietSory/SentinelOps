@@ -34,5 +34,6 @@ service:
       exporters: [otlp/jaeger, debug]
     metrics:
       receivers: [otlp]
-      processors: [batch]
+      # Counters/histograms feed 60 s SLO buckets; do not add a batch timeout.
+      processors: []
       exporters: [prometheus, debug]
