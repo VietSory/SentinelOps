@@ -6,6 +6,8 @@ results instead of restarting.
 **Amended:** 2026-11-10 (Amendment 1, after Codex's independent review, before any
 service was added and before epoch 2 was evaluated). It tightens decisions 3 and 5 and
 relaxes nothing. See the end of this ADR.
+**Amended:** 2026-11-14 (Amendment 2, owner-approved, before any later version was declared): the identity
+records the telemetry pipeline. Tightens decision 1a; `system-v1`…`v3` unchanged.
 **Related:** ADR-008, ADR-015, ADR-016.
 
 ## Context
@@ -130,3 +132,20 @@ carry the declared and computed identity of 1a, and is pinned. The guard
 `tests/test_service_registry_single_source.py` checks every contract against its own
 version, so a valid v1 contract keeps passing while any forgotten current enumeration
 fails.
+
+## Amendment 2 — 2026-11-14 (telemetry pipeline)
+
+Lane B's `5f29a16` changed metric delivery (SDK export 2 s → 1 s, no Collector batch for metrics) to pass
+source parity. The SDK change moved `shared_build_inputs`, but the Collector and Prometheus configuration were
+not part of the identity, so a change to either alone would not have been visible.
+
+- `scripts/system_identity.py` records `telemetry_pipeline`: the git objects of `docker-compose.yml` (the
+  capture's Compose file: Collector/Prometheus images, commands, mounts), `observability/otel-collector-config.yaml`,
+  `observability/prometheus.yml` and the `observability/rules` tree at the capture commit. A new version must
+  record exactly these inputs.
+- Every version declared after `system-v3` must record it, and a service can carry forward only if it is equal.
+  `system-v1`…`v3` were frozen without it and are neither edited nor recomputed with it.
+- `python -m scripts.system_identity --commit HEAD --compare <version>` lists which identity blocks differ
+  from a declared version, so either lane can check before changing the measurement path.
+- Consequence: the current `main` differs from `system-v3` (`services/common`, `src`). The `ald` result stays
+  valid for `system-v3`; the next evaluated epoch declares a new version.

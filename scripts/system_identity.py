@@ -6,6 +6,7 @@ apart from captured data: configs, the transitive in-package import closure of t
 evaluator (as git blob ids), routes, topology, service code and the workload recipe.
 
     python -m scripts.system_identity --commit <sha>
+    python -m scripts.system_identity --commit HEAD --compare system-v3   # what differs from a declared version
 """
 from __future__ import annotations
 
@@ -26,6 +27,13 @@ WORKLOAD_FIELDS = ('kinds', 'entry_rps', 'maximum_delay_ms', 'healthy_active_sec
                    'abrupt_fault_mode_by_ordinal_parity', 'seed_base', 'minimum_verified_healthy_prefault_minutes',
                    'minimum_groups', 'policy_sha256')
 SHARED_BUILD_INPUTS = ('services/common', 'src', 'contracts', 'docker/Dockerfile.service', 'pyproject.toml')
+# Collector and scrape configuration decide which minute a request lands in (5f29a16 moved metrics from a
+# 2 s SDK export plus a 2 s Collector batch to 1 s without batching). Versions declared before this block
+# existed (system-v1..v3) are frozen without it; every later version records it.
+# docker-compose.yml is the capture's COMPOSE_FILE (local_corpus): it selects the Collector/Prometheus images,
+# commands and mounts; observability/rules is the tree Prometheus loads.
+TELEMETRY_PIPELINE = ('docker-compose.yml', 'observability/otel-collector-config.yaml', 'observability/prometheus.yml',
+                      'observability/rules')
 
 
 def stable_id(value) -> str:
@@ -132,6 +140,7 @@ def compute(sha, root=ROOT):
             'topology_sha256': hashlib.sha256(topology_bytes).hexdigest(),
         },
         'shared_build_inputs': {path: source.object_id(path) for path in SHARED_BUILD_INPUTS},
+        'telemetry_pipeline': {path: source.object_id(path) for path in TELEMETRY_PIPELINE if source.exists(path)},
         'services': sorted(routes),
         'service_identity': {
             service: {
@@ -146,10 +155,47 @@ def compute(sha, root=ROOT):
     }
 
 
+def differences(computed, declared):
+    """Blocks of a commit's identity that differ from a declared version's recorded identity.
+
+    `capture_identity.source_commit` always differs and is ignored. Versions frozen before the telemetry
+    pipeline was recorded have no such block, so it is not compared for them.
+    """
+    result = {}
+    for block, value in computed.items():
+        if block == 'telemetry_pipeline' and block not in declared:
+            continue
+        recorded = declared.get(block)
+        if block == 'capture_identity':
+            value = {k: v for k, v in value.items() if k != 'source_commit'}
+            recorded = {k: v for k, v in (recorded or {}).items() if k != 'source_commit'}
+        if isinstance(value, dict) and isinstance(recorded, dict):
+            changed = sorted(k for k in set(value) | set(recorded) if value.get(k) != recorded.get(k))
+            if changed:
+                result[block] = changed
+        elif value != recorded:
+            result[block] = True
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--commit', required=True)
-    print(json.dumps(compute(parser.parse_args().commit), indent=2, sort_keys=True))
+    parser.add_argument('--compare', help='Declared system version to compare against, e.g. system-v3')
+    args = parser.parse_args()
+    sha = subprocess.run(['git', 'rev-parse', args.commit], cwd=ROOT, check=True, capture_output=True,
+                         text=True).stdout.strip()
+    computed = compute(sha)
+    if not args.compare:
+        print(json.dumps(computed, indent=2, sort_keys=True))
+        return
+    registry = json.loads((ROOT / 'configs/system_versions.json').read_text())
+    changed = differences(computed, registry['versions'][args.compare]['computed'])
+    declared = registry['versions'][args.compare]['computed']
+    result = {'commit': sha, 'compared_with': args.compare, 'same_system': not changed, 'differs': changed}
+    if 'telemetry_pipeline' not in declared:
+        result['not_comparable'] = ['telemetry_pipeline (not recorded for ' + args.compare + ')']
+    print(json.dumps(result, indent=2, sort_keys=True))
 
 
 if __name__ == '__main__':
