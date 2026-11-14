@@ -425,3 +425,37 @@ ghi nguồn bằng chứng và từng lần S4 bị lỗi/ngắt. Minimum của 
 capture mới: mỗi pressure stage acquire ít nhất một lock, đồng thời quan sát
 waiter ngoài injector. Run thất bại không được mang nhãn `rds/db-pressure` hoặc
 vào dataset. Các check phần mềm và development không tự nghiệm thu gate.
+
+## 11. Portable API packaging — 2026-11-14
+
+B bổ sung [installed control-plane image](../runbooks/CONTROL_PLANE_IMAGE.md)
+và renderer offline cho API/UI. Image có package wheel, thư viện ML thật, embedded
+contracts, hai worker CLI và config; mặc định production, không model/credential,
+không tự chạy worker/action. Build context dùng allowlist, loại cả model handoff
+dưới `docs/`.
+
+- 56 tests packaging/business-manifest PASS; contract validation: 34 schemas,
+  16 samples, 3 configs PASS.
+- Image đã build và chạy hai ca HTTP production/test trong container network
+  `none`, UID 10001, root filesystem chỉ đọc. UI/assets và ML imports PASS;
+  model/store/auth unavailable giữ fail-closed, operator write bị chặn. Local
+  probe mount đúng một file test chỉ đọc; CI checker dùng Docker exec, không
+  mount host. Đây là software smoke, không phải live telemetry hay model approval.
+- Renderer: 5 resources với digest pin, OIDC public config, control DB Secret
+  reference và model PVC chỉ đọc khi chọn đủ cặp. Kubeconform strict 1.34.0:
+  5 valid, 0 invalid/errors/skips, dùng schema nguồn chính thức đã tải về.
+- CI host-process job build image theo Git SHA và chạy lại hai ca HTTP/CLI;
+  kết quả đúng head được ghi trong PR/Actions, không suy từ CI cũ.
+- CI lượt đầu: image smoke PASS nhưng ghi proof trước registration vào runtime
+  root khiến launcher/cleanup từ chối đúng guard. Đã tách output/artifact khỏi
+  runtime, giữ nguyên guard; regression tái hiện fail trước fix rồi pass. Suite
+  packaging/manifests/launcher sau sửa: 69 tests PASS.
+- Review trước merge phát hiện ConfigMap `envFrom` đổi nhưng pod template không
+  đổi. API và business renderer nay gắn SHA-256 cấu hình public vào template:
+  đổi OIDC/model release cùng PVC hoặc environment/OTLP sẽ tạo rollout khi apply;
+  input giống nhau giữ template ổn định. Regression rotation fail trước fix và
+  pass sau fix. Secret bytes không được đọc/hash; rotation cùng Secret name cần
+  rollout explicit hoặc chọn Secret name mới.
+- **Chưa có cloud worker manifest.** Loopback/source ownership/checkpoint guards
+  giữ nguyên; cần adapter remote/source policy và H3 trước triển khai. Provider,
+  observability bindings và AWS apply vẫn thuộc giai đoạn được cấp quyền riêng.

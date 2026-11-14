@@ -7,6 +7,8 @@ OTLP collector must be provisioned separately. This is not source-parity evidenc
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
@@ -49,6 +51,9 @@ def render(image: str, *, environment: str, otlp_endpoint: str, commerce_secret:
     _label(commerce_secret, 'commerce secret reference')
     endpoint = _endpoint(otlp_endpoint)
     labels = {'app.kubernetes.io/part-of': 'sentinelops'}
+    data = {'DEPLOYMENT_ENVIRONMENT': environment, 'OTEL_EXPORTER_OTLP_ENDPOINT': endpoint,
+            'ENABLE_FAULT_INJECTION': 'false'}
+    config_sha256 = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
     def metadata(name):
         return {'name': name, 'namespace': NAMESPACE, 'labels': dict(labels)}
@@ -58,8 +63,7 @@ def render(image: str, *, environment: str, otlp_endpoint: str, commerce_secret:
         {'apiVersion': 'v1', 'kind': 'ServiceAccount', 'metadata': metadata(ACCOUNT),
          'automountServiceAccountToken': False},
         {'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': metadata(CONFIG),
-         'data': {'DEPLOYMENT_ENVIRONMENT': environment, 'OTEL_EXPORTER_OTLP_ENDPOINT': endpoint,
-                  'ENABLE_FAULT_INJECTION': 'false'}},
+         'data': data},
     ]
     for name in SERVICES:
         short = name.removesuffix('-service')
@@ -93,7 +97,8 @@ def render(image: str, *, environment: str, otlp_endpoint: str, commerce_secret:
         documents.append({'apiVersion': 'apps/v1', 'kind': 'Deployment', 'metadata': metadata(name),
             'spec': {'replicas': 1, 'selector': {'matchLabels': {'app': name}},
                      'strategy': {'type': 'RollingUpdate', 'rollingUpdate': {'maxSurge': 0, 'maxUnavailable': 1}},
-                     'template': {'metadata': {'labels': {**labels, 'app': name}}, 'spec': {
+                     'template': {'metadata': {'labels': {**labels, 'app': name}, 'annotations': {
+                         'sentinelops.io/config-sha256': config_sha256}}, 'spec': {
                          'serviceAccountName': ACCOUNT, 'automountServiceAccountToken': False,
                          'securityContext': {'runAsNonRoot': True, 'runAsUser': 10001,
                                              'seccompProfile': {'type': 'RuntimeDefault'}},
