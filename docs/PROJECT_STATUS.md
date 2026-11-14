@@ -1,6 +1,6 @@
 # SentinelOps — trạng thái triển khai
 
-Cập nhật: **2026-11-14**. Trang này tóm tắt code và khoảng trống sản phẩm.
+Cập nhật: **2026-11-15** (giờ Việt Nam). Trang này tóm tắt code và khoảng trống sản phẩm.
 Service có đang chạy/ready hay không phải kiểm tra trên môi trường hiện tại;
 report hoặc CI cũ không thay kết quả đó.
 
@@ -22,11 +22,26 @@ Alibaba v2022; ADR-014/contract v2 và candidate local giữ lịch sử theo D-
 Local HTTP và RCAEval chỉ evaluation, không fitting/tuning.
 
 B đã thêm [portable API image và manifest offline](runbooks/CONTROL_PLANE_IMAGE.md):
-package wheel/ML dependencies, hai worker CLI, UID non-root/read-only filesystem,
-mặc định không model/credential. Hai ca HTTP cô lập production/test và 56 tests
-packaging/manifests PASS; API renderer có 5 resources, kubeconform strict 1.34
-5/5 hợp lệ. Đây chưa phải registry publication hoặc deployment AWS. Cloud worker
-adapters/source policy và H3 vẫn thiếu; không nới guard local để phát manifest worker.
+wheel/ML dependencies, hai worker CLI, non-root/read-only, mặc định không
+model/credential. PR #52: **MERGED** vào `8ed9ff6`; head `a77332c` có CI **14/14 PASS**
+(run `43616362464`). Head rollout fix `333517f` có **123 focused tests PASS**,
+API + business manifests **14/14 valid** với fixture references; CI `43618472435`:
+**14/14 PASS, 0 skipped jobs**. Checksum public config làm thay đổi pod template khi cấu hình
+đổi; Secret bytes vẫn cần rollout explicit. Optional action-reader Secret binding
+`9b5f71b` đã triển khai (**87 focused tests PASS**, **5 valid manifests**); reader
+vẫn phải có SELECT-only và optional migrations đúng runbook.
+
+ECR PR #49 đã được B review/sửa guard và **MERGED** vào `0364251`; head `fd7a010`,
+CI `43613141372` attempt 2 **14/14 PASS**, node pull IAM giữ baseline. Đây vẫn
+là packaging/IaC offline, chưa registry publication hoặc deployment AWS. Cloud
+worker adapters/source policy, observability deployment bindings và H3 còn thiếu;
+không nới guard local để phát manifest worker.
+
+Follow-up host: launcher quan sát API/health/incidents `inactive`, giữ release
+`5c520ae6…` và stream `b95058b4…`. Guarded restart API bị approval bridge từ chối;
+**chưa khôi phục runtime sau reboot**. CI image/host-process trên runner không
+thay bằng chứng host đang hoạt động. Xem [báo cáo B cập nhật](reports/LANE_B_DELIVERY_REPORT_2026-11-14.md).
+
 [ADR-018](adr/ADR-018-proposed-monotone-latency-detector.md) bị owner từ chối 2026-11-12:
 detection phải do model đã train quyết định, không dùng MAD/slope; epoch `alc` dừng khi chưa chấm và đã xoá.
 
@@ -108,7 +123,7 @@ MTTD vẫn chưa đo. Q-09 của release mới cần bộ trial riêng; 9/10 cũ
 ## Việc tiếp theo
 
 - **A:** đã train lại theo ADR-019 (`de38fc6b`); lớp 2 `ald` (2026-11-14) cho kết quả phát triển S1/S3 tốt, chưa nghiệm thu Q-04…Q-07 (thiếu S2/S4, MTTD live, holdout); full G4/G8 chưa nghiệm thu.
-- **B:** đã tích hợp local bundle `de38fc6b` theo D-27: parity P1–P6 PASS, host/model release mới, stream epoch riêng, baseline và live-check PASS với model signal được tái tính từ accepted history ([báo cáo](reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md)). Giao review Alibaba/Q-10 và hồ sơ G6 cho owner; provider identity, EKS policy/adapter và AWS chỉ triển khai khi đủ quyền/phạm vi.
+- **B:** đã tích hợp local bundle `de38fc6b` theo D-27: parity P1–P6 PASS, host/model release mới, stream epoch riêng, baseline và live-check PASS với model signal được tái tính từ accepted history ([báo cáo](reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md)). PR #52 đã merge; action-reader binding và CI theo head được giao qua PR kế tiếp. Resume host qua launcher khi execution được phép. Q-09/G6 của release mới cần trial/known-good riêng; provider identity, EKS policy/adapter và AWS chỉ triển khai khi đủ quyền/phạm vi.
 
 [Lane B checkpoint](delivery/LANE_B_CHECKPOINT.md) chốt mức bằng chứng từng
 capability (runtime-verified / fixture-tested / code-only / blocked), commit và CI
