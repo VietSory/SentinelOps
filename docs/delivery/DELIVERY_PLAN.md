@@ -17,8 +17,9 @@ chưa có model được chấp nhận, UI dùng được và môi trường tri
 hành là Alibaba `de38fc6b` theo ADR-019, G3 có điều kiện D-27; parity/release/live
 integration local đã PASS. Lớp 2 `ald` đạt các chỉ tiêu phát triển S1/S3 nhưng
 chưa nghiệm thu đầy đủ Q-04…Q-07. ADR-018 đã bị từ chối. Sau merge PR #47,
-main/CI, Q-10, UI/explanation và S2/H4 với model mới đã kiểm xong. S4 đang sửa
-và xác minh theo review PR #48; chưa có capture hoàn tất được chấp nhận.
+main/CI, Q-10, UI/explanation và S2/H4 với model mới đã kiểm xong. S4 sau review
+PR #48 đã capture hoàn tất ở `3c36e2e`, source review PASS; đây vẫn
+là development, chưa nghiệm thu RCA/Q-08 hay independent detector MTTD.
 Q-09 9/10 cũ thuộc `badf9da0`, không chuyển sang release mới; G6 chưa nghiệm thu.
 Việc còn lại ở [checkpoint mục 10](LANE_B_CHECKPOINT.md#10-local-follow-up-sau-merge--2026-11-14).
 

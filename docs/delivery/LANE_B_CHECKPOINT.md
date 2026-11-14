@@ -416,7 +416,7 @@ giữ nguyên cho rollback. G6–G8 và phạm vi Q-04…Q-07 còn lại vẫn c
 | L3 UI/explanation | PASS: incident model `de38fc6b` revision 4, desktop/mobile, 19 evidence/12 claims, IER không đổi |
 | L4 Native S2/H4 | PASS: RCA_READY r2, Payment score 0,797891, coverage 0,80, change bound và dispatch authority; chưa dispatch rollback |
 | L5 Checklist / phân loại bằng chứng | Đã cập nhật checklist này và báo cáo theo đúng model release |
-| L6 S4 v2 | PR #48: đã nhận patch fail-closed của A và thêm runner failure-path tests. Chưa có capture hoàn tất sau bản sửa; không đưa lượt cũ vào RCA/Q-08 |
+| L6 S4 v2 | Capture sạch `3c36e2e` hoàn tất, mỗi pressure stage acquire lock; source review PASS. 1.630 tests và CI 14/14 PASS. RCA abstain, RDS đứng thứ ba; chưa chứng minh RCA đúng. Clock SLO/IER tách khỏi IF alert; chưa nghiệm thu RCA/Q-08 |
 | L7 Q-09 `de38fc6b` | Cần bộ trial riêng và operator duyệt known-good cụ thể trước mỗi thay đổi xấu; 9/10 cũ thuộc `badf9da0` |
 | Gate | Full G4/G5/G6, independent detector MTTD và G8 vẫn mở; AWS vẫn để sau local |
 

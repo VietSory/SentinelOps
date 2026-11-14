@@ -168,7 +168,7 @@ automatic remediation was activated.
 | L3 Native UI / explanation | Desktop/mobile PASS on the new model's incident revision 4, 19 evidence/12 deterministic claims, exact references, unchanged pinned IER, no page errors |
 | L4 Native S2 / H4 | PASS: RCA_READY revision 2, Payment score 0.797891, coverage 0.80, deployment change bound and dispatch authority true. No known-good approval or rollback dispatched |
 | L5 Checklist | Current model-specific checklist updated in delivery plan, checkpoint and project status |
-| L6 S4 | Collector repair in [PR #48](https://github.com/VietSory/SentinelOps/pull/48); no completed verified capture yet |
+| L6 S4 | Capture completed at `3c36e2e`; descriptive source review PASS; see below for clocks and limits |
 | L7 Native Q-09 | New `de38fc6b` campaign still required; operator must review and approve each concrete known-good target before the bad change |
 
 The old **9/10 recovered and 1/1 failed-verify** trials belong to `badf9da0` and
@@ -209,3 +209,66 @@ Local evidence:
   [recovered control data](../../artifacts/lane-b/local-followup-20261114/s4-attempt-02/s4-live-database.json),
   [third preflight rejection](../../artifacts/lane-b/local-followup-20261114/s4-attempt-03/operator-process.log),
   [native waiter verification](../../artifacts/lane-b/local-followup-20261114/s4-native-review.json).
+
+
+### Verified S4 capture after review
+
+The fresh attempt 04 completed at clean source `3c36e2e`. Its predeclared
+minimum was **one acquired lock in every pressure stage**, with injector waits
+excluded from native snapshots. Source review result: **PASS**.
+[CI 43584143300](https://github.com/VietSory/SentinelOps/actions/runs/43584143300) passed **14/14 jobs** for this source; the local
+full suite passed **1,630 tests**, including 88 focused checks.
+
+The frozen development schedule used seed 42, 3 requests/s per entry, 1,800 s
+healthy warmup, 180 s of 350 ms holds, 300 s of 1,200 ms holds, 0.4 s gaps and
+180 s recovery. Commerce/control databases were separately owned and bound to
+loopback ports 25432/25434. Earlier attempts remain retained above.
+
+| Pressure stage | Attempts | Acquired | Acquisition timeouts |
+| --- | --- | --- | --- |
+| degrading | 239 | 239 | 0 |
+| fault | 187 | 187 | 0 |
+
+Native lock snapshots: **2352**, including
+**239** with waiters outside the injector. Trace
+snapshots: **123**. Server-log coverage and SLO onsets were
+recomputed independently; bundle/features/thresholds remained frozen.
+
+| Service | Available post-warmup model windows | IF / MAD flagged windows | SLO decision delay (s) | IER availability delay (s) |
+| --- | --- | --- | --- | --- |
+| checkout-service | 11/11 | 9 / 9 | 151.068 | 271.815 |
+| payment-service | 11/11 | 10 / 11 | 210.381 | 271.815 |
+| inventory-service | 11/11 | 0 / 0 | unavailable | unavailable |
+
+Counts describe windows, not event precision/recall. Actual health evaluated_at
+and original IER recorded_at clocks are separate from receipt-bounded replay.
+Missing events remain unavailable, not zero. The review reproduced
+**3** native model signals and retained
+**4** IER revisions; full onsets, missing/late
+events and model-support availability clocks are in the JSON.
+
+**Independent IF alert-emission MTTD remains unmeasured.** This is one correlated
+S4 development run, not a population p90, full RCA/Q-08 acceptance, an `ald`
+rerun or holdout evaluation. No fitting or threshold adjustment occurred.
+
+The native RCA result **abstained** for `insufficient-coverage`,
+`insufficient-margin` and `insufficient-score`. Its ranking was Checkout
+0.401651, Payment 0.398972, **RDS third at 0.267403**, Inventory 0.230675;
+the observed injected root was RDS. The IER progressed OPEN → RCA_READY →
+ESCALATED → CLOSED, with no action dispatched. This capture does **not**
+demonstrate successful S4 root-cause identification. The
+[raw RCA result](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-live-journal/manifests/3800cfa1c1ae0c74dd450da3f50b50d55e8df8b3a2685f3a9034311e48224fd0.json)
+shows RDS anomaly support from connection pressure only (0.072165), despite
+trace relevance 0.997446. Its native lock-wait evidence is retained by the
+experiment collector but is not a live RCA scoring input. Integrating that
+source requires a separate evidence/contract review and a predeclared evaluation;
+this run is preserved without tuning weights or thresholds to its known root.
+
+- [Frozen capture protocol](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-plan.json),
+  [live clock protocol](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-live-plan-02.json).
+- [Capture manifest](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-runs/run-9b695be1b8ab4aa3b1cc050b2f728507/run.json),
+  [source/clock verification](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/verification.json),
+  [independent SLO](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/independent-slo.json),
+  [replay windows](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/predictions.json).
+- [Software review](../../artifacts/lane-b/local-followup-20261114/s4-review-verification.json),
+  [source CI](../../artifacts/lane-b/local-followup-20261114/pr48-review-ci.json).

@@ -92,9 +92,10 @@ lớp 2 bên dưới.
 
 **Local follow-up sau merge PR #47 (2026-11-14):** main `6f6e587` có CI 14/14
 PASS; Q-10 111 tests/22 PostgreSQL checks PASS; UI/explanation trên incident
-`de38fc6b` thật và native S2/H4 đã kiểm xong. PR #48 đang hoàn tất collector S4
-theo review fail-closed của A; chưa có capture hoàn tất sau sửa, không tính
-lượt cũ vào RCA/Q-08. Q-09 của release mới cần bộ trial riêng; 9/10 cũ thuộc
+`de38fc6b` thật và native S2/H4 đã kiểm xong. PR #48 đã có capture S4
+sau review fail-closed ở `3c36e2e`, source review PASS; RCA abstain, RDS đứng
+thứ ba nên chưa chứng minh RCA đúng hoặc nghiệm thu Q-08. Independent detector
+MTTD vẫn chưa đo. Q-09 của release mới cần bộ trial riêng; 9/10 cũ thuộc
 `badf9da0`. Xem [checklist local hiện hành](delivery/LANE_B_CHECKPOINT.md#10-local-follow-up-sau-merge--2026-11-14).
 
 ## Việc tiếp theo
