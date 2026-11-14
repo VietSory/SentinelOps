@@ -264,3 +264,22 @@ def test_image_registry_resource_policy_is_rejected():
     blocks = {**BLOCKS, 'aws_ecr_repository_policy.images': {'body': 'policy = "{}"'}}
     with pytest.raises(ValueError, match='resource policy'):
         assert_private_by_default(blocks)
+
+
+@pytest.mark.parametrize(('old', 'new'), [
+    ('for_each = aws_ecr_repository.images', 'for_each = {}'),
+    ('repository = each.value.name', 'repository = "unreviewed-repository"'),
+    ('countType = "sinceImagePushed"', 'countType = "imageCountMoreThan"'),
+    ('countUnit = "days"', 'countUnit = "hours"'),
+    ('action = { type = "expire" }', 'action = { type = "archive" }'),
+])
+def test_lifecycle_binding_and_fourteen_day_expiry_are_enforced(old, new):
+    with pytest.raises(ValueError, match='untagged'):
+        assert_private_by_default(mutate('aws_ecr_lifecycle_policy.images', old, new))
+
+
+@pytest.mark.parametrize('kind', ['aws_ecr_repository', 'aws_ecr_public_repository', 'aws_ecr_lifecycle_policy'])
+def test_extra_registry_resources_cannot_escape_the_reviewed_surface(kind):
+    blocks = {**BLOCKS, kind + '.unreviewed': {'body': 'name = "unreviewed"'}}
+    with pytest.raises(ValueError, match='declared'):
+        assert_private_by_default(blocks)

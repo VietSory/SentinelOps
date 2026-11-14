@@ -144,6 +144,15 @@ def assert_private_by_default(blocks: dict[str, dict]) -> list[str]:
         raise ValueError('the artifact bucket must be versioned so a release stays reproducible')
     checks.append('artifact bucket versioned')
 
+    # Checking the primary block alone would allow an extra, unguarded registry
+    # (including a public registry) or an unrelated expiry policy beside it.
+    for prefix, expected in (
+        ('aws_ecr_repository.', {'aws_ecr_repository.images'}),
+        ('aws_ecr_public_repository.', set()),
+        ('aws_ecr_lifecycle_policy.', {'aws_ecr_lifecycle_policy.images'}),
+    ):
+        if {key for key in blocks if key.startswith(prefix)} != expected:
+            raise ValueError('the image registry must contain only the declared private repositories and lifecycle policies')
     registry = _assignments(blocks['aws_ecr_repository.images']['body'])
     for name, value, message in (
         ('for_each', 'local.image_repositories', 'the image registry must create exactly the declared repositories'),
@@ -157,8 +166,14 @@ def assert_private_by_default(blocks: dict[str, dict]) -> list[str]:
     if _locals().get('image_repositories') != ['toset(["application", "control-plane"])']:
         raise ValueError('the image registry must create exactly the declared repositories')
     lifecycle = _assignments(blocks['aws_ecr_lifecycle_policy.images']['body'])
-    if lifecycle.get('tagStatus') != ['"untagged"'] or lifecycle.get('countNumber') != ['14']:
-        raise ValueError('only untagged layers may expire, after 14 days')
+    for name, value in (
+        ('for_each', 'aws_ecr_repository.images'), ('repository', 'each.value.name'),
+        ('tagStatus', '"untagged"'), ('countType', '"sinceImagePushed"'),
+        ('countUnit', '"days"'), ('countNumber', '14'),
+        ('action', '{ type = "expire" }'),
+    ):
+        if lifecycle.get(name) != [value]:
+            raise ValueError('only untagged layers in the declared repositories may expire, after 14 days')
     if any(key.startswith('aws_ecr_repository_policy.') or key.startswith('aws_ecr_registry_policy.') for key in blocks):
         raise ValueError('the image registry must not carry a resource policy that could grant outside access')
     checks.append('image registry: two declared repositories, immutable, scanned, environment KMS key, untagged-only 14-day expiry, no resource policy')

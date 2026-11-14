@@ -44,6 +44,15 @@ mutating a copy of the real configuration, so a guard cannot silently stop
 guarding. These are configuration guarantees about a *description*. They are not
 evidence that a working environment exists.
 
+The ECR guard checks the exact private-repository and lifecycle resource set.
+Expiry must bind to each declared repository and retain the complete
+`sinceImagePushed` / `days` / `14` / `expire` rule for untagged images. Adding an
+unreviewed private/public registry or an unrelated lifecycle policy is rejected;
+checking the two expected repositories alone would leave those additions unguarded.
+This review changes neither node image-pull IAM nor workload authority. Any
+future pull-policy restriction needs the target's complete image inventory and
+bootstrap verification during the separately authorized deployment phase.
+
 ## Permission model
 
 One AWS environment, permissions per workload, no shared admin role
