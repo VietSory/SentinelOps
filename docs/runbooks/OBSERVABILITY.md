@@ -347,3 +347,10 @@ P1–P6, the 5 s scrape/60 s windows, count tolerance 5% and mean tolerance
 10% stay unchanged. This is a healthy-source check at the recorded load,
 not a guarantee of accuracy for arbitrary low-rate or bursty traffic.
 Retain earlier FAIL reports; never select buckets or widen bounds to pass.
+
+Completion logs are followed from each observed pod before traffic starts
+(`server_log_collection=pod-follow-before-traffic/v1`). Reading only the final
+`kubectl logs` snapshot can lose earlier minutes when the kubelet rotates its
+log file ([Kubernetes logging architecture](https://kubernetes.io/docs/concepts/cluster-administration/logging/)).
+Follower exit or pod replacement fails the run. Temporary raw logs are private
+and removed on exit; only the allow-listed independent ledger is retained.

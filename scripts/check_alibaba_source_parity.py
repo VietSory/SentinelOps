@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -65,6 +66,7 @@ MEASUREMENT_PROTOCOL = {
     'faults_enabled': False,
     'request_ledger': 'requests.jsonl',
     'server_completion_ledger': 'server-completions.jsonl',
+    'server_log_collection': 'pod-follow-before-traffic/v1',
 }
 
 
@@ -102,7 +104,41 @@ async def drive(client, targets, stop):
     return rows
 
 
-def exact_logs(sandbox, inventory, rows, ends):
+@contextmanager
+def completion_log_streams(sandbox, inventory, root):
+    """Follow each pinned pod before traffic, so kubelet rotation cannot truncate history.
+
+    Raw output is private and temporary; only the allow-listed ledger survives.
+    A failed follower aborts certification rather than falling back to latest logs.
+    """
+    from scripts.check_rollback_kubernetes import private_file
+    paths, children = {}, []
+    try:
+        for service in SERVICES:
+            path = root / (service + '-completion-stream.tmp')
+            private_file(path, b'')
+            paths[service] = path
+            with path.open('ab') as output:
+                children.append(subprocess.Popen([
+                    'kubectl', '--kubeconfig', str(sandbox.kubeconfig), '--context', 'kind-' + sandbox.name,
+                    '-n', NAMESPACE, 'logs', 'pod/' + inventory[service]['pod_name'],
+                    '--follow', '--tail=-1', '--pod-running-timeout=30s'],
+                    stdout=output, stderr=subprocess.DEVNULL))
+        yield paths, children
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=10)
+        for path in paths.values():
+            path.unlink(missing_ok=True)
+
+
+def exact_logs(log_paths, inventory, rows, ends):
     """Server completions in the run, each marked failed when it is not a clean 200 resolved to
     its client, pod and route; client-side failures are added as failed records at their time."""
     start_ms, stop_ms = int((ends[0] - timedelta(minutes=1)).timestamp() * 1000), int(ends[-1].timestamp() * 1000)
@@ -115,7 +151,7 @@ def exact_logs(sandbox, inventory, rows, ends):
                              'reason': 'client-request-failed'})
     for service in SERVICES:
         method, route = BUSINESS_ROUTES[service]
-        for line in sandbox.kubectl('-n', NAMESPACE, 'logs', 'deployment/' + service).decode().splitlines():
+        for line in log_paths[service].read_text().splitlines():
             try:
                 item = json.loads(line)
             except ValueError:
@@ -306,11 +342,14 @@ async def measure(sandbox, root, bundle_parts, policy):
             first_end = (int(utcnow().timestamp()) // 60 + 2) * 60
             count = minute_count(bundle_parts[0]['provenance']['config'])
             ends = [datetime.fromtimestamp(first_end + m * 60, timezone.utc) for m in range(count)]
-            captures, rows = await asyncio.gather(capture_buckets(client, source, ends, inventory),
-                                                  drive(client, targets, ends[-1] + timedelta(seconds=39)))
-            stable = inventory == await asyncio.to_thread(sandbox.inventory)
-            logs = await asyncio.to_thread(exact_logs, sandbox, inventory, rows, ends)
-            persist_measurements(root, rows, logs)
+            with completion_log_streams(sandbox, inventory, root) as (log_paths, followers):
+                captures, rows = await asyncio.gather(capture_buckets(client, source, ends, inventory),
+                                                      drive(client, targets, ends[-1] + timedelta(seconds=39)))
+                stable = inventory == await asyncio.to_thread(sandbox.inventory)
+                logs = await asyncio.to_thread(exact_logs, log_paths, inventory, rows, ends)
+                persist_measurements(root, rows, logs)
+                if any(child.poll() is not None for child in followers):
+                    raise RuntimeError('server completion log follower exited during measurement')
             checks, failures, normalization_ref = evaluate(root, bundle_parts, captures, logs, ends, policy)
             if not stable:
                 # A pod restart during sampling fails the run with evidence instead of aborting it.

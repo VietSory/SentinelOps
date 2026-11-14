@@ -584,3 +584,66 @@ def test_parity_retains_independent_server_truth_without_credentials_or_free_tex
     assert 'password' not in ledger[0]
     assert (tmp_path / 'server-completions.jsonl').stat().st_mode & 0o077 == 0
     assert json.loads((tmp_path / 'requests.jsonl').read_text()) == requests[0]
+
+
+@pytest.mark.parametrize('interrupt', [False, True])
+def test_completion_followers_pin_pods_and_clean_up_on_interrupt(tmp_path, monkeypatch, interrupt):
+    import importlib
+    from types import SimpleNamespace
+    script = importlib.import_module('scripts.check_alibaba_source_parity')
+    children = []
+    class Child:
+        def __init__(self, args, stdout, stderr):
+            self.args, self.stopped = args, False
+            assert '--follow' in args and '--tail=-1' in args
+            assert 'deployment/' not in ' '.join(args)
+            assert stdout.fileno() >= 0
+            children.append(self)
+        def poll(self):
+            return 0 if self.stopped else None
+        def terminate(self):
+            self.stopped = True
+        def wait(self, timeout):
+            return 0
+    monkeypatch.setattr(script.subprocess, 'Popen', Child)
+    sandbox = SimpleNamespace(kubeconfig=tmp_path / 'private-config', name='owned')
+    inventory = {s: {'pod_name': s + '-pinned'} for s in script.SERVICES}
+    try:
+        with script.completion_log_streams(sandbox, inventory, tmp_path) as (paths, followers):
+            assert len(followers) == 3
+            for service, path in paths.items():
+                assert path.stat().st_mode & 0o077 == 0
+                assert any('pod/' + service + '-pinned' in c.args for c in children)
+            if interrupt:
+                raise KeyboardInterrupt
+    except KeyboardInterrupt:
+        assert interrupt
+    assert all(c.stopped for c in children)
+    assert not list(tmp_path.glob('*completion-stream.tmp'))
+
+
+def test_completion_ledger_retains_early_minutes_after_log_rotation(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from scripts.check_alibaba_source_parity import exact_logs, SERVICES, BUSINESS_ROUTES
+    end = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+    ends = [end - timedelta(minutes=1), end]
+    inventory, paths, clients = {}, {}, []
+    for service in SERVICES:
+        inventory[service] = {'pod_uid': service + '-uid'}
+        paths[service] = tmp_path / service
+        records = []
+        for index, at in enumerate(ends):
+            correlation = service + str(index)
+            clients.append({'correlation_id': correlation, 'trace_id': correlation, 'failed': False,
+                            'request_entry_service': service, 'completed_at': at.isoformat()})
+            records.append({'event': 'request_completed', 'method': BUSINESS_ROUTES[service][0],
+                'route': BUSINESS_ROUTES[service][1], 'timestamp_unix_ms': int(at.timestamp() * 1000),
+                'duration_ms': 12.5, 'status_code': 200, 'k8s.pod.uid': service + '-uid',
+                'correlation_id': correlation, 'trace_id': correlation})
+        # Follower output includes both files even when kubectl's final snapshot would only have the second.
+        paths[service].write_text('\n'.join(json.dumps(r) for r in records))
+    logs = exact_logs(paths, inventory, clients, ends)
+    assert len(logs) == 6 and not any(r['failed'] for r in logs)
+    assert all(sum(r['service'] == s for r in logs) == 2 for s in SERVICES)
+    clients[0]['trace_id'] = 'mismatched'
+    assert sum(r['failed'] for r in exact_logs(paths, inventory, clients, ends)) == 1
