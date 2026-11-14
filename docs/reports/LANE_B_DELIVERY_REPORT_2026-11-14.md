@@ -115,7 +115,7 @@ A/B review evidence contract và protocol evaluation riêng. Xem [báo cáo S4](
 | --- | --- |
 | IaC network/EKS/control PostgreSQL/S3/IAM/observability | Có baseline; Terraform validate/fmt và **13 guards** đã kiểm. **Chưa apply**, không chứng minh môi trường AWS đang tồn tại |
 | Business manifests | Renderer **9 resources** cho ba service: digest pin, Secret reference, OTLP wiring, probes, pod hardening. Kubeconform strict **Kubernetes 1.34: 9 valid/0 invalid/0 errors/0 skips**; image kiểm là fixture, chưa kiểm registry/deployment đích |
-| ECR | [PR #49](https://github.com/VietSory/SentinelOps/pull/49), head `f709ac5`: private immutable repositories, CI 14/14 PASS; **còn OPEN**, chưa có trong baseline main của báo cáo, không tính là đã triển khai |
+| ECR | [PR #49](https://github.com/VietSory/SentinelOps/pull/49), head `f709ac5`: **A gửi đề xuất trong vùng infra của B để B review**, private immutable repositories, CI 14/14 PASS; **còn OPEN**, chưa có trong baseline main. Không tính là B đã hoàn thành triển khai |
 | API/workers/observability deployment bindings | Còn việc triển khai cho môi trường đích; host release local không thay thế portable deployment |
 | Provider identity / EKS remediation adapter-policy | Provider/app client thật và adapter/policy EKS chưa kiểm trên deployment; policy local không tự cấp quyền EKS |
 | H3, release AWS, chi phí/teardown | Chưa có AWS source capture/parity; region/account/quota/budget/quyền apply cần được chốt. **B4 chưa hoàn tất** |
@@ -172,7 +172,7 @@ Không có skipped job không đồng nghĩa mọi test trong từng dependency 
 | **1 — Vận hành local** | Resume API/health/incidents bằng đúng pinned session/release; kiểm READY đúng stream và COMMITTED trước incidents; kiểm protected API, checkpoint freshness và UI | B/operator; cần service-manager execution hoạt động. Giữ volumes, epoch, model selection và lịch sử; missing telemetry vẫn UNKNOWN |
 | **2 — Q-09/G6 model mới** | Chốt protocol/trial và operator duyệt known-good cụ thể trước mỗi thay đổi xấu; chạy, verify và ghi audit riêng cho `de38fc6b` | B/operator, A cung cấp H4 đủ điều kiện; owner nghiệm thu G6. Không kế thừa 9/10 của `badf9da0` |
 | **3 — RCA/S4 và timing** | Review cách đưa native lock-wait evidence vào scoring, freeze interface/evaluation trước run mới; đo independent live IF emission MTTD | A chủ trì RCA/evaluation, B hỗ trợ source/platform. Giữ abstention và ngưỡng hiện hành; run S4 đã xem không thành holdout |
-| **4 — Packaging đích** | Hoàn thiện API/workers/observability manifests và external commerce dependencies; review PR #49 | B; không coi configuration-only là deployment đã verify |
+| **4 — Packaging đích** | Hoàn thiện API/workers/observability manifests và external commerce dependencies; B review đề xuất ECR PR #49 của A, gồm quyết định IAM image-pull scope | B; chưa nghiệm thu hoặc nhận công việc chưa review thành kết quả đã giao; configuration-only không phải deployment đã verify |
 | **5 — Cloud/H3** | Chốt region/account/quota/budget/quyền; deploy trong phạm vi được cấp, cấu hình provider thật, thu H3 và giao A verify parity | Owner/B/A theo boundary. AWS vẫn chưa được triển khai trong phạm vi báo cáo |
 | **6 — Nghiệm thu** | Hoàn tất model/RCA/explanation/action/final evaluation theo các gate còn mở | A/B/owner theo scope; không mở sealed holdout hoặc tự đổi gate thành PASS |
 
