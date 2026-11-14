@@ -1,0 +1,7 @@
+# Dedicated S4 development only. Select a separate sentinelops-s4-* project.
+# Keep the same file set and port environment for capture and teardown.
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:${SENTINELOPS_S4_POSTGRES_PORT:-5432}:5432"
+    command: ["postgres", "-c", "log_lock_waits=on", "-c", "deadlock_timeout=100ms", "-c", "log_timezone=UTC"]

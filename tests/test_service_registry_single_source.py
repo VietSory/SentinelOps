@@ -21,7 +21,7 @@ import re
 import pytest
 import yaml
 
-from scripts.system_identity import Commit, compute, downstream, import_closure
+from scripts.system_identity import TELEMETRY_PIPELINE, Commit, compute, differences, downstream, import_closure
 from sentinelops.telemetry.core import BUSINESS_ROUTES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +35,8 @@ FROZEN_VERSIONS = {
 }
 DECLARED = ('epoch', 'model_version', 'bundle_manifest_sha256', 'shared_infrastructure', 'carry_forward_from',
             'carried_services')
+# Declared before scripts/system_identity.py recorded the telemetry pipeline; frozen without that block.
+PRE_PIPELINE_VERSIONS = frozenset({'system-v1', 'system-v2', 'system-v3'})
 SERVICE_NAME = re.compile(r'[a-z][a-z0-9]*(?:-[a-z0-9]+)*-service')
 
 
@@ -78,6 +80,8 @@ def carry_forward_errors(versions, name, entry):
         errors.append(f'{name} run identity differs from {source}; no service can carry forward')
     if old['computed']['shared_build_inputs'] != new['computed']['shared_build_inputs']:
         errors.append(f'{name} shared build inputs differ from {source}; no service can carry forward')
+    if old['computed'].get('telemetry_pipeline') != new['computed'].get('telemetry_pipeline'):
+        errors.append(f'{name} telemetry pipeline differs from {source}; no service can carry forward')
     for service in carried:
         if (service not in old['services']
                 or old['computed']['service_identity'].get(service) != new['computed']['service_identity'].get(service)
@@ -106,10 +110,15 @@ def registry_errors(registry, contract_paths, routes, topology, pins, recompute=
             errors.append(f'{name} lacks declared fields {list(DECLARED)}')
             continue
         computed = entry.get('computed', {})
+        if name not in PRE_PIPELINE_VERSIONS and set(computed.get('telemetry_pipeline') or ()) != set(TELEMETRY_PIPELINE):
+            errors.append(f'{name} lacks the telemetry pipeline identity')
         if recompute is not None:
             commit = computed.get('capture_identity', {}).get('source_commit')
             actual = recompute(commit)
-            for block in ('run_identity', 'capture_identity', 'shared_build_inputs', 'service_identity'):
+            blocks = ['run_identity', 'capture_identity', 'shared_build_inputs', 'service_identity']
+            if name not in PRE_PIPELINE_VERSIONS:
+                blocks.append('telemetry_pipeline')
+            for block in blocks:
                 if computed.get(block) != actual[block]:
                     errors.append(f'{name} {block} differs from scripts/system_identity.py at {commit}')
             if sorted(entry['services']) != actual['services']:
@@ -331,3 +340,53 @@ def test_editing_the_repository_system_v1_in_place_fails_the_pin():
     edited['computed']['service_identity']['checkout-service']['downstream'].append('rds')
     edited['computed']['capture_identity']['topology_sha256'] = '0' * 64
     assert entry_sha256(edited) != FROZEN_VERSIONS['system-v1']
+
+
+@pytest.mark.parametrize('edited_path', ['observability/otel-collector-config.yaml', 'observability/prometheus.yml',
+                                         'docker-compose.yml', 'observability/rules/sentinelops-workers.yml'])
+def test_identity_records_the_telemetry_pipeline_and_detects_a_collector_edit(tmp_path, edited_path):
+    """5f29a16 changed metric delivery in the Collector; any pipeline edit must change later identities."""
+    import subprocess
+    commit = REGISTRY['versions']['system-v3']['computed']['capture_identity']['source_commit']
+    clone = tmp_path / 'clone'
+    subprocess.run(['git', 'clone', '-q', '--shared', '--no-checkout', str(ROOT), str(clone)], check=True)
+    subprocess.run(['git', '-C', str(clone), 'checkout', '-q', commit], check=True)
+    target = clone / edited_path
+    target.write_text(target.read_text() + '\n# fixture edit of metric delivery\n')
+    env = {'GIT_AUTHOR_NAME': 'fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
+           'GIT_COMMITTER_NAME': 'fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid',
+           'PATH': os.environ.get('PATH', os.defpath)}
+    subprocess.run(['git', '-C', str(clone), '-c', 'core.hooksPath=/dev/null', 'commit', '-qam', 'fixture'],
+                   check=True, env=env)
+    edited = subprocess.run(['git', '-C', str(clone), 'rev-parse', 'HEAD'], check=True, capture_output=True,
+                            text=True).stdout.strip()
+    before, after = compute(commit, clone), compute(edited, clone)
+    assert set(before['telemetry_pipeline']) == set(TELEMETRY_PIPELINE)
+    assert before['telemetry_pipeline'] != after['telemetry_pipeline']
+    assert before['run_identity'] == after['run_identity']  # only the pipeline block reveals this edit
+    assert differences(before, REGISTRY['versions']['system-v3']['computed']) == {}
+    block = edited_path if not edited_path.startswith('observability/rules/') else 'observability/rules'
+    assert differences(after, before) == {'telemetry_pipeline': [block]}
+
+
+def test_a_new_version_must_record_the_telemetry_pipeline(tmp_path):
+    paths = contracts(tmp_path, {'health-signal.schema.json': V1, 'health-signal-v2.schema.json': V2})
+    declared = registry({'health-signal.schema.json': 'system-v1'})
+    declared['versions']['system-v4'] = version(V2, TOPOLOGY_V2)
+    declared['current'] = 'system-v4'
+    errors = registry_errors(declared, paths, dict.fromkeys(V2), TOPOLOGY_V2, pins(declared))
+    assert 'system-v4 lacks the telemetry pipeline identity' in errors
+    declared['versions']['system-v4']['computed']['telemetry_pipeline'] = {'observability/prometheus.yml': 'p'}
+    errors = registry_errors(declared, paths, dict.fromkeys(V2), TOPOLOGY_V2, pins(declared))
+    assert 'system-v4 lacks the telemetry pipeline identity' in errors  # a partial map is not enough
+    declared['versions']['system-v4']['computed']['telemetry_pipeline'] = dict.fromkeys(TELEMETRY_PIPELINE, 'p')
+    assert registry_errors(declared, paths, dict.fromkeys(V2), TOPOLOGY_V2, pins(declared)) == []
+
+
+def test_a_service_cannot_carry_forward_across_a_changed_telemetry_pipeline():
+    old = version(V1, TOPOLOGY_V1)
+    old['computed']['telemetry_pipeline'] = {'observability/otel-collector-config.yaml': 'batched'}
+    new = version(V1, TOPOLOGY_V1, carried=['checkout-service'], source='system-v4')
+    new['computed']['telemetry_pipeline'] = {'observability/otel-collector-config.yaml': 'unbatched'}
+    errors = carry_forward_errors({'system-v4': old}, 'system-v5', new)
+    assert 'system-v5 telemetry pipeline differs from system-v4; no service can carry forward' in errors

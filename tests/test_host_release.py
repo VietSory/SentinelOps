@@ -127,3 +127,71 @@ def test_host_health_arguments_append_only_an_explicit_profile(tmp_path):
     v1_args = host.arguments('health', tmp_path, None)
     assert '--source-profile' not in v1_args
     assert host.arguments('health', tmp_path, None, source_profile=v2) == [*v1_args, '--source-profile', v2]
+
+
+@pytest.mark.parametrize('operation,initial_state', [
+    ('start', 'inactive'), ('restart', 'inactive'),
+    ('start', 'failed'), ('restart', 'failed'),
+    ('start', 'active'), ('restart', 'active'),
+])
+def test_selected_role_recovers_when_systemd_unloads_an_inactive_unit(tmp_path, monkeypatch, operation, initial_state):
+    from contextlib import nullcontext
+    import subprocess
+
+    release_id = 'a' * 32
+    unit = tmp_path / 'api.service'
+    unit.write_text('fixture-owned-unit')
+    environment = {'SENTINELOPS_API_TOKEN': 'producer-fixture',
+                   'SENTINELOPS_OPERATOR_TOKEN': 'operator-fixture'}
+    host.write_private(tmp_path / 'session.json', {'release_id': release_id,
+                       'environment': environment, 'arguments': []})
+    (tmp_path / 'release.json').write_text(json.dumps({'credential_profile': 'local-operator-read/v1'}))
+    current = {'state': initial_state, 'unit': unit.name, 'unit_file': str(unit)}
+    calls = []
+    monkeypatch.setattr(host, 'locked', lambda: nullcontext(tmp_path))
+    monkeypatch.setattr(host, 'state', lambda role: dict(current))
+    monkeypatch.setattr(host, 'release', lambda identifier: tmp_path)
+    monkeypatch.setattr(lane_b, 'runtime_environment', lambda *args: environment)
+    monkeypatch.setattr(host, 'validate_selected', lambda *args: calls.append('validate'))
+
+    def systemctl(command, name):
+        # After show/validation an inactive unit can be garbage-collected. It can
+        # still be started by name, but reset-failed rejects an unloaded unit.
+        if command == 'reset-failed' and initial_state == 'inactive':
+            raise subprocess.CalledProcessError(1, ['systemctl', command, name],
+                                               stderr='Unit ' + name + ' not loaded.')
+        calls.append(command)
+        if command in ('start', 'restart'):
+            current['state'] = 'active'
+    monkeypatch.setattr(host, 'systemctl', systemctl)
+    result = host.start('api', release_id) if operation == 'start' else host.restart('api')
+    assert result['state'] == 'active'
+    expected = ['validate']
+    if operation == 'restart' or initial_state != 'active':
+        if initial_state != 'inactive':
+            expected.append('reset-failed')
+        expected.append(operation)
+    assert calls == expected
+
+
+@pytest.mark.parametrize('operation', ['start', 'restart'])
+def test_inactive_recovery_still_checks_selected_bytes_before_systemd(tmp_path, monkeypatch, operation):
+    from contextlib import nullcontext
+
+    unit = tmp_path / 'api.service'
+    unit.write_text('fixture-owned-unit')
+    host.write_private(tmp_path / 'session.json', {'release_id': 'a' * 32,
+                       'environment': {}, 'arguments': []})
+    (tmp_path / 'release.json').write_text('{}')
+    monkeypatch.setattr(host, 'locked', lambda: nullcontext(tmp_path))
+    monkeypatch.setattr(host, 'state', lambda role: {'state': 'inactive', 'unit': unit.name, 'unit_file': str(unit)})
+    monkeypatch.setattr(host, 'release', lambda identifier: tmp_path)
+    monkeypatch.setattr(lane_b, 'runtime_environment', lambda *args: {})
+    def reject(*args):
+        raise host.HostGuard('selected source or session changed')
+    monkeypatch.setattr(host, 'validate_selected', reject)
+    mutations = []
+    monkeypatch.setattr(host, 'systemctl', lambda *args: mutations.append(args))
+    with pytest.raises(host.HostGuard, match='selected source or session changed'):
+        host.start('api', 'a' * 32) if operation == 'start' else host.restart('api')
+    assert mutations == []

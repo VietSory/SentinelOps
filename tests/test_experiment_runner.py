@@ -158,6 +158,118 @@ def test_failed_preflight_restores_both_faults_and_saves_failed_evidence(monkeyp
     assert ArtifactStore(root/"truth").read(run["request_outcomes_ref"])["outcomes"] == []
 
 
+@pytest.mark.parametrize('acquired_stages', [0, 1])
+def test_s4_runner_requires_each_stage_to_acquire_despite_observed_waiter(monkeypatch, tmp_path, acquired_stages):
+    from sentinelops.experiments.datasets import assemble_dataset
+
+    # Exercise execute(), the real pulse loop, cleanup, manifest and admission.
+    # Only wall-clock durations and external sources are replaced in this harness.
+    monkeypatch.setattr(runner.ExperimentConfig, 'validate', lambda self: None)
+    monkeypatch.setattr(runner, 'checkout_identity', lambda project: ('a' * 40, False, {}))
+    monkeypatch.setattr(runner, 'image_identity', lambda project: {s: 'sha256:' + 'b' * 64 for s in BUSINESS_ROUTES})
+    logs = []
+    monkeypatch.setattr(runner, 'serving_logs', lambda *args: (logs, logs))
+    monkeypatch.setattr(runner, 'failure_context', lambda exc, project: {'type': type(exc).__name__})
+    monkeypatch.setattr(runner.s4_postgres, 'require_sandbox', lambda project: 'sentinelops-s4-test')
+    monkeypatch.setattr(runner.s4_postgres, 'pressure_stages', lambda *args, **kwargs: (
+        ('degrading', .01, 350), ('fault', .01, 1200)))
+    monkeypatch.setattr(runner.PrometheusSource, 'verify_configuration', lambda self: {'scrape_interval': '5s'})
+    closed = []
+    monkeypatch.setattr(runner.PrometheusSource, 'close', lambda self: closed.append('prometheus'))
+    monkeypatch.setattr(runner, 'process_captures', lambda *args, **kwargs: {
+        'eligible_feature_count': 1, 'manifest_ref': 'fixture://normalization'})
+    originals = {runner.PAYMENT: {'mode': 'latency', 'delay_ms': 123},
+                 runner.INVENTORY: {'mode': 'error', 'delay_ms': 0}}
+    posts, connections, queries = [], [], []
+
+    def handle(request):
+        base = str(request.url).removesuffix('/internal/faults')
+        if request.method == 'GET' and request.url.path == '/internal/faults':
+            return httpx.Response(200, json=originals[base])
+        if request.url.path == '/internal/faults':
+            posts.append((base, json.loads(request.content)))
+        if request.url.path == '/v1/checkout':
+            for service, (method, route) in BUSINESS_ROUTES.items():
+                logs.append({'service': service, 'event': 'request_completed', 'method': method, 'route': route,
+                             'timestamp_unix_ms': int(runner.time.time() * 1000), 'status_code': 200,
+                             'duration_ms': 10, 'request_instance_id': request.headers['x-correlation-id'] + service,
+                             'correlation_id': request.headers['x-correlation-id']})
+        return httpx.Response(200, json={'status': 'ready'}, headers={
+            'x-correlation-id': request.headers.get('x-correlation-id', ''),
+            'x-trace-id': request.headers.get('traceparent', '--').split('-')[1]})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(runner.httpx, 'AsyncClient', lambda **kwargs: real_client(
+        transport=httpx.MockTransport(handle), **kwargs))
+
+    async def wait_until(_deadline):
+        await asyncio.sleep(2)
+
+    async def observed_waiter(self):
+        return {'database_oid': 23, 'postgres_started_at': '2026-11-14T00:00:00Z', 'waiting_clients': 1}
+
+    async def no_lock_logs(*args):
+        return None
+
+    monkeypatch.setattr(runner, 'wait_until_utc', wait_until)
+    monkeypatch.setattr(runner.PostgresInfrastructureSource, 'capture_lock_waits', observed_waiter)
+    monkeypatch.setattr(runner.s4_postgres, 'capture_lock_logs', no_lock_logs)
+
+    class Transaction:
+        async def __aenter__(self):
+            pass
+
+        async def __aexit__(self, *args):
+            pass
+
+    class Connection:
+        def __init__(self, stage):
+            self.stage = stage
+
+        def transaction(self):
+            return Transaction()
+
+        async def execute(self, query):
+            queries.append((self.stage, query))
+            if self.stage >= acquired_stages:
+                raise runner.s4_postgres.asyncpg.LockNotAvailableError('fixture timeout')
+
+        async def close(self, **kwargs):
+            closed.append(self.stage)
+
+    async def connect(*args, **kwargs):
+        connection = Connection(len(connections))
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(runner.s4_postgres.asyncpg, 'connect', connect)
+    config = runner.ExperimentConfig('S4', 'validation', warmup_seconds=.01,
+                                     active_seconds=.01, recovery_seconds=.01)
+    with pytest.raises(RuntimeError, match='S4LockNotAcquired'):
+        asyncio.run(runner.execute(config, project=tmp_path, output=tmp_path / 'runs', s4_lead_in=True))
+    root = next((tmp_path / 'runs').iterdir())
+    run = json.loads((root / 'run.json').read_text())
+    assert posts[-2:] == list(originals.items()) and 'prometheus' in closed
+    assert len(connections) == min(acquired_stages + 1, 2)
+    assert all(i in closed for i in range(len(connections))) and queries
+    stages = run['parameters']['s4_lock_stage_results']
+    assert run['parameters']['s4_minimum_acquired_per_stage'] == 1
+    store = ArtifactStore(root / 'serving')
+    source = store.read(run['source_manifest_ref'])
+    assert any(store.read(ref)['waiting_clients'] for ref in source['postgres_lock_wait_refs'])
+    assert ArtifactStore(root / 'truth').read(run['request_outcomes_ref'])['outcomes']
+    assert run['status'] == 'failed' and run['failure_reason'] == 'S4LockNotAcquired'
+    assert run['root_cause_ground_truth'] is None and run['fault_method'] == 'none'
+    assert run['affected_services_ground_truth'] == [] and run['recovery_start_at'] is None
+    assert stages[-1]['phase'] == ('fault' if acquired_stages else 'degrading')
+    assert stages[-1]['acquired'] == 0 and stages[-1]['lock_timeouts'] > 0
+    if acquired_stages:
+        assert stages[0]['acquired'] > 0
+    with pytest.raises(ValueError, match='only completed clean-source runs'):
+        assemble_dataset([{'run': run, 'features': [], 'truth_ref': 'fixture://failed-s4'}],
+                         ArtifactStore(tmp_path / 'dataset'), dataset_id='rejected-s4', allow_pilot=True)
+
+
 def test_dirty_checkout_is_rejected_before_docker_or_run_creation(monkeypatch,tmp_path):
     monkeypatch.setattr(runner,"checkout_identity",lambda project:("a"*40,True,{}))
     def docker_must_not_run(project):

@@ -108,11 +108,55 @@ The experiment ports must be free before starting the stack.
 
 ```bash
 export COMPOSE_PROJECT_NAME=sentinelops-s4-development
+# Choose a free loopback PostgreSQL port; 5432 remains the default.
+export SENTINELOPS_S4_POSTGRES_PORT=25432
+export COMPOSE_FILE=docker-compose.yml:docker-compose.s4.yml
 docker compose up --build -d --wait checkout-service payment-service inventory-service postgres prometheus otel-collector jaeger
 env -u DATABASE_URL python -m scripts.run_experiment --scenario S4 --split validation --all-entry-traffic --output /absolute/s4/runs
 ```
 
 The runner checks that the dedicated project owns the loopback endpoints. It
+requires PostgreSQL to publish the selected port from the dedicated data volume;
+the lock injector and infrastructure observer use that same verified endpoint.
+An ambient `DATABASE_URL` for a different port is rejected. Keep `COMPOSE_FILE`,
+`COMPOSE_PROJECT_NAME` and `SENTINELOPS_S4_POSTGRES_PORT` identical for capture and
+teardown. The supplied S4 override also enables bounded native lock-wait logging.
+Other experiment ports must still be free.
+The injector keeps a 250 ms acquisition timeout and the fixed 0.4 s pulse gap.
+If ordinary concurrent writes prevent acquisition within that bound, it rolls
+back and retries after the gap. Connection and statement failures still abort.
+`parameters.s4_lock_injection` records attempted/acquired locks and acquisition
+timeouts, so a scheduled pressure phase is not mistaken for an observed lock.
+Every pressure stage must acquire the lock at least once; otherwise the run fails
+as `S4LockNotAcquired` and is not admitted as S4 ground truth. A waiting-client
+snapshot alone cannot prove that the injector held a lock.
+`s4_minimum_acquired_per_stage=1` freezes this minimum before load, and
+`s4_lock_stage_results` retains each stage's attempted/acquired/timeout counts.
+S4 ground-truth fields remain empty until the run completes all checks; failed
+runs retain the requested scenario for diagnosis and are rejected by dataset admission.
+The injector identifies itself as `sentinelops-s4-lock-injector`; lock-wait
+snapshots exclude that application's waits while still checking activity visibility.
+External cancellation retains the runner's existing behavior: save a failed
+manifest and partial evidence, then raise a run failure; it is never a completed trial.
+The read-only lock-log query and its source identity use the same selected port.
+
+For an additional S4 development capture compatible with the ADR-019 bundle,
+select profile v2, all three entries and at least 30 minutes of healthy warmup:
+
+```bash
+env -u DATABASE_URL python -m scripts.run_experiment --scenario S4 --split validation \
+  --source-profile prometheus-increase-60s-5s/v2 --all-entry-traffic \
+  --warmup-seconds 1800 --active-seconds 300 --recovery-seconds 180 \
+  --s4-lead-in --seed 42 --output /absolute/s4-v2-development/runs
+```
+
+Declare the run parameters and evaluation protocol before collecting data. This
+capture is additional development evidence; it does not rerun epoch `ald`, fit or
+tune a model, open holdout or measure live detector MTTD by itself. A live detector
+measurement needs original emission clocks and an independently verified SLO
+onset, as required by Q-06.
+
+The runner
 applies bounded PostgreSQL locks to Payment writes and records native snapshots
 through warmup, fault and recovery. The source manifest carries the raw snapshot
 references alongside the existing SLO, trace and completion-log evidence.

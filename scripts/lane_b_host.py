@@ -97,6 +97,14 @@ def systemctl(*args, check=True):
     return subprocess.run(['systemctl', '--user', *args], check=check, capture_output=True, text=True)
 
 
+def reset_failed_for_retry(current):
+    # An inactive linked unit may be unloaded while release/source validation
+    # runs. reset-failed then rejects it, although start/restart can load it by
+    # name. Failed/active units still get the reviewed rate-limit reset.
+    if current['state'] != 'inactive':
+        systemctl('reset-failed', current['unit'])
+
+
 def state(role, *, refreshed=False):
     name = unit_name(role)
     result = systemctl('show', name, '--property=LoadState,ActiveState,SubState,MainPID,ExecMainStatus,FragmentPath,NRestarts', check=False)
@@ -214,7 +222,8 @@ def start(role, identifier, stream=None, model_store=None, model_ref=None, *, ep
                 raise HostGuard('stop selected unit before choosing a different release/source or API credential')
             validate_selected(role, current)
             if current['state'] != 'active':
-                systemctl('reset-failed', current['unit']);systemctl('start', current['unit'])
+                reset_failed_for_retry(current)
+                systemctl('start', current['unit'])
             return state(role)
         if role != 'api': lane_b.require_owned_containers()
         if role == 'api':
@@ -292,7 +301,7 @@ def restart(role):
         current = state(role)
         if current['state'] == 'NOT_INSTALLED': raise HostGuard('role is not installed')
         validate_selected(role, current)  # Reject corrupt bytes before stopping a running process.
-        systemctl('reset-failed', current['unit'])
+        reset_failed_for_retry(current)
         systemctl('restart', current['unit'])
         return state(role)
 
