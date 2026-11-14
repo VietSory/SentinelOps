@@ -446,6 +446,10 @@ dưới `docs/`.
   5 valid, 0 invalid/errors/skips, dùng schema nguồn chính thức đã tải về.
 - CI host-process job build image theo Git SHA và chạy lại hai ca HTTP/CLI;
   kết quả đúng head được ghi trong PR/Actions, không suy từ CI cũ.
+- CI lượt đầu: image smoke PASS nhưng ghi proof trước registration vào runtime
+  root khiến launcher/cleanup từ chối đúng guard. Đã tách output/artifact khỏi
+  runtime, giữ nguyên guard; regression tái hiện fail trước fix rồi pass. Suite
+  packaging/manifests/launcher sau sửa: 69 tests PASS.
 - **Chưa có cloud worker manifest.** Loopback/source ownership/checkpoint guards
   giữ nguyên; cần adapter remote/source policy và H3 trước triển khai. Provider,
   observability bindings và AWS apply vẫn thuộc giai đoạn được cấp quyền riêng.

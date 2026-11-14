@@ -14,7 +14,7 @@ no AWS API call and provisions nothing.
 
 ```sh
 python -m scripts.check_control_plane_image --build \
-  --output artifacts/lane-b/control-plane-image-verification.json
+  --output artifacts/control-plane-image/verification.json
 ```
 
 The checker builds with the actual Git revision, resolves the result to an
@@ -36,7 +36,7 @@ An already built immutable image can be checked without rebuilding:
 
 ```sh
 python -m scripts.check_control_plane_image --image "$CONTROL_PLANE_IMAGE_ID" \
-  --output artifacts/lane-b/control-plane-image-readback.json
+  --output artifacts/control-plane-image/readback.json
 ```
 
 Outputs are exclusive. This proves installed-image software behavior, not source
@@ -44,6 +44,8 @@ parity, real provider identity, DB integration, a fitted/promoted model or a
 running continuous worker. The Git revision label is provenance, not authority.
 The image ID used locally is not a published registry digest. Published release
 images must be transferred through the approved registry and pinned by digest.
+Keep standalone image proofs outside `artifacts/lane-b/`: that runtime root must
+be registered by the existing launcher before anything else writes inside it.
 
 The image-specific Docker ignore file allows only package sources/contracts,
 build metadata and the two worker CLIs with three runtime config files. In

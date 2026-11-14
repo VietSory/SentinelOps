@@ -241,7 +241,8 @@ jobs:
               stream.write(f'XDG_RUNTIME_DIR=/run/user/{uid}\nDBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus\n')
           PY
       - name: Build and verify the isolated installed control-plane image
-        run: python -m scripts.check_control_plane_image --build --output artifacts/lane-b/control-plane-image-ci.json
+        # Image proof must not populate the owned runtime root before lane_b up registers it.
+        run: python -m scripts.check_control_plane_image --build --output artifacts/control-plane-image/ci.json
       - run: python -m scripts.lane_b up
       - name: Build an isolated wheel and verify actual managed process recovery
         run: |
@@ -265,7 +266,6 @@ jobs:
         with:
           name: host-process-evidence
           path: |
-            artifacts/lane-b/control-plane-image-ci.json
             artifacts/lane-b/host-process-store-ci.json
             artifacts/lane-b/health/
             artifacts/lane-b/incidents/
@@ -275,6 +275,13 @@ jobs:
             artifacts/lane-b/host-releases/*/configs/*.yaml
             artifacts/lane-b/host-releases/*/cli/scripts/*.py
             artifacts/lane-b/host-releases/*/launch.py
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: control-plane-image-evidence
+          path: artifacts/control-plane-image/ci.json
           if-no-files-found: warn
           retention-days: 7
 

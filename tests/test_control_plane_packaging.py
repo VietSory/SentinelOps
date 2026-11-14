@@ -1,6 +1,7 @@
 """Packaging/configuration checks; no provider, cloud or trained-model claim."""
 import json
 from pathlib import Path
+import shlex
 import sys
 
 import pytest
@@ -8,6 +9,7 @@ import yaml
 
 from scripts import render_api_manifests as api
 from scripts.check_control_plane_image import immutable_image
+from scripts import check_control_plane_image, lane_b
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = 'registry.example.invalid/control-plane@sha256:' + 'a' * 64
@@ -116,3 +118,21 @@ def test_control_plane_build_context_allowlist_cannot_include_user_data_or_crede
     assert '@sha256:' in dockerfile and 'USER 10001:10001' in dockerfile
     assert 'SENTINELOPS_ENV=production' in dockerfile and 'SENTINELOPS_ENABLE_DEMO=false' in dockerfile
     assert 'COPY . ' not in dockerfile and 'COPY src' not in dockerfile.split('FROM base AS runtime')[1]
+
+
+def test_ci_image_proof_does_not_appropriate_an_unregistered_lane_b_runtime(tmp_path, monkeypatch):
+    workflow = yaml.safe_load((ROOT/'.github/workflows/ci.yml').read_text())
+    steps = workflow['jobs']['host-process-integration']['steps']
+    arguments = shlex.split(next(step['run'] for step in steps
+        if 'scripts.check_control_plane_image --build' in step.get('run', '')))
+    output = tmp_path / arguments[arguments.index('--output') + 1]
+    monkeypatch.setattr(check_control_plane_image, 'check', lambda image: {'status': 'PASS', 'image_id': image})
+    monkeypatch.setattr(sys, 'argv', ['check_control_plane_image', '--image', IMAGE, '--output', str(output)])
+    check_control_plane_image.main()
+
+    # Exercise the actual registration guard, not just a path string comparison.
+    monkeypatch.setattr(lane_b, 'PROJECT', tmp_path)
+    monkeypatch.setattr(lane_b, 'ROOT', tmp_path/'artifacts/lane-b')
+    lane_b.init_runtime()
+    assert (lane_b.ROOT/'runtime.json').is_file()
+    assert json.loads(output.read_text())['status'] == 'PASS'
