@@ -20,6 +20,13 @@ report hoặc CI cũ không thay kết quả đó.
 [ADR-016](adr/ADR-016-public-production-training-source.md) thay nguồn fitting bằng
 Alibaba v2022; ADR-014/contract v2 và candidate local giữ lịch sử theo D-23.
 Local HTTP và RCAEval chỉ evaluation, không fitting/tuning.
+
+B đã thêm [portable API image và manifest offline](runbooks/CONTROL_PLANE_IMAGE.md):
+package wheel/ML dependencies, hai worker CLI, UID non-root/read-only filesystem,
+mặc định không model/credential. Hai ca HTTP cô lập production/test và 56 tests
+packaging/manifests PASS; API renderer có 5 resources, kubeconform strict 1.34
+5/5 hợp lệ. Đây chưa phải registry publication hoặc deployment AWS. Cloud worker
+adapters/source policy và H3 vẫn thiếu; không nới guard local để phát manifest worker.
 [ADR-018](adr/ADR-018-proposed-monotone-latency-detector.md) bị owner từ chối 2026-11-12:
 detection phải do model đã train quyết định, không dùng MAD/slope; epoch `alc` dừng khi chưa chấm và đã xoá.
 

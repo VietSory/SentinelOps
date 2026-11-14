@@ -144,8 +144,9 @@ What survives on purpose, and must be handled explicitly:
 This slice delivers the described, validated baseline. It does not deliver:
 
 - An applied workload bundle. The business-service slice can now be rendered
-  offline as described below; API/workers/observability manifests and their
-  deployment bindings remain separate work.
+  offline as described below; the [API image/manifests](CONTROL_PLANE_IMAGE.md)
+  are also prepared offline. Worker/source adapters and observability deployment
+  bindings remain separate work; none of these artifacts is an applied environment.
 - An applied environment, live CloudWatch/X-Ray source capture, or H3 handoff.
 - A Grafana/operational dashboard.
 - Model activation (H1/G3) or remediation acceptance (H4/G6).

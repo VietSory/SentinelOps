@@ -240,6 +240,8 @@ jobs:
           with open(os.environ['GITHUB_ENV'],'a') as stream:
               stream.write(f'XDG_RUNTIME_DIR=/run/user/{uid}\nDBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus\n')
           PY
+      - name: Build and verify the isolated installed control-plane image
+        run: python -m scripts.check_control_plane_image --build --output artifacts/lane-b/control-plane-image-ci.json
       - run: python -m scripts.lane_b up
       - name: Build an isolated wheel and verify actual managed process recovery
         run: |
@@ -263,6 +265,7 @@ jobs:
         with:
           name: host-process-evidence
           path: |
+            artifacts/lane-b/control-plane-image-ci.json
             artifacts/lane-b/host-process-store-ci.json
             artifacts/lane-b/health/
             artifacts/lane-b/incidents/

@@ -1,0 +1,38 @@
+FROM python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535 AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM base AS builder
+WORKDIR /build
+COPY pyproject.toml README.md setup.py MANIFEST.in ./
+COPY src ./src
+COPY contracts ./contracts
+RUN python -m pip wheel --no-cache-dir --wheel-dir /wheels '.[ml]' \
+    && python -m venv /opt/venv \
+    && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links /wheels 'sentinelops[ml]'
+
+FROM base AS runtime
+ARG SENTINELOPS_SOURCE_REVISION=unrecorded
+LABEL org.opencontainers.image.source="https://github.com/VietSory/SentinelOps" \
+      org.opencontainers.image.revision="${SENTINELOPS_SOURCE_REVISION}"
+ENV PATH="/opt/venv/bin:${PATH}" \
+    HOME=/tmp \
+    SENTINELOPS_ENV=production \
+    SENTINELOPS_ENABLE_DEMO=false \
+    OPENBLAS_NUM_THREADS=1 \
+    OMP_NUM_THREADS=1
+WORKDIR /opt/sentinelops
+COPY --from=builder /opt/venv /opt/venv
+COPY scripts/run_health_worker.py scripts/run_incident_worker.py ./scripts/
+COPY configs/slo_health_policy.json configs/rca_policy.json configs/topology.yaml ./configs/
+USER 10001:10001
+EXPOSE 8000
+HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=2).close()"
+CMD ["python", "-m", "uvicorn", "sentinelops.main:app", "--host", "0.0.0.0", "--port", "8000"]
