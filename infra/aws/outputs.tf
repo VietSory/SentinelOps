@@ -76,3 +76,8 @@ output "remediation_approval" {
   description = "Infrastructure never authorizes remediation; H4/G6 acceptance is separate."
   value       = false
 }
+
+output "image_repository_urls" {
+  description = "Private ECR repositories; deployment manifests pin images from these by digest."
+  value       = { for name, repository in aws_ecr_repository.images : name => repository.repository_url }
+}
