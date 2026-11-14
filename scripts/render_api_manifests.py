@@ -1,6 +1,6 @@
 """Render the API/UI deployment offline; no worker/cloud/source adapter is implied.
 
-Uses OIDC public configuration and an existing control DB Secret reference.
+Uses OIDC public configuration and existing control/action-reader DB Secret references.
 Default inference is unavailable. An optional read-only model PVC/reference is
 only wiring: the existing registry must validate its content at runtime.
 """
@@ -38,10 +38,15 @@ def public_url(value: str) -> str:
 
 def render(image: str, *, environment: str, control_secret: str, issuer: str,
            audience: str, jwks_url: str, audience_claim: str = 'aud',
+           action_read_secret: str | None = None,
            model_claim: str | None = None, model_release_ref: str | None = None) -> list[dict]:
     image_digest(image)
     _label(environment, 'environment')
     _label(control_secret, 'control secret reference')
+    if action_read_secret is not None:
+        _label(action_read_secret, 'action read secret reference')
+        if action_read_secret == control_secret:
+            raise ValueError('action reader requires a separate Secret from the control runtime')
     if environment in LOCAL_ENVIRONMENTS:
         raise ValueError('this deployment requires a non-local environment and OIDC')
     oidc = OidcConfig(issuer=public_url(issuer), audience=audience,
@@ -70,11 +75,15 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
     config_sha256 = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     def probe():
         return {'httpGet': {'path': '/health', 'port': 'http'}, 'periodSeconds': 5, 'timeoutSeconds': 2}
+    environment_variables = [{'name': 'CONTROL_DATABASE_URL', 'valueFrom': {'secretKeyRef': {
+        'name': control_secret, 'key': 'database-url', 'optional': False}}}]
+    if action_read_secret is not None:
+        environment_variables.append({'name': 'SENTINELOPS_ACTION_READ_DATABASE_URL', 'valueFrom': {
+            'secretKeyRef': {'name': action_read_secret, 'key': 'database-url', 'optional': False}}})
     container = {'name': 'api', 'image': image, 'imagePullPolicy': 'IfNotPresent',
         'ports': [{'name': 'http', 'containerPort': 8000}],
         'envFrom': [{'configMapRef': {'name': CONFIG}}],
-        'env': [{'name': 'CONTROL_DATABASE_URL', 'valueFrom': {'secretKeyRef': {
-            'name': control_secret, 'key': 'database-url', 'optional': False}}}],
+        'env': environment_variables,
         'securityContext': {'allowPrivilegeEscalation': False, 'readOnlyRootFilesystem': True,
                             'capabilities': {'drop': ['ALL']}},
         'resources': {'requests': {'cpu': '100m', 'memory': '256Mi'},
@@ -106,6 +115,7 @@ def main():
     parser.add_argument('--image', required=True)
     parser.add_argument('--environment', required=True)
     parser.add_argument('--control-secret', required=True)
+    parser.add_argument('--action-read-secret', help='Existing dedicated SELECT-only Secret name, database-url key')
     parser.add_argument('--issuer', required=True)
     parser.add_argument('--audience', required=True)
     parser.add_argument('--jwks-url', required=True)

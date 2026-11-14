@@ -43,6 +43,33 @@ def test_api_manifest_has_oidc_secret_references_and_no_implicit_model_worker_or
     assert not any(d['kind'] in ('Secret', 'PersistentVolumeClaim', 'Role', 'RoleBinding') for d in documents)
 
 
+def test_optional_action_reader_uses_a_dedicated_secret_without_adding_authority():
+    documents = api.render(IMAGE, **PARAMETERS, action_read_secret='action-read-runtime')
+    baseline = api.render(IMAGE, **PARAMETERS)
+    deployment = next(d for d in documents if d['kind'] == 'Deployment')
+    container, = deployment['spec']['template']['spec']['containers']
+    assert container['env'].pop() == {
+        'name': 'SENTINELOPS_ACTION_READ_DATABASE_URL',
+        'valueFrom': {'secretKeyRef': {
+            'name': 'action-read-runtime', 'key': 'database-url', 'optional': False}}}
+    # The binding adds no Secret, migration, executor, RBAC, model or credentials
+    # to public configuration; the existing reader validates privileges at runtime.
+    assert documents == baseline
+
+
+def test_action_reader_secret_selection_changes_pod_template_and_is_deterministic():
+    def template(secret=None):
+        documents = api.render(IMAGE, **PARAMETERS, action_read_secret=secret)
+        return next(d for d in documents if d['kind'] == 'Deployment')['spec']['template']
+    disabled, selected, rotated = template(), template('action-read-v1'), template('action-read-v2')
+    assert disabled != selected and selected != rotated
+    assert selected == template('action-read-v1')
+    assert rotated == template('action-read-v2')
+    assert disabled['metadata'] == selected['metadata'] == rotated['metadata']
+    for pod in (disabled, selected, rotated):
+        assert pod['spec']['containers'][0]['image'] == IMAGE
+
+
 def test_optional_model_is_explicit_read_only_wiring_not_approval():
     ref = 'artifact://manifests/' + 'b' * 64 + '.json'
     documents = api.render(IMAGE, **PARAMETERS, model_claim='approved-models', model_release_ref=ref)
@@ -79,6 +106,10 @@ def test_runtime_config_rotation_changes_pod_template_with_same_image_and_model_
 @pytest.mark.parametrize('values', [
     {'environment': 'local'}, {'environment': 'test'}, {'environment': 'PRODUCTION'},
     {'control_secret': 'postgresql://user:password@database/control'},
+    {'action_read_secret': 'control-runtime'}, {'action_read_secret': ''},
+    {'action_read_secret': True}, {'action_read_secret': 'action/read'},
+    {'action_read_secret': 'ActionReader'}, {'action_read_secret': 'a' * 64},
+    {'action_read_secret': 'postgresql://user:password@database/control'},
     {'issuer': 'http://identity.example.invalid'}, {'issuer': 'https://@identity.example.invalid'},
     {'issuer': 'https://identity.example.invalid?token=secret'}, {'issuer': 'https://identity.example.invalid#secret'},
     {'issuer': 'https://identity.example.invalid\n'}, {'issuer': None}, {'issuer': True},
@@ -111,19 +142,36 @@ def test_immutable_docker_id_can_be_verified_but_is_not_a_registry_manifest_refe
         api.render(value, **PARAMETERS)
 
 
-def test_cli_is_deterministic_and_refuses_overwrite(tmp_path, monkeypatch):
+@pytest.mark.parametrize('action_read_secret', [None, 'action-read-runtime'])
+def test_cli_is_deterministic_and_refuses_overwrite(tmp_path, monkeypatch, action_read_secret):
     def render(path):
-        monkeypatch.setattr(sys, 'argv', ['render_api_manifests', '--image', IMAGE,
+        arguments = ['render_api_manifests', '--image', IMAGE,
             '--environment', 'aws-dev', '--control-secret', 'control-runtime',
             '--issuer', PARAMETERS['issuer'], '--audience', PARAMETERS['audience'],
-            '--jwks-url', PARAMETERS['jwks_url'], '--output', str(path)])
+            '--jwks-url', PARAMETERS['jwks_url'], '--output', str(path)]
+        if action_read_secret is not None:
+            arguments.extend(['--action-read-secret', action_read_secret])
+        monkeypatch.setattr(sys, 'argv', arguments)
         api.main()
     first, second = tmp_path/'one.yaml', tmp_path/'two.yaml'
     render(first); render(second)
     assert first.read_bytes() == second.read_bytes()
-    assert list(yaml.safe_load_all(first.read_text())) == api.render(IMAGE, **PARAMETERS)
+    assert list(yaml.safe_load_all(first.read_text())) == api.render(
+        IMAGE, **PARAMETERS, action_read_secret=action_read_secret)
     with pytest.raises(FileExistsError):
         render(first)
+
+
+def test_cli_rejects_shared_action_credential_before_writing_output(tmp_path, monkeypatch):
+    output = tmp_path / 'invalid.yaml'
+    monkeypatch.setattr(sys, 'argv', ['render_api_manifests', '--image', IMAGE,
+        '--environment', 'aws-dev', '--control-secret', 'control-runtime',
+        '--action-read-secret', 'control-runtime', '--issuer', PARAMETERS['issuer'],
+        '--audience', PARAMETERS['audience'], '--jwks-url', PARAMETERS['jwks_url'],
+        '--output', str(output)])
+    with pytest.raises(ValueError, match='separate Secret'):
+        api.main()
+    assert not output.exists()
 
 
 def test_control_plane_build_context_allowlist_cannot_include_user_data_or_credentials():
