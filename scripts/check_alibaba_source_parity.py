@@ -23,6 +23,10 @@ Criteria `alibaba-parity-criteria/v1`:
      (`service_windows_fast`) yields a final relative window for every service
      from the Prometheus minutes, with the bundle's feature order and finite IF,
      MAD and XGBoost scores.
+
+Measurement protocol v2 uses five requests/s per entry, bounded to one in-flight
+request per entry. P1-P6 and their bounds are unchanged. The complete request and
+server-completion ledgers are retained so failed measurements can be replayed.
 """
 from __future__ import annotations
 
@@ -54,6 +58,14 @@ FIRST_AGE = 35
 COUNT_TOLERANCE = .05
 MEAN_TOLERANCE = .10
 PROJECT = Path(__file__).resolve().parents[1]
+MEASUREMENT_PROTOCOL = {
+    'protocol_version': 'alibaba-source-measurement/v2',
+    'entry_requests_per_second': 5,
+    'maximum_in_flight': len(SERVICES),
+    'faults_enabled': False,
+    'request_ledger': 'requests.jsonl',
+    'server_completion_ledger': 'server-completions.jsonl',
+}
 
 
 def utcnow():
@@ -85,7 +97,7 @@ async def drive(client, targets, stop):
     tick = loop.time()
     while utcnow() < stop:
         await asyncio.gather(*(request(s, u) for s, u in targets.items()))
-        tick += 1
+        tick += 1 / MEASUREMENT_PROTOCOL['entry_requests_per_second']
         await asyncio.sleep(max(0, tick - loop.time()))
     return rows
 
@@ -119,6 +131,24 @@ def exact_logs(sandbox, inventory, rows, ends):
             item['service'] = service
             selected.append(item)
     return selected
+
+
+
+COMPLETION_FIELDS = ('service', 'timestamp_unix_ms', 'duration_ms', 'method', 'route', 'status_code',
+                     'trace_id', 'correlation_id', 'k8s.pod.uid', 'failed', 'reason')
+
+
+def persist_measurements(root, requests, completions):
+    """Retain the independent P4/P5 truth before deleting the sandbox; no free-text log fields."""
+    from scripts.check_rollback_kubernetes import private_file
+    ledgers = {'requests.jsonl': requests,
+               'server-completions.jsonl': [{key: row[key] for key in COMPLETION_FIELDS if key in row}
+                                             for row in completions]}
+    for name, rows in ledgers.items():
+        # Malformed duration stays an explicitly failed record, never a non-standard JSON NaN.
+        safe = [{key: None if isinstance(value, float) and not math.isfinite(value) else value
+                 for key, value in row.items()} for row in rows]
+        private_file(root / name, ''.join(json.dumps(row, allow_nan=False) + '\n' for row in safe).encode())
 
 
 def verify_bundle(bundle, manifest_sha256):
@@ -280,6 +310,7 @@ async def measure(sandbox, root, bundle_parts, policy):
                                                   drive(client, targets, ends[-1] + timedelta(seconds=39)))
             stable = inventory == await asyncio.to_thread(sandbox.inventory)
             logs = await asyncio.to_thread(exact_logs, sandbox, inventory, rows, ends)
+            persist_measurements(root, rows, logs)
             checks, failures, normalization_ref = evaluate(root, bundle_parts, captures, logs, ends, policy)
             if not stable:
                 # A pod restart during sampling fails the run with evidence instead of aborting it.
@@ -299,6 +330,7 @@ def write_evidence(root, scope, commit, manifest, manifest_sha256, checks, failu
                     'configuration_hash': config.get('configuration_hash') if config else None,
                     'scrape_interval': config.get('scrape_interval') if config else None,
                     'normalization_ref': normalization_ref,
+                    'measurement_protocol': MEASUREMENT_PROTOCOL,
                     'activation_allowed': False, 'G3_accepted': False}
     (root / 'verification.json').write_text(json.dumps(verification, indent=2, allow_nan=False) + '\n')
     record = {'parity_version': PARITY_VERSION, **scope, 'status': 'FAIL' if failures else 'PASS',

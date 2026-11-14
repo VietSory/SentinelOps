@@ -535,3 +535,52 @@ def test_parity_diagnostics_keep_status_and_reasons_but_no_free_text(tmp_path):
     written = (tmp_path / 'diagnostics.json').read_text()
     assert 'SECRET' not in written
     assert json.loads(written)['events'] == [{'reason': 'Failed', 'type': 'Warning', 'object': 'inventory-service-1'}]
+
+
+def test_parity_measurement_cadence_is_bounded_and_matches_its_recorded_protocol(monkeypatch):
+    import asyncio
+    import importlib
+    from datetime import datetime, timedelta, timezone
+    import httpx
+    script = importlib.import_module('scripts.check_alibaba_source_parity')
+    clock = [0.]
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(script, 'utcnow', lambda: start + timedelta(seconds=clock[0]))
+    active, maximum = [0], [0]
+    class Client:
+        async def request(self, method, url, json=None, headers=None):
+            active[0] += 1
+            maximum[0] = max(maximum[0], active[0])
+            trace = headers['traceparent'].split('-')[1]
+            active[0] -= 1
+            return httpx.Response(200, headers={'x-trace-id': trace, 'x-correlation-id': headers['x-correlation-id']})
+    async def run():
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(loop, 'time', lambda: clock[0])
+        async def advance(seconds):
+            clock[0] = round(clock[0] + seconds, 9)
+        monkeypatch.setattr(script.asyncio, 'sleep', advance)
+        targets = {s: 'http://' + s for s in script.SERVICES}
+        return await script.drive(Client(), targets, start + timedelta(seconds=1))
+    rows = asyncio.run(run())
+    for service in script.SERVICES:
+        assert sum(r['request_entry_service'] == service for r in rows) == 5
+    assert not any(r['failed'] for r in rows)
+    assert maximum[0] <= script.MEASUREMENT_PROTOCOL['maximum_in_flight']
+    assert script.MEASUREMENT_PROTOCOL['entry_requests_per_second'] == 5
+
+
+def test_parity_retains_independent_server_truth_without_credentials_or_free_text(tmp_path):
+    from scripts.check_alibaba_source_parity import persist_measurements
+    requests = [{'request_entry_service': 'payment-service', 'failed': False}]
+    completions = [{'service': 'payment-service', 'timestamp_unix_ms': 1000, 'duration_ms': 12.5,
+                    'failed': False, 'password': 'must-not-be-retained', 'message': 'free-text-secret'},
+                   {'service': 'payment-service', 'failed': True, 'duration_ms': float('nan')}]
+    persist_measurements(tmp_path, requests, completions)
+    ledger = [json.loads(line) for line in (tmp_path / 'server-completions.jsonl').read_text().splitlines()]
+    assert ledger[0]['duration_ms'] == 12.5 and ledger[1]['failed'] is True
+    assert ledger[1]['duration_ms'] is None
+    assert 'secret' not in (tmp_path / 'server-completions.jsonl').read_text()
+    assert 'password' not in ledger[0]
+    assert (tmp_path / 'server-completions.jsonl').stat().st_mode & 0o077 == 0
+    assert json.loads((tmp_path / 'requests.jsonl').read_text()) == requests[0]

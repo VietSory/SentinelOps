@@ -331,3 +331,19 @@ The host-side HTTPX smoke test now uses `trust_env=False` so local requests are 
 - Metric counters and histogram counts increase for the tested business routes.
 - Existing Step 2 fault scenarios remain reproducible.
 - Both smoke tests pass and fault configurations are restored.
+
+
+## Alibaba source-parity measurement protocol
+
+The committed `alibaba-source-measurement/v2` protocol sends five healthy
+requests per second to each entry, with at most one in-flight request per
+entry. This gives denser samples than the former one-request/s driver.
+Prometheus [extrapolates counter increases](https://prometheus.io/docs/prometheus/latest/querying/functions/#increase);
+a sparse bucket can be sensitive to latency outliers near scrape boundaries.
+The parity report records this protocol explicitly and retains private
+`requests.jsonl` and allow-listed `server-completions.jsonl` before the
+sandbox is removed, so P4 counts and P5 means can be independently checked.
+P1–P6, the 5 s scrape/60 s windows, count tolerance 5% and mean tolerance
+10% stay unchanged. This is a healthy-source check at the recorded load,
+not a guarantee of accuracy for arbitrary low-rate or bursty traffic.
+Retain earlier FAIL reports; never select buckets or widen bounds to pass.
