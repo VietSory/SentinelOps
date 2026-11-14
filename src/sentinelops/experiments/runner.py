@@ -202,11 +202,14 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         run["parameters"]["s5_protocol_sha256"]=protocol_hash
         run["parameters"]["role"]="local-RCA-development-or-heldout-only"
     if s4_project:
-        run.update(root_cause_ground_truth="rds", fault_method="db-pressure")
+        # Keep the requested scenario separate from verified ground truth.
+        run.update(root_cause_ground_truth=None, fault_method="none", affected_services_ground_truth=[])
         run["parameters"]["s4_compose_project"] = s4_project
         run["parameters"]["s4_postgres_port"] = s4_postgres.database_port()
         run["parameters"]["s4_lock_injection"] = {"attempts": 0, "acquired": 0, "lock_timeouts": 0}
         run["parameters"]["s4_lock_gap_seconds"] = s4_postgres.PULSE_GAP_SECONDS
+        run["parameters"]["s4_minimum_acquired_per_stage"] = 1
+        run["parameters"]["s4_lock_stage_results"] = []
         s4_stages = s4_postgres.pressure_stages(config.active_seconds, config.maximum_delay_ms, s4_lead_in)
         if s4_lead_in:
             run["parameters"]["s4_pressure_stages"] = [
@@ -353,6 +356,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                 injection = run["parameters"]["s4_lock_injection"]
                 for phase, duration, delay in s4_stages:
                     before = injection["acquired"]
+                    counters_before = dict(injection)
                     pulse = asyncio.create_task(s4_postgres.lock_pulses(delay / 1000, project, s4_project,
                         stats=injection))
                     try:
@@ -364,6 +368,9 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                         if not pulse.cancelled() and pulse.exception() is not None:
                             raise pulse.exception()
                         pulse = None
+                        run["parameters"]["s4_lock_stage_results"].append({
+                            "phase": phase, **{key: injection[key] - counters_before[key] for key in injection},
+                        })
                     s4_postgres.require_stage_acquired(injection, before, phase)
                 run["recovery_start_at"] = timestamp(datetime.now(timezone.utc))
                 await load("recovery", config.recovery_seconds)
@@ -454,6 +461,9 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         run["parameters"]["evidence_failure_context"] = failure_context(exc,project)
     run["dirty_worktree"] = dirty or any(not Path(path).is_file() or hashlib.sha256(Path(path).read_bytes()).hexdigest()!=digest for path,digest in hashes.items())
     run["status"],run["failure_reason"] = ("failed",failure) if failure else ("completed",None)
+    if s4_project and not failure:
+        run.update(root_cause_ground_truth="rds", fault_method="db-pressure",
+                   affected_services_ground_truth=[config.target_service, "checkout-service"])
     validate_payload("experiment-run.schema.json",run)
     truth.write("manifests",run)
     (root/"run.json").write_text(json.dumps(run,indent=2))

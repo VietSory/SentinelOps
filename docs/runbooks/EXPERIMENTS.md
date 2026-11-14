@@ -129,7 +129,15 @@ back and retries after the gap. Connection and statement failures still abort.
 timeouts, so a scheduled pressure phase is not mistaken for an observed lock.
 Every pressure stage must acquire the lock at least once; otherwise the run fails
 as `S4LockNotAcquired` and is not admitted as S4 ground truth. A waiting-client
-snapshot alone is not proof of injection, because the injector's own wait counts.
+snapshot alone cannot prove that the injector held a lock.
+`s4_minimum_acquired_per_stage=1` freezes this minimum before load, and
+`s4_lock_stage_results` retains each stage's attempted/acquired/timeout counts.
+S4 ground-truth fields remain empty until the run completes all checks; failed
+runs retain the requested scenario for diagnosis and are rejected by dataset admission.
+The injector identifies itself as `sentinelops-s4-lock-injector`; lock-wait
+snapshots exclude that application's waits while still checking activity visibility.
+External cancellation retains the runner's existing behavior: save a failed
+manifest and partial evidence, then raise a run failure; it is never a completed trial.
 The read-only lock-log query and its source identity use the same selected port.
 
 For an additional S4 development capture compatible with the ADR-019 bundle,

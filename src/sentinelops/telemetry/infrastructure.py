@@ -9,6 +9,8 @@ import asyncpg
 from sentinelops.contracts import validate_payload
 from sentinelops.telemetry.core import stable_id, timestamp
 
+S4_INJECTOR_APPLICATION_NAME = "sentinelops-s4-lock-injector"
+
 SQL = """
 SELECT clock_timestamp() AS measured_at,
        current_setting('max_connections')::integer AS max_connections,
@@ -18,7 +20,7 @@ SELECT clock_timestamp() AS measured_at,
         WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()) AS connections
 """
 
-LOCK_WAITS_SQL = """
+LOCK_WAITS_SQL = f"""
 SELECT clock_timestamp() AS measured_at,
        pg_postmaster_start_time() AS postgres_started_at,
        (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()) AS database_oid,
@@ -29,6 +31,7 @@ SELECT clock_timestamp() AS measured_at,
        min(locks.waitstart) AS earliest_wait_start
 FROM pg_catalog.pg_stat_activity AS activity
 LEFT JOIN pg_catalog.pg_locks AS locks ON locks.pid = activity.pid AND NOT locks.granted
+  AND activity.application_name IS DISTINCT FROM '{S4_INJECTOR_APPLICATION_NAME}'
 WHERE activity.datname = current_database()
   AND activity.backend_type = 'client backend' AND activity.pid <> pg_backend_pid()
 """

@@ -90,6 +90,13 @@ lớp 2 bên dưới.
 - **G6 local Q-09 đạt đúng ngưỡng** ([báo cáo](reports/G6_LOCAL_ALIBABA_BADF9DA0.md)): 9/10 golden-path recovered (trial 04 blocked do race của harness, vẫn tính); 1/1 failed-verify escalated với audit đầy đủ; 0 patch không an toàn trên 10 lần mutate. **G6 chưa PASS**: B đã review lại Q-10 và bổ sung kiểm executor/adapter; owner chưa quyết định nghiệm thu.
 - **Lớp 2 xong 2026-11-12** ([báo cáo](reports/LAYER2_LOCAL_ALIBABA_BADF9DA0.md)): 5 nhóm, 25 run, chạy evaluation đúng một lần, không fit, không chỉnh ngưỡng. Nhóm `alb-04` bị owner loại cả nhóm vì máy ngủ trong lúc warmup, quyết định ghi trước khi có điểm. **Model Alibaba không chuyển được sang lỗi local ở ngưỡng đã đóng băng:** IF bắt 1/12 sự cố latency, MAD bắt 12/12 (6 báo nhầm ở checkout); XGBoost precursor recall 0/20, slope 20/20; lỗi 5xx do SLO rule bắt 8/8. Q-04, Q-05, Q-07 **FAIL** (development). Candidate kế nhiệm cần thiết kế mới trên Alibaba và epoch mới; ADR-018 (phục vụ MAD/slope) bị owner từ chối; hướng tiếp theo là train lại IF/XGBoost trên Alibaba.
 
+**Local follow-up sau merge PR #47 (2026-11-14):** main `6f6e587` có CI 14/14
+PASS; Q-10 111 tests/22 PostgreSQL checks PASS; UI/explanation trên incident
+`de38fc6b` thật và native S2/H4 đã kiểm xong. PR #48 đang hoàn tất collector S4
+theo review fail-closed của A; chưa có capture hoàn tất sau sửa, không tính
+lượt cũ vào RCA/Q-08. Q-09 của release mới cần bộ trial riêng; 9/10 cũ thuộc
+`badf9da0`. Xem [checklist local hiện hành](delivery/LANE_B_CHECKPOINT.md#10-local-follow-up-sau-merge--2026-11-14).
+
 ## Việc tiếp theo
 
 - **A:** đã train lại theo ADR-019 (`de38fc6b`); lớp 2 `ald` (2026-11-14) cho kết quả phát triển S1/S3 tốt, chưa nghiệm thu Q-04…Q-07 (thiếu S2/S4, MTTD live, holdout); full G4/G8 chưa nghiệm thu.

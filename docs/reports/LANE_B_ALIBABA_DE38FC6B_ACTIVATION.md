@@ -158,3 +158,54 @@ the required accepted baseline. Native integration is not model-quality
 acceptance: Q-04…Q-07 still have the S2/S4, live MTTD and G8 limits recorded in
 the [layer-2 report](LAYER2_LOCAL_ALIBABA_DE38FC6B.md). No cloud deployment or
 automatic remediation was activated.
+
+## Local follow-up after merge — 2026-11-14
+
+| Item | Verified result / remaining work |
+| --- | --- |
+| L1 Merge / CI | `6f6e587`, [CI 43562346041](https://github.com/VietSory/SentinelOps/actions/runs/43562346041), 14/14 jobs successful |
+| L2 Q-10 | 111 remediation tests and 22 owned PostgreSQL checks PASS: CAS, audit, outage, quarantine and SELECT-only access. Software fixtures, no native trial added |
+| L3 Native UI / explanation | Desktop/mobile PASS on the new model's incident revision 4, 19 evidence/12 deterministic claims, exact references, unchanged pinned IER, no page errors |
+| L4 Native S2 / H4 | PASS: RCA_READY revision 2, Payment score 0.797891, coverage 0.80, deployment change bound and dispatch authority true. No known-good approval or rollback dispatched |
+| L5 Checklist | Current model-specific checklist updated in delivery plan, checkpoint and project status |
+| L6 S4 | Collector repair in [PR #48](https://github.com/VietSory/SentinelOps/pull/48); no completed verified capture yet |
+| L7 Native Q-09 | New `de38fc6b` campaign still required; operator must review and approve each concrete known-good target before the bad change |
+
+The old **9/10 recovered and 1/1 failed-verify** trials belong to `badf9da0` and
+cannot be inherited by this release. Full G4/G5/G6/G8 acceptance and independent
+live IF alert-emission MTTD remain open. No AWS work or holdout access occurred.
+
+S4 attempt history is retained outside Git:
+
+- First capture at `4095131` failed with `LockNotAvailableError`; a missed log-reader
+  DSN also produced authentication rejection at the default port. No query/write
+  ran on that other database. `b0afa69` repaired every selected DB path and identity.
+- Attempt 02 at `b0afa69` was interrupted during healthy warmup when the host
+  restarted at 16:28 local. Retained control data has eight health batches and
+  zero incident jobs; no S4 pressure phase ran and no completed manifest exists.
+- Attempt 03 was rejected at the port preflight before source startup or sampling.
+- Lane A identified that retrying every lock timeout could still allow completion
+  without an acquired lock. A's patch is applied with original authorship: every
+  pressure stage must acquire at least once or fail as `S4LockNotAcquired`.
+  B adds full runner tests for all-timeout lead-in and successful lead-in followed
+  by all-timeout fault, checking failed manifest, cleanup, empty ground-truth
+  fields and dataset rejection even when the sampler reports a waiter.
+- `s4_minimum_acquired_per_stage=1` is frozen before traffic and stage counters
+  are retained. Injector application-name waits are excluded from snapshots.
+  Native PostgreSQL verification observed counts **0** with only the injector
+  waiting and **1** with an independent waiter, then verified one timeout,
+  four acquisitions and six native lock-log records. These are collector checks,
+  not RCA/Q-08 results. Earlier capture attempts remain unverified for that purpose.
+
+Local evidence:
+
+- [Progress](../../artifacts/lane-b/local-followup-20261114/progress.json),
+  [main CI](../../artifacts/lane-b/local-followup-20261114/main-ci.json),
+  [PostgreSQL](../../artifacts/lane-b/local-followup-20261114/q10-postgresql.json).
+- [Native UI](../../artifacts/lane-b/local-followup-20261114/ui-native-02/verification.json),
+  [native S2/H4](../../artifacts/lane-b/local-followup-20261114/s2-h4-02/verification.json).
+- [First failed run](../../artifacts/lane-b/local-followup-20261114/s4-runs/run-37bdd31a5b5345039fc26cbc3192d132/run.json),
+  [host interruption](../../artifacts/lane-b/local-followup-20261114/s4-attempt-02/interruption.json),
+  [recovered control data](../../artifacts/lane-b/local-followup-20261114/s4-attempt-02/s4-live-database.json),
+  [third preflight rejection](../../artifacts/lane-b/local-followup-20261114/s4-attempt-03/operator-process.log),
+  [native waiter verification](../../artifacts/lane-b/local-followup-20261114/s4-native-review.json).

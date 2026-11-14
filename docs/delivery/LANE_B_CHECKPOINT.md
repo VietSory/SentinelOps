@@ -4,7 +4,7 @@ Các mục 1–3 lưu baseline trên máy B tại `d605826` (2026-11-05) và b�
 sau. Mục 4–5 cập nhật tình trạng bàn giao local ngày 2026-11-08. Bằng chứng trên
 máy A và xác nhận trên môi trường B được ghi riêng.
 
-**Trạng thái hiện hành 2026-11-14 ở mục 9 (cập nhật cuối mục).** Các mục cũ giữ mốc đo và giới hạn
+**Trạng thái hiện hành 2026-11-14 ở mục 10.** Các mục cũ giữ mốc đo và giới hạn
 của thời điểm đó; không dùng câu “chưa có model/rollback/OIDC” của baseline để
 ghi đè báo cáo tích hợp mới.
 
@@ -406,3 +406,22 @@ model signal tái tính được từ bundle mới. Xem
 [báo cáo tích hợp](../reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md) để lấy
 parity, verification, release ref và live output. Release/store/checkpoint cũ
 giữ nguyên cho rollback. G6–G8 và phạm vi Q-04…Q-07 còn lại vẫn chưa nghiệm thu.
+
+## 10. Local follow-up sau merge — 2026-11-14
+
+| Hạng mục | Kết quả / việc còn lại |
+| --- | --- |
+| L1 Main/CI | PASS: merge `6f6e587`, run `43562346041`, 14/14 jobs thành công |
+| L2 Q-10 | PASS: 111 tests và 22 PostgreSQL checks; fixture-only, không thêm trial Q-09 |
+| L3 UI/explanation | PASS: incident model `de38fc6b` revision 4, desktop/mobile, 19 evidence/12 claims, IER không đổi |
+| L4 Native S2/H4 | PASS: RCA_READY r2, Payment score 0,797891, coverage 0,80, change bound và dispatch authority; chưa dispatch rollback |
+| L5 Checklist / phân loại bằng chứng | Đã cập nhật checklist này và báo cáo theo đúng model release |
+| L6 S4 v2 | PR #48: đã nhận patch fail-closed của A và thêm runner failure-path tests. Chưa có capture hoàn tất sau bản sửa; không đưa lượt cũ vào RCA/Q-08 |
+| L7 Q-09 `de38fc6b` | Cần bộ trial riêng và operator duyệt known-good cụ thể trước mỗi thay đổi xấu; 9/10 cũ thuộc `badf9da0` |
+| Gate | Full G4/G5/G6, independent detector MTTD và G8 vẫn mở; AWS vẫn để sau local |
+
+[Báo cáo follow-up](../reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md#local-follow-up-after-merge--2026-11-14)
+ghi nguồn bằng chứng và từng lần S4 bị lỗi/ngắt. Minimum của S4 đã chốt trước
+capture mới: mỗi pressure stage acquire ít nhất một lock, đồng thời quan sát
+waiter ngoài injector. Run thất bại không được mang nhãn `rds/db-pressure` hoặc
+vào dataset. Các check phần mềm và development không tự nghiệm thu gate.

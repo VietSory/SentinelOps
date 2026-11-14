@@ -13,7 +13,7 @@ import asyncpg
 
 from sentinelops.contracts import utc_time
 from sentinelops.telemetry.core import timestamp
-from sentinelops.telemetry.infrastructure import PostgresInfrastructureSource
+from sentinelops.telemetry.infrastructure import PostgresInfrastructureSource, S4_INJECTOR_APPLICATION_NAME
 
 DATABASE_URL = "postgresql://sentinel:sentinel@127.0.0.1:5432/sentinelops"
 PULSE_GAP_SECONDS = .4
@@ -103,6 +103,7 @@ async def lock_pulses(hold_seconds: float, project: Path, expected_project: str,
     if await asyncio.to_thread(require_sandbox, project) != expected_project:
         raise ValueError("S4 Compose project changed before lock injection")
     connection = await asyncpg.connect(database_url(), timeout=5, server_settings={
+        "application_name": S4_INJECTOR_APPLICATION_NAME,
         "lock_timeout": "250ms", "idle_in_transaction_session_timeout": "2500ms",
         "statement_timeout": "2500ms",
     })

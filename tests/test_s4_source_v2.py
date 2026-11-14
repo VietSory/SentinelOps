@@ -148,6 +148,7 @@ def test_lock_timeout_rolls_back_and_retries_after_the_fixed_gap(tmp_path, monke
     async def connect(dsn, **kwargs):
         assert kwargs['server_settings']['lock_timeout'] == '250ms'
         assert kwargs['server_settings']['statement_timeout'] == '2500ms'
+        assert kwargs['server_settings']['application_name'] == 'sentinelops-s4-lock-injector'
         return Connection()
     async def sleep(seconds):
         sleeps.append(seconds)
