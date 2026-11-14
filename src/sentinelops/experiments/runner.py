@@ -350,18 +350,21 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                 await load("healthy",config.active_seconds)
             elif s4_project:
                 run["fault_start_at"] = timestamp(datetime.now(timezone.utc))
+                injection = run["parameters"]["s4_lock_injection"]
                 for phase, duration, delay in s4_stages:
+                    before = injection["acquired"]
                     pulse = asyncio.create_task(s4_postgres.lock_pulses(delay / 1000, project, s4_project,
-                        stats=run["parameters"]["s4_lock_injection"]))
+                        stats=injection))
                     try:
                         await load(phase, duration)
                     finally:
                         pulse.cancel()
-                        try:
-                            await pulse
-                        except asyncio.CancelledError:
-                            pass
+                        # asyncio.wait never swallows a cancellation of this runner itself.
+                        await asyncio.wait([pulse])
+                        if not pulse.cancelled() and pulse.exception() is not None:
+                            raise pulse.exception()
                         pulse = None
+                    s4_postgres.require_stage_acquired(injection, before, phase)
                 run["recovery_start_at"] = timestamp(datetime.now(timezone.utc))
                 await load("recovery", config.recovery_seconds)
             else:

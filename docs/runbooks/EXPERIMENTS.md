@@ -127,6 +127,9 @@ If ordinary concurrent writes prevent acquisition within that bound, it rolls
 back and retries after the gap. Connection and statement failures still abort.
 `parameters.s4_lock_injection` records attempted/acquired locks and acquisition
 timeouts, so a scheduled pressure phase is not mistaken for an observed lock.
+Every pressure stage must acquire the lock at least once; otherwise the run fails
+as `S4LockNotAcquired` and is not admitted as S4 ground truth. A waiting-client
+snapshot alone is not proof of injection, because the injector's own wait counts.
 The read-only lock-log query and its source identity use the same selected port.
 
 For an additional S4 development capture compatible with the ADR-019 bundle,

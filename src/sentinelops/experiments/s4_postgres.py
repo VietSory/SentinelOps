@@ -88,6 +88,17 @@ def pressure_stages(active_seconds: int, hold_ms: int, lead_in: bool):
     return main
 
 
+class S4LockNotAcquired(ValueError):
+    """A pressure stage ended without the injector ever holding the lock: no verified S4 fault."""
+
+
+def require_stage_acquired(stats: dict, before: int, phase: str) -> None:
+    """Lock timeouts are retried, so a stage can end without one acquired lock. A waiting-client snapshot does not
+    prove injection either (the injector's own wait is a waiting client). Every stage must acquire at least once."""
+    if stats.get("acquired", 0) <= before:
+        raise S4LockNotAcquired(f"S4 stage {phase} never acquired the injection lock")
+
+
 async def lock_pulses(hold_seconds: float, project: Path, expected_project: str, *, stats=None):
     if await asyncio.to_thread(require_sandbox, project) != expected_project:
         raise ValueError("S4 Compose project changed before lock injection")

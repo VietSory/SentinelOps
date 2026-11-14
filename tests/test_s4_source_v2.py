@@ -223,3 +223,24 @@ def test_native_lock_log_identity_matches_the_selected_port(tmp_path, monkeypatc
         '2026-11-14T00:00:00Z', '2026-11-14T00:01:00Z')
     assert record['source_ref'] == PostgresInfrastructureSource(s4_postgres.database_url()).source_ref
     assert record['source_ref'] != PostgresInfrastructureSource(s4_postgres.DATABASE_URL).source_ref
+
+
+
+def test_stage_without_an_acquired_lock_fails_closed():
+    # Every pulse timed out: a waiting snapshot alone must not let the run carry an S4 label.
+    stats = {'attempts': 7, 'acquired': 3, 'lock_timeouts': 4}
+    with pytest.raises(s4_postgres.S4LockNotAcquired, match='pressure'):
+        s4_postgres.require_stage_acquired(stats, 3, 'pressure')
+    assert issubclass(s4_postgres.S4LockNotAcquired, ValueError)
+
+
+def test_stage_with_an_acquired_lock_passes():
+    s4_postgres.require_stage_acquired({'acquired': 4}, 3, 'pressure')
+
+
+def test_runner_checks_every_s4_stage_and_keeps_runner_cancellation():
+    import inspect
+    source = inspect.getsource(runner._execute_locked)
+    loop = source[source.index('for phase, duration, delay in s4_stages:'):source.index('run["recovery_start_at"]')]
+    assert 's4_postgres.require_stage_acquired(injection, before, phase)' in loop
+    assert 'await asyncio.wait([pulse])' in loop and 'except asyncio.CancelledError' not in loop
