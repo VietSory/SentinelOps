@@ -205,6 +205,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         run.update(root_cause_ground_truth="rds", fault_method="db-pressure")
         run["parameters"]["s4_compose_project"] = s4_project
         run["parameters"]["s4_postgres_port"] = s4_postgres.database_port()
+        run["parameters"]["s4_lock_injection"] = {"attempts": 0, "acquired": 0, "lock_timeouts": 0}
         run["parameters"]["s4_lock_gap_seconds"] = s4_postgres.PULSE_GAP_SECONDS
         s4_stages = s4_postgres.pressure_stages(config.active_seconds, config.maximum_delay_ms, s4_lead_in)
         if s4_lead_in:
@@ -350,7 +351,8 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
             elif s4_project:
                 run["fault_start_at"] = timestamp(datetime.now(timezone.utc))
                 for phase, duration, delay in s4_stages:
-                    pulse = asyncio.create_task(s4_postgres.lock_pulses(delay / 1000, project, s4_project))
+                    pulse = asyncio.create_task(s4_postgres.lock_pulses(delay / 1000, project, s4_project,
+                        stats=run["parameters"]["s4_lock_injection"]))
                     try:
                         await load(phase, duration)
                     finally:

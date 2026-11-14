@@ -88,18 +88,28 @@ def pressure_stages(active_seconds: int, hold_ms: int, lead_in: bool):
     return main
 
 
-async def lock_pulses(hold_seconds: float, project: Path, expected_project: str):
+async def lock_pulses(hold_seconds: float, project: Path, expected_project: str, *, stats=None):
     if await asyncio.to_thread(require_sandbox, project) != expected_project:
         raise ValueError("S4 Compose project changed before lock injection")
     connection = await asyncpg.connect(database_url(), timeout=5, server_settings={
         "lock_timeout": "250ms", "idle_in_transaction_session_timeout": "2500ms",
         "statement_timeout": "2500ms",
     })
+    counters = stats if stats is not None else {}
+    for key in ("attempts", "acquired", "lock_timeouts"):
+        counters.setdefault(key, 0)
     try:
         while True:
-            async with connection.transaction():
-                await connection.execute("LOCK TABLE public.payments IN SHARE MODE")
-                await asyncio.sleep(hold_seconds)
+            counters["attempts"] += 1
+            try:
+                async with connection.transaction():
+                    await connection.execute("LOCK TABLE public.payments IN SHARE MODE")
+                    counters["acquired"] += 1
+                    await asyncio.sleep(hold_seconds)
+            except asyncpg.LockNotAvailableError:
+                # A bounded acquisition timeout is expected under concurrent writes.
+                # The transaction has rolled back before the next paced attempt.
+                counters["lock_timeouts"] += 1
             await asyncio.sleep(PULSE_GAP_SECONDS)
     finally:
         await connection.close(timeout=5)
@@ -125,7 +135,7 @@ def project_lock_logs(output: str, *, database: int, relation: int, since: str, 
 async def capture_lock_logs(project: Path, expected_project: str, since: str, ended: str) -> dict | None:
     if await asyncio.to_thread(require_sandbox, project) != expected_project:
         raise ValueError("S4 Compose project changed before lock-log capture")
-    connection = await asyncpg.connect(DATABASE_URL, timeout=5, server_settings={"default_transaction_read_only": "on"})
+    connection = await asyncpg.connect(database_url(), timeout=5, server_settings={"default_transaction_read_only": "on"})
     try:
         native = await connection.fetchrow("""
             SELECT current_setting('log_lock_waits') AS enabled,
@@ -161,7 +171,7 @@ def _read_lock_logs(project, expected_project, native, since, ended):
     receipt = timestamp(datetime.now(timezone.utc))
     return {
         "kind": "postgres-lock-wait-log/v1",
-        "source_ref": PostgresInfrastructureSource(DATABASE_URL).source_ref,
+        "source_ref": PostgresInfrastructureSource(database_url()).source_ref,
         "postgres_started_at": timestamp(native["postgres_started_at"]),
         "database_oid": native["database_oid"],
         "relation_oid": native["relation_oid"],

@@ -124,3 +124,102 @@ def test_s4_refuses_a_database_url_for_the_wrong_local_port(tmp_path, monkeypatc
     with pytest.raises(ValueError, match='dedicated Compose PostgreSQL'):
         asyncio.run(runner.execute(config, project=tmp_path, output=tmp_path / 'runs',
                                    source_profile=SOURCE_PROFILE_V2))
+
+
+def test_lock_timeout_rolls_back_and_retries_after_the_fixed_gap(tmp_path, monkeypatch, owned_sources):
+    project, _ = owned_sources
+    events, sleeps, stats = [], [], {}
+    class Transaction:
+        async def __aenter__(self):
+            events.append('begin')
+        async def __aexit__(self, kind, *args):
+            events.append('rollback' if kind else 'commit')
+    class Connection:
+        attempts = 0
+        def transaction(self):
+            return Transaction()
+        async def execute(self, statement):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise s4_postgres.asyncpg.LockNotAvailableError('fixture contention')
+            events.append('acquired')
+        async def close(self, **kwargs):
+            events.append('closed')
+    async def connect(dsn, **kwargs):
+        assert kwargs['server_settings']['lock_timeout'] == '250ms'
+        assert kwargs['server_settings']['statement_timeout'] == '2500ms'
+        return Connection()
+    async def sleep(seconds):
+        sleeps.append(seconds)
+        if len(sleeps) == 2:
+            raise asyncio.CancelledError
+    monkeypatch.setattr(s4_postgres.asyncpg, 'connect', connect)
+    monkeypatch.setattr(s4_postgres.asyncio, 'sleep', sleep)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(s4_postgres.lock_pulses(.35, tmp_path, project, stats=stats))
+    assert sleeps == [s4_postgres.PULSE_GAP_SECONDS, .35]
+    assert events == ['begin', 'rollback', 'begin', 'acquired', 'rollback', 'closed']
+    assert stats == {'attempts': 2, 'acquired': 1, 'lock_timeouts': 1}
+
+
+@pytest.mark.parametrize('error', [s4_postgres.asyncpg.PostgresConnectionError, s4_postgres.asyncpg.QueryCanceledError])
+def test_lock_pulses_do_not_hide_connection_or_statement_failures(tmp_path, monkeypatch, owned_sources, error):
+    project, _ = owned_sources
+    closed = []
+    class Transaction:
+        async def __aenter__(self):
+            pass
+        async def __aexit__(self, *args):
+            pass
+    class Connection:
+        def transaction(self):
+            return Transaction()
+        async def execute(self, statement):
+            raise error('fixture source failure')
+        async def close(self, **kwargs):
+            closed.append(True)
+    async def connect(*args, **kwargs):
+        return Connection()
+    monkeypatch.setattr(s4_postgres.asyncpg, 'connect', connect)
+    with pytest.raises(error):
+        asyncio.run(s4_postgres.lock_pulses(.35, tmp_path, project))
+    assert closed == [True]
+
+
+def test_lock_log_reader_connects_to_the_selected_read_only_database(tmp_path, monkeypatch, owned_sources):
+    project, _ = owned_sources
+    connections, closed = [], []
+    class Connection:
+        async def fetchrow(self, *args, **kwargs):
+            return {'enabled': 'off'}
+        async def close(self, **kwargs):
+            closed.append(True)
+    async def connect(dsn, **kwargs):
+        connections.append(dsn)
+        assert kwargs['server_settings'] == {'default_transaction_read_only': 'on'}
+        return Connection()
+    monkeypatch.setattr(s4_postgres.asyncpg, 'connect', connect)
+    assert asyncio.run(s4_postgres.capture_lock_logs(tmp_path, project,
+        '2026-11-14T00:00:00Z', '2026-11-14T00:01:00Z')) is None
+    assert connections == ['postgresql://sentinel:sentinel@127.0.0.1:25432/sentinelops']
+    assert closed == [True]
+
+
+def test_native_lock_log_identity_matches_the_selected_port(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from sentinelops.telemetry.infrastructure import PostgresInfrastructureSource
+    monkeypatch.setenv('SENTINELOPS_S4_POSTGRES_PORT', '25432')
+    project = 'sentinelops-s4-log-test'
+    def docker(args, **kwargs):
+        if args[1] == 'compose':
+            return 'a' * 64
+        if args[1] == 'inspect':
+            return project + ' postgres'
+        assert args[1] == 'logs'
+        return ''
+    monkeypatch.setattr(s4_postgres.subprocess, 'check_output', docker)
+    record = s4_postgres._read_lock_logs(tmp_path, project,
+        {'postgres_started_at': datetime(2026, 11, 14, tzinfo=timezone.utc), 'database_oid': 23, 'relation_oid': 17},
+        '2026-11-14T00:00:00Z', '2026-11-14T00:01:00Z')
+    assert record['source_ref'] == PostgresInfrastructureSource(s4_postgres.database_url()).source_ref
+    assert record['source_ref'] != PostgresInfrastructureSource(s4_postgres.DATABASE_URL).source_ref

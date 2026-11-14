@@ -122,6 +122,12 @@ An ambient `DATABASE_URL` for a different port is rejected. Keep `COMPOSE_FILE`,
 `COMPOSE_PROJECT_NAME` and `SENTINELOPS_S4_POSTGRES_PORT` identical for capture and
 teardown. The supplied S4 override also enables bounded native lock-wait logging.
 Other experiment ports must still be free.
+The injector keeps a 250 ms acquisition timeout and the fixed 0.4 s pulse gap.
+If ordinary concurrent writes prevent acquisition within that bound, it rolls
+back and retries after the gap. Connection and statement failures still abort.
+`parameters.s4_lock_injection` records attempted/acquired locks and acquisition
+timeouts, so a scheduled pressure phase is not mistaken for an observed lock.
+The read-only lock-log query and its source identity use the same selected port.
 
 For an additional S4 development capture compatible with the ADR-019 bundle,
 select profile v2, all three entries and at least 30 minutes of healthy warmup:
