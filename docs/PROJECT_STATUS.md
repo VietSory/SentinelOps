@@ -1,6 +1,6 @@
 # SentinelOps — trạng thái triển khai
 
-Cập nhật: **2026-11-12**. Trang này tóm tắt code và khoảng trống sản phẩm.
+Cập nhật: **2026-11-14**. Trang này tóm tắt code và khoảng trống sản phẩm.
 Service có đang chạy/ready hay không phải kiểm tra trên môi trường hiện tại;
 report hoặc CI cũ không thay kết quả đó.
 
@@ -8,7 +8,7 @@ report hoặc CI cũ không thay kết quả đó.
 | --- | --- | --- |
 | Workload / observability | Có ba services, commerce PostgreSQL, OTel, Prometheus/Jaeger local. Có renderer và sandbox kind cho service thật; đã quan sát Checkout/DB, RED bucket và pod UID nhất quán trong API/metric/trace/log. Đã có parity v2 trên các môi trường được báo cáo và H4 native trong trial; không suy thành G4/G6 hoặc AWS acceptance | [Testbed](runbooks/LOCAL_TESTBED.md), [Kubernetes local](runbooks/KUBERNETES_LOCAL.md), [observability](runbooks/OBSERVABILITY.md) |
 | Telemetry / features | Có raw capture, quality/provenance, 60s buckets / 300s windows và replay | [Telemetry](runbooks/TELEMETRY.md), [timing](architecture/TRACE_TIMING.md) |
-| Data / models | Fitting hiện hành dùng Alibaba v2022 theo ADR-016; local chỉ evaluation. Bundle `badf9da0` có G3 duyệt có điều kiện D-22 cho local H4→G6, chưa nghiệm thu chất lượng đầy đủ; local Q-04/Q-05/Q-07 FAIL | Audit corpus hiện tại theo [corpus runbook](runbooks/LOCAL_HTTP_CORPUS.md); [model lifecycle](runbooks/MODEL_PIPELINE.md) |
+| Data / models | Fitting dùng Alibaba v2022 (ADR-016, ADR-019). Candidate **`de38fc6b`** (ADR-019) thay `badf9da0`: qua cổng chuỗi tổng hợp và kiểm tra phát triển trên `alb` (IF 12/12, precursor 20/20); lớp 1 IF F1 0,336, IF hơn MAD có ý nghĩa. Owner duyệt G3 có điều kiện (D-27); lớp 2 epoch `ald` chấm một lần 2026-11-14: kết quả phát triển S1/S3 tốt (IF 12/12, 0 báo sai, trễ 150 s; XGB precursor 20/20, AP 0,95 > slope 0,81–0,84) nhưng **chưa nghiệm thu Q-04…Q-07**: thiếu S2/S4, MTTD live và holdout G8 ( [báo cáo](reports/LAYER2_LOCAL_ALIBABA_DE38FC6B.md)) | [G3 packet](reports/G3_CANDIDATE_ALIBABA_DE38FC6B.md), [ADR-019](adr/ADR-019-breach-relative-retrain.md), [model lifecycle](runbooks/MODEL_PIPELINE.md) |
 | Incident pipeline | Có health/incident workers, control DB, IER revisions và protected read API | [Health](runbooks/HEALTH_WORKER.md), [incident](runbooks/INCIDENT_WORKER.md), [API](runbooks/INCIDENT_API.md) |
 | Correlation / RCA | Có conservative grouping/abstention; **full G4 chưa nghiệm thu** | [RCA runbook](runbooks/RCA.md), [research baseline](reports/RCA_DEVELOPMENT.md) |
 | Operator UI / B1 | Có UI read-only cùng origin `/ui/`: token trong tab, list/filter/cursor, revision-pinned detail/history/evidence, UNKNOWN/503 và model-unavailable. Đã chạy trên incident SLO thật của B, 4 immutable revisions, API/DB restart và browser outage/reconnect | [API/UI](runbooks/INCIDENT_API.md), [runtime B](runbooks/LOCAL_TESTBED.md); không coi ranking là root đã xác nhận |
@@ -20,8 +20,8 @@ report hoặc CI cũ không thay kết quả đó.
 [ADR-016](adr/ADR-016-public-production-training-source.md) thay nguồn fitting bằng
 Alibaba v2022; ADR-014/contract v2 và candidate local giữ lịch sử theo D-23.
 Local HTTP và RCAEval chỉ evaluation, không fitting/tuning.
-[ADR-018](adr/ADR-018-proposed-monotone-latency-detector.md) vẫn Proposed: chưa
-đổi serving method hoặc gate; evaluation epoch `alc` chờ owner phê duyệt.
+[ADR-018](adr/ADR-018-proposed-monotone-latency-detector.md) bị owner từ chối 2026-11-12:
+detection phải do model đã train quyết định, không dùng MAD/slope; epoch `alc` dừng khi chưa chấm và đã xoá.
 
 B có [business manifests renderer](runbooks/AWS_BASELINE.md#offline-business-service-manifests)
 cho ba service với digest/Secret reference/probes, được kiểm input và schema
@@ -88,12 +88,12 @@ lớp 2 bên dưới.
 - **Source parity profile v2 PASS** (P1–P6): mean latency Prometheus lệch tối đa 4,3% so với log server.
 - **H4 PASS:** health stream v2, 11 phút healthy trước image xấu; IF Alibaba cho `anomaly_strength` 0,989, Payment score 0,797, coverage 0,80, `dispatch_authority=true`.
 - **G6 local Q-09 đạt đúng ngưỡng** ([báo cáo](reports/G6_LOCAL_ALIBABA_BADF9DA0.md)): 9/10 golden-path recovered (trial 04 blocked do race của harness, vẫn tính); 1/1 failed-verify escalated với audit đầy đủ; 0 patch không an toàn trên 10 lần mutate. **G6 chưa PASS**: B đã review lại Q-10 và bổ sung kiểm executor/adapter; owner chưa quyết định nghiệm thu.
-- **Lớp 2 xong 2026-11-12** ([báo cáo](reports/LAYER2_LOCAL_ALIBABA_BADF9DA0.md)): 5 nhóm, 25 run, chạy evaluation đúng một lần, không fit, không chỉnh ngưỡng. Nhóm `alb-04` bị owner loại cả nhóm vì máy ngủ trong lúc warmup, quyết định ghi trước khi có điểm. **Model Alibaba không chuyển được sang lỗi local ở ngưỡng đã đóng băng:** IF bắt 1/12 sự cố latency, MAD bắt 12/12 (6 báo nhầm ở checkout); XGBoost precursor recall 0/20, slope 20/20; lỗi 5xx do SLO rule bắt 8/8. Q-04, Q-05, Q-07 **FAIL** (development). Candidate kế nhiệm cần thiết kế mới trên Alibaba và epoch mới; ADR-018 đề xuất phục vụ MAD/slope trong bundle hiện có nhưng vẫn chờ phê duyệt, không tự chọn lại theo kết quả đã xem.
+- **Lớp 2 xong 2026-11-12** ([báo cáo](reports/LAYER2_LOCAL_ALIBABA_BADF9DA0.md)): 5 nhóm, 25 run, chạy evaluation đúng một lần, không fit, không chỉnh ngưỡng. Nhóm `alb-04` bị owner loại cả nhóm vì máy ngủ trong lúc warmup, quyết định ghi trước khi có điểm. **Model Alibaba không chuyển được sang lỗi local ở ngưỡng đã đóng băng:** IF bắt 1/12 sự cố latency, MAD bắt 12/12 (6 báo nhầm ở checkout); XGBoost precursor recall 0/20, slope 20/20; lỗi 5xx do SLO rule bắt 8/8. Q-04, Q-05, Q-07 **FAIL** (development). Candidate kế nhiệm cần thiết kế mới trên Alibaba và epoch mới; ADR-018 (phục vụ MAD/slope) bị owner từ chối; hướng tiếp theo là train lại IF/XGBoost trên Alibaba.
 
 ## Việc tiếp theo
 
-- **A:** chốt hướng model/ADR-018 và epoch xác nhận theo quyền đã cấp; giữ các FAIL lớp 2 và full G4/G8 chưa nghiệm thu.
-- **B:** giao review Alibaba/Q-10 và hồ sơ G6 cho owner; provider identity, EKS policy/adapter và AWS chỉ triển khai khi đủ quyền/phạm vi. UI/packaging/monitoring local không cần làm lại.
+- **A:** đã train lại theo ADR-019 (`de38fc6b`); lớp 2 `ald` (2026-11-14) cho kết quả phát triển S1/S3 tốt, chưa nghiệm thu Q-04…Q-07 (thiếu S2/S4, MTTD live, holdout); full G4/G8 chưa nghiệm thu.
+- **B:** owner đã duyệt G3 `de38fc6b` (D-27); đo parity một lần với gói mới rồi build release; giao review Alibaba/Q-10 và hồ sơ G6 cho owner; provider identity, EKS policy/adapter và AWS chỉ triển khai khi đủ quyền/phạm vi. UI/packaging/monitoring local không cần làm lại.
 
 [Lane B checkpoint](delivery/LANE_B_CHECKPOINT.md) chốt mức bằng chứng từng
 capability (runtime-verified / fixture-tested / code-only / blocked), commit và CI

@@ -2,6 +2,7 @@
 
 **Status:** Accepted 2026-11-08 — explicit owner approval ("Duyệt, bắt đầu ngay")
 after the owner decided that self-generated data must not be a training source.
+**Amended by:** [ADR-019](ADR-019-breach-relative-retrain.md) (2026-11-13) for the feature set, detector inputs, risk target/thresholds and the use of the evaluated epoch `alb` as development data.
 **Supersedes:** ADR-014 for the **training source** of Isolation Forest and XGBoost.
 ADR-014's evidence discipline (provenance, grouping, chronology, label freeze,
 sealed final) still applies. The local HTTP corpus and ADR-015 epochs become

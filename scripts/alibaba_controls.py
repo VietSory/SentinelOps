@@ -1,11 +1,11 @@
-"""ADR-016 layer-1 controls: the Q-05/Q-07 comparisons already fixed by the v1 protocol.
+"""ADR-016/ADR-019 layer-1 controls: the Q-05/Q-07 comparisons already fixed by the v1 protocol.
 
 Reads a finished fit and recomputes, on the same Alibaba evaluation services and
 without refitting, retuning or changing any threshold:
 
 - the fixed slope control (relative latency slope, threshold at the calibration
   healthy 99th percentile, as in the local protocol) against XGBoost average precision;
-- precursor recall with lead >= 60 s for XGBoost (protocol risk_threshold 0.8)
+- precursor recall with lead >= 60 s for XGBoost (the fit's calibrated degrading threshold)
   and for the slope control, both through the protocol persistence;
 - the actual alert budget on risk negatives;
 - paired service-level percentile bootstrap for IF-MAD event F1 and XGB-slope AP.
@@ -40,8 +40,10 @@ def main():
     import joblib
     import numpy as np
     from sklearn.metrics import average_precision_score
+    import math
     import xgboost
-    from sentinelops.ml.alibaba_training import build_rows, load_config, load_minutes
+    from sentinelops.ml.alibaba_training import build_arrays, load_config, load_minutes
+    from sentinelops.ml.models import ExceedanceRisk
     from sentinelops.ml.evaluation import event_metrics
     from sentinelops.ml.local_evaluation import load_protocol, persistent_states, risk_curve
     from sentinelops.telemetry.core import stable_id
@@ -54,11 +56,24 @@ def main():
     data, provenance = load_minutes(args.minutes)
     if provenance != fit['source_archives']:
         raise SystemExit('aggregates differ from the fit provenance')
-    rows = build_rows(data, config)
+    arrays = build_arrays(data, config, splits=('calibration', 'evaluation'))
     names = config['features']
     slope_index = names.index(SLOPE)
-    calibration = [r['features'] for r in rows if r['split'] == 'calibration' and r['healthy']]
-    evaluation = [r for r in rows if r['split'] == 'evaluation']
+    # The risk comparison runs at the multiplier the degrading threshold was calibrated on, so the threshold,
+    # labels and breach-relative inputs describe one operating point. Detector events keep ADR-016 semantics.
+    degrading = config['risk']['thresholds']['degrading']['multiplier']
+    column = config['label']['breach_multipliers'].index(degrading)
+    split = arrays['service_split'][arrays['service']]
+    values_at = lambda mask: np.column_stack([arrays['features'][mask], np.full(int(mask.sum()), -math.log(degrading))])
+    calibration = values_at((split == 'calibration') & arrays['healthy'])
+    selected = split == 'evaluation'
+    evaluation = [{'service': arrays['services'][s], 'minute': int(m), 'healthy': bool(h),
+                   'risk_label': None if label < 0 else int(label), 'risk_onset_minute': None if ro != ro else int(ro),
+                   'onset_minute': None if o != o else int(o)}
+                  for s, m, h, label, ro, o in zip(arrays['service'][selected], arrays['minute'][selected],
+                                                   arrays['healthy'][selected], arrays['labels'][selected, column],
+                                                   arrays['onsets'][selected, column], arrays['onset_minute'][selected])]
+    eval_values = values_at(selected)
     counts = fit['counts']['evaluation']
     if len(evaluation) != counts['windows'] or len(calibration) != fit['counts']['calibration']['healthy']:
         raise SystemExit('rebuilt rows differ from the fit counts')
@@ -71,16 +86,18 @@ def main():
     detector = joblib.load(io.BytesIO(model_bytes['detector.joblib']))
     if detector.thresholds != fit['thresholds']:
         raise SystemExit('detector thresholds differ from the fit report')
-    risk = xgboost.XGBClassifier()
-    risk.load_model(bytearray(model_bytes['risk.json']))
-    values = [r['features'] for r in evaluation]
+    booster = xgboost.XGBClassifier()
+    booster.load_model(bytearray(model_bytes['risk.json']))
+    risk = ExceedanceRisk(booster, names)
+    risk_threshold = fit['risk_thresholds']['degrading']
+    values = eval_values
     detected = detector.predict(values)
     xgb = risk.predict_proba(values)[:, 1]
     slope = np.maximum(0., np.asarray(values)[:, slope_index])
     slope_threshold = float(np.quantile(np.maximum(0., np.asarray(calibration)[:, slope_index]),
                                         1 - protocol['false_alert_budget'], method='higher'))
     flags = {'isolation_forest': detected['isolation_forest']['alert'], 'median_mad': detected['median_mad']['alert'],
-             'xgboost': xgb >= protocol['risk_threshold'], 'slope': slope > slope_threshold}
+             'xgboost': xgb >= risk_threshold, 'slope': slope > slope_threshold}
 
     by_service = {}
     for i, r in enumerate(evaluation):
@@ -107,10 +124,10 @@ def main():
             for i, s in zip(idx, states[name]):
                 r = evaluation[i]
                 if r['risk_label'] == 1:
-                    lead = 60 * (r['onset_minute'] - r['minute'])
-                    best = eligible.setdefault(r['onset_minute'], None)
+                    lead = 60 * (r['risk_onset_minute'] - r['minute'])
+                    best = eligible.setdefault(r['risk_onset_minute'], None)
                     if s['active'] and s['available'] and (best is None or lead > best):
-                        eligible[r['onset_minute']] = lead
+                        eligible[r['risk_onset_minute']] = lead
             precursor[name][service] = eligible
 
     labelled = np.array([i for i, r in enumerate(evaluation) if r['risk_label'] in (0, 1)])
@@ -126,7 +143,7 @@ def main():
                              'precursor_recall_lead_ge_60s': qualified / len(events) if events else None,
                              'actual_alert_rate_on_negatives': float(flags[name][labelled][labels == 0].mean())}
     risk_report['slope']['threshold'] = slope_threshold
-    risk_report['xgboost']['threshold'] = protocol['risk_threshold']
+    risk_report['xgboost']['threshold'] = risk_threshold
 
     detector_metrics = {name: event_metrics(runs) for name, runs in detector_runs.items()}
     per_run = {name: np.array([[d['tp'], d['fp'], d['fn']] for d in m['per_run']]) for name, m in detector_metrics.items()}
@@ -149,13 +166,13 @@ def main():
         m.pop('per_run', None)
         m.pop('detection_delays_seconds', None)
         m.pop('measured_leads_seconds', None)
-    report = {'report_version': 'alibaba-relative-controls/v1', 'authorizing_adr': 'ADR-016',
+    report = {'report_version': 'alibaba-relative-controls/v1', 'authorizing_adr': 'ADR-019',
               'fit_report_sha256': stable_id(fit), 'config_sha256': fit['config_sha256'],
               'fitting_source_commit': fit['fitting_source_commit'], 'controls_source_commit': commit,
               'model_artifacts_sha256': model_artifacts,
-              'protocol_reused': {k: protocol[k] for k in ('false_alert_budget', 'entry_windows', 'exit_windows',
-                                                          'risk_threshold', 'bootstrap_replicates', 'bootstrap_seed',
-                                                          'confidence_level')},
+              'protocol_reused': {**{k: protocol[k] for k in ('false_alert_budget', 'entry_windows', 'exit_windows',
+                                                             'bootstrap_replicates', 'bootstrap_seed', 'confidence_level')},
+                                  'risk_threshold': risk_threshold, 'risk_breach_multiplier': degrading},
               'slope_control_feature': SLOPE, 'detector_events': detector_metrics, 'risk': risk_report,
               'paired_service_bootstrap': {'method': 'paired-whole-service-percentile-bootstrap', 'services': len(services),
                                            'if_minus_mad_event_f1': interval(np.array(f1_diff)),

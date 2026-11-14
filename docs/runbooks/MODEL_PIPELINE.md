@@ -8,9 +8,6 @@ handoff, release and parity tools were retired on 2026-11-09 with owner approval
 they stay readable in git history, and their recorded evidence (candidate
 `38bcc766`, D-19) is unchanged. Current model: [model card](../reports/MODEL_CARD_ALIBABA_BADF9DA0.md). RCAEval remains RCA-only.
 
-`scripts.audit_model_readiness` describes historical GAMMA v1 reproduction; it
-remains ineligible for fitting.
-
 Numerical primitives implement actual train-only RobustScaler/IsolationForest,
 median/MAD control and XGBoost binary risk. Per-service matrices preserve native
 identities. Calibration ECDFs and higher-quantile thresholds use the designated

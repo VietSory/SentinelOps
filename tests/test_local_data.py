@@ -104,9 +104,3 @@ def test_abrupt_onset_must_overlap_the_fault_on_an_affected_route(service, onset
     oracle = {'services': {service: {'first_violation_at': f'2026-11-08T{onset}Z'}}}
     changed_ms = int(utc_time('2026-11-08T00:04:49Z').timestamp()) * 1000
     assert _abrupt_onsets_in_scope(oracle, 'payment-service', changed_ms, '2026-11-08T00:14:00Z') is eligible
-
-
-def test_local_admission_is_never_returned_for_fitting(tmp_path):
-    from sentinelops.ml.corpus import load_training_rows
-    with pytest.raises(DatasetNotReady, match='evaluation-only'):
-        load_training_rows(ArtifactStore(tmp_path), {'dataset_version': 'local-http-admission/v1', 'training_ready': True})

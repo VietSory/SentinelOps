@@ -257,7 +257,10 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
     provenance = manifest['provenance']
     model_version = manifest['model_version']
     if (manifest.get('bundle_version') != BUNDLE_VERSION or manifest.get('origin') != ORIGIN
-            or report.get('report_version') != 'alibaba-relative-development/v1'
+            or report.get('report_version') != 'alibaba-relative-development/v2'
+            or report.get('development_fit') is not False
+            or report.get('fault_shape_gate', {}).get('passed') is not True
+            or report.get('risk_thresholds') != manifest.get('risk_thresholds')
             or report.get('config_sha256') != provenance['config_sha256']
             or len(report.get('source_archives', [])) != len(provenance['source_archives'])
             or any(report['counts'][k]['services'] <= 0 for k in ('train', 'calibration', 'evaluation'))):
@@ -269,6 +272,8 @@ def validate_evidence(manifest, report, controls, parity_record, parity_verifica
         raise ValueError('layer-1 controls do not belong to this fit')
     if not controls_complete(controls):
         raise ValueError('layer-1 controls lack the detector, risk or bootstrap metrics')
+    if controls['risk']['xgboost']['threshold'] != manifest['risk_thresholds']['degrading']:
+        raise ValueError('layer-1 controls scored XGBoost at a threshold other than the bundle\'s calibrated one')
     if controls.get('model_artifacts_sha256') != manifest['artifacts']:
         raise ValueError('layer-1 controls did not score this bundle\'s model files')
     if repository_config is None:

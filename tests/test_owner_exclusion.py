@@ -11,7 +11,7 @@ from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 from sentinelops.telemetry.store import ArtifactStore
 
 EPOCH, SUCCESSOR = 'a' * 40, 'b' * 40
-DECISION = 'Owner 2026-11-11: host slept 7h48m inside alc-04; exclude the whole group once.'
+DECISION = 'Owner 2026-11-11: host slept 7h48m inside ald-04; exclude the whole group once.'
 ROLE = 'development-validation'
 
 
@@ -49,17 +49,17 @@ def epoch(tmp_path, monkeypatch):
     plan = corpus.load_plan(corpus.ALIBABA_PLAN)
     names = list(BUSINESS_ROUTES) + ['postgres', 'prometheus', 'otel-collector', 'jaeger']
     containers = {name: {'container_id': f'{i + 1:064x}', 'image': 'sha256:' + 'f' * 64} for i, name in enumerate(names)}
-    session = {'group_id': 'alc-04', 'role': ROLE, 'ordinal': 4, 'source_commit': EPOCH,
-               'compose_project': 'sentinelops-corpus-alc-04', 'registered_at': '2026-11-11T02:10:00Z',
+    session = {'group_id': 'ald-04', 'role': ROLE, 'ordinal': 4, 'source_commit': EPOCH,
+               'compose_project': 'sentinelops-corpus-ald-04', 'registered_at': '2026-11-11T02:10:00Z',
                'plan_sha256': stable_id(plan), 'context': {'containers': containers}}
-    corpus.bind(store, corpus.registration_path(store, 'alc-04'), session)
+    corpus.bind(store, corpus.registration_path(store, 'ald-04'), session)
     for kind in ('healthy', 'payment-abrupt'):
-        root = store.root / 'runs' / ('alc-04-' + kind)
+        root = store.root / 'runs' / ('ald-04-' + kind)
         root.mkdir(parents=True)
         corpus.bind(store, root / 'result.json', {'fixture_only': True, 'kind': kind})
         (root / 'raw.json').write_bytes(b'{"fixture_only":true}')
-    write_ledger(store, 'alc-04-inventory-abrupt', gap_seconds=28094)
-    state = {'failing': {'alc-04-inventory-abrupt'}, 'stopped': [], 'running': True}
+    write_ledger(store, 'ald-04-inventory-abrupt', gap_seconds=28094)
+    state = {'failing': {'ald-04-inventory-abrupt'}, 'stopped': [], 'running': True}
     inspected = [{'Id': item['container_id'], 'Config': {'Labels': {'com.docker.compose.project': session['compose_project']}},
                   'State': {'Running': True}} for item in containers.values()]
 
@@ -94,14 +94,14 @@ def exclude(fixture, **overrides):
 
 def test_owner_exclusion_keeps_every_byte_stops_the_group_and_names_the_successor(epoch):
     store, plan, session, state = epoch
-    before = recovery._inventory(store, 'alc-04', plan)
+    before = recovery._inventory(store, 'ald-04', plan)
     result = exclude(epoch)
-    assert result['replacement_group_id'] == 'alc-06' and result['successor_source_commit'] == SUCCESSOR
-    assert result['slot_status'] == {'alc-04-healthy': 'SOURCE_VERIFIED', 'alc-04-payment-abrupt': 'SOURCE_VERIFIED',
-                                     'alc-04-inventory-abrupt': 'FAILED_WARMUP_COVERAGE',
-                                     'alc-04-payment-gradual': 'INCOMPLETE', 'alc-04-inventory-gradual': 'INCOMPLETE'}
+    assert result['replacement_group_id'] == 'ald-06' and result['successor_source_commit'] == SUCCESSOR
+    assert result['slot_status'] == {'ald-04-healthy': 'SOURCE_VERIFIED', 'ald-04-payment-abrupt': 'SOURCE_VERIFIED',
+                                     'ald-04-inventory-abrupt': 'FAILED_WARMUP_COVERAGE',
+                                     'ald-04-payment-gradual': 'INCOMPLETE', 'ald-04-inventory-gradual': 'INCOMPLETE'}
     assert sorted(state['stopped']) == sorted(c['container_id'] for c in session['context']['containers'].values())
-    assert recovery._inventory(store, 'alc-04', plan) == before
+    assert recovery._inventory(store, 'ald-04', plan) == before
     ref, closed = recovery.read_abandonment(store, session, plan)
     assert closed['closure_version'] == owner.VERSION and closed['owner_decision'] == DECISION
     assert owner.epoch_sources(store, plan) == {EPOCH, SUCCESSOR}
@@ -111,12 +111,12 @@ def test_a_fully_verified_group_cannot_be_excluded(epoch):
     store, plan, _, state = epoch
     state['failing'].clear()
     for kind in ('payment-gradual', 'inventory-gradual'):
-        root = store.root / 'runs' / ('alc-04-' + kind)
+        root = store.root / 'runs' / ('ald-04-' + kind)
         root.mkdir(parents=True)
         corpus.bind(store, root / 'result.json', {'fixture_only': True})
     with pytest.raises(ValueError, match='fully verified'):
         exclude(epoch)
-    assert not (store.root / 'sessions/alc-04/closed.json').exists() and state['stopped'] == []
+    assert not (store.root / 'sessions/ald-04/closed.json').exists() and state['stopped'] == []
 
 
 @pytest.mark.parametrize(('overrides', 'source', 'message'), [
@@ -131,13 +131,13 @@ def test_exclusion_needs_a_decision_a_spare_ordinal_and_a_descendant_source(epoc
     monkeypatch.setattr(owner, 'clean_source', lambda *_: source)
     with pytest.raises(ValueError, match=message):
         exclude(epoch, **overrides)
-    assert not (store.root / 'sessions/alc-04/closed.json').exists()
+    assert not (store.root / 'sessions/ald-04/closed.json').exists()
 
 
 def test_source_changed_after_the_decision_is_detected(epoch):
     store, plan, session, _ = epoch
     exclude(epoch)
-    (store.root / 'runs/alc-04-healthy/raw.json').write_bytes(b'{"edited":true}')
+    (store.root / 'runs/ald-04-healthy/raw.json').write_bytes(b'{"edited":true}')
     with pytest.raises(ValueError, match='changed after the owner decision'):
         recovery.read_abandonment(store, session, plan)
 
@@ -153,9 +153,9 @@ def test_slot_status_must_replay_exactly(epoch):
 def test_closure_fields_are_exact(epoch):
     store, plan, session, _ = epoch
     exclude(epoch)
-    path = store.root / 'sessions/alc-04/closed.json'
+    path = store.root / 'sessions/ald-04/closed.json'
     ref, closed = corpus.read_binding(store, path)
-    for change in ({'replacement_group_id': 'alc-07'}, {'reason': 'other'}, {'extra': True}):
+    for change in ({'replacement_group_id': 'ald-07'}, {'reason': 'other'}, {'extra': True}):
         with pytest.raises(ValueError, match='differs from the frozen'):
             owner.read_owner_exclusion(store, session, plan, {**closed, **change}, ref)
 
@@ -163,28 +163,28 @@ def test_closure_fields_are_exact(epoch):
 def test_only_one_owner_exclusion_per_epoch(epoch):
     store, plan, session, _ = epoch
     exclude(epoch)
-    other = {**session, 'group_id': 'alc-05', 'ordinal': 5, 'compose_project': 'sentinelops-corpus-alc-05'}
-    corpus.bind(store, corpus.registration_path(store, 'alc-05'), other)
+    other = {**session, 'group_id': 'ald-05', 'ordinal': 5, 'compose_project': 'sentinelops-corpus-ald-05'}
+    corpus.bind(store, corpus.registration_path(store, 'ald-05'), other)
     with pytest.raises(ValueError):
         owner.exclude_group(store, plan, role=ROLE, ordinal=5, replacement_ordinal=7, decision=DECISION)
 
 
 def test_a_failure_without_a_host_pause_witness_cannot_be_excluded(tmp_path, monkeypatch, epoch):
     store, plan, _, state = epoch
-    write_ledger(store, 'alc-04-inventory-abrupt', gap_seconds=0)  # same run directory, regular ledger
+    write_ledger(store, 'ald-04-inventory-abrupt', gap_seconds=0)  # same run directory, regular ledger
     with pytest.raises(ValueError, match='host-pause witness'):
         exclude(epoch)
-    assert not (store.root / 'sessions/alc-04/closed.json').exists() and state['stopped'] == []
+    assert not (store.root / 'sessions/ald-04/closed.json').exists() and state['stopped'] == []
 
 
 def test_the_witness_is_recorded_and_replayed_from_the_original_ledger(epoch):
     store, plan, session, _ = epoch
     result = exclude(epoch)
-    witness = result['host_pause_witness']['alc-04-inventory-abrupt']
+    witness = result['host_pause_witness']['ald-04-inventory-abrupt']
     assert witness['gaps'][0]['seconds'] > owner.PAUSE_SECONDS and witness['attempts'] == 20
-    path = store.root / 'sessions/alc-04/closed.json'
+    path = store.root / 'sessions/ald-04/closed.json'
     ref, closed = corpus.read_binding(store, path)
-    forged = {**closed, 'host_pause_witness': {'alc-04-payment-gradual': witness}}
+    forged = {**closed, 'host_pause_witness': {'ald-04-payment-gradual': witness}}
     with pytest.raises(ValueError, match='witness differs'):
         owner.read_owner_exclusion(store, session, plan, forged, ref)
 
@@ -209,15 +209,15 @@ def test_the_schedule_follows_the_exclusion_to_its_replacement(epoch):
     from sentinelops.experiments.local_campaign import planned_slots
     store, plan, _, _ = epoch
     exclude(epoch)
-    groups = {f'alc-0{i}' for i in (1, 2, 3, 5)}
+    groups = {f'ald-0{i}' for i in (1, 2, 3, 5)}
     slots = recovery.effective_slots(store, plan, planned_slots(plan))
-    assert {f'alc-0{ordinal}' for _, ordinal, _ in slots} == groups | {'alc-06'}
+    assert {f'ald-0{ordinal}' for _, ordinal, _ in slots} == groups | {'ald-06'}
 
 
 def test_loose_files_in_an_incomplete_slot_are_never_a_witness(epoch):
     store, plan, _, state = epoch
-    write_ledger(store, 'alc-04-inventory-abrupt', gap_seconds=0)
-    write_ledger(store, 'alc-04-payment-gradual', gap_seconds=28094, bound=False)  # forged, unregistered
+    write_ledger(store, 'ald-04-inventory-abrupt', gap_seconds=0)
+    write_ledger(store, 'ald-04-payment-gradual', gap_seconds=28094, bound=False)  # forged, unregistered
     with pytest.raises(ValueError, match='host-pause witness'):
         exclude(epoch)
     assert state['stopped'] == []
@@ -225,7 +225,7 @@ def test_loose_files_in_an_incomplete_slot_are_never_a_witness(epoch):
 
 def test_a_ledger_that_is_not_the_bound_capture_is_refused(epoch):
     store, plan, _, state = epoch
-    run_json = next((store.root / 'runs/alc-04-inventory-abrupt/captures').glob('run-*/run.json'))
+    run_json = next((store.root / 'runs/ald-04-inventory-abrupt/captures').glob('run-*/run.json'))
     run = json.loads(run_json.read_text())
     run_json.write_text(json.dumps({**run, 'ended_at': '2030-01-01T00:00:00.000000Z'}))
     with pytest.raises(ValueError, match='registered completed capture'):
@@ -243,7 +243,7 @@ def test_any_other_verifier_failure_is_never_explained_by_a_pause(epoch):
 
 def test_a_pause_after_the_warmup_does_not_explain_a_warmup_failure(epoch):
     store, plan, _, state = epoch
-    write_ledger(store, 'alc-04-inventory-abrupt', gap_seconds=28094, gap_after_warmup=True)
+    write_ledger(store, 'ald-04-inventory-abrupt', gap_seconds=28094, gap_after_warmup=True)
     with pytest.raises(ValueError, match='host-pause witness'):
         exclude(epoch)
     assert state['stopped'] == []

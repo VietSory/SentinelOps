@@ -34,15 +34,6 @@ from sentinelops.ml.local_data import audit_local_corpus
 from sentinelops.experiments.multifault import grouping_report
 from sentinelops.public_data.downloads import fetch_file
 from sentinelops.public_data.audit import load_verified_manifest
-from sentinelops.public_data.gamma import load_gamma_manifest
-from sentinelops.public_data.gamma_audit import audit_gamma
-from sentinelops.public_data.resources import resource_window
-from sentinelops.public_data.phases import parse_phases
-from sentinelops.public_data.gamma_archive import RangeReader
-from sentinelops.public_data.gamma_clients import summarize_log, summarize_integers
-from sentinelops.public_data.cohort import load_cohort_manifest
-from sentinelops.public_data.admission import admit_case, session_groups
-from sentinelops.public_data.dataset import build_grouped_dataset
 from sentinelops.public_data.rcaeval_partitions import group_metadata, require_cases
 from sentinelops.public_data.rcaeval_native import adapt_native_case, load_native_inputs, validate_profile
 from sentinelops.public_data.rcaeval_evaluation import evaluate_manifest
@@ -58,7 +49,6 @@ from sentinelops.workers.incident_journal import IncidentJournal
 from sentinelops.workers.incident import IncidentWorker
 from sentinelops.workers.incident_replay import replay as replay_incident_ledger
 from sentinelops.ml.registry import ModelRegistry
-from sentinelops.ml.readiness import audit_readiness
 from sentinelops.workers.model_signals import collect_model_signals
 from sentinelops.public_data.rcaeval_evaluation import diagnose_native
 from sentinelops.remediation.verification import verify_post_action_health
@@ -74,16 +64,12 @@ from sentinelops.remediation.quarantine import QuarantineJournal, QuarantineRevi
 from sentinelops.contracts import load_schema, validate_payload
 from fastapi.testclient import TestClient
 assert callable(verify_post_action_health)
-client_summary = summarize_log(b'10 requests in 1.00m, 1.00MB read\n')
-assert client_summary['summary']['duration_seconds'] == '60.00'
-assert client_summary['http_5xx_count'] is None and client_summary['socket_errors'] is None
-assert summarize_integers(b'123\n456\n')['unit'] is None
 for name in ('telemetry', 'feature-window', 'detection-result', 'degradation-risk',
              'incident-evidence-record', 'explanation', 'remediation-action',
              'observation-envelope', 'feature-envelope', 'infrastructure-observation',
              'experiment-run', 'dataset-manifest', 'incident-write',
              'incident-envelope', 'incident-list', 'api-error', 'explanation-response', 'training-data-policy',
-             'research-resource-window', 'research-interference-label', 'health-signal', 'correlation-result',
+             'health-signal', 'correlation-result',
              'rca-policy', 'rca-result', 'training-data-policy-v2', 'lane-b-deployment-lock', 'payment-known-good',
              'action-observation', 'action-list', 'quarantine-review', 'quarantine-release', 'quarantine-status',
              'payment-image-review', 'payment-image-evidence', 'payment-deployment-baseline', 'payment-deployment-change'):

@@ -131,7 +131,7 @@ def test_window_end_pauses_only_at_a_group_boundary_without_starting_capture(tmp
     assert 4 * 3600 < needed < 5 * 3600
     late = campaign.run_campaign(store, plan_path=ALIBABA_PLAN, bundle='b', manifest_sha256='m',
                                  window_end=now + timedelta(seconds=needed - 1), clock=lambda: now)
-    assert late['status'] == 'PAUSED_AT_GROUP_BOUNDARY' and late['next_group'] == 'alc-01' and started == []
+    assert late['status'] == 'PAUSED_AT_GROUP_BOUNDARY' and late['next_group'] == 'ald-01' and started == []
     with pytest.raises(Started):  # enough time: the first slot of the group starts
         campaign.run_campaign(store, plan_path=ALIBABA_PLAN, bundle='b', manifest_sha256='m',
                               window_end=now + timedelta(seconds=needed), clock=lambda: now)
@@ -145,8 +145,8 @@ def test_pause_closes_verified_group_before_reporting_boundary(tmp_path, monkeyp
 
     plan = load_plan(corpus.ALIBABA_PLAN)
     store = ArtifactStore(tmp_path)
-    group = 'alc-01'
-    project = 'sentinelops-corpus-alc-01'
+    group = 'ald-01'
+    project = 'sentinelops-corpus-ald-01'
     container = 'a' * 64
     kinds = corpus.plan_kinds(plan)
     bind(store, corpus.registration_path(store, group), {
@@ -168,7 +168,7 @@ def test_pause_closes_verified_group_before_reporting_boundary(tmp_path, monkeyp
     monkeypatch.setattr(campaign, 'inspect_completed_capture',
                         lambda store, slot, **kwargs: verified.append(slot))
     monkeypatch.setattr(corpus, 'docker', lambda *args:
-        '[{"Config":{"Labels":{"com.docker.compose.project":"sentinelops-corpus-alc-01"}}}]')
+        '[{"Config":{"Labels":{"com.docker.compose.project":"sentinelops-corpus-ald-01"}}}]')
 
     def stop(args, **kwargs):
         assert args == ['docker', 'stop', container]
@@ -183,7 +183,7 @@ def test_pause_closes_verified_group_before_reporting_boundary(tmp_path, monkeyp
     if stop_ok:
         result = campaign.run_campaign(store, **options)
         assert result['status'] == 'PAUSED_AT_GROUP_BOUNDARY'
-        assert result['next_group'] == 'alc-02'
+        assert result['next_group'] == 'ald-02'
     else:
         with pytest.raises(RuntimeError, match='stop failed'):
             campaign.run_campaign(store, **options)
@@ -191,11 +191,11 @@ def test_pause_closes_verified_group_before_reporting_boundary(tmp_path, monkeyp
     events = sorted((tmp_path / 'campaign' / 'events').glob('*.json'))
     _, latest = corpus.read_binding(store, events[-1])
     assert latest['status'] == ('PAUSED_AT_GROUP_BOUNDARY' if stop_ok else 'STOPPED_REQUIRES_INVESTIGATION')
-    assert not corpus.registration_path(store, 'alc-02').exists()
+    assert not corpus.registration_path(store, 'ald-02').exists()
 
 
 def test_alibaba_plan_keeps_five_acquired_groups_with_a_replacement_budget():
     from sentinelops.experiments.local_corpus import ALIBABA_PLAN, group_name
     plan = load_plan(ALIBABA_PLAN)
     assert {ordinal for _, ordinal, _ in planned_slots(plan)} == {1, 2, 3, 4, 5}
-    assert group_name(plan, 'development-validation', 6) == 'alc-06'  # an interrupted group can be replaced
+    assert group_name(plan, 'development-validation', 6) == 'ald-06'  # an interrupted group can be replaced

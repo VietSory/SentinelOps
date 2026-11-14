@@ -73,27 +73,6 @@ def _semantic_validation(name: str, payload: dict[str, Any]) -> None:
     if name == "health-signal.schema.json":
         from sentinelops.incidents.health import validate_signal
         validate_signal(payload)
-    if name == "research-interference-label.schema.json":
-        start, end = utc_time(payload["window_start"]), utc_time(payload["window_end"])
-        if (end - start).total_seconds() != 300 or end.timestamp() % 60:
-            raise ValueError("interference labels require aligned five-minute windows")
-        direct, global_seconds = payload["direct_interference_seconds"], payload["any_host_interference_seconds"]
-        if direct > global_seconds:
-            raise ValueError("direct interference cannot exceed any-host union coverage")
-        expected = ("direct-recorded-interference" if direct else "other-host-interference-context" if global_seconds
-                    else "boundary-uncertain" if payload["overlapping_or_guarded_event_ids"]
-                    else "no-recorded-interference-reference")
-        if payload["label"] != expected or (global_seconds > 0 and not payload["overlapping_or_guarded_event_ids"]):
-            raise ValueError("interference label contradicts interval evidence")
-    if name == "research-resource-window.schema.json":
-        start, end = utc_time(payload["window_start"]), utc_time(payload["window_end"])
-        if (end - start).total_seconds() != 300 or end.timestamp() % 60:
-            raise ValueError("research resource windows require aligned five-minute cutoffs")
-        if payload["max_input_observed_at"] and utc_time(payload["max_input_observed_at"]) > end:
-            raise ValueError("resource window includes observations after its cutoff")
-        eligible = payload["eligible_for_features"]
-        if eligible != (payload["features"] is not None) or eligible != (payload["quality"]["valid_buckets"] >= 4):
-            raise ValueError("resource feature eligibility contradicts values/coverage")
     if name in ("incident-write.schema.json","incident-envelope.schema.json","incident-list.schema.json",
                 "explanation-response.schema.json"):
         from sentinelops.incidents.validation import validate_wrapper

@@ -31,6 +31,7 @@ REGISTRY = json.loads((ROOT / 'configs/system_versions.json').read_text())
 FROZEN_VERSIONS = {
     'system-v1': '710f9db5c614bf270dff985621004bb09b4a37b0080aea5ecbfbfbe1d14e6371',
     'system-v2': 'fc83bb104858ce31e9336593521a93a8cc444ab879fc4c91301f24f2d596fa66',
+    'system-v3': 'daf13579ff72dd0626977f0cfbd5d617364f9065ee26899c11b3e951e9a01d42',
 }
 DECLARED = ('epoch', 'model_version', 'bundle_manifest_sha256', 'shared_infrastructure', 'carry_forward_from',
             'carried_services')

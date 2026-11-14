@@ -26,8 +26,6 @@ SAMPLE_MAP = {
     "incident-list.sample.json": "incident-list.schema.json",
     "api-error.sample.json": "api-error.schema.json",
     "explanation-response.sample.json": "explanation-response.schema.json",
-    "research-resource-window.sample.json": "research-resource-window.schema.json",
-    "research-interference-label.sample.json": "research-interference-label.schema.json",
     "health-signal.sample.json": "health-signal.schema.json",
     "correlation-result.sample.json": "correlation-result.schema.json",
     "rca-result.sample.json": "rca-result.schema.json",

@@ -1,7 +1,7 @@
 {
   "registry_version": "sentinelops-system-versions/v1",
   "authorizing_adr": "ADR-017",
-  "current": "system-v2",
+  "current": "system-v3",
   "versions": {
     "system-v1": {
       "services": [
@@ -278,6 +278,151 @@
             ],
             "route": "POST /v1/payments/charge",
             "workload_recipe_sha256": "d91a78699ea4b1a402723bee4306c168168e7cebc26e4c80849d58dcc363d09b"
+          }
+        }
+      }
+    },
+    "system-v3": {
+      "services": [
+        "checkout-service",
+        "inventory-service",
+        "payment-service"
+      ],
+      "topology": "configs/topology.yaml",
+      "declared": {
+        "epoch": "alibaba-layer2 epoch 4 (ald-*), ADR-019 confirmation",
+        "model_version": "de38fc6bb89896856556e13e7c6142ba21c8d0fea88ebd082f95e96d4e5b0e57",
+        "bundle_manifest_sha256": "d52df5846ac5027507d96b67c751f02f2c5519e3ea970fbdc3599207d18eb84e",
+        "shared_infrastructure": {
+          "checkout-service": [],
+          "inventory-service": [
+            "rds"
+          ],
+          "payment-service": [
+            "rds"
+          ]
+        },
+        "carry_forward_from": null,
+        "carried_services": []
+      },
+      "computed": {
+        "run_identity": {
+          "source_profile": "prometheus-increase-60s-5s/v2",
+          "feature_set_version": "http-relative-5m/v2",
+          "slo_health_policy_sha256": "52df658a1569c82e3cbbc85909e3d5f980137636b09626ec5bdcfa059b768560",
+          "scoring_sha256": "d3d928b20ece82476019a40be1fd4fbcb531280efb35e307b7aff91ed4bcf307",
+          "base_protocol_sha256": "1e8a1aa8ecaf2c06316d68486d76d51c5cc3dd5a641312bcd19e1822eadff8d7",
+          "scoring_code_blobs": {
+            "src/sentinelops/contracts.py": "bc61a2321a96cfed6174e8eeb5af2003012ca077",
+            "src/sentinelops/experiments/__init__.py": "2061e00946779355b9cd2e9ca79bdb3a01d26b98",
+            "src/sentinelops/experiments/client_clock.py": "c415c782092ad4264ec7369deded37ffc46b019e",
+            "src/sentinelops/experiments/clock_recovery.py": "ee0626cb467b24e4fcab1d19596dcfe525d2941a",
+            "src/sentinelops/experiments/diagnostics.py": "34274092682ff81f78835de14b2ff2e67966064e",
+            "src/sentinelops/experiments/labels.py": "5eb3df76d207b5692d02fa3ebfd372ba8b7f5839",
+            "src/sentinelops/experiments/local_campaign.py": "76999e90057a6b224dfa6a613e0e1de3cce4dd91",
+            "src/sentinelops/experiments/local_corpus.py": "568777a0dfd570350fee9f2ac9846a4494776887",
+            "src/sentinelops/experiments/local_labels.py": "3864f885e42b6f0b6be7d05aee536e4c62962a2e",
+            "src/sentinelops/experiments/local_recovery.py": "96b91d52781789a41046692deb198d7b8e380847",
+            "src/sentinelops/experiments/owner_exclusion.py": "9638bf3ae123f6273d54084805421ede80a82d86",
+            "src/sentinelops/experiments/runner.py": "43ebcd605870ebd8ad92d1a330246f668178dec2",
+            "src/sentinelops/experiments/s4_postgres.py": "c51feb7713d9738fdc5beb56a8795c512ea76308",
+            "src/sentinelops/experiments/traffic.py": "cf3a274ee0190b94ccee847d30552cf292864d62",
+            "src/sentinelops/experiments/verification.py": "9971af149e18ff8ed5bcfce54f47ca6cefbc1628",
+            "src/sentinelops/incidents/correlation.py": "3f97be3f7265dc13cc96e7bd64f141cb2fe709bd",
+            "src/sentinelops/incidents/domain.py": "f44e17befef2feeb63cb78710fac3a4354802bb0",
+            "src/sentinelops/incidents/health.py": "0e9227da96904f4527074fe15433f27cf35389fa",
+            "src/sentinelops/incidents/rca.py": "8f01357783bf7a0c675eb42b8a1184c8f81a2bba",
+            "src/sentinelops/incidents/validation.py": "47a94abfafd52e281d9fa3e03ef9cf529e85605e",
+            "src/sentinelops/ml/alibaba_bundle.py": "083cd39d1e27654319e558c6e86470609d86f1db",
+            "src/sentinelops/ml/alibaba_live.py": "1052facca0bdd4734f6b7f3db30770b570599885",
+            "src/sentinelops/ml/alibaba_local_evaluation.py": "586da445e59d72263dd93ab36b5536f9508f73ac",
+            "src/sentinelops/ml/alibaba_release.py": "024cb679e4a6786d1f3b75ea491077ca09943c31",
+            "src/sentinelops/ml/alibaba_training.py": "e09f022094887b7d0144b408e87f863855aa8914",
+            "src/sentinelops/ml/detector_evaluation.py": "ba4de8b4d3282630bd99fd506d1761d2df2dfa8f",
+            "src/sentinelops/ml/evaluation.py": "d4eba35900c22acaca0f856e8701c3f15d493df0",
+            "src/sentinelops/ml/local_data.py": "a48f6f3ccf3b78da417f92753b7bf87993f8969a",
+            "src/sentinelops/ml/local_evaluation.py": "6251eb0eb9b7c76dfb83a2337ff1787351a2198e",
+            "src/sentinelops/ml/models.py": "2d3b9e6ff20eff050a886b58d7fdb72c469669fe",
+            "src/sentinelops/ml/readiness.py": "b1314d20feb8348db910480fd589831e86ab2b55",
+            "src/sentinelops/ml/registry.py": "0b576748d568e705f429d186552de811aeb97132",
+            "src/sentinelops/ml/release.py": "c59d7d2788f58874a40efb6da1cc4cf9c4e22910",
+            "src/sentinelops/public_data/alibaba.py": "b42444113076c44ad285717ebced082c4a4316dd",
+            "src/sentinelops/public_data/policy.py": "01c52d93450c1ee7984207091a6dec5e51635d8d",
+            "src/sentinelops/schema_registry.py": "ed203c109496e0394cd771a73f8953b27af5c109",
+            "src/sentinelops/telemetry/core.py": "00999055b5177ae8b35fadc8d07671c0e46e3b7f",
+            "src/sentinelops/telemetry/infrastructure.py": "b493911846b4da589f5b24b18b6b1e3da18472d3",
+            "src/sentinelops/telemetry/pipeline.py": "27051206de8d3ee40edbb50d6ee2960694f148ef",
+            "src/sentinelops/telemetry/prometheus.py": "214c25eb4c25bd84622181bea2d16821914eb882",
+            "src/sentinelops/telemetry/scheduling.py": "00ec40f3c46a6039bf1fa20affaeb685d253bda5",
+            "src/sentinelops/telemetry/store.py": "96ab35babd94b3f5cc4ff6ce31f3feca28ac69bb",
+            "src/sentinelops/trace_evidence.py": "6e1f0a865fc9738e95d6d4a94bb390520be41641",
+            "src/sentinelops/trace_query.py": "d2e8b32773405b34a6118582b38bd4a641104bd3"
+          }
+        },
+        "capture_identity": {
+          "source_commit": "202650d81a642068c352246791c5bafa6f2c6228",
+          "evaluation_plan_sha256": "a5c19b8fa35b20e5bc0202b6e54890e1066fdee38f5c83ea579e86f698c4a26b",
+          "topology_sha256": "d1265592881a04d07bb6ed992baa59d43610c90cd76cb3565cc75dd53d0df9a3"
+        },
+        "shared_build_inputs": {
+          "services/common": "dfa33fec68c6d8fc3512287287cbf954567bf434",
+          "src": "e5d2dc3668bf3dabbf3384563e6e91b3e28d7b83",
+          "contracts": "783eceb05c0103ce3cfabfaf8519912c7e3b3b2b",
+          "docker/Dockerfile.service": "5f797fb53c6072c5b3c37b42b47b3ae603057b46",
+          "pyproject.toml": "6f327034509c1895d8d83fe039118c80edfe6ce2"
+        },
+        "services": [
+          "checkout-service",
+          "inventory-service",
+          "payment-service"
+        ],
+        "service_identity": {
+          "checkout-service": {
+            "route": "POST /v1/checkout",
+            "downstream": [
+              "inventory-service",
+              "payment-service",
+              "rds"
+            ],
+            "code_tree": "b3f5367e598819ccb905f242f69b4689b49af96b",
+            "measured_kinds": [
+              "healthy",
+              "payment-abrupt",
+              "inventory-abrupt",
+              "payment-gradual",
+              "inventory-gradual"
+            ],
+            "workload_recipe_sha256": "98a0e50e47dbd6e75e1b53ce1318b2b8f5667fd73eece0f6be2b2c85f7eaa817"
+          },
+          "inventory-service": {
+            "route": "GET /v1/inventory/{sku}",
+            "downstream": [
+              "rds"
+            ],
+            "code_tree": "0b6cacd933346256cf2025921dadc97d08f618ad",
+            "measured_kinds": [
+              "healthy",
+              "payment-abrupt",
+              "inventory-abrupt",
+              "payment-gradual",
+              "inventory-gradual"
+            ],
+            "workload_recipe_sha256": "98a0e50e47dbd6e75e1b53ce1318b2b8f5667fd73eece0f6be2b2c85f7eaa817"
+          },
+          "payment-service": {
+            "route": "POST /v1/payments/charge",
+            "downstream": [
+              "rds"
+            ],
+            "code_tree": "7df33fa2d03712c2eb7deab23050f2cf705d01a4",
+            "measured_kinds": [
+              "healthy",
+              "payment-abrupt",
+              "inventory-abrupt",
+              "payment-gradual",
+              "inventory-gradual"
+            ],
+            "workload_recipe_sha256": "98a0e50e47dbd6e75e1b53ce1318b2b8f5667fd73eece0f6be2b2c85f7eaa817"
           }
         }
       }

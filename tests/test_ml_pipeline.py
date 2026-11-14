@@ -14,8 +14,8 @@ pytest.importorskip("xgboost")
 from fastapi.testclient import TestClient
 from sentinelops.api import create_app
 from sentinelops.ml.evaluation import event_metrics
-from sentinelops.ml.models import fit_detector, fit_risk, save_bundle, load_bundle, train_gamma, matrix
-from sentinelops.ml.readiness import audit_readiness, DatasetNotReady
+from sentinelops.ml.models import fit_detector, fit_risk, save_bundle, load_bundle, matrix
+from sentinelops.ml.readiness import DatasetNotReady
 from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, IncompatibleFeatures
 from sentinelops.telemetry.core import FEATURE_KEYS, timestamp
 from sentinelops.telemetry.store import ArtifactStore
@@ -73,19 +73,6 @@ def test_fixture_cannot_be_promoted_even_with_forged_approval(tmp_path, fitted):
 def test_missing_nonfinite_boolean_or_wrong_schema_rejected(values):
     with pytest.raises(ValueError):
         matrix(values, 5)
-
-
-def test_exact_readiness_and_no_invalid_training_artifact(tmp_path):
-    recorded = json.loads(Path("tests/fixtures/gamma-grouped-dataset.json").read_text())
-    audit = audit_readiness(recorded)
-    assert (audit["candidate_windows"], audit["feature_eligible_windows"], audit["excluded_windows"]) == (29610, 22771, 6839)
-    assert audit["status"] == "BLOCKED" and audit["verified_precursor_runs"] == 0
-    assert all(row["train"] == row["calibration"] == 0 for row in audit["certified_business_service_health"].values())
-    store = ArtifactStore(tmp_path / "store")
-    ref = store.write("manifests", recorded)
-    with pytest.raises(DatasetNotReady):
-        train_gamma(store, ref, tmp_path / "models")
-    assert not (tmp_path / "models").exists()
 
 
 def test_default_registry_and_api_fail_closed_without_scores():
@@ -148,27 +135,6 @@ def test_event_metrics_keep_duplicates_misses_and_real_emission_delays():
     assert (result["tp"], result["fp"], result["fn"]) == (1, 1, 1)
     assert result["f1"] == .5 and result["detection_delays_seconds"] == [10.]
     assert result["measured_leads_seconds"] == [50.] and result["false_incidents_per_healthy_service_hour"] == 1
-
-
-def test_self_attested_dataset_cannot_enter_fit_or_read_arbitrary_evidence(tmp_path):
-    from sentinelops.ml.corpus import load_training_rows
-    from sentinelops.public_data.policy import load_policy
-    from sentinelops.telemetry.core import stable_id
-    report = {'dataset_version': 'gamma-verified-training/v1', 'source': load_policy()['sources']['gamma'],
-              'training_data_policy_hash': stable_id(load_policy()), 'training_ready': True,
-              'health_labels_available': True, 'source_reference_is_healthy_certificate': True,
-              'source_reference_traffic_verified': True, 'independence_established': True,
-              'risk_target_available': True, 'source_audit_refs': ['forged://exists-is-not-proof']}
-    class NoRead:
-        def read(self, ref):
-            pytest.fail('self-attestation must be rejected before any corpus/evidence read')
-    with pytest.raises(DatasetNotReady, match='self-attested'):
-        load_training_rows(NoRead(), report)
-    store = ArtifactStore(tmp_path / 'store')
-    ref = store.write('manifests', report)
-    with pytest.raises(DatasetNotReady, match='self-attested'):
-        train_gamma(store, ref, tmp_path / 'models')
-    assert not (tmp_path / 'models').exists()
 
 
 @pytest.mark.parametrize('seconds', [-300, 0, 60, 299, 301, 600])
