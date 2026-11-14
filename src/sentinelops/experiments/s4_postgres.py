@@ -30,6 +30,18 @@ PORTS = {
 }
 
 
+def database_port() -> int:
+    """Only the local published port is configurable; host, role and database stay pinned."""
+    value = os.getenv("SENTINELOPS_S4_POSTGRES_PORT", "5432")
+    if not re.fullmatch(r"[1-9][0-9]{0,4}", value) or int(value) > 65535:
+        raise ValueError("S4 PostgreSQL port must be an integer from 1 to 65535")
+    return int(value)
+
+
+def database_url() -> str:
+    return f"postgresql://sentinel:sentinel@127.0.0.1:{database_port()}/sentinelops"
+
+
 def require_sandbox(project: Path) -> str:
     name = os.getenv("COMPOSE_PROJECT_NAME", "")
     if not re.fullmatch(r"sentinelops-s4-[a-z0-9][a-z0-9-]{0,39}", name):
@@ -42,8 +54,9 @@ def require_sandbox(project: Path) -> str:
     ).strip()
     if endpoint != "unix:///var/run/docker.sock":
         raise ValueError("S4 requires the default local Docker endpoint")
+    ports = {**PORTS, "postgres": ("5432/tcp", str(database_port()))}
     identifiers = subprocess.check_output(
-        ["docker", "compose", "ps", "-q", *PORTS], cwd=project, text=True, timeout=10,
+        ["docker", "compose", "ps", "-q", *ports], cwd=project, text=True, timeout=10,
     ).split()
     if len(identifiers) != len(PORTS):
         raise ValueError("S4 requires every dedicated source container to be running")
@@ -54,7 +67,7 @@ def require_sandbox(project: Path) -> str:
         service = labels.get("com.docker.compose.service")
         if labels.get("com.docker.compose.project") != name or service not in PORTS or not item["State"]["Running"]:
             raise ValueError("S4 source container does not belong to the dedicated project")
-        private, published = PORTS[service]
+        private, published = ports[service]
         if item["NetworkSettings"]["Ports"].get(private) != [{"HostIp": "127.0.0.1", "HostPort": published}]:
             raise ValueError(f"S4 {service} is not bound to the expected local experiment port")
         if service == "postgres":
@@ -78,7 +91,7 @@ def pressure_stages(active_seconds: int, hold_ms: int, lead_in: bool):
 async def lock_pulses(hold_seconds: float, project: Path, expected_project: str):
     if await asyncio.to_thread(require_sandbox, project) != expected_project:
         raise ValueError("S4 Compose project changed before lock injection")
-    connection = await asyncpg.connect(DATABASE_URL, timeout=5, server_settings={
+    connection = await asyncpg.connect(database_url(), timeout=5, server_settings={
         "lock_timeout": "250ms", "idle_in_transaction_session_timeout": "2500ms",
         "statement_timeout": "2500ms",
     })

@@ -204,6 +204,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
     if s4_project:
         run.update(root_cause_ground_truth="rds", fault_method="db-pressure")
         run["parameters"]["s4_compose_project"] = s4_project
+        run["parameters"]["s4_postgres_port"] = s4_postgres.database_port()
         run["parameters"]["s4_lock_gap_seconds"] = s4_postgres.PULSE_GAP_SECONDS
         s4_stages = s4_postgres.pressure_stages(config.active_seconds, config.maximum_delay_ms, s4_lead_in)
         if s4_lead_in:
@@ -291,7 +292,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
                 bucket += 60
 
         async def sample_locks():
-            observer = PostgresInfrastructureSource(s4_postgres.DATABASE_URL)
+            observer = PostgresInfrastructureSource(s4_postgres.database_url())
             identity = None
             while True:
                 item = await observer.capture_lock_waits()
@@ -467,15 +468,15 @@ async def execute(config: ExperimentConfig, *, project: Path, output: Path, sess
         stages = s4_postgres.pressure_stages(config.active_seconds, config.maximum_delay_ms, lead_in=True)
         if config.warmup_seconds + sum(seconds for _, seconds, _ in stages) + config.recovery_seconds > 6000:
             raise ValueError("S4 with a lock lead-in must fit the bounded snapshot budget")
-    if config.scenario == "S4" and (allow_dirty or os.getenv("DATABASE_URL") not in (None, s4_postgres.DATABASE_URL)):
+    if config.scenario == "S4" and (allow_dirty or os.getenv("DATABASE_URL") not in (None, s4_postgres.database_url())):
         raise ValueError("S4 requires clean source and the dedicated Compose PostgreSQL connection")
     if source_profile not in (SOURCE_PROFILE, SOURCE_PROFILE_V2):
         raise ValueError("unsupported experiment source profile")
     if source_profile == SOURCE_PROFILE_V2 and (
-        config.split != "validation" or config.scenario not in ("S0", "S1", "S3")
+        config.split != "validation" or config.scenario not in ("S0", "S1", "S3", "S4")
         or config.warmup_seconds < 1800 or not config.all_entry_traffic or allow_dirty
     ):
-        raise ValueError("ADR-016 capture requires clean S0/S1/S3 validation with all-entry traffic and 30-minute warmup")
+        raise ValueError("ADR-016 capture requires clean S0/S1/S3/S4 validation with all-entry traffic and 30-minute warmup")
     with ExperimentLock(project):
         return await _execute_locked(config, project=project, output=output, session_id=session_id,
                                      allow_dirty=allow_dirty, source_profile=source_profile, s4_lead_in=s4_lead_in)
