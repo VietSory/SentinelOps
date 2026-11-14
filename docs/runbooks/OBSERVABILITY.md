@@ -306,7 +306,10 @@ docker compose logs --no-color --tail 100 checkout-service payment-service inven
 - A trace-parent mismatch requires checking header injection inside the client
   span, not only whether all three service names are present.
 - Missing metrics can indicate exporter/Collector startup errors; allow for the
-  SDK's 2-second export interval and the Collector's batching delay.
+  SDK's 1-second export interval and the 5-second Prometheus scrape.
+  Metrics bypass the Collector batch processor to keep counter/histogram
+  delivery fresh; traces retain their existing batch processor. A parity FAIL
+  must retain its evidence and must not be bypassed by widening tolerances.
 - The smoke test expects Jaeger's stable v3 query API. A 404 after polling should prompt
   checking the running image/configuration and rebuilding the current Compose
   stack. The decoder handles v3 JSON/NDJSON frames, rejects stream errors/duplicate IDs and verifies each complete trace; it does not infer success from the service registry alone.
@@ -328,3 +331,26 @@ The host-side HTTPX smoke test now uses `trust_env=False` so local requests are 
 - Metric counters and histogram counts increase for the tested business routes.
 - Existing Step 2 fault scenarios remain reproducible.
 - Both smoke tests pass and fault configurations are restored.
+
+
+## Alibaba source-parity measurement protocol
+
+The committed `alibaba-source-measurement/v2` protocol sends five healthy
+requests per second to each entry, with at most one in-flight request per
+entry. This gives denser samples than the former one-request/s driver.
+Prometheus [extrapolates counter increases](https://prometheus.io/docs/prometheus/latest/querying/functions/#increase);
+a sparse bucket can be sensitive to latency outliers near scrape boundaries.
+The parity report records this protocol explicitly and retains private
+`requests.jsonl` and allow-listed `server-completions.jsonl` before the
+sandbox is removed, so P4 counts and P5 means can be independently checked.
+P1–P6, the 5 s scrape/60 s windows, count tolerance 5% and mean tolerance
+10% stay unchanged. This is a healthy-source check at the recorded load,
+not a guarantee of accuracy for arbitrary low-rate or bursty traffic.
+Retain earlier FAIL reports; never select buckets or widen bounds to pass.
+
+Completion logs are followed from each observed pod before traffic starts
+(`server_log_collection=pod-follow-before-traffic/v1`). Reading only the final
+`kubectl logs` snapshot can lose earlier minutes when the kubelet rotates its
+log file ([Kubernetes logging architecture](https://kubernetes.io/docs/concepts/cluster-administration/logging/)).
+Follower exit or pod replacement fails the run. Temporary raw logs are private
+and removed on exit; only the allow-listed independent ledger is retained.

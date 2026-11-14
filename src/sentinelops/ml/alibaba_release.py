@@ -203,7 +203,9 @@ def criteria_complete(criteria, model_version, config, scores_for, health_policy
     for item in criteria['P4']:
         count, completions = item.get('prometheus_count'), item.get('server_completions')
         if not (_number(count) and count >= 0 and _count(completions) and completions > 0
-                and item.get('error_count') == 0 and _count(item.get('error_count'))
+                # Prometheus increase() emits floats, including a healthy 0.0.
+                # Require finite numeric zero; booleans and any nonzero error still fail.
+                and item.get('error_count') == 0 and _number(item.get('error_count'))
                 and item.get('failed_requests') == 0 and _count(item.get('failed_requests'))
                 and _close(item.get('relative_difference'), abs(count / completions - 1))
                 and item['relative_difference'] <= COUNT_TOLERANCE):

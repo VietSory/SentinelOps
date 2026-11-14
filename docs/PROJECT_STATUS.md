@@ -93,7 +93,7 @@ lớp 2 bên dưới.
 ## Việc tiếp theo
 
 - **A:** đã train lại theo ADR-019 (`de38fc6b`); lớp 2 `ald` (2026-11-14) cho kết quả phát triển S1/S3 tốt, chưa nghiệm thu Q-04…Q-07 (thiếu S2/S4, MTTD live, holdout); full G4/G8 chưa nghiệm thu.
-- **B:** owner đã duyệt G3 `de38fc6b` (D-27); đo parity một lần với gói mới rồi build release; giao review Alibaba/Q-10 và hồ sơ G6 cho owner; provider identity, EKS policy/adapter và AWS chỉ triển khai khi đủ quyền/phạm vi. UI/packaging/monitoring local không cần làm lại.
+- **B:** đã tích hợp local bundle `de38fc6b` theo D-27: parity P1–P6 PASS, host/model release mới, stream epoch riêng, baseline và live-check PASS với model signal được tái tính từ accepted history ([báo cáo](reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md)). Giao review Alibaba/Q-10 và hồ sơ G6 cho owner; provider identity, EKS policy/adapter và AWS chỉ triển khai khi đủ quyền/phạm vi.
 
 [Lane B checkpoint](delivery/LANE_B_CHECKPOINT.md) chốt mức bằng chứng từng
 capability (runtime-verified / fixture-tested / code-only / blocked), commit và CI

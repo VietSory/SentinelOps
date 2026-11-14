@@ -79,7 +79,8 @@ def configure(service_name: str) -> tuple[trace.Tracer, metrics.Meter]:
 
         metric_reader = PeriodicExportingMetricReader(
             OTLPMetricExporter(endpoint=endpoint, insecure=endpoint.startswith("http://")),
-            export_interval_millis=2000,
+            # Keep delivery lag small compared with the 5 s Prometheus scrape.
+            export_interval_millis=1000,
         )
         meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader], views=duration_histogram_views())
         metrics.set_meter_provider(meter_provider)

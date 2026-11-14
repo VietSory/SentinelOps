@@ -4,6 +4,15 @@ Evidence-driven AIOps cho ba microservice: **Checkout, Payment, Inventory**.
 Hệ thống thu metrics/logs/traces, tính SLO và model signals, tạo incident có bằng
 chứng, rồi hỗ trợ giải thích và remediation có kiểm soát.
 
+Isolation Forest phát hiện bất thường và XGBoost dự báo vượt SLO được train trên
+trace production Alibaba theo
+[ADR-016](docs/adr/ADR-016-public-production-training-source.md) và
+[ADR-019](docs/adr/ADR-019-breach-relative-retrain.md) — xem
+[Ranh giới sản phẩm](#ranh-giới-sản-phẩm). Mọi gate G0–G8
+([CONSTRAINTS_AND_GATES](docs/architecture/CONSTRAINTS_AND_GATES.md)) tách rõ
+bốn mức bằng chứng — runtime-verified, fixture-tested, code-only, blocked —
+không coi report hay CI cũ là bằng chứng hiện hành.
+
 ## Bắt đầu ở đây
 
 | Bạn cần | Tài liệu |
@@ -15,11 +24,13 @@ chứng, rồi hỗ trợ giải thích và remediation có kiểm soát.
 
 Local testbed/observability, telemetry/features, persistent incident API,
 health/incident workers và UI read-only tại `/ui/` đã có. Model chính thức được
-train trên **Alibaba v2022 theo ADR-016**; owner duyệt G3 **có điều kiện**, chỉ
-cho tích hợp local H4→G6 (D-22). Đã có [báo cáo tích hợp v2 trên máy B](docs/reports/LANE_B_ALIBABA_V2_ACTIVATION.md)
-và [các trial G6 local](docs/reports/G6_LOCAL_ALIBABA_BADF9DA0.md); **G6 chưa
-nghiệm thu**, kết quả chính thức còn chờ lớp đánh giá local v2 và G8. AWS và
-Bedrock chưa triển khai. Runtime hiện tại phải kiểm tra trên môi trường tương ứng.
+train trên **Alibaba v2022**, bundle hiện hành **`de38fc6b` (ADR-019)**; owner duyệt
+G3 **có điều kiện** cho tích hợp local và đường deploy AWS (D-27). Xem
+[báo cáo tích hợp model mới trên máy B](docs/reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md)
+và [lớp 2 `ald`](docs/reports/LAYER2_LOCAL_ALIBABA_DE38FC6B.md). Các
+[trial G6 cũ](docs/reports/G6_LOCAL_ALIBABA_BADF9DA0.md) dùng bundle `badf9da0`;
+**G6 và Q-04…Q-07 chưa nghiệm thu đầy đủ**, còn thiếu S2/S4, MTTD live và G8.
+AWS và Bedrock chưa triển khai. Runtime hiện tại phải kiểm tra trên môi trường tương ứng.
 
 ## Chạy API local
 
@@ -48,9 +59,29 @@ nhập/sửa IER. Không gửi token qua URL hoặc commit vào Git.
 Theo [runtime B](docs/runbooks/LOCAL_TESTBED.md#lane-b-isolated-application-runtime)
 để chạy các workers/source riêng. Không cần model để xem incident; UI chỉ đọc.
 
+## Model pipeline (Alibaba, ADR-016)
+
+```sh
+python -m scripts.train_alibaba --help
+python -m scripts.alibaba_controls --help
+python -m scripts.check_alibaba_source_parity --help   # target-environment source parity, bắt buộc trước build
+python -m scripts.build_alibaba_release --help         # operator-only, cần parity PASS + owner G3 decision
+python -m scripts.lane_b_host start --role health --source-profile prometheus-increase-60s-5s/v2 --help
+python -m scripts.check_lane_b_live --help             # verify end-to-end sau khi chọn release
+```
+
+Chi tiết từng bước và điều kiện gate ở [model pipeline runbook](docs/runbooks/MODEL_PIPELINE.md#source-parity-and-serving-release)
+và [lane B checkpoint §7.6](docs/delivery/LANE_B_CHECKPOINT.md#76-cập-nhật-2026-11-09-model-chính-thức-là-model-alibaba-adr-016).
+`build_alibaba_release` không activate gì; B tự chọn release qua
+`SENTINELOPS_MODEL_STORE`/`SENTINELOPS_MODEL_RELEASE_REF` sau khi owner duyệt G3.
+
 ## Ranh giới sản phẩm
 
-- MAD là control, Isolation Forest phát hiện anomaly, XGBoost dự báo pre-SLO gradual.
+- Isolation Forest phát hiện anomaly latency; XGBoost dự báo vượt SLO 750 ms
+  trong 300 giây với ràng buộc đơn điệu. Một **bundle dùng chung** cho
+  Checkout/Payment/Inventory (`http-relative-5m/v2`, ADR-019). MAD và slope chỉ là
+  control đánh giá; SLO rule đảm nhận lỗi 5xx. Bundle v1 `badf9da0` không nạp được
+  với code hiện hành.
 - IER và deterministic RCA giữ evidence/ranking/uncertainty; Bedrock chỉ giải thích.
 - Action chỉ dùng runbook được phép, có policy, audit và telemetry verification.
 - Nguồn train chính thức là trace production Alibaba v2022 theo
@@ -60,7 +91,7 @@ Theo [runtime B](docs/runbooks/LOCAL_TESTBED.md#lane-b-isolated-application-runt
 - Dữ liệu local HTTP chỉ dùng evaluation, không dùng fit, chọn model hay chỉnh
   ngưỡng; đường train local đã gỡ theo D-23. ADR-014 đã được thay thế về nguồn
   train; RCAEval chỉ dành cho RCA evaluation, GAMMA/v1 giữ làm lịch sử.
-- Alibaba không có trường lỗi 5xx; SLO rule và MAD đảm nhận phần này. Build release
+- Alibaba không có trường lỗi 5xx; SLO rule đảm nhận phần này. Build release
   không tự bật model; parity phải được đo trên môi trường đích và activation phải
   nằm trong phạm vi owner duyệt.
 

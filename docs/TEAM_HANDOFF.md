@@ -1,7 +1,7 @@
 # SentinelOps — bắt đầu làm việc trong đội hai người
 
 Baseline lịch sử: `main` sau PR #24, merge `f4891cf`, 2026-10-31. Trạng thái
-bàn giao cập nhật 2026-11-12; không chứng minh máy mới đã có data/model/runtime.
+bàn giao cập nhật 2026-11-14; không chứng minh máy mới đã có data/model/runtime.
 
 ## 1. Sản phẩm và trạng thái hiện tại
 
@@ -18,11 +18,14 @@ verify bằng telemetry. Missing data là UNKNOWN, không phải healthy.
 
 **Đã có:** workload/observability, telemetry/features/replay, guarded fitting/loading,
 health/incident workers, persistent API, conservative RCA, UI/H2 pin revision,
-local operator/producer scopes và OIDC adapter. Model Alibaba `badf9da0` được
-duyệt có điều kiện cho local H4→G6 (D-22), đã có source parity và inference trên
-máy B. Native trials ghi 9/10 recovered, 1/1 failed-verify escalated; B đã review
-lại safety tests. **Chưa nghiệm thu:** chất lượng model đầy đủ (local Q-04/Q-05/
-Q-07 FAIL), full G4, G5, G6 và G8. AWS/provider identity thật chưa triển khai.
+local operator/producer scopes và OIDC adapter. Model hiện hành là Alibaba
+`de38fc6b` (ADR-019), G3 có điều kiện D-27; xem
+[báo cáo parity/release/inference trên máy B](reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md).
+Lớp 2 `ald` đạt các ngưỡng phát triển S1/S3, nhưng chưa nghiệm thu đầy đủ
+Q-04…Q-07 (thiếu S2/S4, MTTD live và holdout). Native trials của bundle cũ
+`badf9da0` ghi 9/10 recovered, 1/1 failed-verify escalated; B đã review safety
+tests. **Chưa nghiệm thu:** chất lượng model đầy đủ, full G4, G5, G6 và G8.
+AWS/provider identity thật chưa triển khai.
 Không làm lại những module đã có hoặc coi fixture model là model đã được chấp nhận.
 Report cũ có thể ghi active capture; đó là quan sát tại thời điểm report, không
 phải xác nhận controller vẫn sống hôm nay. Kiểm tra trên đúng máy trước khi tiếp tục.
@@ -36,7 +39,7 @@ trước, sau đó đọc caller/code bị tác động. Không cần đọc to�
 | --- | --- |
 | Trạng thái / phần chưa đạt | [PROJECT_STATUS.md](PROJECT_STATUS.md), đối chiếu Git/CI/runtime của mình |
 | Sản phẩm / thiết kế / acceptance | [PRODUCT_SPEC.md](architecture/PRODUCT_SPEC.md), [TECHNICAL_SPEC.md](architecture/TECHNICAL_SPEC.md), [gates](architecture/CONSTRAINTS_AND_GATES.md), [ADR index](adr/README.md) |
-| A: data/model hiện tại | [ADR-016](adr/ADR-016-public-production-training-source.md), [model packet](reports/G3_CANDIDATE_ALIBABA_BADF9DA0.md), [layer 2](reports/LAYER2_LOCAL_ALIBABA_BADF9DA0.md), [models](runbooks/MODEL_PIPELINE.md); [ADR-018](adr/ADR-018-proposed-monotone-latency-detector.md) còn Proposed |
+| A: data/model hiện tại | [ADR-016](adr/ADR-016-public-production-training-source.md), [ADR-019](adr/ADR-019-breach-relative-retrain.md), [model packet](reports/G3_CANDIDATE_ALIBABA_DE38FC6B.md), [layer 2](reports/LAYER2_LOCAL_ALIBABA_DE38FC6B.md), [models](runbooks/MODEL_PIPELINE.md); ADR-018 đã bị từ chối |
 | A: worker/RCA | [health](runbooks/HEALTH_WORKER.md), [incident](runbooks/INCIDENT_WORKER.md), [RCA](runbooks/RCA.md), [RCAEval](runbooks/RCAEVAL_NATIVE_DEVELOPMENT.md) |
 | B: API/DB/UI | [API runbook](runbooks/INCIDENT_API.md), [storage](runbooks/INCIDENT_STORE.md), `src/sentinelops/api.py`, `contracts/` |
 | B: deploy/action | [ADR-006](adr/ADR-006-control-plane-and-storage.md), [ADR-009](adr/ADR-009-payment-rollback-runbook.md), technical spec §13–14, Compose/infra/observability |
@@ -49,7 +52,8 @@ trước, sau đó đọc caller/code bị tác động. Không cần đọc to�
 2. Giữ native service splits, train-only fitting, calibration riêng và source
    provenance theo ADR-016; local không fit/chọn model/chỉnh ngưỡng. ADR-017 pin
    identity của từng epoch, không tự gộp kết quả giữa các phiên bản. Final sealed.
-3. Feature Alibaba `http-relative-5m/v1`, source `prometheus-increase-60s-5s/v2`.
+3. Feature Alibaba `http-relative-5m/v2`, source `prometheus-increase-60s-5s/v2`.
+   MAD/slope chỉ dùng đánh giá. Code hiện hành không nạp bundle v1 `badf9da0`.
    Thiếu model trả 503; thiếu history thì signal unavailable. Release Alibaba cần
    history nên `/detect` và `/risk` trả 409; đọc `service_signals` trong IER.
 4. IER là authoritative record, schema strict; metadata bổ sung ở envelope versioned.

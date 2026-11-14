@@ -23,11 +23,16 @@ Criteria `alibaba-parity-criteria/v1`:
      (`service_windows_fast`) yields a final relative window for every service
      from the Prometheus minutes, with the bundle's feature order and finite IF,
      MAD and XGBoost scores.
+
+Measurement protocol v2 uses five requests/s per entry, bounded to one in-flight
+request per entry. P1-P6 and their bounds are unchanged. The complete request and
+server-completion ledgers are retained so failed measurements can be replayed.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -54,6 +59,15 @@ FIRST_AGE = 35
 COUNT_TOLERANCE = .05
 MEAN_TOLERANCE = .10
 PROJECT = Path(__file__).resolve().parents[1]
+MEASUREMENT_PROTOCOL = {
+    'protocol_version': 'alibaba-source-measurement/v2',
+    'entry_requests_per_second': 5,
+    'maximum_in_flight': len(SERVICES),
+    'faults_enabled': False,
+    'request_ledger': 'requests.jsonl',
+    'server_completion_ledger': 'server-completions.jsonl',
+    'server_log_collection': 'pod-follow-before-traffic/v1',
+}
 
 
 def utcnow():
@@ -85,12 +99,46 @@ async def drive(client, targets, stop):
     tick = loop.time()
     while utcnow() < stop:
         await asyncio.gather(*(request(s, u) for s, u in targets.items()))
-        tick += 1
+        tick += 1 / MEASUREMENT_PROTOCOL['entry_requests_per_second']
         await asyncio.sleep(max(0, tick - loop.time()))
     return rows
 
 
-def exact_logs(sandbox, inventory, rows, ends):
+@contextmanager
+def completion_log_streams(sandbox, inventory, root):
+    """Follow each pinned pod before traffic, so kubelet rotation cannot truncate history.
+
+    Raw output is private and temporary; only the allow-listed ledger survives.
+    A failed follower aborts certification rather than falling back to latest logs.
+    """
+    from scripts.check_rollback_kubernetes import private_file
+    paths, children = {}, []
+    try:
+        for service in SERVICES:
+            path = root / (service + '-completion-stream.tmp')
+            private_file(path, b'')
+            paths[service] = path
+            with path.open('ab') as output:
+                children.append(subprocess.Popen([
+                    'kubectl', '--kubeconfig', str(sandbox.kubeconfig), '--context', 'kind-' + sandbox.name,
+                    '-n', NAMESPACE, 'logs', 'pod/' + inventory[service]['pod_name'],
+                    '--follow', '--tail=-1', '--pod-running-timeout=30s'],
+                    stdout=output, stderr=subprocess.DEVNULL))
+        yield paths, children
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=10)
+        for path in paths.values():
+            path.unlink(missing_ok=True)
+
+
+def exact_logs(log_paths, inventory, rows, ends):
     """Server completions in the run, each marked failed when it is not a clean 200 resolved to
     its client, pod and route; client-side failures are added as failed records at their time."""
     start_ms, stop_ms = int((ends[0] - timedelta(minutes=1)).timestamp() * 1000), int(ends[-1].timestamp() * 1000)
@@ -103,7 +151,7 @@ def exact_logs(sandbox, inventory, rows, ends):
                              'reason': 'client-request-failed'})
     for service in SERVICES:
         method, route = BUSINESS_ROUTES[service]
-        for line in sandbox.kubectl('-n', NAMESPACE, 'logs', 'deployment/' + service).decode().splitlines():
+        for line in log_paths[service].read_text().splitlines():
             try:
                 item = json.loads(line)
             except ValueError:
@@ -119,6 +167,24 @@ def exact_logs(sandbox, inventory, rows, ends):
             item['service'] = service
             selected.append(item)
     return selected
+
+
+
+COMPLETION_FIELDS = ('service', 'timestamp_unix_ms', 'duration_ms', 'method', 'route', 'status_code',
+                     'trace_id', 'correlation_id', 'k8s.pod.uid', 'failed', 'reason')
+
+
+def persist_measurements(root, requests, completions):
+    """Retain the independent P4/P5 truth before deleting the sandbox; no free-text log fields."""
+    from scripts.check_rollback_kubernetes import private_file
+    ledgers = {'requests.jsonl': requests,
+               'server-completions.jsonl': [{key: row[key] for key in COMPLETION_FIELDS if key in row}
+                                             for row in completions]}
+    for name, rows in ledgers.items():
+        # Malformed duration stays an explicitly failed record, never a non-standard JSON NaN.
+        safe = [{key: None if isinstance(value, float) and not math.isfinite(value) else value
+                 for key, value in row.items()} for row in rows]
+        private_file(root / name, ''.join(json.dumps(row, allow_nan=False) + '\n' for row in safe).encode())
 
 
 def verify_bundle(bundle, manifest_sha256):
@@ -276,10 +342,14 @@ async def measure(sandbox, root, bundle_parts, policy):
             first_end = (int(utcnow().timestamp()) // 60 + 2) * 60
             count = minute_count(bundle_parts[0]['provenance']['config'])
             ends = [datetime.fromtimestamp(first_end + m * 60, timezone.utc) for m in range(count)]
-            captures, rows = await asyncio.gather(capture_buckets(client, source, ends, inventory),
-                                                  drive(client, targets, ends[-1] + timedelta(seconds=39)))
-            stable = inventory == await asyncio.to_thread(sandbox.inventory)
-            logs = await asyncio.to_thread(exact_logs, sandbox, inventory, rows, ends)
+            with completion_log_streams(sandbox, inventory, root) as (log_paths, followers):
+                captures, rows = await asyncio.gather(capture_buckets(client, source, ends, inventory),
+                                                      drive(client, targets, ends[-1] + timedelta(seconds=39)))
+                stable = inventory == await asyncio.to_thread(sandbox.inventory)
+                logs = await asyncio.to_thread(exact_logs, log_paths, inventory, rows, ends)
+                persist_measurements(root, rows, logs)
+                if any(child.poll() is not None for child in followers):
+                    raise RuntimeError('server completion log follower exited during measurement')
             checks, failures, normalization_ref = evaluate(root, bundle_parts, captures, logs, ends, policy)
             if not stable:
                 # A pod restart during sampling fails the run with evidence instead of aborting it.
@@ -299,6 +369,7 @@ def write_evidence(root, scope, commit, manifest, manifest_sha256, checks, failu
                     'configuration_hash': config.get('configuration_hash') if config else None,
                     'scrape_interval': config.get('scrape_interval') if config else None,
                     'normalization_ref': normalization_ref,
+                    'measurement_protocol': MEASUREMENT_PROTOCOL,
                     'activation_allowed': False, 'G3_accepted': False}
     (root / 'verification.json').write_text(json.dumps(verification, indent=2, allow_nan=False) + '\n')
     record = {'parity_version': PARITY_VERSION, **scope, 'status': 'FAIL' if failures else 'PASS',

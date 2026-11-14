@@ -535,3 +535,135 @@ def test_parity_diagnostics_keep_status_and_reasons_but_no_free_text(tmp_path):
     written = (tmp_path / 'diagnostics.json').read_text()
     assert 'SECRET' not in written
     assert json.loads(written)['events'] == [{'reason': 'Failed', 'type': 'Warning', 'object': 'inventory-service-1'}]
+
+
+def test_parity_measurement_cadence_is_bounded_and_matches_its_recorded_protocol(monkeypatch):
+    import asyncio
+    import importlib
+    from datetime import datetime, timedelta, timezone
+    import httpx
+    script = importlib.import_module('scripts.check_alibaba_source_parity')
+    clock = [0.]
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(script, 'utcnow', lambda: start + timedelta(seconds=clock[0]))
+    active, maximum = [0], [0]
+    class Client:
+        async def request(self, method, url, json=None, headers=None):
+            active[0] += 1
+            maximum[0] = max(maximum[0], active[0])
+            trace = headers['traceparent'].split('-')[1]
+            active[0] -= 1
+            return httpx.Response(200, headers={'x-trace-id': trace, 'x-correlation-id': headers['x-correlation-id']})
+    async def run():
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(loop, 'time', lambda: clock[0])
+        async def advance(seconds):
+            clock[0] = round(clock[0] + seconds, 9)
+        monkeypatch.setattr(script.asyncio, 'sleep', advance)
+        targets = {s: 'http://' + s for s in script.SERVICES}
+        return await script.drive(Client(), targets, start + timedelta(seconds=1))
+    rows = asyncio.run(run())
+    for service in script.SERVICES:
+        assert sum(r['request_entry_service'] == service for r in rows) == 5
+    assert not any(r['failed'] for r in rows)
+    assert maximum[0] <= script.MEASUREMENT_PROTOCOL['maximum_in_flight']
+    assert script.MEASUREMENT_PROTOCOL['entry_requests_per_second'] == 5
+
+
+def test_parity_retains_independent_server_truth_without_credentials_or_free_text(tmp_path):
+    from scripts.check_alibaba_source_parity import persist_measurements
+    requests = [{'request_entry_service': 'payment-service', 'failed': False}]
+    completions = [{'service': 'payment-service', 'timestamp_unix_ms': 1000, 'duration_ms': 12.5,
+                    'failed': False, 'password': 'must-not-be-retained', 'message': 'free-text-secret'},
+                   {'service': 'payment-service', 'failed': True, 'duration_ms': float('nan')}]
+    persist_measurements(tmp_path, requests, completions)
+    ledger = [json.loads(line) for line in (tmp_path / 'server-completions.jsonl').read_text().splitlines()]
+    assert ledger[0]['duration_ms'] == 12.5 and ledger[1]['failed'] is True
+    assert ledger[1]['duration_ms'] is None
+    assert 'secret' not in (tmp_path / 'server-completions.jsonl').read_text()
+    assert 'password' not in ledger[0]
+    assert (tmp_path / 'server-completions.jsonl').stat().st_mode & 0o077 == 0
+    assert json.loads((tmp_path / 'requests.jsonl').read_text()) == requests[0]
+
+
+@pytest.mark.parametrize('interrupt', [False, True])
+def test_completion_followers_pin_pods_and_clean_up_on_interrupt(tmp_path, monkeypatch, interrupt):
+    import importlib
+    from types import SimpleNamespace
+    script = importlib.import_module('scripts.check_alibaba_source_parity')
+    children = []
+    class Child:
+        def __init__(self, args, stdout, stderr):
+            self.args, self.stopped = args, False
+            assert '--follow' in args and '--tail=-1' in args
+            assert 'deployment/' not in ' '.join(args)
+            assert stdout.fileno() >= 0
+            children.append(self)
+        def poll(self):
+            return 0 if self.stopped else None
+        def terminate(self):
+            self.stopped = True
+        def wait(self, timeout):
+            return 0
+    monkeypatch.setattr(script.subprocess, 'Popen', Child)
+    sandbox = SimpleNamespace(kubeconfig=tmp_path / 'private-config', name='owned')
+    inventory = {s: {'pod_name': s + '-pinned'} for s in script.SERVICES}
+    try:
+        with script.completion_log_streams(sandbox, inventory, tmp_path) as (paths, followers):
+            assert len(followers) == 3
+            for service, path in paths.items():
+                assert path.stat().st_mode & 0o077 == 0
+                assert any('pod/' + service + '-pinned' in c.args for c in children)
+            if interrupt:
+                raise KeyboardInterrupt
+    except KeyboardInterrupt:
+        assert interrupt
+    assert all(c.stopped for c in children)
+    assert not list(tmp_path.glob('*completion-stream.tmp'))
+
+
+def test_completion_ledger_retains_early_minutes_after_log_rotation(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from scripts.check_alibaba_source_parity import exact_logs, SERVICES, BUSINESS_ROUTES
+    end = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+    ends = [end - timedelta(minutes=1), end]
+    inventory, paths, clients = {}, {}, []
+    for service in SERVICES:
+        inventory[service] = {'pod_uid': service + '-uid'}
+        paths[service] = tmp_path / service
+        records = []
+        for index, at in enumerate(ends):
+            correlation = service + str(index)
+            clients.append({'correlation_id': correlation, 'trace_id': correlation, 'failed': False,
+                            'request_entry_service': service, 'completed_at': at.isoformat()})
+            records.append({'event': 'request_completed', 'method': BUSINESS_ROUTES[service][0],
+                'route': BUSINESS_ROUTES[service][1], 'timestamp_unix_ms': int(at.timestamp() * 1000),
+                'duration_ms': 12.5, 'status_code': 200, 'k8s.pod.uid': service + '-uid',
+                'correlation_id': correlation, 'trace_id': correlation})
+        # Follower output includes both files even when kubectl's final snapshot would only have the second.
+        paths[service].write_text('\n'.join(json.dumps(r) for r in records))
+    logs = exact_logs(paths, inventory, clients, ends)
+    assert len(logs) == 6 and not any(r['failed'] for r in logs)
+    assert all(sum(r['service'] == s for r in logs) == 2 for s in SERVICES)
+    clients[0]['trace_id'] = 'mismatched'
+    assert sum(r['failed'] for r in exact_logs(paths, inventory, clients, ends)) == 1
+
+
+def test_release_accepts_native_prometheus_float_zero_errors(tmp_path):
+    sha, manifest, report, controls, record, verification = evidence(tmp_path)
+    for row in verification['criteria']['P4']:
+        row['error_count'] = 0.0
+    record['evidence'] = [parity_verification_ref(verification)]
+    result = build_alibaba_release(tmp_path / 'bundle', sha, controls=controls,
+        parity_record=record, parity_verification=verification,
+        approved_by='fixture-owner', decision_note='test float-zero admission', output=tmp_path / 'release')
+    assert result['activation_performed'] is False
+
+
+@pytest.mark.parametrize('value', [False, True, '0', None, -0.1, 0.1, float('nan'), float('inf')])
+def test_parity_error_count_still_rejects_nonzero_or_nonnumeric_values(tmp_path, value):
+    from sentinelops.ml.alibaba_release import criteria_complete
+    sha, manifest, report, controls, record, verification = evidence(tmp_path)
+    verification['criteria']['P4'][0]['error_count'] = value
+    assert not criteria_complete(verification['criteria'], manifest['model_version'],
+        manifest['provenance']['config'], scorer(tmp_path, sha), {'maximum_lag_seconds': 60})

@@ -6,7 +6,9 @@ Isolation Forest and XGBoost are trained only on Alibaba
 are evaluation only. Local-data fitting (ADR-014) and its per-service candidate,
 handoff, release and parity tools were retired on 2026-11-09 with owner approval;
 they stay readable in git history, and their recorded evidence (candidate
-`38bcc766`, D-19) is unchanged. Current model: [model card](../reports/MODEL_CARD_ALIBABA_BADF9DA0.md). RCAEval remains RCA-only.
+`38bcc766`, D-19) is unchanged. Current model: `de38fc6b` under [ADR-019](../adr/ADR-019-breach-relative-retrain.md);
+see its [G3 packet](../reports/G3_CANDIDATE_ALIBABA_DE38FC6B.md) and
+[layer-2 report](../reports/LAYER2_LOCAL_ALIBABA_DE38FC6B.md). RCAEval remains RCA-only.
 
 Numerical primitives implement actual train-only RobustScaler/IsolationForest,
 median/MAD control and XGBoost binary risk. Per-service matrices preserve native
@@ -65,7 +67,9 @@ generalization/uncertainty claims.
 The continuous collector emits `validated-window-model/v2` with a separate
 `inference_started_at` and `evaluated_at`. It pins feature eligibility and model
 execution to the recorded start, then records prediction availability at actual
-completion. Replay recomputes with the original start and validates completion
+completion. Alibaba uses `validated-window-model/v3`, which additionally pins
+`model_feature_ref` and `source_batch_ref` to accepted profile-v2 history.
+Replay recomputes with the original start and validates completion
 ordering, source identity, signal status and actual estimator output. Completion
 time does not become the feature freshness decision. The existing RCA stale
 support guard still applies at the later RCA decision; replaying a valid inference
@@ -96,26 +100,33 @@ python -m scripts.package_alibaba_bundle --fit <root>/fit-<date> --output <root>
 
 What each step does:
 
-- **Features (`http-relative-5m/v1`):** compare a service's last five minutes with
-  its own trailing median (5–60 minutes, strictly before the window): latency
-  level/slope/peak and call-rate level/slope.
-- **Breach labels:** latency above twice that baseline for two consecutive
-  minutes. XGBoost predicts an onset within 300 s.
+- **Features (`http-relative-5m/v2`, ADR-019):** compare the last five minutes with
+  the service's trailing median (5–60 minutes, strictly before the window). The
+  six features are latency level/slope/peak, call-rate level/slope and the log
+  ratio of baseline latency to the breach level. IF uses latency level and peak.
+- **Breach labels:** latency above K × baseline for two consecutive minutes,
+  K ∈ {2, 4, 8, 16, 32, 64}. XGBoost predicts an onset within 300 s from three
+  breach-relative latency inputs with increasing monotone constraints. Serving
+  uses the frozen 750 ms SLO. `watch`/`degrading` thresholds come from Alibaba
+  calibration at K = 64/16, respectively; do not reuse a fixed 0.8 threshold.
+- **Pre-capture gate:** packaging requires the frozen synthetic fault-shape
+  gate to pass. This checks that the trained models respond to the prescribed
+  shapes; it is not local quality acceptance.
 - **Splits:** by microservice identity (60/20/20), so evaluation services are
   never fitted.
-- **5xx:** the source has no error field. Errors are covered by the SLO rule and
-  MAD, not by these models.
+- **5xx:** the source has no error field. Errors are covered by the SLO rule.
+  MAD and slope are evaluation-only controls; they do not drive serving alerts.
 - **Transform:** `service_windows` is the single-window reference and
   `service_windows_fast` the vectorised training path; a test keeps them equal.
-- **No gates:** the bundle is never an approval or activation. G3, parity and
+- **No activation authority:** the bundle is never an approval or activation. G3, parity and
   release apply unchanged.
 
 ## Evaluation
 
 | Layer | Command | Role |
 | --- | --- | --- |
-| 1 — unseen Alibaba services | `scripts.alibaba_controls --fit … --minutes … --output …` | Frozen config, run once; Q-05/Q-07 controls with the v1 protocol rules |
-| 2 — local v2 epoch (D-21) | `scripts.evaluate_alibaba_local` | Official local result; plan frozen before capture, ≥30 healthy minutes before each fault |
+| 1 — unseen Alibaba services | `scripts.alibaba_controls --fit … --minutes … --output …` | Frozen config, run once; Q-05/Q-07 controls with ADR-019 bundled risk thresholds |
+| 2 — local epoch `ald` (ADR-019) | `scripts.evaluate_alibaba_local` | Official local result; plan frozen before capture, ≥30 healthy minutes before each fault |
 | ADR-015 epoch replay | `scripts.evaluate_alibaba_legacy_p95` | Development only: profile v1 has no `_sum`, so p95 replaces mean latency |
 
 The ADR-015 detector epoch is still audited and frozen with
@@ -133,7 +144,7 @@ The ADR-015 detector epoch is still audited and frozen with
    provenance and a diagnostics file with status and event reasons only; sandbox
    tokens and the kubeconfig are always removed from it.
 2. The owner decides G3 from the review packet
-   ([example](../reports/G3_CANDIDATE_ALIBABA_BADF9DA0.md)).
+   ([current packet](../reports/G3_CANDIDATE_ALIBABA_DE38FC6B.md), D-27).
 3. `scripts.build_alibaba_release --bundle … --manifest-sha256 … --controls …
    --parity-record … --parity-verification … --approved-by … --decision-note …
    --confirm-owner-decision --output NEW_DIR` writes a new trusted store after
@@ -143,4 +154,13 @@ The ADR-015 detector epoch is still audited and frozen with
 
 Live inference needs a v2 health stream (`--source-profile
 prometheus-increase-60s-5s/v2`). Before a service has five baseline minutes ahead
-of a five-minute window, its model signal is unavailable, never zero.
+of a five-minute window, its model signal is unavailable, never zero. For a new
+stream epoch, supply healthy traffic until all three services can infer from
+accepted history before injecting a fault. `/ready` reporting `model=true` only
+confirms bundle load; inspect incident `service_signals` to verify actual inference.
+See the [machine B rollout](../reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md)
+for the exact release, parity, baseline and live-check evidence.
+
+Code after ADR-019 rejects `http-relative-5m/v1` bundles, including `badf9da0`.
+Keep the old immutable host release, model store and stream epoch together for
+rollback; do not restart an old bundle with the new feature implementation.
