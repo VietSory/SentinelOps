@@ -204,6 +204,13 @@ bounded temporary volume. Mutable images, invalid resource names and endpoint
 credentials/query strings are rejected. Outputs are deterministic and exclusive:
 an existing output file is never overwritten.
 
+Each Deployment template includes a deterministic SHA-256 of the public runtime
+ConfigMap. Changing the environment or OTLP endpoint changes all three templates
+so applying the rendered bundle rolls the services onto the new configuration.
+Identical inputs keep the templates stable. Secret values remain external and
+unread: rotating the contents of the same commerce Secret needs an explicit
+rollout, or a new Secret reference.
+
 ```sh
 python -m pytest -q tests/test_business_manifests.py tests/test_kubernetes_testbed.py tests/test_aws_iac.py
 kubeconform -strict -summary -kubernetes-version 1.34.0 artifacts/deployment/business.yaml

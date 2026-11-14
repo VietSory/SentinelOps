@@ -53,6 +53,29 @@ def test_optional_model_is_explicit_read_only_wiring_not_approval():
     assert pod['containers'][0]['volumeMounts'][1]['readOnly'] is True
 
 
+@pytest.mark.parametrize('change', [
+    {'issuer': 'https://identity.example.invalid/replacement'},
+    {'audience': 'replacement-audience'},
+    {'jwks_url': 'https://identity.example.invalid/replacement/jwks.json'},
+    {'audience_claim': 'client_id'},
+    {'model_release_ref': 'artifact://manifests/' + 'c' * 64 + '.json'},
+])
+def test_runtime_config_rotation_changes_pod_template_with_same_image_and_model_pvc(change):
+    parameters = {**PARAMETERS, 'model_claim': 'approved-models',
+                  'model_release_ref': 'artifact://manifests/' + 'b' * 64 + '.json'}
+    original = api.render(IMAGE, **parameters)
+    rotated = api.render(IMAGE, **{**parameters, **change})
+    assert original == api.render(IMAGE, **parameters)
+    assert rotated == api.render(IMAGE, **{**parameters, **change})
+    def template(documents):
+        return next(d for d in documents if d['kind'] == 'Deployment')['spec']['template']
+    before, after = template(original), template(rotated)
+    # envFrom values are captured at process startup. Rotation must replace the
+    # pod even when the image, Secret and read-only model PVC stay the same.
+    assert before['spec'] == after['spec']
+    assert before['metadata'] != after['metadata']
+
+
 @pytest.mark.parametrize('values', [
     {'environment': 'local'}, {'environment': 'test'}, {'environment': 'PRODUCTION'},
     {'control_secret': 'postgresql://user:password@database/control'},

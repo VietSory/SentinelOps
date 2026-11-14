@@ -7,6 +7,8 @@ only wiring: the existing registry must validate its content at runtime.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
@@ -62,6 +64,10 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
         data.update(SENTINELOPS_MODEL_STORE='/models', SENTINELOPS_MODEL_RELEASE_REF=model_release_ref)
         volumes.append({'name': 'models', 'persistentVolumeClaim': {'claimName': model_claim, 'readOnly': True}})
         mounts.append({'name': 'models', 'mountPath': '/models', 'readOnly': True})
+    # ConfigMap environment values are read only when a pod starts. Bind the
+    # template to their bytes so changing OIDC or a release on the same PVC
+    # replaces the process with the newly selected runtime configuration.
+    config_sha256 = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     def probe():
         return {'httpGet': {'path': '/health', 'port': 'http'}, 'periodSeconds': 5, 'timeoutSeconds': 2}
     container = {'name': 'api', 'image': image, 'imagePullPolicy': 'IfNotPresent',
@@ -83,6 +89,7 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
         {'apiVersion': 'apps/v1', 'kind': 'Deployment', 'metadata': metadata(NAME), 'spec': {
             'replicas': 1, 'selector': {'matchLabels': {'app': NAME}},
             'template': {'metadata': {'labels': {**labels, 'app': NAME}, 'annotations': {
+                'sentinelops.io/config-sha256': config_sha256,
                 'sentinelops.io/readiness-scope': 'HTTP server availability; dependency readiness is exposed by the API'}},
                 'spec': {'serviceAccountName': 'api', 'automountServiceAccountToken': False,
                     'securityContext': {'runAsNonRoot': True, 'runAsUser': 10001,

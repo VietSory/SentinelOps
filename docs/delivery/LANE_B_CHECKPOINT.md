@@ -450,6 +450,12 @@ dưới `docs/`.
   root khiến launcher/cleanup từ chối đúng guard. Đã tách output/artifact khỏi
   runtime, giữ nguyên guard; regression tái hiện fail trước fix rồi pass. Suite
   packaging/manifests/launcher sau sửa: 69 tests PASS.
+- Review trước merge phát hiện ConfigMap `envFrom` đổi nhưng pod template không
+  đổi. API và business renderer nay gắn SHA-256 cấu hình public vào template:
+  đổi OIDC/model release cùng PVC hoặc environment/OTLP sẽ tạo rollout khi apply;
+  input giống nhau giữ template ổn định. Regression rotation fail trước fix và
+  pass sau fix. Secret bytes không được đọc/hash; rotation cùng Secret name cần
+  rollout explicit hoặc chọn Secret name mới.
 - **Chưa có cloud worker manifest.** Loopback/source ownership/checkpoint guards
   giữ nguyên; cần adapter remote/source policy và H3 trước triển khai. Provider,
   observability bindings và AWS apply vẫn thuộc giai đoạn được cấp quyền riêng.

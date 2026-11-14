@@ -73,6 +73,14 @@ checks signatures/scopes at runtime; rendering does not create an identity
 provider. Cognito access-token deployments can explicitly use
 `--audience-claim client_id`, with the existing verifier restrictions unchanged.
 
+The pod template includes a deterministic SHA-256 of the public runtime ConfigMap.
+Changing OIDC configuration or the model release reference therefore changes the
+Deployment template and triggers a rollout when applied. Re-rendering identical
+inputs leaves the template unchanged. The renderer never reads Secret values:
+rotating the contents of an existing DB Secret requires an explicit rollout, or
+selecting a new Secret name. Verify protected dependency readiness after rollout;
+the checksum records configuration bytes, not provider/model approval.
+
 Five resources are emitted: Namespace, token-disabled `api` ServiceAccount,
 public ConfigMap, API Deployment and ClusterIP Service. No Secret/PVC, IRSA role,
 RBAC, ingress, LoadBalancer, migration or action executor is created. The DB

@@ -100,3 +100,21 @@ def test_invalid_cli_input_does_not_create_an_output(tmp_path,monkeypatch):
     with pytest.raises(ValueError):
         manifests.main()
     assert not target.exists()
+
+
+@pytest.mark.parametrize('change', [
+    {'otlp_endpoint': 'http://replacement-collector:4317'},
+    {'environment': 'aws-stage'},
+])
+def test_configuration_change_updates_each_pod_template_for_rollout(change):
+    original = manifests.render(IMAGE, **PARAMETERS)
+    updated = manifests.render(IMAGE, **{**PARAMETERS, **change})
+    def templates(documents):
+        return {item['metadata']['name']: item['spec']['template']
+                for item in documents if item['kind'] == 'Deployment'}
+    before, after = templates(original), templates(updated)
+    assert before.keys() == after.keys()
+    for name in before:
+        assert before[name] != after[name], 'changed envFrom configuration must trigger a rollout'
+        assert before[name]['spec'] == after[name]['spec']
+    assert templates(manifests.render(IMAGE, **PARAMETERS)) == before
