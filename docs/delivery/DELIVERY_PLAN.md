@@ -13,12 +13,15 @@ chưa có model được chấp nhận, UI dùng được và môi trường tri
 [PROJECT_STATUS.md](../PROJECT_STATUS.md); tiêu chí G0–G8 vẫn ở
 [CONSTRAINTS_AND_GATES.md](../architecture/CONSTRAINTS_AND_GATES.md).
 
-**Đối chiếu 2026-11-12:** các mốc xuất phát dưới đây là baseline lịch sử, không
-phải checklist phải làm lại. ADR-016 đã thay nguồn fitting bằng Alibaba, D-22 chỉ
-duyệt G3 có điều kiện local H4→G6; local training đã gỡ D-23. B1/B2 local, OIDC
-adapter và model rollover đã có; Q-09 native 9/10, Q-10 đã được B review lại nhưng
-G6 vẫn chờ owner nghiệm thu. Lớp 2 Q-04/Q-05/Q-07 FAIL; ADR-018 còn Proposed.
-Việc còn lại và mức bằng chứng ở [checkpoint mục 9](LANE_B_CHECKPOINT.md#9-b-follow-up--2026-11-12).
+**Đối chiếu 2026-11-14:** các mốc xuất phát dưới đây giữ lịch sử. Model hiện
+hành là Alibaba `de38fc6b` theo ADR-019, G3 có điều kiện D-27; parity/release/live
+integration local đã PASS. Lớp 2 `ald` đạt các chỉ tiêu phát triển S1/S3 nhưng
+chưa nghiệm thu đầy đủ Q-04…Q-07. ADR-018 đã bị từ chối. Sau merge PR #47,
+main/CI, Q-10, UI/explanation và S2/H4 với model mới đã kiểm xong. S4 sau review
+PR #48 đã capture hoàn tất ở `3c36e2e`, source review PASS; đây vẫn
+là development, chưa nghiệm thu RCA/Q-08 hay independent detector MTTD.
+Q-09 9/10 cũ thuộc `badf9da0`, không chuyển sang release mới; G6 chưa nghiệm thu.
+Việc còn lại ở [checkpoint mục 10](LANE_B_CHECKPOINT.md#10-local-follow-up-sau-merge--2026-11-14).
 
 ## 1. Phân công và kết quả cuối của từng người
 

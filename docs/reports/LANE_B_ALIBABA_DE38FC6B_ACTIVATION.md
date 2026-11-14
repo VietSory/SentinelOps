@@ -158,3 +158,117 @@ the required accepted baseline. Native integration is not model-quality
 acceptance: Q-04…Q-07 still have the S2/S4, live MTTD and G8 limits recorded in
 the [layer-2 report](LAYER2_LOCAL_ALIBABA_DE38FC6B.md). No cloud deployment or
 automatic remediation was activated.
+
+## Local follow-up after merge — 2026-11-14
+
+| Item | Verified result / remaining work |
+| --- | --- |
+| L1 Merge / CI | `6f6e587`, [CI 43562346041](https://github.com/VietSory/SentinelOps/actions/runs/43562346041), 14/14 jobs successful |
+| L2 Q-10 | 111 remediation tests and 22 owned PostgreSQL checks PASS: CAS, audit, outage, quarantine and SELECT-only access. Software fixtures, no native trial added |
+| L3 Native UI / explanation | Desktop/mobile PASS on the new model's incident revision 4, 19 evidence/12 deterministic claims, exact references, unchanged pinned IER, no page errors |
+| L4 Native S2 / H4 | PASS: RCA_READY revision 2, Payment score 0.797891, coverage 0.80, deployment change bound and dispatch authority true. No known-good approval or rollback dispatched |
+| L5 Checklist | Current model-specific checklist updated in delivery plan, checkpoint and project status |
+| L6 S4 | Capture completed at `3c36e2e`; descriptive source review PASS; see below for clocks and limits |
+| L7 Native Q-09 | New `de38fc6b` campaign still required; operator must review and approve each concrete known-good target before the bad change |
+
+The old **9/10 recovered and 1/1 failed-verify** trials belong to `badf9da0` and
+cannot be inherited by this release. Full G4/G5/G6/G8 acceptance and independent
+live IF alert-emission MTTD remain open. No AWS work or holdout access occurred.
+
+S4 attempt history is retained outside Git:
+
+- First capture at `4095131` failed with `LockNotAvailableError`; a missed log-reader
+  DSN also produced authentication rejection at the default port. No query/write
+  ran on that other database. `b0afa69` repaired every selected DB path and identity.
+- Attempt 02 at `b0afa69` was interrupted during healthy warmup when the host
+  restarted at 16:28 local. Retained control data has eight health batches and
+  zero incident jobs; no S4 pressure phase ran and no completed manifest exists.
+- Attempt 03 was rejected at the port preflight before source startup or sampling.
+- Lane A identified that retrying every lock timeout could still allow completion
+  without an acquired lock. A's patch is applied with original authorship: every
+  pressure stage must acquire at least once or fail as `S4LockNotAcquired`.
+  B adds full runner tests for all-timeout lead-in and successful lead-in followed
+  by all-timeout fault, checking failed manifest, cleanup, empty ground-truth
+  fields and dataset rejection even when the sampler reports a waiter.
+- `s4_minimum_acquired_per_stage=1` is frozen before traffic and stage counters
+  are retained. Injector application-name waits are excluded from snapshots.
+  Native PostgreSQL verification observed counts **0** with only the injector
+  waiting and **1** with an independent waiter, then verified one timeout,
+  four acquisitions and six native lock-log records. These are collector checks,
+  not RCA/Q-08 results. Earlier capture attempts remain unverified for that purpose.
+
+Local evidence:
+
+- [Progress](../../artifacts/lane-b/local-followup-20261114/progress.json),
+  [main CI](../../artifacts/lane-b/local-followup-20261114/main-ci.json),
+  [PostgreSQL](../../artifacts/lane-b/local-followup-20261114/q10-postgresql.json).
+- [Native UI](../../artifacts/lane-b/local-followup-20261114/ui-native-02/verification.json),
+  [native S2/H4](../../artifacts/lane-b/local-followup-20261114/s2-h4-02/verification.json).
+- [First failed run](../../artifacts/lane-b/local-followup-20261114/s4-runs/run-37bdd31a5b5345039fc26cbc3192d132/run.json),
+  [host interruption](../../artifacts/lane-b/local-followup-20261114/s4-attempt-02/interruption.json),
+  [recovered control data](../../artifacts/lane-b/local-followup-20261114/s4-attempt-02/s4-live-database.json),
+  [third preflight rejection](../../artifacts/lane-b/local-followup-20261114/s4-attempt-03/operator-process.log),
+  [native waiter verification](../../artifacts/lane-b/local-followup-20261114/s4-native-review.json).
+
+
+### Verified S4 capture after review
+
+The fresh attempt 04 completed at clean source `3c36e2e`. Its predeclared
+minimum was **one acquired lock in every pressure stage**, with injector waits
+excluded from native snapshots. Source review result: **PASS**.
+[CI 43584143300](https://github.com/VietSory/SentinelOps/actions/runs/43584143300) passed **14/14 jobs** for this source; the local
+full suite passed **1,630 tests**, including 88 focused checks.
+
+The frozen development schedule used seed 42, 3 requests/s per entry, 1,800 s
+healthy warmup, 180 s of 350 ms holds, 300 s of 1,200 ms holds, 0.4 s gaps and
+180 s recovery. Commerce/control databases were separately owned and bound to
+loopback ports 25432/25434. Earlier attempts remain retained above.
+
+| Pressure stage | Attempts | Acquired | Acquisition timeouts |
+| --- | --- | --- | --- |
+| degrading | 239 | 239 | 0 |
+| fault | 187 | 187 | 0 |
+
+Native lock snapshots: **2352**, including
+**239** with waiters outside the injector. Trace
+snapshots: **123**. Server-log coverage and SLO onsets were
+recomputed independently; bundle/features/thresholds remained frozen.
+
+| Service | Available post-warmup model windows | IF / MAD flagged windows | SLO decision delay (s) | IER availability delay (s) |
+| --- | --- | --- | --- | --- |
+| checkout-service | 11/11 | 9 / 9 | 151.068 | 271.815 |
+| payment-service | 11/11 | 10 / 11 | 210.381 | 271.815 |
+| inventory-service | 11/11 | 0 / 0 | unavailable | unavailable |
+
+Counts describe windows, not event precision/recall. Actual health evaluated_at
+and original IER recorded_at clocks are separate from receipt-bounded replay.
+Missing events remain unavailable, not zero. The review reproduced
+**3** native model signals and retained
+**4** IER revisions; full onsets, missing/late
+events and model-support availability clocks are in the JSON.
+
+**Independent IF alert-emission MTTD remains unmeasured.** This is one correlated
+S4 development run, not a population p90, full RCA/Q-08 acceptance, an `ald`
+rerun or holdout evaluation. No fitting or threshold adjustment occurred.
+
+The native RCA result **abstained** for `insufficient-coverage`,
+`insufficient-margin` and `insufficient-score`. Its ranking was Checkout
+0.401651, Payment 0.398972, **RDS third at 0.267403**, Inventory 0.230675;
+the observed injected root was RDS. The IER progressed OPEN → RCA_READY →
+ESCALATED → CLOSED, with no action dispatched. This capture does **not**
+demonstrate successful S4 root-cause identification. The
+[raw RCA result](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-live-journal/manifests/3800cfa1c1ae0c74dd450da3f50b50d55e8df8b3a2685f3a9034311e48224fd0.json)
+shows RDS anomaly support from connection pressure only (0.072165), despite
+trace relevance 0.997446. Its native lock-wait evidence is retained by the
+experiment collector but is not a live RCA scoring input. Integrating that
+source requires a separate evidence/contract review and a predeclared evaluation;
+this run is preserved without tuning weights or thresholds to its known root.
+
+- [Frozen capture protocol](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-plan.json),
+  [live clock protocol](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-live-plan-02.json).
+- [Capture manifest](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-runs/run-9b695be1b8ab4aa3b1cc050b2f728507/run.json),
+  [source/clock verification](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/verification.json),
+  [independent SLO](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/independent-slo.json),
+  [replay windows](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/predictions.json).
+- [Software review](../../artifacts/lane-b/local-followup-20261114/s4-review-verification.json),
+  [source CI](../../artifacts/lane-b/local-followup-20261114/pr48-review-ci.json).
