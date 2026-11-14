@@ -28,6 +28,7 @@ on. It makes **zero AWS API calls** and needs no credentials.
 | EKS API server private; public access only through an explicit variable, and `0.0.0.0/0` rejected | `cluster_public_access*` validation + guard |
 | Control database private, encrypted, and retains a final snapshot on teardown | `aws_db_instance.control` + guard |
 | Artifact bucket blocks all public access, versioned, KMS-encrypted, TLS-only | `aws_s3_bucket_*` + bucket policy + guard |
+| Image registry (`application`, `control-plane`) has immutable tags, scan on push, KMS encryption and no resource policy; untagged layers expire after 14 days | `aws_ecr_*` + guard |
 | No subnet auto-assigns public addresses | `map_public_ip_on_launch = false` + guard |
 | Every log group has bounded, encrypted retention; unlimited retention rejected | `log_retention_days` validation + guard |
 | No role attaches an administrator or service-wide managed policy | `FORBIDDEN_POLICIES` guard |
@@ -85,6 +86,12 @@ this document.
 6. **Apply permission** — who may run `terraform apply`, and the state backend
    decision. There is deliberately no `backend` block: shared state is itself a
    provisioned resource and an owner decision.
+7. **Registry apply rights** — the apply role needs `kms:CreateGrant`, `kms:RetireGrant`
+   and `kms:DescribeKey` on the environment key so ECR can encrypt its repositories;
+   ECR then uses its own grant and nodes need no direct `kms:Decrypt` to pull. The node
+   role keeps `AmazonEC2ContainerRegistryReadOnly`: scoping pulls to the two
+   repositories would also block the AWS-hosted EKS system images (VPC CNI, pause).
+
 
 ## Cost envelope
 
@@ -99,6 +106,7 @@ applied, so no bill exists.
 | NAT gateway | 2 AZ, hourly + data | ~$75 + traffic |
 | RDS PostgreSQL | `db.t4g.medium`, Multi-AZ, 50 GiB gp3 | ~$130 |
 | S3, CloudWatch, X-Ray, KMS | Low volume at 30-day retention, 10% trace sampling | ~$20–40 |
+| ECR | Two private repositories, a few GiB of images | ~$1 |
 | **Indicative total** | | **~$450–470/month** |
 
 The default `monthly_budget_usd = 300` is therefore **below** this baseline on

@@ -80,6 +80,27 @@ def _blocks(pattern: re.Pattern) -> dict[str, dict]:
     return found
 
 
+def _assignments(body: str) -> dict[str, list[str]]:
+    """`name = value` lines with comments removed; every assignment of a name is kept, so a duplicate is visible."""
+    found: dict[str, list[str]] = {}
+    for line in body.splitlines():
+        line = line.split('#', 1)[0].split('//', 1)[0].strip()
+        match = re.fullmatch(r'([A-Za-z_][A-Za-z0-9_]*) = (.+?),?', line)
+        if match:
+            found.setdefault(match.group(1), []).append(match.group(2).strip())
+    return found
+
+
+def _locals() -> dict[str, list[str]]:
+    merged: dict[str, list[str]] = {}
+    for path in sorted(ROOT.glob('*.tf')):  # several files may each hold a `locals` block
+        text = path.read_text()
+        for match in re.finditer(r'^locals\s*\{', text, re.MULTILINE):
+            for name, values in _assignments(normalize(text[match.end():_close(text, match.end())])).items():
+                merged.setdefault(name, []).extend(values)
+    return merged
+
+
 def resources() -> dict[str, dict]:
     return _blocks(re.compile(r'^resource\s+"([^"]+)"\s+"([^"]+)"\s*\{', re.MULTILINE))
 
@@ -122,6 +143,25 @@ def assert_private_by_default(blocks: dict[str, dict]) -> list[str]:
     if 'versioning_configuration' not in blocks['aws_s3_bucket_versioning.artifacts']['body']:
         raise ValueError('the artifact bucket must be versioned so a release stays reproducible')
     checks.append('artifact bucket versioned')
+
+    registry = _assignments(blocks['aws_ecr_repository.images']['body'])
+    for name, value, message in (
+        ('for_each', 'local.image_repositories', 'the image registry must create exactly the declared repositories'),
+        ('image_tag_mutability', '"IMMUTABLE"', 'image tags must be immutable so a pinned digest keeps its meaning'),
+        ('scan_on_push', 'true', 'images must be scanned on push'),
+        ('encryption_type', '"KMS"', 'the image registry must be KMS-encrypted'),
+        ('kms_key', 'aws_kms_key.main.arn', 'the image registry must use the environment KMS key'),
+    ):
+        if registry.get(name) != [value]:
+            raise ValueError(message)
+    if _locals().get('image_repositories') != ['toset(["application", "control-plane"])']:
+        raise ValueError('the image registry must create exactly the declared repositories')
+    lifecycle = _assignments(blocks['aws_ecr_lifecycle_policy.images']['body'])
+    if lifecycle.get('tagStatus') != ['"untagged"'] or lifecycle.get('countNumber') != ['14']:
+        raise ValueError('only untagged layers may expire, after 14 days')
+    if any(key.startswith('aws_ecr_repository_policy.') or key.startswith('aws_ecr_registry_policy.') for key in blocks):
+        raise ValueError('the image registry must not carry a resource policy that could grant outside access')
+    checks.append('image registry: two declared repositories, immutable, scanned, environment KMS key, untagged-only 14-day expiry, no resource policy')
     return checks
 
 

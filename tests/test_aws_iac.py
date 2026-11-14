@@ -40,14 +40,15 @@ def test_real_configuration_satisfies_every_guard():
     checks = (assert_private_by_default(BLOCKS) + assert_bounded_retention(BLOCKS)
               + assert_no_overbroad_identity(BLOCKS, DOCUMENTS) + assert_no_static_credentials()
               + assert_grants_no_authority())
-    assert len(checks) == 13
+    assert len(checks) == 14
 
 
 def test_expected_surface_is_described():
     """A silently shrinking configuration would pass vacuous guards."""
     for key in ('aws_eks_cluster.main', 'aws_eks_node_group.main', 'aws_db_instance.control',
                 'aws_s3_bucket.artifacts', 'aws_kms_key.main', 'aws_iam_openid_connect_provider.cluster',
-                'aws_budgets_budget.monthly', 'aws_flow_log.vpc', 'aws_vpc_endpoint.s3'):
+                'aws_budgets_budget.monthly', 'aws_flow_log.vpc', 'aws_vpc_endpoint.s3',
+                'aws_ecr_repository.images', 'aws_ecr_lifecycle_policy.images'):
         assert key in BLOCKS, 'missing described resource: '+key
     for role in ('telemetry_reader', 'data_worker', 'explanation', 'controller', 'api'):
         assert 'aws_iam_role.'+role in BLOCKS
@@ -224,3 +225,42 @@ def test_provider_lock_is_committed():
     """The lock file pins provider hashes; it is a supply-chain control."""
     assert (ROOT/'.terraform.lock.hcl').is_file()
     assert 'hashicorp/aws' in (ROOT/'.terraform.lock.hcl').read_text()
+
+
+@pytest.mark.parametrize(('old', 'new', 'message'), [
+    ('image_tag_mutability = "IMMUTABLE"', 'image_tag_mutability = "MUTABLE"', 'immutable'),
+    ('scan_on_push = true', 'scan_on_push = false', 'scanned'),
+    ('encryption_type = "KMS"', 'encryption_type = "AES256"', 'KMS'),
+    ('kms_key = aws_kms_key.main.arn', 'kms_key = var.other_key', 'environment KMS key'),
+    ('for_each = local.image_repositories', 'for_each = toset([])', 'declared repositories'),
+    # A comment carrying the required text must not hide a weakened setting.
+    ('scan_on_push = true', 'scan_on_push = false # scan_on_push = true', 'scanned'),
+    ('scan_on_push = true', 'scan_on_push = true\n scan_on_push = false', 'scanned'),
+])
+def test_weakened_image_registry_is_rejected(old, new, message):
+    with pytest.raises(ValueError, match=message):
+        assert_private_by_default(mutate('aws_ecr_repository.images', old, new))
+
+
+@pytest.mark.parametrize(('old', 'new'), [
+    ('countNumber = 14', 'countNumber = 1'),
+    ('tagStatus = "untagged"', 'tagStatus = "any"'),
+])
+def test_image_lifecycle_cannot_expire_release_images(old, new):
+    with pytest.raises(ValueError, match='untagged'):
+        assert_private_by_default(mutate('aws_ecr_lifecycle_policy.images', old, new))
+
+
+def test_changed_repository_set_is_rejected(copied, monkeypatch):
+    import scripts.check_aws_iac as iac
+    path = copied/'ecr.tf'
+    path.write_text(path.read_text().replace('toset(["application", "control-plane"])', 'toset(["application"])'))
+    monkeypatch.setattr(iac, 'ROOT', copied)
+    with pytest.raises(ValueError, match='declared repositories'):
+        assert_private_by_default(iac.resources())
+
+
+def test_image_registry_resource_policy_is_rejected():
+    blocks = {**BLOCKS, 'aws_ecr_repository_policy.images': {'body': 'policy = "{}"'}}
+    with pytest.raises(ValueError, match='resource policy'):
+        assert_private_by_default(blocks)
