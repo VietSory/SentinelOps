@@ -592,8 +592,12 @@ thêm deployment bootstrap hoặc quarantine 006.
 
 Summary Q-09 v2 gộp failed-verify/safety giữa releases dù golden-path đã tách.
 V3 tách cả ba nhóm theo model release và chặn lặp directory/symlink để không
-nhân mẫu số. **12 focused tests PASS**; CI integration phải kiểm theo head của
-patch này, không kế thừa main CI. Đọc receipt cũ `g6-de38fc6b-01` bằng v3 cho
+nhân mẫu số. **12 focused tests PASS**. PR #63 đã MERGED vào
+`786ffd17dd9a97311d1ab89a53b0d6a776c8bbdc`; head `da5ebc48`, CI
+`43723300314`: **14/14 PASS, 0 skipped jobs**.
+[CI main `43726609291`](https://github.com/VietSory/SentinelOps/actions/runs/43726609291)
+trên đúng merge SHA cũng **14/14 PASS, 0 skipped jobs**. Đọc receipt cũ
+`g6-de38fc6b-01` bằng v3 cho
 đúng release `092290ce…`: 1 attempt, 0 recovered, `TRIAL_FAILED`, 0 failed-verify
 observations và 0 mutations. Receipt và lần thất bại được giữ nguyên.
 
@@ -601,3 +605,12 @@ observations và 0 mutations. Receipt và lần thất bại được giữ nguy
 ghi thứ tự, retained attempts và operator/known-good boundary. Đây là chuẩn bị
 phần mềm; chưa có campaign Q-09 hoàn tất hoặc G6 acceptance. Docker/host execution
 và approval cụ thể vẫn là điều kiện trước khi thu evidence mới.
+
+Lượt resume tiếp theo sau merge #63 vẫn bị chặn: `lane_b resume-control` gặp
+Docker socket permission trong sandbox, escalated launcher trả
+`Denied, expired, cancelled, or unavailable`. `lane_b_host restart --role api`
+trả RuntimeError trong sandbox và cũng bị approval bridge từ chối khi escalated.
+API/health/incidents vẫn inactive/PID 0; selected release `5c520ae6…`, stream
+`b95058b4…` được giữ nguyên. Chưa có DB-history readback, protected API/UI hoặc
+checkpoint-freshness verification trên host từ các lượt này. Release UI
+`229452c2…` đã verify nhưng chưa select; không dùng CI runner thay bằng chứng host.
