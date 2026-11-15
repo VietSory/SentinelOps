@@ -150,6 +150,64 @@ run "changed_environment_and_region" {
     )
     error_message = "Region, environment and prefix changes must update the Logs service principal and exact encryption contexts."
   }
+
+  assert {
+    condition = (
+      aws_cloudwatch_dashboard.operations.dashboard_name == "sentinelops-next-prod-operations" &&
+      alltrue([for widget in jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets :
+        widget.properties.region == "ap-southeast-1" if widget.type != "text"
+      ]) &&
+      strcontains(jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[1].properties.metrics[0][0].expression, "SentinelOps/prod") &&
+      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[7].properties.metrics[0][3] == "sentinelops-next-control-prod" &&
+      startswith(jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[10].properties.query, "SOURCE '/sentinelops/prod/workloads'")
+    )
+    error_message = "Dashboard metrics, database and log source must follow the actual region/environment/prefix, without stale dev bindings."
+  }
+}
+
+run "operations_dashboard_preserves_measurement_boundaries" {
+  command = plan
+
+  assert {
+    condition = (
+      output.operations_dashboard_name == "sentinelops-dev-operations" &&
+      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).start == "-PT1H" &&
+      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).periodOverride == "inherit" &&
+      length(jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets) == 11
+    )
+    error_message = "The operator view must have its explicit time range and all business/database/log panels."
+  }
+
+  assert {
+    condition = jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[3].properties.metrics == [[{
+      id         = "e1"
+      expression = "SEARCH('{\"SentinelOps/dev\",\"service\",\"route\",\"status_code\"} MetricName=\"sentinelops_http_requests\" service=\"payment-service\" route=\"/v1/payments/charge\"', 'Sum', 60)"
+    }]]
+    error_message = "Business request series must use exact EMF namespace/dimensions and canonical business routes, excluding probe traffic."
+  }
+
+  assert {
+    condition = (
+      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[7].properties.metrics == [["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "sentinelops-control-dev", { unit = "Percent" }]] &&
+      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[8].properties.stat == "Maximum" &&
+      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[9].properties.stat == "Minimum" &&
+      strcontains(jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[10].properties.query, "filter @logStream like /^otel-logs-/")
+    )
+    error_message = "Control DB metrics must bind the actual RDS instance and raw OTLP logs must exclude the EMF stream."
+  }
+
+  assert {
+    condition = (
+      alltrue([for widget in jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets :
+        widget.properties.period == 60 && widget.properties.view == "timeSeries" if widget.type == "metric"
+      ]) &&
+      !strcontains(aws_cloudwatch_dashboard.operations.dashboard_body, "FILL(") &&
+      !strcontains(aws_cloudwatch_dashboard.operations.dashboard_body, "request_duration_ms") &&
+      !strcontains(aws_cloudwatch_dashboard.operations.dashboard_body, "p95") &&
+      strcontains(jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[0].properties.markdown, "unknown")
+    )
+    error_message = "Missing observations must not be filled as healthy; no histogram percentile or model readiness may be inferred."
+  }
 }
 
 run "exporter_has_only_scoped_delivery_authority" {

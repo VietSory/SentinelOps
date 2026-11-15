@@ -74,6 +74,11 @@ output "log_group_names" {
   }
 }
 
+output "operations_dashboard_name" {
+  description = "Operator CloudWatch dashboard name; access and real metric/log delivery must be verified after authorized deployment."
+  value       = aws_cloudwatch_dashboard.operations.dashboard_name
+}
+
 output "bedrock_invoke_granted" {
   description = "False until explicit model ids are supplied; the explanation role then has no invoke permission."
   value       = length(var.bedrock_model_ids) > 0
