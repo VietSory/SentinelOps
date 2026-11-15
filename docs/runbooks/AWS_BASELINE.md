@@ -202,7 +202,8 @@ This slice delivers the described, validated baseline. It does not deliver:
   infrastructure/stdout log shipping and target delivery
   remain separate work; none of these artifacts is an applied environment.
 - An applied environment, live CloudWatch/X-Ray source capture, or H3 handoff.
-- A Grafana/operational dashboard.
+- A deployed/verified operational dashboard. The CloudWatch definition below is
+  prepared offline; local Grafana is not an AWS deployment binding.
 - Model activation (H1/G3) or remediation acceptance (H4/G6).
 
 G7 requires an applied environment with real adapters, source quality, action and
@@ -406,3 +407,46 @@ target, including time/unit mappings, histogram conversion and restart gaps.
 Do not interpret EMF histogram statistics as validated p95 or feed this source
 into the existing local model/worker policy. Source adapters/parity belong to
 the A/B handoff; no worker manifest or remote ownership exception is added here.
+
+## CloudWatch operations dashboard
+
+`infra/aws/dashboard.tf` describes `<name-prefix>-<environment>-operations`.
+The public `operations_dashboard_name` output identifies it after an authorized
+apply. It adds no public sharing, IAM grant, alarm, model signal or action control.
+An applied dashboard still needs real telemetry and an authorized viewer; this
+configuration alone does not create either.
+
+The eleven widgets contain an operator context note, requests/errors for each of
+Checkout/Payment/Inventory, control RDS CPU/connections/free storage, and recent
+raw OTLP log envelopes. Metric panels use 60-second periods over the last hour.
+The business SEARCH expressions bind `SentinelOps/<environment>`, exact metric
+names and the `service`, `route`, `status_code` dimensions emitted by the collector.
+Each service uses its canonical business route, excluding readiness/probe traffic.
+Status-code series stay separate; missing observations are not filled with zero.
+An absent error series is not proof of a healthy service. CloudWatch search can
+discover only recently reported series, and service data must actually arrive.
+
+RDS widgets bind the declared **control** instance, not an assumed commerce DB.
+CPU is Average/Percent, connections Maximum/Count and free storage Minimum/Bytes.
+The logs widget selects only `otel-logs-*` streams in the environment workload
+group, excludes EMF metric records, and shows event/ingestion timestamps plus the
+raw envelope. It does not assume that a JSON business body is already flattened.
+
+No latency percentile, business SLO alarm or detector/incident status is inferred
+from these operational charts. Histogram mapping and source coverage still need
+target verification/A-B H3 review before interpreting CloudWatch data as accepted
+model inputs. The dashboard is not a substitute for the protected incident UI.
+
+Viewer identity is an external deployment prerequisite: the operator needs the
+appropriate `cloudwatch:GetDashboard`, metric-read and Logs Insights query/result
+permissions for these sources. The existing workload telemetry-reader is not a
+human console login and is not silently granted query or dashboard-write access.
+CloudWatch dashboards and Logs Insights queries can incur charges; include them
+in the owner-approved budget. No dashboard creation or query is executed here.
+
+Native Terraform mock tests evaluate the decoded body, exact business expressions,
+RDS binding, log selection, missing-data behavior, and a changed region/environment/
+prefix. They remain plan-only with both providers mocked. Actual PutDashboard
+acceptance, rendered console behavior, viewer authorization and live data remain
+unverified until cloud deployment is authorized. See the AWS [dashboard JSON](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Dashboard-Body-Structure.html)
+and [SEARCH syntax](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/search-expression-syntax.html).
