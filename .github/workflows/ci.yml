@@ -244,6 +244,34 @@ jobs:
         # Image proof must not populate the owned runtime root before lane_b up registers it.
         run: python -m scripts.check_control_plane_image --build --output artifacts/control-plane-image/ci.json
       - run: python -m scripts.lane_b up
+      - name: Recover only the existing B control database and preserve stored rows
+        run: |
+          python - <<'PY'
+          import json,subprocess
+          from uuid import uuid4
+          from scripts import lane_b
+          config=lane_b.validate_config(json.loads(subprocess.check_output(
+              lane_b.compose('config','--format','json'),text=True)))
+          lane_b.require_owned_containers()
+          def sql(statement):
+              return subprocess.check_output(lane_b.compose('exec','-T','control-postgres',
+                  'psql','-U','control_bootstrap','-d','sentinelops_control','-v','ON_ERROR_STOP=1',
+                  '-Atc',statement),text=True).strip()
+          marker=uuid4().hex
+          sql('CREATE TABLE sentinel_control.control_resume_ci_marker (value text NOT NULL)')
+          sql("INSERT INTO sentinel_control.control_resume_ci_marker VALUES ('"+marker+"')")
+          others=[name for name in lane_b.PORTS if name!='control-postgres']
+          before=subprocess.check_output(lane_b.compose('ps','-q',*others),text=True).split()
+          lane_b.require_owned_containers()
+          subprocess.run(lane_b.compose('rm','-s','-f','control-postgres'),check=True)
+          result=lane_b.resume_control(config)
+          assert sql('SELECT value FROM sentinel_control.control_resume_ci_marker')==marker
+          assert subprocess.check_output(lane_b.compose('ps','-q',*others),text=True).split()==before
+          lane_b.resume_control(config)
+          assert sql('SELECT value FROM sentinel_control.control_resume_ci_marker')==marker
+          sql('DROP TABLE sentinel_control.control_resume_ci_marker')
+          print('EXISTING B CONTROL DB RECOVERY: PASS; row preserved, other containers unchanged; software fixture only')
+          PY
       - name: Build an isolated wheel and verify actual managed process recovery
         run: |
           python - <<'PY'
