@@ -14,6 +14,7 @@ import secrets
 import stat
 import subprocess
 import sys
+import tempfile
 from urllib.parse import urlsplit
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -147,9 +148,64 @@ def launch_arguments(command, stream=None, model_store=None, release_ref=None, *
         '--jaeger','http://127.0.0.1:26686',*shared,*models]
 
 
+def resume_control(config):
+    """Recover only an existing initialized B database; never bootstrap a new one."""
+    validate_config(config)
+    if not (ROOT / 'runtime.json').is_file():
+        raise ValueError('resume requires the previously registered B runtime')
+    init_runtime()
+    require_owned_containers()
+    service = config['services']['control-postgres']
+    mounts = [m for m in service.get('volumes', [])
+              if m.get('target') == '/var/lib/postgresql/data']
+    if len(mounts) != 1 or mounts[0].get('type') != 'volume':
+        raise ValueError('resume requires the existing named control volume')
+    key = mounts[0]['source']
+    name = config.get('volumes', {}).get(key, {}).get('name')
+    if name != NAME + '_sentinelops_control':
+        raise ValueError('resume cannot select a different control volume')
+    volume, = json.loads(subprocess.check_output(['docker', 'volume', 'inspect', name], text=True))
+    labels = volume.get('Labels') or {}
+    if (labels.get('com.docker.compose.project') != NAME
+            or labels.get('com.docker.compose.volume') != 'sentinelops_control'):
+        raise ValueError('control volume does not belong to B')
+    containers = subprocess.check_output(['docker', 'ps', '-aq', '--filter',
+        'label=com.docker.compose.project=' + NAME, '--filter',
+        'label=com.docker.compose.service=control-postgres'], text=True).split()
+    if len(containers) > 1:
+        raise ValueError('multiple control containers cannot be resumed implicitly')
+    selected_image = (subprocess.check_output(['docker', 'inspect', '--format', '{{.Image}}',
+                      containers[0]], text=True).strip() if containers else service['image'])
+    image = subprocess.check_output(['docker', 'image', 'inspect', '--format', '{{.Id}}',
+                                     selected_image], text=True).strip()
+    if not re.fullmatch(r'sha256:[0-9a-f]{64}', image):
+        raise ValueError('control image must already exist locally')
+    # Mount read-only with nocopy: an absent/empty/foreign-version data directory
+    # must never be silently initialized by the PostgreSQL entrypoint.
+    subprocess.run(['docker', 'run', '--rm', '--pull', 'never', '--network', 'none',
+        '--read-only', '--user', 'postgres', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+        '--pids-limit', '32', '--memory', '64m', '--cpus', '0.5',
+        '--mount', f'type=volume,source={name},target=/existing,readonly,volume-nocopy',
+        '--entrypoint', '/bin/sh', image, '-ec',
+        'test "$(cat /existing/PG_VERSION)" = 16; test -s /existing/global/pg_control'],
+        check=True, capture_output=True, text=True, timeout=30)
+    # Freeze the inspected local image rather than resolving the mutable tag
+    # again at the moment Compose starts the container.
+    with tempfile.TemporaryDirectory(prefix='sentinelops-b-control-') as temporary:
+        override = Path(temporary) / 'control.yml'
+        override.write_text('services:\n  control-postgres:\n    image: ' + image +
+                            '\n    pull_policy: never\n    build: !reset null\n')
+        require_owned_containers()
+        command = compose('-f', str(override), 'up', '--no-build', '--pull', 'never',
+                          '--no-deps', '-d', '--wait', '--wait-timeout', '90', 'control-postgres')
+        subprocess.run(command, cwd=PROJECT, env=docker_environment(), check=True)
+    return {'scope': 'control-postgres-only', 'existing_volume': name, 'image_id': image,
+            'readiness': 'postgres-process-only', 'incident_readiness': 'NOT_OBSERVED'}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=['config','up','down','status','snapshot','serve','health','incidents'])
+    parser.add_argument('command',choices=['config','up','down','status','snapshot','resume-control','serve','health','incidents'])
     parser.add_argument('--health-stream')
     parser.add_argument('--stream-epoch', help='Explicit B stream and artifact epoch for health and incidents')
     parser.add_argument('--source-profile',choices=('prometheus-increase-60s-5s/v1','prometheus-increase-60s-5s/v2'),
@@ -176,6 +232,8 @@ def main():
                                                                cwd=PROJECT,env=docker_environment(),text=True)))
     if args.command == 'config':
         print(json.dumps({'project':config['name'],'ports':PORTS,'api_port':18000},indent=2))
+    elif args.command == 'resume-control':
+        print(json.dumps(resume_control(config)))
     elif args.command == 'snapshot':
         from scripts.lane_b_release import snapshot
         init_runtime()
