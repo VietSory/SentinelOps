@@ -45,14 +45,19 @@ def _endpoint(value):
     return value.rstrip('/')
 
 
-def render(image: str, *, environment: str, otlp_endpoint: str, commerce_secret: str) -> list[dict]:
+def render(image: str, *, environment: str, otlp_endpoint: str, commerce_secret: str,
+           export_logs: bool = False) -> list[dict]:
     image_digest(image)
     _label(environment, 'environment')
     _label(commerce_secret, 'commerce secret reference')
     endpoint = _endpoint(otlp_endpoint)
+    if not isinstance(export_logs, bool):
+        raise ValueError('export_logs must be a boolean')
     labels = {'app.kubernetes.io/part-of': 'sentinelops'}
     data = {'DEPLOYMENT_ENVIRONMENT': environment, 'OTEL_EXPORTER_OTLP_ENDPOINT': endpoint,
             'ENABLE_FAULT_INJECTION': 'false'}
+    if export_logs:
+        data['SENTINELOPS_OTLP_LOGS_ENABLED'] = 'true'
     config_sha256 = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
     def metadata(name):
@@ -115,10 +120,13 @@ def main():
     parser.add_argument('--environment', required=True)
     parser.add_argument('--otlp-endpoint', required=True)
     parser.add_argument('--commerce-secret', required=True, help='Existing Secret name, database-url key; not its value')
+    parser.add_argument('--export-logs', action='store_true',
+                        help='Also send business events to the collector OTLP logs pipeline; stdout remains enabled')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     documents = render(args.application_image, environment=args.environment,
-                       otlp_endpoint=args.otlp_endpoint, commerce_secret=args.commerce_secret)
+                       otlp_endpoint=args.otlp_endpoint, commerce_secret=args.commerce_secret,
+                       export_logs=args.export_logs)
     with args.output.open('x') as stream:
         yaml.safe_dump_all(documents, stream, sort_keys=False)
 
