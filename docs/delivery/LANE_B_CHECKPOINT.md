@@ -428,6 +428,16 @@ vào dataset. Các check phần mềm và development không tự nghiệm thu g
 
 ## 11. Portable API packaging — 2026-11-14
 
+Follow-up local recovery 2026-11-15: PR #58 đã MERGED `a32fa3f`, main CI
+`43680102687` PASS. UI release `229452c2d1f0408bb678d6e1eaa90819` đã build/verify
+từ đúng main này, manifest `9434dd2b3678c8026c535279d37dcdf16401bc31c430e5306c3247b8598900f2`.
+Chưa select/rollout: approval bridge từ chối API-only rollout và Docker status.
+Lần status mới quan sát API/health/incidents inactive; worker stream vẫn `b95058b4…`,
+release cũ `5c520ae6…`, không đổi session/model/epoch/checkpoints.
+Lệnh `lane_b resume-control` đang bổ sung recovery DB cũ qua ownership/data guards;
+28 focused tests PASS, native container/row-preservation kiểm theo CI đúng head.
+AWS tiếp tục **offline only** theo lựa chọn owner; không cấp quyền provision/push/deploy.
+
 Follow-up dashboard 2026-11-15: B thêm CloudWatch operations definition offline
 với 11 widgets, exact business routes/EMF dimensions, control RDS identifier và
 OTLP log-stream filter. Không điền dữ liệu thiếu thành healthy hoặc suy percentile

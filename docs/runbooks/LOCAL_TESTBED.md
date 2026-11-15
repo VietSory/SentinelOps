@@ -9,6 +9,42 @@ and the reserved loopback ports from the team contract. It does not use A's corp
 database or worker checkpoints. Run `status` to inspect B; `down` preserves volumes.
 The launcher refuses project resources belonging to another checkout.
 
+### Restore the incident UI database without starting workloads
+
+If the API reports an unavailable incident store and `lane_b status` shows no
+control container, an existing B database can be resumed independently:
+
+```sh
+python -m scripts.lane_b resume-control
+```
+
+This requires the previously registered runtime, the existing named volume with
+B's Compose ownership labels, a locally available PostgreSQL image, and an
+initialized PostgreSQL 16 data directory. A temporary non-root, network-disabled
+container checks the data directory read-only with volume copying disabled.
+Missing/empty volumes, another project's storage and another PostgreSQL major
+version are rejected before Compose can initialize a new database. If the control
+container still exists, its exact image is reused; otherwise the locally installed
+configured image is resolved to an immutable image ID. There is no build or pull.
+
+Only `control-postgres` is started; business workload, collectors and workers stay
+as selected. Existing volume data and API credentials are retained. This operation
+does not migrate schemas, repair roles, reset checkpoints or change model/session
+selection. It is not a backup/restore tool or a general database upgrade path.
+Avoid concurrent Docker administration while it runs; the local operator/Docker
+daemon remain trusted boundaries.
+
+After it reports a healthy PostgreSQL process, reconnect/refresh the UI and check
+protected `/ready/incidents`. The API retries store readiness, so an API restart
+is normally unnecessary. Process health does not prove schema/runtime privileges
+are valid, that an incident exists, or that workers are producing fresh data.
+If protected readiness still fails, diagnose schema/role/network configuration;
+do not delete the volume or rerun bootstrap SQL blindly.
+
+CI removes only its isolated control container, resumes the same volume and
+checks a persisted software marker survives, other container identities remain
+unchanged and repeating resume is safe. This does not prove this host has resumed.
+
 Host processes run in separate terminals:
 
 ```sh
