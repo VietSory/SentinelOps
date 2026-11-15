@@ -48,6 +48,12 @@ chỉ dùng key cho nhóm VPC của mình. PR #54 đã **MERGED** vào `ed878da`
 **14/14 jobs PASS, 0 skipped jobs**, đúng SHA `ed878dad53177ceb52f528fc36a58427bae36166`.
 Xem [binding](runbooks/AWS_BASELINE.md#cloudwatch-encryption-binding).
 
+B đã thêm [CloudWatch operations dashboard offline](runbooks/AWS_BASELINE.md#cloudwatch-operations-dashboard):
+business request/error series theo route/status, control RDS và OTLP raw logs.
+Không fill missing thành zero/healthy, không suy p95/model readiness hoặc thêm
+action/alarms. 47 IaC guard tests PASS; Terraform mock evaluation theo CI head
+của thay đổi. Chưa apply/kiểm console, viewer permissions hay live AWS delivery.
+
 B đã bổ sung [collector AWS offline](runbooks/AWS_BASELINE.md#offline-aws-collector):
 6-resource renderer, CloudWatch EMF/OTLP Logs/X-Ray, projected STS token và role
 `telemetry-exporter` riêng. Reader không được tái dùng làm exporter. 111 focused

@@ -428,6 +428,13 @@ vào dataset. Các check phần mềm và development không tự nghiệm thu g
 
 ## 11. Portable API packaging — 2026-11-14
 
+Follow-up dashboard 2026-11-15: B thêm CloudWatch operations definition offline
+với 11 widgets, exact business routes/EMF dimensions, control RDS identifier và
+OTLP log-stream filter. Không điền dữ liệu thiếu thành healthy hoặc suy percentile
+từ histogram chưa verify. 47 IaC guard tests PASS; native Terraform mock evaluation
+và full CI phải đối chiếu head PR. Chưa apply, viewer identity, console validation,
+delivery AWS hoặc H3. Xem [runbook](../runbooks/AWS_BASELINE.md#cloudwatch-operations-dashboard).
+
 B bổ sung [installed control-plane image](../runbooks/CONTROL_PLANE_IMAGE.md)
 và renderer offline cho API/UI. Image có package wheel, thư viện ML thật, embedded
 contracts, hai worker CLI và config; mặc định production, không model/credential,
