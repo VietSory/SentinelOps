@@ -65,7 +65,8 @@ def check() -> dict:
         assert sql("SET SESSION AUTHORIZATION deployment_runtime_fixture; SELECT "
             "has_database_privilege(current_database(),'CONNECT') AND "
             "has_schema_privilege('sentinel_control','USAGE') AND "
-            "has_table_privilege('sentinel_control.incident_versions','SELECT,INSERT') AND "
+            "has_table_privilege('sentinel_control.incident_versions','SELECT') AND "
+            "has_table_privilege('sentinel_control.incident_versions','INSERT') AND "
             "NOT has_table_privilege('sentinel_control.incident_versions','UPDATE,DELETE,TRUNCATE') AND "
             "NOT has_table_privilege('sentinel_control.incident_events','UPDATE,DELETE,TRUNCATE') AND "
             "NOT has_schema_privilege('sentinel_control','CREATE') AND "
@@ -74,6 +75,10 @@ def check() -> dict:
         sql('SET SESSION AUTHORIZATION deployment_runtime_fixture; '
             'CREATE TABLE sentinel_control.unwanted_table (id integer)', success=False)
         sql('SET SESSION AUTHORIZATION deployment_runtime_fixture; SET ROLE control_owner', success=False)
+        for operation in ['UPDATE sentinel_control.incident_versions SET actor=actor WHERE false',
+                          'DELETE FROM sentinel_control.incident_events WHERE false',
+                          'TRUNCATE sentinel_control.incident_events CASCADE']:
+            sql('SET SESSION AUTHORIZATION deployment_runtime_fixture; ' + operation, success=False)
         sql(bootstrap, success=False)
         assert sql('SELECT max(version) FROM sentinel_control.schema_migrations') == '3'
         assert sql("SELECT count(*) FROM pg_namespace WHERE nspname='sentinel_remediation'") == '0'
