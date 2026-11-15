@@ -22,11 +22,70 @@ Initialization SQL only runs on a fresh control volume. Do not erase an existing
 
 ## Revisions and transactions
 
+See also the credential-free deployment bootstrap below. Deployment migrations
+are explicit operator actions; runtime startup never applies them.
+
 Trusted producers construct an `IncidentWrite` with the exact existing IER, lifecycle stage, expected revision, stable idempotency key, actor/reason and supplemental provenance. New records require expected revision 0 and stage OPEN. Updates lock the current incident row and compare revisions. Current pointer, immutable version, audit event and outbox entry commit in one transaction. A failure in any write rolls all of them back.
 
 An exact retry returns the original stored revision even after newer revisions exist. Reusing its idempotency key for different payload, expected revision, context, actor or reason conflicts. Concurrent writers using the same expected revision cannot both advance it. Detection time is immutable; CLOSED cannot be reopened under the same incident ID. Recurrence needs a new incident.
 
 The runtime role has INSERT/SELECT but no UPDATE/DELETE/TRUNCATE on versions/events. It can update only the current pointer/stage/timestamp and outbox lease/completion columns. This protects historical records from ordinary runtime writes; database owners/administrators remain privileged and require separate production audit/access controls.
+
+## Credential-free deployment bootstrap (offline preparation)
+
+`infra/control/001-deployment-roles.sql` is the explicit alternative to the local
+password-bearing `001-local-roles.sql` for a **fresh**, separately provisioned
+PostgreSQL 16 `sentinelops_control` database. It creates `control_owner` and
+`control_writer` as NOLOGIN groups with no password, and rejects another database
+name or pre-existing control roles/schema before changing anything. Do not run
+both bootstrap alternatives, or use either as an upgrade/repair script.
+
+The owner group owns the schema; only the authorized migration principal receives
+SET membership so existing migrations can use `SET LOCAL ROLE control_owner`.
+The runtime group gets CONNECT/USAGE and the existing migrations' bounded grants.
+It receives no schema CREATE, history UPDATE/DELETE/TRUNCATE, owner membership,
+superuser/role/database creation, replication or RLS-bypass authority.
+
+After cloud/database authorization, an operator supplies a private libpq service
+definition for the intended migration principal/database, with verified TLS/CA.
+The following describes migration order; CI does not execute it remotely:
+
+```sh
+PGSERVICE=sentinelops-migrations psql -X -v ON_ERROR_STOP=1 -f infra/control/001-deployment-roles.sql
+PGSERVICE=sentinelops-migrations psql -X -v ON_ERROR_STOP=1 -f infra/control/002-incident-store.sql
+PGSERVICE=sentinelops-migrations psql -X -v ON_ERROR_STOP=1 -f infra/control/003-health-worker.sql
+PGSERVICE=sentinelops-migrations psql -X -v ON_ERROR_STOP=1 -f infra/control/004-incident-consumer.sql
+```
+
+Every file is transactional, but the four-file sequence is not one transaction.
+If a later migration fails, retain the database and diagnose its version/objects;
+do not replay bootstrap or remove storage. This path creates no action schema or
+action reader/writer/resolver; optional migrations 005/006 still require explicit
+review and do not grant action approval.
+
+Provision application login identities and authentication separately using the
+approved secret/IAM process. Grant required core runtime logins membership in
+`control_writer` with PostgreSQL 16 `INHERIT TRUE, SET FALSE`; never grant
+`control_owner` or migration-principal membership to them. Keep producer API bearer
+scopes distinct from database privileges. Runtime login TLS DSNs belong in the
+externally provisioned Secret `database-url` key, not Terraform outputs, manifests,
+Git or command arguments. Optional action observations need their own SELECT-only
+login/Secret and the action reader's runtime privilege checks. This bootstrap
+does not create credentials, an IAM database-auth mapping, Secret synchronization,
+commerce schema/data, DB network access or a model store.
+
+The migration principal needs target CREATE ROLE/schema/GRANT/SET ROLE permissions;
+RDS bootstrap identity and TLS/network prerequisites remain owner-managed.
+PostgreSQL fixture checks do not prove the intended RDS role has those rights.
+After deployment, verify protected incident readiness and actual runtime privileges
+before attaching workers/API, retaining separate migration credentials.
+
+`python -m scripts.check_deployment_bootstrap` verifies this path on a disposable,
+non-root PostgreSQL container: tmpfs storage, no host mounts/ports, network none,
+locally pinned image ID, no cloud calls. It checks migration version, wrong-target
+and replay rejection, NOLOGIN/password-free groups, inherited runtime reads/inserts
+and rejection of DDL/owner escalation. Its synthetic login has no real credential;
+the container is removed after the check. It never selects an existing database.
 
 ## State and provenance
 
