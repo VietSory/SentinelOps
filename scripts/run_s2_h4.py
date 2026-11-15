@@ -54,6 +54,8 @@ WRITER_DSN_PREFIX = 'postgresql://control_writer:local-control-writer@127.0.0.1:
 PAYMENT = 'payment-service'
 POST_CHANGE_MINUTES = 8
 TOKEN_DURATION = '60m'  # sandbox identity() issues 10m tokens; this run can exceed that
+LOCAL_CONTROL_MIGRATIONS = ('001-local-roles.sql', '002-incident-store.sql',
+                            '003-health-worker.sql', '004-incident-consumer.sql')
 
 
 def clock():
@@ -139,8 +141,8 @@ p.write_text(s)
 def control_db(sandbox, postgres, owned):
     bootstrap = sandbox.root / 'db-init'
     bootstrap.mkdir(mode=0o755)
-    for path in sorted((PROJECT / 'infra/control').glob('00[1-4]-*.sql')):
-        shutil.copyfile(path, bootstrap / path.name)
+    for filename in LOCAL_CONTROL_MIGRATIONS:
+        shutil.copyfile(PROJECT / 'infra/control' / filename, bootstrap / filename)
     env = sandbox.root / 'db-bootstrap.env'
     fd = os.open(env, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     with os.fdopen(fd, 'w') as stream:
