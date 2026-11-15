@@ -520,3 +520,16 @@ adapter/H3, provider/AWS và các quality gates ở mục 10 vẫn mở. Chi ti�
 - Business logs hiện là stdout: còn cần shipper/OTLP emitter. CNI/IRSA/delivery,
   histogram/time/unit parity và remote worker source policy chưa kiểm trên target.
   Đây là configuration-only, không phải AWS deployment, source parity hoặc gate.
+
+### Business OTLP logs — follow-up 2026-11-15
+
+- PR #55 đã **MERGED** `04caa52`; head cuối `28d6464`, run `43671259567`:
+  **14/14 PASS, 0 skipped jobs**. CI merge `43673513991` cần đối chiếu riêng.
+- B thêm emitter business event opt-in và `--export-logs` cho renderer. Giữ
+  JSON stdout/context, queue 512 records, batch 64, export timeout 2 giây;
+  exporter chạy background, không thêm AWS identity/host mounts vào service.
+- **50 focused checks PASS**. Ba ca transport gRPC thật/middleware/outage chưa
+  chạy local do socket sandbox và approval bridge; CI chạy các ca này theo head.
+  Không coi stdout hoặc flush queue là xác nhận CloudWatch đã lưu dữ liệu.
+- Mặc định local/capture không đổi. Không thu toàn bộ stdout: DB/infrastructure/
+  uvicorn logs, target delivery verification và H3 vẫn chưa hoàn tất.
