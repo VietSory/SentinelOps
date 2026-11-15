@@ -502,15 +502,18 @@ adapter/H3, provider/AWS và các quality gates ở mục 10 vẫn mở. Chi ti�
 ### Collector/exporter offline — follow-up 2026-11-15
 
 - PR #54 KMS đã **MERGED** vào `ed878da`; head `ae62a6a`, run `43667608441`:
-  **14/14 PASS, 0 skipped jobs**. CI sau merge là run `43669428327`, cần đối chiếu
-  riêng với `ed878dad53177ceb52f528fc36a58427bae36166`.
+  **14/14 PASS, 0 skipped jobs**. CI sau merge `43669428327`: **14/14 PASS,
+  0 skipped jobs**, đúng `ed878dad53177ceb52f528fc36a58427bae36166`.
 - Renderer mới tạo 6 resources cho gateway OTLP, config CloudWatch EMF/Logs/X-Ray,
   role `telemetry-exporter` và projected STS token riêng. Không tạo credential,
   log group, retention, DB/S3/action permission hoặc worker manifest.
 - **111 focused Python tests PASS**. Contrib 0.162.0 digest pin đã validate config
   thật trong container `network=none`. Checker tự động và kubeconform local bị
-  approval bridge chặn; CI chạy lại checker hợp lệ/invalid, IAM mock assertions
-  và schema Kubernetes 1.34 theo đúng head. Chưa claim các bước pending là PASS.
+  approval bridge chặn. PR #55 run `43671071492`, head `31ca5b8`: IaC PASS,
+  gồm 3 native Terraform mock tests, checker hợp lệ/invalid và kubeconform strict
+  Kubernetes 1.34 (**6 valid, 0 invalid/errors/skips**). Foundation **1537 passed,
+  37 skipped**, installed wheel PASS. Các kết quả job này chưa thay kết luận full
+  native CI hoặc CI của head bàn giao cuối.
 - Sampling traces phải explicit và ghi trong H3; metrics/logs không sampled.
   Một replica/Recreate giữ state delta theo series, nhưng restart có thể mất
   queue/baseline. Probes chỉ kiểm process, không chứng minh AWS delivery.

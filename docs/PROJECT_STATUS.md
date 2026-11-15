@@ -44,15 +44,18 @@ Follow-up CloudWatch/KMS: đã bổ sung key policy cho regional Logs, giới h�
 ba log-group ARN; telemetry-reader chỉ decrypt/describe qua Logs, flow-log writer
 chỉ dùng key cho nhóm VPC của mình. PR #54 đã **MERGED** vào `ed878da`; head
 `ae62a6a`, run `43667608441`: **14/14 jobs PASS**, gồm validate/14 guard và
-**2 mock test PASS**, không có AWS credentials. CI sau merge đối chiếu riêng ở
-run `43669428327`; không chuyển kết quả PR head sang merge SHA.
+**2 mock test PASS**, không có AWS credentials. CI sau merge `43669428327` cũng
+**14/14 jobs PASS, 0 skipped jobs**, đúng SHA `ed878dad53177ceb52f528fc36a58427bae36166`.
 Xem [binding](runbooks/AWS_BASELINE.md#cloudwatch-encryption-binding).
 
 B đã bổ sung [collector AWS offline](runbooks/AWS_BASELINE.md#offline-aws-collector):
 6-resource renderer, CloudWatch EMF/OTLP Logs/X-Ray, projected STS token và role
 `telemetry-exporter` riêng. Reader không được tái dùng làm exporter. 111 focused
 Python tests PASS; binary contrib 0.162.0 đã validate config trong container
-không mạng. Checker tự động, schema và IAM mock checks được đưa vào CI theo head;
+không mạng. PR #55, run `43671071492`, head `31ca5b8`: IaC job PASS với 3 native
+Terraform mock tests, checker collector hợp lệ/invalid PASS và kubeconform strict
+1.34: **6 valid, 0 invalid/errors/skips**. Foundation: **1537 passed, 37 skipped**,
+installed wheel PASS. Full native CI và head bàn giao cuối phải đối chiếu riêng;
 không coi lượt local bị sandbox/approval bridge chặn là PASS. Chưa deploy/gửi
 telemetry AWS; stdout log shipping, delivery verification và H3 vẫn thiếu.
 
