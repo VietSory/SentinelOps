@@ -52,7 +52,7 @@ Các module health/correlation/RCA/persistence đã có được tái sử dụn
 | Inactive-unit recovery | Sửa lỗi `reset-failed` trả `Unit not loaded`: inactive start/restart sau integrity/source checks; failed/active giữ rate-limit reset | PR #50; hai inactive regression cases FAIL trước sửa; **65 focused checks PASS** sau tích hợp main; CI head `2831c416` 14/14 PASS |
 | Image/config lock | Pin image/config bằng deployment lock, giữ explicit model/source selection | Có đường local đã verify; lock không tự thành known-good approval hoặc source parity |
 | Portable API image / manifests | Wheel/API/UI/ML dependencies và worker CLI, production mặc định không model/credential; renderer digest/OIDC/DB reference, config checksum để rollout | Hai ca HTTP container cô lập PASS. PR #52: **MERGED** vào `8ed9ff6`; CI head mới `333517f`: **14/14 PASS, 0 skipped jobs**; chi tiết mục 5–6 |
-| Optional action-reader binding | Commit `9b5f71b` thêm Secret reference SELECT-only riêng, chặn dùng cùng Secret với control runtime; giữ checks quyền sẵn có | **87 focused tests PASS**, **5 manifests valid**; CI của lát cắt này đối chiếu trên head PR publication. Không provision credential/migration hoặc cấp quyền action |
+| Optional action-reader binding | Commit `9b5f71b` thêm Secret reference SELECT-only riêng, chặn dùng cùng Secret với control runtime; giữ checks quyền sẵn có | PR #53 **MERGED** `6590a8c`; head `f1d4aff`, CI `43620994259` **14/14 PASS**. **87 focused tests PASS**, **5 manifests valid**, 22 PostgreSQL software checks; không thêm trial Q-09/G6, provision credential/migration hoặc cấp quyền action |
 | Prometheus/Grafana | **10 operator rules**, dashboard read-only **11 panel**; heartbeat/readiness/errors/eligibility/backlog/progress | Đã quan sát Prometheus load rules/alert firing và Grafana evaluate expressions thật. Đây là worker telemetry, không phải business SLO hay model quality |
 | CI theo tác động | Workflow luôn có conclusion; foundation/summary, UI scope, native/public suites theo code/config; unknown path chạy đủ | Không coi job skipped là native PASS. Job ML có mandatory imports và chạy riêng `tests/test_alibaba*.py` |
 | Demo/runbooks | Hướng dẫn stack, API/UI, credentials, readiness, history, fallback, Grafana và rollback | [Demo local](../runbooks/DEMO_LOCAL.md) ghi rõ giới hạn; không thay nghiệm thu G4–G8 |
@@ -123,6 +123,7 @@ A/B review evidence contract và protocol evaluation riêng. Xem [báo cáo S4](
 | ECR | B đã review/sửa lifecycle và repository guard, thêm 8 negative cases. [PR #49](https://github.com/VietSory/SentinelOps/pull/49) **MERGED** vào `0364251`; head `fd7a010`, CI `43613141372` attempt 2 **14/14 PASS**. Node image-pull IAM giữ baseline; chỉ IaC offline, chưa tạo registry AWS |
 | API deployment | PR #52 có installed image và **5 resources** offline. API/business config changes nay đổi pod template; **123 focused tests PASS**, kubeconform strict 1.34: **14 valid, 0 invalid/errors/skips** trên fixture references. Trạng thái PR/CI mới ở mục 6; chưa publish image/deploy |
 | Workers/observability deployment bindings | Chưa triển khai cloud workers: cần remote adapter/source policy và H3, giữ loopback/ownership guards. Observability AWS phải theo CloudWatch/X-Ray baseline; stack local không thay deployment bindings |
+| CloudWatch/KMS prerequisite | Bổ sung regional Logs key policy và caller permissions giới hạn đúng log-group ARN; reader không thành exporter. 53 focused Python tests và fmt PASS; PR #54 head `7ac348d`, run `43667473696`: IaC validate/14 guard và 2 AWS/TLS mock tests PASS. Full CI head cuối đối chiếu tại PR. Chưa triển khai collector hoặc AWS |
 | Provider identity / EKS remediation adapter-policy | Provider/app client thật và adapter/policy EKS chưa kiểm trên deployment; policy local không tự cấp quyền EKS |
 | H3, release AWS, chi phí/teardown | Chưa có AWS source capture/parity; region/account/quota/budget/quyền apply cần được chốt. **B4 chưa hoàn tất** |
 
@@ -147,6 +148,12 @@ trước PR #44 nằm trong [checkpoint B](../delivery/LANE_B_CHECKPOINT.md).
 | [#50](https://github.com/VietSory/SentinelOps/pull/50) | Recover inactive systemd units; tích hợp main | `2831c416` | MERGED vào `a255892` | [14 PASS, 0 skipped jobs](https://github.com/VietSory/SentinelOps/actions/runs/43607840174) |
 | [#49](https://github.com/VietSory/SentinelOps/pull/49) | B review ECR/lifecycle guards | `fd7a010` | MERGED vào `0364251` | [Attempt 2: 14 PASS](https://github.com/VietSory/SentinelOps/actions/runs/43613141372); attempt 1 observability timeout |
 | [#52](https://github.com/VietSory/SentinelOps/pull/52) | Installed API image, offline manifests và rollout cấu hình | `333517f` | **MERGED** vào `8ed9ff6` | [Head `a77332c`: 14 PASS](https://github.com/VietSory/SentinelOps/actions/runs/43616362464); [head `333517f`](https://github.com/VietSory/SentinelOps/actions/runs/43618472435): **14/14 PASS, 0 skipped jobs** |
+| [#53](https://github.com/VietSory/SentinelOps/pull/53) | Optional SELECT-only action-reader binding | `f1d4aff` | **MERGED** vào `6590a8c` | [Run `43620994259`](https://github.com/VietSory/SentinelOps/actions/runs/43620994259): **14/14 PASS, 0 skipped jobs** |
+
+CI sau merge #53 [run `43665706369`](https://github.com/VietSory/SentinelOps/actions/runs/43665706369)
+đã **14/14 PASS, 0 skipped jobs** trên đúng SHA
+`6590a8cb0de5e704a630614032cf6e1a2791bf81`. Đối chiếu GitHub ngày 15/11;
+không dùng trạng thái đang chạy từ lần bàn giao trước.
 
 PR #52 đã sửa vị trí output image proof ra ngoài runtime root chưa registration;
 run `43616362464` xác nhận image smoke, host recovery và cleanup PASS. Image source
@@ -196,7 +203,7 @@ phải lỗi code đã chứng minh và CI runner không chứng minh host này 
 | **1 — Vận hành local** | Resume API/health/incidents bằng đúng pinned session/release; kiểm READY đúng stream và COMMITTED trước incidents; kiểm protected API, checkpoint freshness và UI | B/operator; cần service-manager execution hoạt động. Giữ volumes, epoch, model selection và lịch sử; missing telemetry vẫn UNKNOWN |
 | **2 — Q-09/G6 model mới** | Chốt protocol/trial và operator duyệt known-good cụ thể trước mỗi thay đổi xấu; chạy, verify và ghi audit riêng cho `de38fc6b` | B/operator, A cung cấp H4 đủ điều kiện; owner nghiệm thu G6. Không kế thừa 9/10 của `badf9da0` |
 | **3 — RCA/S4 và timing** | Review cách đưa native lock-wait evidence vào scoring, freeze interface/evaluation trước run mới; đo independent live IF emission MTTD | A chủ trì RCA/evaluation, B hỗ trợ source/platform. Giữ abstention và ngưỡng hiện hành; run S4 đã xem không thành holdout |
-| **4 — Packaging đích** | PR #52 và ECR #49 đã merge; giao optional action-reader binding theo CI đúng head, tiếp tục observability bindings/external commerce prerequisites | B; worker adapter/source policy cần A/B review trước H3. Configuration-only không phải deployment đã verify |
+| **4 — Packaging đích** | PR #52, ECR #49 và action-reader #53 đã merge; sửa prerequisite CloudWatch/KMS, tiếp tục collector/exporter bindings và external commerce prerequisites | B; worker adapter/source policy cần A/B review trước H3. Configuration-only không phải deployment đã verify |
 | **5 — Cloud/H3** | Chốt region/account/quota/budget/quyền; deploy trong phạm vi được cấp, cấu hình provider thật, thu H3 và giao A verify parity | Owner/B/A theo boundary. AWS vẫn chưa được triển khai trong phạm vi báo cáo |
 | **6 — Nghiệm thu** | Hoàn tất model/RCA/explanation/action/final evaluation theo các gate còn mở | A/B/owner theo scope; không mở sealed holdout hoặc tự đổi gate thành PASS |
 

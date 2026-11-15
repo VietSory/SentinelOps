@@ -16,6 +16,7 @@ or apply permission — the owner confirms each of those first.
 ```sh
 terraform -chdir=infra/aws init -backend=false -input=false
 python -m scripts.check_aws_iac
+terraform -chdir=infra/aws test -filter=tests/cloudwatch_kms.tftest.hcl
 python -m pytest -q tests/test_aws_iac.py
 ```
 
@@ -43,6 +44,14 @@ on. It makes **zero AWS API calls** and needs no credentials.
 mutating a copy of the real configuration, so a guard cannot silently stop
 guarding. These are configuration guarantees about a *description*. They are not
 evidence that a working environment exists.
+
+The specific `cloudwatch_kms.tftest.hcl` file mocks **both AWS and TLS providers**
+and uses only `command = plan`. CI evaluates the real configuration graph and
+decoded key/caller policy JSON against fixture account data. It checks the exact
+regional Logs principal, the three log-group encryption contexts, read-only
+reader permissions, flow-log scope, and a changed region/environment/prefix.
+It does not test AWS authorization or encrypt/decrypt live data. Do not replace
+this with an ordinary cloud plan or remove the mocks without apply-scope approval.
 
 The ECR guard checks the exact private-repository and lifecycle resource set.
 Expiry must bind to each declared repository and retain the complete
@@ -78,6 +87,30 @@ blocked regardless: that gate is H4/G6, not IAM.
 The explanation role starts with **no** `bedrock:InvokeModel` permission at all —
 `bedrock_model_ids` defaults to empty and the policy is not created. Granting it
 requires naming models explicitly; wildcards are rejected.
+
+### CloudWatch encryption binding
+
+All three declared log groups use the environment KMS key. Its explicit policy
+preserves the default account administration/delegation statement and grants
+the regional `logs.<region>.amazonaws.com` service only cryptographic operations,
+conditioned on the **exact three log-group ARNs**. These context ARNs do not have
+a `:*` log-stream suffix. Names and context ARNs come from the same local map;
+the key policy does not depend on the log-group resources, avoiding a dependency
+cycle when the groups reference the key.
+
+The telemetry reader gets only `kms:Decrypt`/`kms:DescribeKey` on this key, through
+regional Logs and those same encryption contexts. It remains read-only and is
+not an exporter. The existing VPC flow-log delivery role gets cryptographic use
+only through regional Logs for its own VPC log group. Flow-log creation depends
+on both delivery policies. Neither caller receives direct KMS use or permission
+to change retention, create a log group, invoke Bedrock or operate an application.
+This follows the [CloudWatch Logs KMS permission model](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/encrypt-log-data-kms.html).
+
+The apply principal still needs permission to create/manage the key policy and
+`kms:DescribeKey` when associating the key with log groups. These operator
+permissions are external prerequisites, not grants made to workloads here.
+An application collector/exporter role, its CloudWatch/X-Ray configuration,
+delivery verification and H3 source capture remain outstanding.
 
 ## Prerequisites the owner confirms before any apply
 
