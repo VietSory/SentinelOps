@@ -204,7 +204,8 @@ def test_enqueue_failure_does_not_fail_business_operation_or_leak_exception(monk
     assert 'do-not-retain' not in caplog.text
 
 
-def test_slow_export_runs_off_the_business_call_thread(resource, monkeypatch):
+def test_slow_export_runs_off_the_business_call_thread(resource, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger='sentinelops-testbed')
     entered, release = Event(), Event()
     class SlowExporter:
         def export(self, batch):
@@ -226,3 +227,13 @@ def test_slow_export_runs_off_the_business_call_thread(resource, monkeypatch):
         release.set()
         sink.provider.shutdown()
         pool.shutdown(wait=True)
+
+
+def test_log_level_filter_applies_to_stdout_and_otlp(monkeypatch, caplog):
+    class UnexpectedSink:
+        def emit(self, *args):
+            pytest.fail('an INFO event suppressed by LOG_LEVEL must not be exported')
+    monkeypatch.setattr(log_export, '_sink', UnexpectedSink())
+    with caplog.at_level(logging.WARNING, logger='sentinelops-testbed'):
+        runtime.log_event('payment-service', 'filtered_event')
+    assert 'filtered_event' not in caplog.text

@@ -289,6 +289,8 @@ service/version/environment/pod identity, and the active span supplies the OTLP
 trace/span fields. These are observations, not authenticated provenance or H3.
 The CloudWatch exporter retains its envelope (`raw_log=false`), so consumers must
 decode the JSON body rather than assume a raw stdout record at the top level.
+Both delivery paths honor the existing `LOG_LEVEL`: raising it above INFO
+suppresses these INFO business events on stdout **and** OTLP.
 
 Delivery is best effort: an SDK batch queue holds at most 512 records, batches
 up to 64, schedules every second and bounds each export attempt to 2 seconds.

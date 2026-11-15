@@ -57,13 +57,16 @@ Terraform mock tests, checker collector hợp lệ/invalid PASS và kubeconform 
 1.34: **6 valid, 0 invalid/errors/skips**. Foundation: **1537 passed, 37 skipped**,
 installed wheel PASS. Head cuối `28d6464`, run `43671259567`: **14/14 PASS,
 0 skipped jobs**. PR #55 đã **MERGED** vào `04caa52`; CI merge `43673513991`
-đối chiếu riêng. Chưa deploy/gửi telemetry AWS; delivery verification và H3 vẫn thiếu.
+đúng SHA `04caa52a030d59843c09320ebb9b42c3c1632ae0`: **14/14 PASS**.
+Chưa deploy/gửi telemetry AWS; delivery verification và H3 vẫn thiếu.
 
 Follow-up business logs: emitter OTLP opt-in (`--export-logs`) giữ JSON stdout,
 event/context/pod identity, queue hữu hạn và timeout riêng. Mặc định local tắt,
-không thêm AWS identity vào business pods. **50 focused checks PASS**; ba ca
-loopback gRPC/middleware/outage chờ CI vì sandbox chặn socket và approval bridge
-từ chối execution. Không claim transport PASS trước kết quả CI đúng head.
+không thêm AWS identity vào business pods. PR #56 head `791cc06`, run `43674451205`:
+**14/14 PASS, 0 skipped jobs**, foundation **1554 passed, 37 skipped**, gồm ba ca
+loopback gRPC/middleware/outage thật; kubeconform **15 valid, 0 invalid/errors/skips**.
+Local socket/launcher execution vẫn bị approval bridge chặn. Follow-up đồng bộ
+`LOG_LEVEL` cho stdout/OTLP cần đối chiếu CI head mới, không kế thừa PASS head cũ.
 Chỉ business events được export; stdout hạ tầng/DB/uvicorn còn cần collection riêng.
 Xem [log export](runbooks/AWS_BASELINE.md#business-event-log-export).
 

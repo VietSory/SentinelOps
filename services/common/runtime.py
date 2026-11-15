@@ -39,8 +39,9 @@ def log_event(service: str, event: str, **fields: object) -> None:
         **fields,
     }
     body = json.dumps(payload, default=str, separators=(",", ":"))
-    logger.info(body)
-    export_event(payload, body)
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(body)
+        export_event(payload, body)
 
 
 def install_request_context(app: FastAPI, service_name: str) -> None:
