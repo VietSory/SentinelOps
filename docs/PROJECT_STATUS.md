@@ -48,6 +48,13 @@ chỉ dùng key cho nhóm VPC của mình. PR #54 đã **MERGED** vào `ed878da`
 **14/14 jobs PASS, 0 skipped jobs**, đúng SHA `ed878dad53177ceb52f528fc36a58427bae36166`.
 Xem [binding](runbooks/AWS_BASELINE.md#cloudwatch-encryption-binding).
 
+Owner chọn AWS **offline only**. B bổ sung optional operator Cognito pool/client
+IaC, mặc định tắt, enrollment/recovery bởi admin, TOTP bắt buộc, scope chỉ đọc và
+public renderer binding `client_id`. 47 IaC guard tests PASS; native mock tests
+theo CI head PR. Chưa provision/user/login/token/provider verification. UI vẫn
+nhận access token được lấy bởi OAuth client riêng đã review; không tự exchange code.
+Xem [operator identity](runbooks/AWS_BASELINE.md#optional-operator-identity-configuration-offline).
+
 B đã thêm [CloudWatch operations dashboard offline](runbooks/AWS_BASELINE.md#cloudwatch-operations-dashboard):
 business request/error series theo route/status, control RDS và OTLP raw logs.
 Không fill missing thành zero/healthy, không suy p95/model readiness hoặc thêm

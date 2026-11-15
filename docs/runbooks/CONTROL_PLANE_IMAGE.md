@@ -72,6 +72,10 @@ contain credentials, query strings or fragments. The existing OIDC verifier
 checks signatures/scopes at runtime; rendering does not create an identity
 provider. Cognito access-token deployments can explicitly use
 `--audience-claim client_id`, with the existing verifier restrictions unchanged.
+The [optional operator identity IaC](AWS_BASELINE.md#optional-operator-identity-configuration-offline)
+is disabled by default and can supply these public fields after authorized
+provisioning. It creates no operator user or token, and the token-paste UI is
+not an OAuth callback/code-exchange client.
 
 The pod template includes a deterministic SHA-256 of the public runtime ConfigMap.
 Changing OIDC configuration or the model release reference therefore changes the

@@ -116,6 +116,52 @@ delivery verification and H3 source capture remain outstanding.
 
 ## Prerequisites the owner confirms before any apply
 
+### Optional operator identity configuration (offline)
+
+The baseline can describe a dedicated Cognito operator pool/app client using
+`operator_identity_enabled=true` and an explicit `operator_callback_urls` list.
+Both default to disabled/empty. An enabled pool requires at least one exact HTTPS
+callback without credentials, query or fragment; callback ownership and OAuth
+client behavior must be reviewed before authorized deployment.
+
+The pool has administrator-only enrollment and recovery, mandatory software-token
+MFA, a 16-character password policy and deletion protection. No user, password,
+client secret, producer client or application IAM grant is created. The public
+operator app client supports only authorization-code flow and the existing
+`sentinelops/incidents.read` scope (plus `openid`), with 15-minute access/ID tokens
+and an eight-hour refresh token. It has no `incidents.write` scope. OAuth callers
+must use S256 PKCE and verify state; this Terraform client configuration does not
+enforce that the caller supplied PKCE. Do not use implicit/password grants or
+reuse the operator client for producers. See [Cognito authorization/code PKCE](https://docs.aws.amazon.com/cognito/latest/developerguide/authorization-endpoint.html).
+
+`operator_oidc_binding` is null by default. When enabled, it supplies the public
+issuer, client ID audience, JWKS URL and `audience_claim=client_id` expected by
+the API renderer and its existing Cognito access-token verifier. The deployed API
+still requires a real token signed by that issuer, for that client, with the read
+scope; an ID token is not the operator access token. The output does not contain
+credentials or approve provider availability. Keep it in public configuration,
+and never put access/refresh tokens in tfvars or Terraform outputs.
+
+The current UI accepts a pasted access token; it does not implement an OAuth
+callback/code-exchange client. Select an existing reviewed operator OAuth client
+and register **its** callback URL, then obtain the scoped access token and connect
+to the protected UI. Do not register `/ui/` as a callback expecting it to exchange
+codes. User enrollment, TOTP setup, callback-client validation, login/logout,
+refresh/revocation behavior and live API authorization remain target acceptance
+work after owner authorization. An existing external IdP remains supported without
+creating Cognito resources; the optional pool is not required by the API.
+
+Native Terraform tests use mocked providers to verify default-off behavior,
+read-only client scope, admin/TOTP/deletion controls, renderer fields and rejection
+of absent/credential-bearing callbacks. No provider, user or domain is provisioned,
+no authentication request is sent, and no real login/G7 acceptance is claimed.
+
+Deletion protection must be deliberately disabled before an intended teardown;
+operator account recovery requires an authorized pool administrator. Those
+permissions are external to the API/exporter/worker roles.
+
+### Infrastructure authorization
+
 Apply is blocked until **all** of these are explicit. None of them is granted by
 this document.
 
