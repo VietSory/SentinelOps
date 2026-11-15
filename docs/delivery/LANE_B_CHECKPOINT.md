@@ -544,3 +544,25 @@ adapter/H3, provider/AWS và các quality gates ở mục 10 vẫn mở. Chi ti�
   Không coi stdout hoặc flush queue là xác nhận CloudWatch đã lưu dữ liệu.
 - Mặc định local/capture không đổi. Không thu toàn bộ stdout: DB/infrastructure/
   uvicorn logs, target delivery verification và H3 vẫn chưa hoàn tất.
+
+### Offline prerequisites — follow-up 2026-11-15
+
+- PR #59 (`8d339e3`, run `43710482812`), #60 (`d9c0c93`, run `43710734737`)
+  và #61 (`c309905`, run `43711388890`) đã được đối chiếu đúng head:
+  **mỗi run 14/14 PASS, 0 skipped jobs**. Cả ba còn mở khi kiểm GitHub;
+  approval bridge từ chối merge #60 với `Denied, expired, cancelled, or unavailable`.
+  Đây lần lượt là guarded control-volume recovery, OIDC provider/app-client
+  configuration tắt mặc định và credential-free control DB deployment bootstrap.
+  Không coi PR head/CI merge checkout là main đã merge.
+- Commerce có thêm `infra/commerce/001-deployment.sql`: chỉ cho DB PostgreSQL 16
+  mới, role owner/runtime NOLOGIN không password, runtime chỉ SELECT inventory
+  và INSERT payment. Không tạo DB/login/Secret/catalog và không đổi local init.
+  [Runbook](../runbooks/AWS_BASELINE.md#commerce-database-bootstrap) ghi rõ
+  provisioning, TLS, external login và catalog là dependency deployment.
+  Native CI kiểm actual SQL/permission trong container fixture mới, không mount,
+  không host port/network, không dùng DB A/B hiện có. Syntax/diff và 37 focused
+  manifest/CI checks PASS; Docker local bị approval bridge từ chối, nên kết quả
+  native phải lấy từ CI đúng head, không nhận local runtime PASS.
+- Owner vẫn chọn **offline only** cho AWS. Host DB/UI rollout chưa được thực thi;
+  release UI đã build/verify nhưng chưa select. Q-09/G6 `de38fc6b`, remote worker
+  adapter/source policy, H3 và các gate nghiệm thu vẫn giữ nguyên điều kiện.

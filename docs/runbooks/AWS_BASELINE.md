@@ -259,9 +259,61 @@ Schema validation was executed with kubeconform 0.7.0 and Kubernetes 1.34.0:
 without network access. The checked image reference was explicitly a software
 fixture, not a verified/published deployment image. No registry, cluster or AWS
 API was called by rendering/validation. Image availability, external commerce
-schema/Secret, collector reachability and target admission/RBAC remain deployment
+database/Secret, collector reachability and target admission/RBAC remain deployment
 prerequisites. This is configuration evidence, not a running AWS workload, H3
 source parity, known-good approval or G7 acceptance.
+
+### Commerce database bootstrap
+
+`infra/commerce/001-deployment.sql` prepares the existing Inventory/Payment table
+contract on a **new PostgreSQL 16 database named `sentinelops_commerce`**. It is an
+explicit alternative to the sandbox `infra/local/init.sql`, not a migration for
+an existing database. Provision the private commerce database and an authorized
+database owner with `CREATEROLE` separately; the control RDS instance/bootstrap
+credential does not supply this dependency. No commerce database is created by
+the current Terraform baseline or manifest renderer.
+
+Run it only after deployment authorization, using a private libpq service profile
+that selects that database, verifies the server TLS certificate and reads the
+bootstrap password from protected credential storage:
+
+```sh
+PGSERVICE=commerce-bootstrap psql -X -v ON_ERROR_STOP=1 -f infra/commerce/001-deployment.sql
+```
+
+The SQL rejects a different database/major version, pre-existing commerce roles,
+custom schemas or existing objects in `public` before making changes. Its role,
+schema-permission and table changes are one transaction. It creates no login,
+password, Kubernetes Secret, control/action schema or inventory rows. Replaying
+against an installed database fails; do not drop existing objects/roles to force
+it through. Back up and use an explicit reviewed migration for an existing store.
+
+The `commerce_owner` and `commerce_runtime` groups are `NOLOGIN`, with no password
+or administrative flags. Only the migration principal receives owner SET
+membership. Runtime has CONNECT/USAGE, SELECT on `inventory` and INSERT on
+`payments`, matching the existing service queries. It cannot read payments,
+write the inventory catalog, update/delete/truncate tables, create objects or
+become the owner. An externally managed application login must inherit only
+`commerce_runtime` (`WITH INHERIT TRUE, SET FALSE`), have no unrelated grants or
+administrative flags, and retain `public` in its search path. Its TLS DSN belongs
+in the existing commerce Secret's `database-url`, never in Git or a public
+ConfigMap. Both service pods currently use that explicit shared Secret.
+
+Populate an operator-approved inventory catalog through the migration/owner
+principal before serving checkout traffic. An empty catalog returns the existing
+404 behavior; `/ready` only executes SELECT 1 and does not prove catalog/schema
+availability. No local demo catalog is silently copied into a deployment.
+
+`python -m scripts.check_commerce_bootstrap` checks the actual SQL using an
+already available PostgreSQL image pinned by local ID. Its newly created fixture
+is non-root, read-only, network-disabled and uses only bounded tmpfs, with no
+host ports, mounts or existing DB connection. It checks bootstrap as a
+non-superuser database owner, inventory reads/payment inserts and actual rejected
+runtime operations, plus wrong-target, occupied-database, role-collision and
+replay rejection. Synthetic catalog/payment rows exist only in that disposable
+software fixture. CI runs it in `incident-storage`; local Docker execution may
+require the normal approval bridge. A software PASS does not prove actual RDS
+permissions, external-login provisioning, TLS/Secret correctness or deployment.
 
 ### Business event log export
 
