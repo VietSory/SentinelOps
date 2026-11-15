@@ -116,6 +116,8 @@ jobs:
           cache: pip
       - run: pip install -e '.[dev]'
       - run: docker compose -p sentinelops-control -f docker-compose.control.yml up -d --wait --wait-timeout 120
+      - name: Verify credential-free deployment bootstrap on an isolated PostgreSQL fixture
+        run: python -m scripts.check_deployment_bootstrap
       - run: python scripts/check_incident_store.py
       - run: docker compose -p sentinelops-control -f docker-compose.control.yml restart control-postgres
       - run: docker compose -p sentinelops-control -f docker-compose.control.yml up -d --wait --wait-timeout 60

@@ -61,6 +61,13 @@ Không fill missing thành zero/healthy, không suy p95/model readiness hoặc t
 action/alarms. 47 IaC guard tests PASS; Terraform mock evaluation theo CI head
 của thay đổi. Chưa apply/kiểm console, viewer permissions hay live AWS delivery.
 
+Offline DB prerequisite: B bổ sung bootstrap deployment không mật khẩu cho DB mới,
+owner/runtime groups NOLOGIN và đường dùng lại core migrations 002–004. Không
+tạo login/Secret hay action schema; DB hiện hữu bị chặn replay bootstrap.
+Checker PostgreSQL cô lập trong CI kiểm quyền thực, sai DB/replay, không đọc DB host.
+Đây chưa phải roles/Secret/migrations đã tồn tại trên AWS. Xem
+[storage](runbooks/INCIDENT_STORE.md#credential-free-deployment-bootstrap-offline-preparation).
+
 B đã bổ sung [collector AWS offline](runbooks/AWS_BASELINE.md#offline-aws-collector):
 6-resource renderer, CloudWatch EMF/OTLP Logs/X-Ray, projected STS token và role
 `telemetry-exporter` riêng. Reader không được tái dùng làm exporter. 111 focused

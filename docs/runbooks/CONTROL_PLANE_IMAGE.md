@@ -91,6 +91,9 @@ RBAC, ingress, LoadBalancer, migration or action executor is created. The DB
 Secret must hold the appropriate runtime DSN/privileges and TLS settings; it is
 not the RDS bootstrap credential. Apply/deployment still needs owner-approved
 account, region, quota, budget and target prerequisites.
+For a fresh deployment database, the [credential-free bootstrap](INCIDENT_STORE.md#credential-free-deployment-bootstrap-offline-preparation)
+describes NOLOGIN owner/runtime groups and the existing explicit core migrations.
+Provision runtime logins and Secrets separately; do not reuse local sandbox passwords.
 
 To enable the existing read-only action/quarantine views, add
 `--action-read-secret action-read-runtime`. Its `database-url` key must contain
