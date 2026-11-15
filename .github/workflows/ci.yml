@@ -680,6 +680,23 @@ jobs:
       # Both AWS/TLS providers are mocked in this specific test file. No cloud
       # plan/apply or account access: evaluate rendered policy JSON and graph.
       - run: terraform -chdir=infra/aws test -filter=tests/cloudwatch_kms.tftest.hcl -no-color
+      - name: Validate AWS collector configuration offline with the pinned real binary
+        run: python -m scripts.check_collector_config --pull
+      - name: Validate collector resources against Kubernetes 1.34 schemas
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          from scripts.render_collector_manifests import CHECK_IMAGE, render
+          target = Path('artifacts/deployment/collector.yaml')
+          target.parent.mkdir(parents=True, exist_ok=True)
+          docs = render(CHECK_IMAGE, region='eu-central-1', environment='dev',
+              exporter_role_arn='arn:aws:iam::123456789012:role/sentinelops-telemetry-exporter',
+              trace_sampling_percentage=10)
+          with target.open('x') as stream:
+              yaml.safe_dump_all(docs, stream, sort_keys=False)
+          PY
+          go run github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0 -strict -summary -kubernetes-version 1.34.0 artifacts/deployment/collector.yaml
       - name: Confirm no AWS credentials were available
         if: always()
         run: |

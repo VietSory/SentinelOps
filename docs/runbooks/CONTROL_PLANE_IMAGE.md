@@ -136,5 +136,6 @@ target parity and H3 must be implemented/reviewed before that deployment. Their
 absence remains a blocker, not a reason to relax the local safety guards.
 
 See [business manifests/AWS prerequisites](AWS_BASELINE.md),
+[offline AWS collector and its delivery boundaries](AWS_BASELINE.md#offline-aws-collector),
 [health worker](HEALTH_WORKER.md), [incident worker](INCIDENT_WORKER.md),
 [model loading](MODEL_PIPELINE.md) and [host-bound runtime](HOST_PROCESSES.md).

@@ -22,6 +22,9 @@ mock_provider "aws" {
   mock_resource "aws_kms_key" {
     defaults = { arn = "arn:aws:kms:eu-central-1:123456789012:key/11111111-2222-3333-4444-555555555555" }
   }
+  mock_resource "aws_iam_openid_connect_provider" {
+    defaults = { arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-central-1.amazonaws.com/id/SOFTWAREFIXTURE" }
+  }
   mock_resource "aws_eks_cluster" {
     defaults = { identity = [{ oidc = [{ issuer = "https://oidc.eks.eu-central-1.amazonaws.com/id/SOFTWAREFIXTURE" }] }] }
   }
@@ -146,5 +149,85 @@ run "changed_environment_and_region" {
       ])
     )
     error_message = "Region, environment and prefix changes must update the Logs service principal and exact encryption contexts."
+  }
+}
+
+run "exporter_has_only_scoped_delivery_authority" {
+  command = plan
+
+  assert {
+    condition = (
+      aws_iam_role.telemetry_exporter.name == "sentinelops-telemetry-exporter" &&
+      jsondecode(aws_iam_role.telemetry_exporter.assume_role_policy) == {
+        Version = "2012-10-17"
+        Statement = [{
+          Effect    = "Allow"
+          Action    = "sts:AssumeRoleWithWebIdentity"
+          Principal = { Federated = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.eu-central-1.amazonaws.com/id/SOFTWAREFIXTURE" }
+          Condition = {
+            StringEquals = {
+              "oidc.eks.eu-central-1.amazonaws.com/id/SOFTWAREFIXTURE:sub" = "system:serviceaccount:sentinelops:telemetry-exporter"
+              "oidc.eks.eu-central-1.amazonaws.com/id/SOFTWAREFIXTURE:aud" = "sts.amazonaws.com"
+            }
+          }
+        }]
+      }
+    )
+    error_message = "Only the dedicated exporter service account and STS audience may assume the exporter role."
+  }
+
+  assert {
+    condition = (
+      aws_iam_role_policy.telemetry_exporter.role == aws_iam_role.telemetry_exporter.id &&
+      jsondecode(aws_iam_role_policy.telemetry_exporter.policy) == {
+        Version = "2012-10-17"
+        Statement = [
+          {
+            Sid    = "WriteCollectorStreams"
+            Effect = "Allow"
+            Action = ["logs:CreateLogStream", "logs:PutLogEvents"]
+            Resource = [
+              "arn:aws:logs:eu-central-1:123456789012:log-group:/sentinelops/dev/workloads:log-stream:otel-metrics-*",
+              "arn:aws:logs:eu-central-1:123456789012:log-group:/sentinelops/dev/workloads:log-stream:otel-logs-*",
+            ]
+          },
+          {
+            Sid      = "DescribeWorkloadStreams"
+            Effect   = "Allow"
+            Action   = ["logs:DescribeLogStreams"]
+            Resource = "arn:aws:logs:eu-central-1:123456789012:log-group:/sentinelops/dev/workloads:*"
+          },
+          {
+            Sid       = "SendRegionalTraces"
+            Effect    = "Allow"
+            Action    = ["xray:PutTraceSegments"]
+            Resource  = "*"
+            Condition = { StringEquals = { "aws:RequestedRegion" = "eu-central-1" } }
+          },
+          {
+            Sid      = "UseWorkloadLogKeyThroughLogs"
+            Effect   = "Allow"
+            Action   = ["kms:Encrypt", "kms:Decrypt", "kms:ReEncryptFrom", "kms:ReEncryptTo", "kms:GenerateDataKey", "kms:GenerateDataKeyWithoutPlaintext", "kms:DescribeKey"]
+            Resource = aws_kms_key.main.arn
+            Condition = {
+              StringEquals = { "kms:ViaService" = "logs.eu-central-1.amazonaws.com" }
+              ArnEquals    = { "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:eu-central-1:123456789012:log-group:/sentinelops/dev/workloads" }
+            }
+          },
+        ]
+      }
+    )
+    error_message = "Exporter permissions must not expand beyond named workload streams, regional trace writes and the workload Logs key context."
+  }
+
+  assert {
+    condition = output.collector_bindings == {
+      region                    = "eu-central-1"
+      environment               = "dev"
+      exporter_role_arn         = aws_iam_role.telemetry_exporter.arn
+      workload_log_group        = "/sentinelops/dev/workloads"
+      trace_sampling_percentage = 10
+    }
+    error_message = "The public handoff must match the renderer and declared infrastructure inputs."
   }
 }

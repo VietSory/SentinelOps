@@ -28,13 +28,25 @@ output "oidc_provider_arn" {
 }
 
 output "workload_role_arns" {
-  description = "Per-workload IRSA role ARNs to annotate each Kubernetes service account with."
+  description = "Per-workload IRSA role ARNs; use service-account annotation or the collector's explicit STS token binding."
   value = {
-    telemetry-reader = aws_iam_role.telemetry_reader.arn
-    data-worker      = aws_iam_role.data_worker.arn
-    explanation      = aws_iam_role.explanation.arn
-    controller       = aws_iam_role.controller.arn
-    api              = aws_iam_role.api.arn
+    telemetry-reader   = aws_iam_role.telemetry_reader.arn
+    telemetry-exporter = aws_iam_role.telemetry_exporter.arn
+    data-worker        = aws_iam_role.data_worker.arn
+    explanation        = aws_iam_role.explanation.arn
+    controller         = aws_iam_role.controller.arn
+    api                = aws_iam_role.api.arn
+  }
+}
+
+output "collector_bindings" {
+  description = "Public inputs for the offline collector renderer; not proof of deployment, delivery or H3 parity."
+  value = {
+    region                    = var.region
+    environment               = var.environment
+    exporter_role_arn         = aws_iam_role.telemetry_exporter.arn
+    workload_log_group        = local.log_group_names.workloads
+    trace_sampling_percentage = var.xray_fixed_sampling_rate * 100
   }
 }
 

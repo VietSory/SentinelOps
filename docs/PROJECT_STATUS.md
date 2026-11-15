@@ -37,17 +37,27 @@ CI sau merge #53: run `43665706369`, đúng SHA
 ECR PR #49 đã được B review/sửa guard và **MERGED** vào `0364251`; head `fd7a010`,
 CI `43613141372` attempt 2 **14/14 PASS**, node pull IAM giữ baseline. Đây vẫn
 là packaging/IaC offline, chưa registry publication hoặc deployment AWS. Cloud
-worker adapters/source policy, observability deployment bindings và H3 còn thiếu;
+worker adapters/source policy, observability delivery thực tế và H3 còn thiếu;
 không nới guard local để phát manifest worker.
 
 Follow-up CloudWatch/KMS: đã bổ sung key policy cho regional Logs, giới hạn đúng
 ba log-group ARN; telemetry-reader chỉ decrypt/describe qua Logs, flow-log writer
-chỉ dùng key cho nhóm VPC của mình. Đây là sửa prerequisite IaC, chưa có exporter
-workload hoặc AWS deployment. PR #54 head `7ac348d`, job IaC của run
-`43667473696`: Terraform validate/14 guard và **2 mock test PASS**, không có AWS
-credentials. Full CI của head cuối theo [PR #54](https://github.com/VietSory/SentinelOps/pull/54);
-không chuyển PASS của job IaC thành toàn bộ CI/deployment.
+chỉ dùng key cho nhóm VPC của mình. PR #54 đã **MERGED** vào `ed878da`; head
+`ae62a6a`, run `43667608441`: **14/14 jobs PASS**, gồm validate/14 guard và
+**2 mock test PASS**, không có AWS credentials. CI sau merge `43669428327` cũng
+**14/14 jobs PASS, 0 skipped jobs**, đúng SHA `ed878dad53177ceb52f528fc36a58427bae36166`.
 Xem [binding](runbooks/AWS_BASELINE.md#cloudwatch-encryption-binding).
+
+B đã bổ sung [collector AWS offline](runbooks/AWS_BASELINE.md#offline-aws-collector):
+6-resource renderer, CloudWatch EMF/OTLP Logs/X-Ray, projected STS token và role
+`telemetry-exporter` riêng. Reader không được tái dùng làm exporter. 111 focused
+Python tests PASS; binary contrib 0.162.0 đã validate config trong container
+không mạng. PR #55, run `43671071492`, head `31ca5b8`: IaC job PASS với 3 native
+Terraform mock tests, checker collector hợp lệ/invalid PASS và kubeconform strict
+1.34: **6 valid, 0 invalid/errors/skips**. Foundation: **1537 passed, 37 skipped**,
+installed wheel PASS. Full native CI và head bàn giao cuối phải đối chiếu riêng;
+không coi lượt local bị sandbox/approval bridge chặn là PASS. Chưa deploy/gửi
+telemetry AWS; stdout log shipping, delivery verification và H3 vẫn thiếu.
 
 Follow-up host: launcher quan sát API/health/incidents `inactive`, giữ release
 `5c520ae6…` và stream `b95058b4…`. Guarded restart API bị approval bridge từ chối;
