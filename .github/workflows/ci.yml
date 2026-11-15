@@ -682,12 +682,13 @@ jobs:
       - run: terraform -chdir=infra/aws test -filter=tests/cloudwatch_kms.tftest.hcl -no-color
       - name: Validate AWS collector configuration offline with the pinned real binary
         run: python -m scripts.check_collector_config --pull
-      - name: Validate collector resources against Kubernetes 1.34 schemas
+      - name: Validate collector and log-enabled business resources against Kubernetes 1.34 schemas
         run: |
           python - <<'PY'
           from pathlib import Path
           import yaml
           from scripts.render_collector_manifests import CHECK_IMAGE, render
+          from scripts.render_business_manifests import render as render_business
           target = Path('artifacts/deployment/collector.yaml')
           target.parent.mkdir(parents=True, exist_ok=True)
           docs = render(CHECK_IMAGE, region='eu-central-1', environment='dev',
@@ -695,8 +696,13 @@ jobs:
               trace_sampling_percentage=10)
           with target.open('x') as stream:
               yaml.safe_dump_all(docs, stream, sort_keys=False)
+          business = render_business('registry.example.invalid/business@sha256:' + 'a' * 64,
+              environment='dev', otlp_endpoint='http://otel-collector:4317',
+              commerce_secret='commerce-runtime', export_logs=True)
+          with target.with_name('business-logs.yaml').open('x') as stream:
+              yaml.safe_dump_all(business, stream, sort_keys=False)
           PY
-          go run github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0 -strict -summary -kubernetes-version 1.34.0 artifacts/deployment/collector.yaml
+          go run github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0 -strict -summary -kubernetes-version 1.34.0 artifacts/deployment/collector.yaml artifacts/deployment/business-logs.yaml
       - name: Confirm no AWS credentials were available
         if: always()
         run: |

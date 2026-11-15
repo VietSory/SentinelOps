@@ -55,9 +55,20 @@ Python tests PASS; binary contrib 0.162.0 đã validate config trong container
 không mạng. PR #55, run `43671071492`, head `31ca5b8`: IaC job PASS với 3 native
 Terraform mock tests, checker collector hợp lệ/invalid PASS và kubeconform strict
 1.34: **6 valid, 0 invalid/errors/skips**. Foundation: **1537 passed, 37 skipped**,
-installed wheel PASS. Full native CI và head bàn giao cuối phải đối chiếu riêng;
-không coi lượt local bị sandbox/approval bridge chặn là PASS. Chưa deploy/gửi
-telemetry AWS; stdout log shipping, delivery verification và H3 vẫn thiếu.
+installed wheel PASS. Head cuối `28d6464`, run `43671259567`: **14/14 PASS,
+0 skipped jobs**. PR #55 đã **MERGED** vào `04caa52`; CI merge `43673513991`
+đúng SHA `04caa52a030d59843c09320ebb9b42c3c1632ae0`: **14/14 PASS**.
+Chưa deploy/gửi telemetry AWS; delivery verification và H3 vẫn thiếu.
+
+Follow-up business logs: emitter OTLP opt-in (`--export-logs`) giữ JSON stdout,
+event/context/pod identity, queue hữu hạn và timeout riêng. Mặc định local tắt,
+không thêm AWS identity vào business pods. PR #56 head `791cc06`, run `43674451205`:
+**14/14 PASS, 0 skipped jobs**, foundation **1554 passed, 37 skipped**, gồm ba ca
+loopback gRPC/middleware/outage thật; kubeconform **15 valid, 0 invalid/errors/skips**.
+Local socket/launcher execution vẫn bị approval bridge chặn. Follow-up đồng bộ
+`LOG_LEVEL` cho stdout/OTLP cần đối chiếu CI head mới, không kế thừa PASS head cũ.
+Chỉ business events được export; stdout hạ tầng/DB/uvicorn còn cần collection riêng.
+Xem [log export](runbooks/AWS_BASELINE.md#business-event-log-export).
 
 Follow-up host: launcher quan sát API/health/incidents `inactive`, giữ release
 `5c520ae6…` và stream `b95058b4…`. Guarded restart API bị approval bridge từ chối;

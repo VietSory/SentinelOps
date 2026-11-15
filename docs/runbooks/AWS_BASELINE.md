@@ -198,7 +198,8 @@ This slice delivers the described, validated baseline. It does not deliver:
 - An applied workload bundle. The business-service slice can now be rendered
   offline as described below; the [API image/manifests](CONTROL_PLANE_IMAGE.md)
   are also prepared offline. The collector gateway can be rendered offline as
-  described below. Worker/source adapters, stdout log shipping and target delivery
+  described below. Business event OTLP export is opt-in; worker/source adapters,
+  infrastructure/stdout log shipping and target delivery
   remain separate work; none of these artifacts is an applied environment.
 - An applied environment, live CloudWatch/X-Ray source capture, or H3 handoff.
 - A Grafana/operational dashboard.
@@ -241,7 +242,7 @@ credentials/query strings are rejected. Outputs are deterministic and exclusive:
 an existing output file is never overwritten.
 
 Each Deployment template includes a deterministic SHA-256 of the public runtime
-ConfigMap. Changing the environment or OTLP endpoint changes all three templates
+ConfigMap. Changing the environment, OTLP endpoint or log-export flag changes all three templates
 so applying the rendered bundle rolls the services onto the new configuration.
 Identical inputs keep the templates stable. Secret values remain external and
 unread: rotating the contents of the same commerce Secret needs an explicit
@@ -260,6 +261,61 @@ API was called by rendering/validation. Image availability, external commerce
 schema/Secret, collector reachability and target admission/RBAC remain deployment
 prerequisites. This is configuration evidence, not a running AWS workload, H3
 source parity, known-good approval or G7 acceptance.
+
+### Business event log export
+
+Add `--export-logs` to the business renderer when targeting a collector that
+has an OTLP logs pipeline, such as the AWS collector below. It adds only
+`SENTINELOPS_OTLP_LOGS_ENABLED=true` to public config and rolls all three pod
+templates. Use matching `--environment dev` (or staging/prod) for business and
+collector bundles. The emitter uses the same explicit `OTEL_EXPORTER_OTLP_ENDPOINT`
+over gRPC, with TLS for `https`. No AWS SDK, token, role, host mount or extra
+service account permission is added to business pods. Existing images must be
+rebuilt/published through the approved registry workflow before selecting their
+new digest; setting the flag on an older image does not add this feature.
+
+Default is off. Local Compose and capture configurations are unchanged; the
+local collector currently has no logs pipeline, so do not enable this flag for
+that stack. The environment accepts only literal `true`/`false`; enabling without
+an explicit credential-free HTTP(S) endpoint/port fails startup. Changes require
+a restart/rollout; there is no live toggling or fallback to another destination.
+
+Only structured calls to `services.common.runtime.log_event` are exported:
+request start/completion and business/dependency events. The exact JSON string
+remains on stdout and becomes the OTLP record body, including event time in ms,
+correlation/request-instance IDs, trace/span IDs and available Downward API
+identity. OTLP event time is that same timestamp in ns; resource attributes carry
+service/version/environment/pod identity, and the active span supplies the OTLP
+trace/span fields. These are observations, not authenticated provenance or H3.
+The CloudWatch exporter retains its envelope (`raw_log=false`), so consumers must
+decode the JSON body rather than assume a raw stdout record at the top level.
+Both delivery paths honor the existing `LOG_LEVEL`: raising it above INFO
+suppresses these INFO business events on stdout **and** OTLP.
+
+Delivery is best effort: an SDK batch queue holds at most 512 records, batches
+up to 64, schedules every second and bounds each export attempt to 2 seconds.
+Network retry happens on the exporter thread. Slow/unavailable collectors do not
+block the business call; stdout remains emitted. Queue overflow, retry exhaustion,
+crash or forced shutdown can lose records; normal SDK shutdown attempts to drain.
+Neither `force_flush`, HTTP success nor pod readiness acknowledges remote storage.
+No disk spool, durable replay, exactly-once guarantee or delivery readiness is
+claimed. Exporter diagnostics stay in Python/stdout logging and cannot recursively
+enter the business log exporter. Do not also ship the same stdout events into the
+same CloudWatch destination without a deliberate duplicate-handling strategy.
+
+Uvicorn access/error output, arbitrary Python logs, PostgreSQL and infrastructure
+stdout are **not** covered by this opt-in emitter; their target log collection
+remains separate work. AWS IAM/STS/CNI/CloudWatch delivery and timestamp/body
+mapping must still be verified on the authorized target before H3 acceptance.
+
+```sh
+python -m pytest -q tests/test_business_log_export.py tests/test_business_manifests.py
+```
+
+The transport tests use an isolated loopback OTLP/gRPC receiver with the real
+pinned Python exporter, including outage/recovery and real request middleware.
+They do not call AWS or claim cloud delivery. Batch/log APIs follow the pinned
+SDK; see [OpenTelemetry Python logs](https://opentelemetry-python.readthedocs.io/en/latest/sdk/_logs.html).
 
 ## Offline AWS collector
 
@@ -303,7 +359,7 @@ the renderer cannot prove credential isolation against a compromised node. See
 | Signal | Destination and behavior |
 | --- | --- |
 | Business OTLP metrics | `awsemf` writes EMF to `otel-metrics-<collector-pod-uid>` in the existing workload group, namespace `SentinelOps/<environment>`. Only the three `sentinelops_http_*` instruments are declared, with service/route/status dimensions and no automatic dimension rollups. Metric publication uses Logs, not `cloudwatch:PutMetricData`. |
-| OTLP logs | `awscloudwatchlogs` writes `otel-logs-<collector-pod-uid>`, retaining the OTLP record envelope (`raw_log=false`). It does **not** read container stdout or host files. Current business services emit JSON stdout logs; a reviewed log shipper/OTLP emitter is still required. |
+| OTLP logs | `awscloudwatchlogs` writes `otel-logs-<collector-pod-uid>`, retaining the OTLP record envelope (`raw_log=false`). It does **not** read container stdout or host files. Business events can opt into the emitter above; other stdout/infrastructure logs still need separate collection. |
 | OTLP traces | `awsxray` writes segments in the configured region, links the workload group, skips EC2 metadata and leaves exporter telemetry disabled. A deterministic TraceID sampler uses the **explicit percentage**, with producer sampling-priority overrides removed. Metrics and logs are not sampled. |
 
 The Terraform sampling fraction is multiplied by 100 for this renderer: `0.1`

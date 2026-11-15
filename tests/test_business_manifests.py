@@ -105,6 +105,7 @@ def test_invalid_cli_input_does_not_create_an_output(tmp_path,monkeypatch):
 @pytest.mark.parametrize('change', [
     {'otlp_endpoint': 'http://replacement-collector:4317'},
     {'environment': 'aws-stage'},
+    {'export_logs': True},
 ])
 def test_configuration_change_updates_each_pod_template_for_rollout(change):
     original = manifests.render(IMAGE, **PARAMETERS)
@@ -118,3 +119,18 @@ def test_configuration_change_updates_each_pod_template_for_rollout(change):
         assert before[name] != after[name], 'changed envFrom configuration must trigger a rollout'
         assert before[name]['spec'] == after[name]['spec']
     assert templates(manifests.render(IMAGE, **PARAMETERS)) == before
+
+
+def test_log_delivery_flag_adds_only_public_config_and_keeps_pods_without_aws_identity(tmp_path, monkeypatch):
+    target = tmp_path / 'logs.yaml'
+    monkeypatch.setattr(sys, 'argv', ['render_business_manifests', '--application-image', IMAGE,
+        '--environment', 'dev', '--otlp-endpoint', 'http://otel-collector:4317',
+        '--commerce-secret', 'commerce-runtime', '--export-logs', '--output', str(target)])
+    manifests.main()
+    documents = list(yaml.safe_load_all(target.read_text()))
+    assert len(documents) == 9
+    config = next(d for d in documents if d['kind'] == 'ConfigMap')['data']
+    assert config['SENTINELOPS_OTLP_LOGS_ENABLED'] == 'true'
+    assert 'AWS_' not in target.read_text() and 'serviceAccountToken' not in target.read_text()
+    with pytest.raises(ValueError):
+        manifests.render(IMAGE, **PARAMETERS, export_logs='false')
