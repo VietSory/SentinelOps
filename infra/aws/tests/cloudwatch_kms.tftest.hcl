@@ -2,6 +2,15 @@
 # No AWS/TLS endpoint, credentials, state backend or deployed resource is used.
 mock_provider "aws" {
   override_during = plan
+  mock_resource "aws_cognito_user_pool" {
+    defaults = {
+      id       = "eu-central-1_SOFTWAREFIXTURE"
+      endpoint = "cognito-idp.eu-central-1.amazonaws.com/eu-central-1_SOFTWAREFIXTURE"
+    }
+  }
+  mock_resource "aws_cognito_user_pool_client" {
+    defaults = { id = "softwarefixtureclient" }
+  }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "123456789012" }
   }
@@ -43,6 +52,81 @@ variables {
   region              = "eu-central-1"
   allowed_account_ids = ["123456789012"]
   environment         = "dev"
+}
+
+run "operator_identity_is_disabled_by_default" {
+  command = plan
+  assert {
+    condition = (
+      length(aws_cognito_user_pool.operators) == 0 &&
+      length(aws_cognito_user_pool_client.operator) == 0 &&
+      length(aws_cognito_resource_server.operator_api) == 0 &&
+      length(aws_cognito_user_pool_domain.operator) == 0 &&
+      output.operator_oidc_binding == null
+    )
+    error_message = "Baseline plans must not create a provider, client, domain or public identity binding implicitly."
+  }
+}
+
+run "operator_identity_is_read_only_and_requires_enrollment" {
+  command = plan
+  variables {
+    operator_identity_enabled = true
+    operator_callback_urls    = ["https://operator.example.invalid/callback"]
+  }
+  assert {
+    condition = (
+      aws_cognito_user_pool.operators[0].deletion_protection == "ACTIVE" &&
+      aws_cognito_user_pool.operators[0].mfa_configuration == "ON" &&
+      aws_cognito_user_pool.operators[0].software_token_mfa_configuration[0].enabled &&
+      aws_cognito_user_pool.operators[0].admin_create_user_config[0].allow_admin_create_user_only &&
+      aws_cognito_user_pool.operators[0].account_recovery_setting[0].recovery_mechanism == toset([{ name = "admin_only", priority = 1 }]) &&
+      aws_cognito_user_pool.operators[0].password_policy[0].minimum_length == 16
+    )
+    error_message = "Only explicitly enrolled operators with mandatory TOTP may sign in; preserve deletion protection."
+  }
+  assert {
+    condition = (
+      !aws_cognito_user_pool_client.operator[0].generate_secret &&
+      aws_cognito_user_pool_client.operator[0].enable_token_revocation &&
+      aws_cognito_user_pool_client.operator[0].allowed_oauth_flows == toset(["code"]) &&
+      aws_cognito_user_pool_client.operator[0].allowed_oauth_scopes == toset(["openid", "sentinelops/incidents.read"]) &&
+      aws_cognito_resource_server.operator_api[0].scope == toset([{
+        scope_name        = "incidents.read"
+        scope_description = "Read incident, explanation and action observations; no writes or dispatch"
+      }]) &&
+      aws_cognito_user_pool_client.operator[0].callback_urls == toset(["https://operator.example.invalid/callback"]) &&
+      aws_cognito_user_pool_client.operator[0].access_token_validity == 15 &&
+      aws_cognito_user_pool_client.operator[0].token_validity_units[0].access_token == "minutes"
+    )
+    error_message = "The operator client must have only read scope/code flow, short-lived access tokens and no client secret."
+  }
+  assert {
+    condition = output.operator_oidc_binding == {
+      issuer         = "https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_SOFTWAREFIXTURE"
+      audience       = "softwarefixtureclient"
+      jwks_url       = "https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_SOFTWAREFIXTURE/.well-known/jwks.json"
+      audience_claim = "client_id"
+      operator_scope = "sentinelops/incidents.read"
+    }
+    error_message = "Renderer configuration must match Cognito access-token client_id and the existing read scope."
+  }
+}
+
+run "operator_identity_requires_explicit_callback" {
+  command = plan
+  variables {
+    operator_identity_enabled = true
+  }
+  expect_failures = [aws_cognito_user_pool.operators]
+}
+
+run "operator_callback_rejects_credential_urls" {
+  command = plan
+  variables {
+    operator_callback_urls = ["https://user:password@operator.example.invalid/callback"]
+  }
+  expect_failures = [var.operator_callback_urls]
 }
 
 run "encrypted_log_groups" {
