@@ -474,11 +474,20 @@ dưới `docs/`.
   PASS**, API manifest **5 valid**. Chỉ Secret reference riêng cho SELECT-only
   reader; chặn cùng Secret/control runtime, giữ privilege checks. Credential,
   optional migration và rollout vẫn là prerequisite, không cấp action authority.
+- PR #53 đã **MERGED** vào `6590a8c`; head `f1d4aff`, run `43620994259`:
+  **14/14 PASS, 0 skipped jobs**. Foundation: 1508 passed/37 skipped; 22 checks
+  PostgreSQL action reader PASS trên DB fixture, không thêm trial Q-09/G6.
+- Follow-up KMS: key policy regional Logs bị thiếu đã được bổ sung, giới hạn
+  đúng ba log-group ARN và giữ account administration. Reader giữ read-only;
+  flow-log writer chỉ có cryptographic use qua Logs cho nhóm VPC. **53 focused
+  Python tests PASS**, Terraform fmt PASS; native Terraform local bị sandbox
+  chặn plugin và approval bridge từ chối. Mock AWS/TLS test được đưa vào CI để
+  kiểm đúng head; chưa phải kiểm quyền AWS/deployment hoặc hoàn tất exporter.
 - Host API/health/incidents vẫn quan sát `inactive`, release `5c520ae6…`, stream
   `b95058b4…` giữ nguyên. Guarded restart API bị approval bridge từ chối
   `Denied, expired, cancelled, or unavailable`; chưa khôi phục runtime.
 
-CI/merge của action-reader được đối chiếu theo head PR; resume host chỉ qua
+CI/merge của action-reader đã được đối chiếu GitHub; resume host chỉ qua
 launcher có guard khi môi trường cho phép. Q-09/G6 cho `de38fc6b`, remote worker
 adapter/H3, provider/AWS và các quality gates ở mục 10 vẫn mở. Chi tiết tổng hợp
 ở [báo cáo lane B](../reports/LANE_B_DELIVERY_REPORT_2026-11-14.md).

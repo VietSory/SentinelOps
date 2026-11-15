@@ -28,14 +28,21 @@ model/credential. PR #52: **MERGED** vào `8ed9ff6`; head `a77332c` có CI **14/
 API + business manifests **14/14 valid** với fixture references; CI `43618472435`:
 **14/14 PASS, 0 skipped jobs**. Checksum public config làm thay đổi pod template khi cấu hình
 đổi; Secret bytes vẫn cần rollout explicit. Optional action-reader Secret binding
-`9b5f71b` đã triển khai (**87 focused tests PASS**, **5 valid manifests**); reader
-vẫn phải có SELECT-only và optional migrations đúng runbook.
+`9b5f71b` đã triển khai (**87 focused tests PASS**, **5 valid manifests**). PR #53
+đã **MERGED** vào `6590a8c`; CI head `f1d4aff`, run `43620994259`: **14/14 PASS,
+0 skipped jobs**. Reader vẫn phải có SELECT-only và optional migrations đúng runbook.
 
 ECR PR #49 đã được B review/sửa guard và **MERGED** vào `0364251`; head `fd7a010`,
 CI `43613141372` attempt 2 **14/14 PASS**, node pull IAM giữ baseline. Đây vẫn
 là packaging/IaC offline, chưa registry publication hoặc deployment AWS. Cloud
 worker adapters/source policy, observability deployment bindings và H3 còn thiếu;
 không nới guard local để phát manifest worker.
+
+Follow-up CloudWatch/KMS: đã bổ sung key policy cho regional Logs, giới hạn đúng
+ba log-group ARN; telemetry-reader chỉ decrypt/describe qua Logs, flow-log writer
+chỉ dùng key cho nhóm VPC của mình. Đây là sửa prerequisite IaC, chưa có exporter
+workload hoặc AWS deployment. Terraform mock test/CI phải đối chiếu đúng head PR;
+không dùng kết quả validate cũ cho policy mới. Xem [binding](runbooks/AWS_BASELINE.md#cloudwatch-encryption-binding).
 
 Follow-up host: launcher quan sát API/health/incidents `inactive`, giữ release
 `5c520ae6…` và stream `b95058b4…`. Guarded restart API bị approval bridge từ chối;
@@ -123,7 +130,7 @@ MTTD vẫn chưa đo. Q-09 của release mới cần bộ trial riêng; 9/10 cũ
 ## Việc tiếp theo
 
 - **A:** đã train lại theo ADR-019 (`de38fc6b`); lớp 2 `ald` (2026-11-14) cho kết quả phát triển S1/S3 tốt, chưa nghiệm thu Q-04…Q-07 (thiếu S2/S4, MTTD live, holdout); full G4/G8 chưa nghiệm thu.
-- **B:** đã tích hợp local bundle `de38fc6b` theo D-27: parity P1–P6 PASS, host/model release mới, stream epoch riêng, baseline và live-check PASS với model signal được tái tính từ accepted history ([báo cáo](reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md)). PR #52 đã merge; action-reader binding và CI theo head được giao qua PR kế tiếp. Resume host qua launcher khi execution được phép. Q-09/G6 của release mới cần trial/known-good riêng; provider identity, EKS policy/adapter và AWS chỉ triển khai khi đủ quyền/phạm vi.
+- **B:** đã tích hợp local bundle `de38fc6b` theo D-27: parity P1–P6 PASS, host/model release mới, stream epoch riêng, baseline và live-check PASS với model signal được tái tính từ accepted history ([báo cáo](reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md)). PR #52 và action-reader #53 đã merge; tiếp tục observability deployment bindings sau sửa prerequisite KMS. Resume host qua launcher khi execution được phép. Q-09/G6 của release mới cần trial/known-good riêng; provider identity, EKS policy/adapter và AWS chỉ triển khai khi đủ quyền/phạm vi.
 
 [Lane B checkpoint](delivery/LANE_B_CHECKPOINT.md) chốt mức bằng chứng từng
 capability (runtime-verified / fixture-tested / code-only / blocked), commit và CI
