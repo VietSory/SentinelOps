@@ -459,3 +459,26 @@ dưới `docs/`.
 - **Chưa có cloud worker manifest.** Loopback/source ownership/checkpoint guards
   giữ nguyên; cần adapter remote/source policy và H3 trước triển khai. Provider,
   observability bindings và AWS apply vẫn thuộc giai đoạn được cấp quyền riêng.
+
+### Follow-up 2026-11-15 (giờ Việt Nam)
+
+- ECR PR #49 đã được B review/sửa guard và merge `0364251`; head `fd7a010`,
+  run `43613141372` attempt 2 **14/14 PASS**. Attempt 1 observability timeout;
+  node image-pull IAM giữ baseline. Không apply hoặc gọi AWS API.
+- PR #52 head `a77332c`, run `43616362464` đã **14/14 PASS**, gồm image smoke,
+  host recovery và cleanup sau fix output. Rollout fix `333517f`: **123 focused
+  tests PASS**, kubeconform strict 1.34 **14 valid/0 invalid/errors/skips** cho
+  API + business manifests với fixture references. Run `43618472435`:
+  **14/14 PASS, 0 skipped jobs**; PR #52: **MERGED** vào `8ed9ff6`. Không chuyển CI head cũ sang head mới.
+- Optional action-reader binding `9b5f71b` đã triển khai: **87 tests
+  PASS**, API manifest **5 valid**. Chỉ Secret reference riêng cho SELECT-only
+  reader; chặn cùng Secret/control runtime, giữ privilege checks. Credential,
+  optional migration và rollout vẫn là prerequisite, không cấp action authority.
+- Host API/health/incidents vẫn quan sát `inactive`, release `5c520ae6…`, stream
+  `b95058b4…` giữ nguyên. Guarded restart API bị approval bridge từ chối
+  `Denied, expired, cancelled, or unavailable`; chưa khôi phục runtime.
+
+CI/merge của action-reader được đối chiếu theo head PR; resume host chỉ qua
+launcher có guard khi môi trường cho phép. Q-09/G6 cho `de38fc6b`, remote worker
+adapter/H3, provider/AWS và các quality gates ở mục 10 vẫn mở. Chi tiết tổng hợp
+ở [báo cáo lane B](../reports/LANE_B_DELIVERY_REPORT_2026-11-14.md).

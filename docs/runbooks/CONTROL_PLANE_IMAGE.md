@@ -88,6 +88,23 @@ Secret must hold the appropriate runtime DSN/privileges and TLS settings; it is
 not the RDS bootstrap credential. Apply/deployment still needs owner-approved
 account, region, quota, budget and target prerequisites.
 
+To enable the existing read-only action/quarantine views, add
+`--action-read-secret action-read-runtime`. Its `database-url` key must contain
+credentials for a separately provisioned SELECT-only login in
+`control_action_reader`; the Secret name must differ from `--control-secret`.
+Apply the optional action schema migration explicitly before use, including the
+quarantine migration when those views are needed; see
+[read-only action HTTP/UI](CONTROLLED_REMEDIATION.md#read-only-action-http-and-ui).
+The renderer only adds `SENTINELOPS_ACTION_READ_DATABASE_URL` as a Secret reference.
+The selected Secret and `database-url` key are required; their absence prevents
+pod startup. With a configured binding, the existing reader checks privileges
+and rejects writer credentials, schema ownership and quarantine-release authority;
+unreachable storage or rejected privileges keep the action store unavailable.
+Rendering does not validate Secret contents or create a login, migration,
+approval or action executor. Omit the flag to keep action storage unconfigured.
+Selecting a new reader Secret name changes the pod template;
+rotating its contents under the same name still requires an explicit rollout.
+
 The optional `--model-claim` and `--model-release-ref` must be paired. They mount
 an existing, pre-materialized model store at `/models` read-only. This is wiring,
 not promotion: the existing registry rejects corrupted, unapproved or incompatible
