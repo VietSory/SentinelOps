@@ -121,6 +121,8 @@ jobs:
       - run: docker compose -p sentinelops-control -f docker-compose.control.yml up -d --wait --wait-timeout 60
       - run: python scripts/check_incident_store.py --verify-report artifacts/incidents/store-acceptance.json
       - run: python scripts/check_incident_api.py --restart-database
+      - name: Verify commerce deployment SQL and bounded runtime privileges in a new isolated PostgreSQL
+        run: python -m scripts.check_commerce_bootstrap
       - name: Preserve incident storage evidence
         uses: actions/upload-artifact@v4
         with:
