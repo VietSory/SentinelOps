@@ -131,6 +131,12 @@ button[hidden],[hidden]{
   margin:0 12px 10px
 }
 .nav-item{
+  width:100%;
+  border:0;
+  background:transparent;
+  color:inherit;
+  text-align:left;
+  cursor:pointer;
   display:flex;
   align-items:center;
   gap:10px;
@@ -152,6 +158,7 @@ button[hidden],[hidden]{
   background:var(--soft-teal);
   color:var(--teal)
 }
+.nav-item:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
 .nav-item.muted{
   color:#7c8790
 }

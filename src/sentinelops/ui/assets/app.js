@@ -304,6 +304,12 @@ function actionHistory(state,opened) {
 }
 
 function renderDetail(state) {
+  for (const [id,key] of [['nav-incidents','overview'],['nav-explanation','explanation'],['nav-actions','actions']]) {
+    const active = (state.detail ? tab : 'overview') === key ||
+      (key === 'overview' && !['explanation','actions'].includes(tab));
+    const item = $('#'+id); item.classList.toggle('active',active);
+    if (active) item.setAttribute('aria-current','page'); else item.removeAttribute('aria-current');
+  }
   const target = $('#detail-pane');
   const opened=new Set([...target.querySelectorAll('details[data-action-id][open]')].map(item => item.dataset.actionId));
   target.replaceChildren(); target.setAttribute('aria-busy',String(state.detailLoading));
@@ -332,15 +338,32 @@ function renderDetail(state) {
   header.append(form); target.append(header);
   const tabs = node('div',null,'tabs'); tabs.setAttribute('role','group'); tabs.setAttribute('aria-label','Incident sections');
   for (const [key,label] of [['overview','Overview'],['evidence',`Evidence (${payload.evidence.length})`],['timeline','Timeline'],['explanation','Explanation'],['actions','Actions']]) {
-    const item = button(label,async () => { tab = key; renderDetail(workspace.state);
-      if (key === 'actions' && !workspace.state.actions && !workspace.state.actionsError) await workspace.loadActions();
-      if (key === 'explanation' && !workspace.state.explanation && !workspace.state.explanationError) await workspace.loadExplanation();
-      if (tab === key) document.querySelector(`[data-tab="${key}"]`)?.focus(); },`tab ${tab === key ? 'active' : ''}`);
+    const item = button(label,() => openSection(key),`tab ${tab === key ? 'active' : ''}`);
     item.dataset.tab = key; item.setAttribute('aria-pressed',String(tab === key)); tabs.append(item);
   }
   const content = node('div',null,'detail-content'); content.append(tab === 'evidence' ? evidence(detail) : tab === 'timeline' ? timeline(detail,state) : tab === 'explanation' ? explanation(state) : tab === 'actions' ? actionHistory(state,opened) : overview(detail));
   target.append(tabs,content);
 }
+
+async function openSection(key) {
+  if (!workspace.state.detail) {
+    $('#notice').textContent = workspace.state.session ?
+      'Choose an incident from the feed to view its explanation or action history.' :
+      'Connect to your workspace, then choose an incident to view its explanation or action history.';
+    $('#notice').hidden = false;
+    const target = workspace.state.session ? $('#incident-list') : $('#api-token');
+    if (workspace.state.session) target.tabIndex = -1;
+    target.focus(); return;
+  }
+  tab = key; renderDetail(workspace.state);
+  if (key === 'actions' && !workspace.state.actions && !workspace.state.actionsError) await workspace.loadActions();
+  if (key === 'explanation' && !workspace.state.explanation && !workspace.state.explanationError) await workspace.loadExplanation();
+  if (tab === key) document.querySelector(`[data-tab="${key}"]`)?.focus();
+}
+
+$('#nav-explanation').addEventListener('click',() => openSection('explanation'));
+$('#nav-actions').addEventListener('click',() => openSection('actions'));
+$('#nav-incidents').addEventListener('click',() => { tab = 'overview'; renderDetail(workspace.state); });
 
 $('#connect-form').addEventListener('submit',async event => {
   event.preventDefault(); const token = $('#api-token').value.trim(); $('#api-token').value = '';

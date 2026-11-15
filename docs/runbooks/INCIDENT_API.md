@@ -10,6 +10,12 @@ cleared from the input after connecting and are never persisted in browser stora
 Disconnect clears incident state. No incident writes, fault controls or action
 execution are exposed by this UI.
 
+The sidebar Explanations and Action history buttons open the corresponding
+section of the currently selected incident/revision. Connect and select an
+incident first; clicking either shortcut without a selection shows that guidance.
+These sections share the same loading, unavailable-store and revision-pinning
+behavior as the buttons inside incident details.
+
 The visible tab checks both public `/ready` and protected `/ready/incidents`
 on connect/refresh, every 30 seconds, and when the tab becomes visible again.
 Public configuration readiness alone does not verify the bearer token. An observed
