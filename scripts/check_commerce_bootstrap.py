@@ -63,6 +63,12 @@ def check() -> dict:
 
         migrate(database='postgres', denied='requires PostgreSQL 16 database sentinelops_commerce')
         assert sql("SELECT count(*) FROM pg_roles WHERE rolname IN ('commerce_owner','commerce_runtime')") == '0'
+        # Only the literal pg_ prefix is internal; pgx_fixture is a user schema.
+        sql('CREATE SCHEMA pgx_fixture')
+        migrate(denied='requires a fresh database and absent commerce roles')
+        assert sql("SELECT count(*) FROM pg_namespace WHERE nspname='pgx_fixture'") == '1'
+        assert sql("SELECT count(*) FROM pg_roles WHERE rolname IN ('commerce_owner','commerce_runtime')") == '0'
+        sql('DROP SCHEMA pgx_fixture')
         # An unrelated existing object is preserved and blocks all bootstrap mutations.
         sql('CREATE TABLE public.keep_fixture (id integer); INSERT INTO public.keep_fixture VALUES (7)')
         migrate(denied='requires a fresh database and absent commerce roles')

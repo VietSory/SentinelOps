@@ -12,7 +12,7 @@ BEGIN
     END IF;
     IF EXISTS (SELECT FROM pg_roles WHERE rolname IN ('commerce_owner', 'commerce_runtime'))
        OR EXISTS (SELECT FROM pg_namespace
-                  WHERE nspname NOT IN ('public', 'information_schema') AND nspname NOT LIKE 'pg_%')
+                  WHERE nspname NOT IN ('public', 'information_schema') AND nspname !~ '^pg_')
        OR EXISTS (SELECT FROM pg_class WHERE relnamespace = 'public'::regnamespace)
        OR EXISTS (SELECT FROM pg_proc WHERE pronamespace = 'public'::regnamespace)
        OR EXISTS (SELECT FROM pg_type WHERE typnamespace = 'public'::regnamespace) THEN
