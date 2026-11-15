@@ -564,3 +564,58 @@ persistent B-owned target in this order:
 5. Let the executor consume the qualified incident within the 180-second freshness bound.
 
 The ordered steps are in [LANE_B_CHECKPOINT §7.5](../delivery/LANE_B_CHECKPOINT.md#75-chuỗi-lệnh-đầucuối-để-gỡ-h1-và-h4).
+
+### Q-09 preparation for the current Alibaba release
+
+The current model is `de38fc6b` (ADR-019/D-27), serving release
+`artifact://manifests/092290cedcea07578f664aa670eabf236f66ce7db27ebf159c2c386c3ee5216b.json`.
+The old `badf9da0` trial outcomes and approvals are separate evidence. Packaging,
+CI or an S2/H4 assessment never supplies a known-good approval for a new target.
+
+Before a campaign, record the committed code/config/model hashes, owned host and
+trial-directory list, and the operator's trial scope. Use at least ten golden-path
+attempts and a failed-verify attempt with the existing
+`commerce-db-unavailable-after-rollback` scenario. Retain every started attempt,
+including blocked, interrupted, approval-timeout and harness-failure receipts;
+never replace a failed attempt with a successful retry under the same ID. The
+existing `g6-de38fc6b-01` preparation ended `TRIAL_FAILED` with no approved ledger,
+no exported action journal and no mutation. Preserve and include that receipt;
+it is not a recovered trial. There is no new completed Q-09 campaign yet.
+
+Each fresh B-owned trial must accept the existing model's required healthy
+history, collect the exact target UID/image/health evidence, and wait for the
+operator's concrete known-good decision before the bad change. The operator must
+also explicitly authorize that trial's rollback policy; this protocol does not
+authorize enabling auto-remediation. Keep the policy disabled and do not start
+a bad-change trial while that decision or the known-good approval is absent.
+Do not reuse an approval from a cleaned-up sandbox or create an approval on the
+operator's behalf. Pause shared-host trials while lane A is acquiring data.
+
+For an authorized trial, use the existing harness ordering and guards: observed
+bad change, current H4/revision/freshness checks, durable intent, one rollback,
+then the unchanged three eligible post-action buckets/600-second verification.
+In the failed-verify case, retain escalation, quarantine and its complete audit;
+never redeploy the bad image to manufacture a recovery. Retain a control DB with
+pending audit under the existing cleanup guard. No AWS, holdout or model/threshold
+change is part of this local protocol. G6 acceptance remains an owner decision.
+
+The S2/H4 harness stages only local bootstrap `001-local-roles.sql` and migrations
+002–004; G6 adds only 005. The deployment bootstrap is an alternative, not another
+migration to discover by a numeric glob. Quarantine migration 006 is not added
+implicitly. This B platform packaging choice does not change worker semantics.
+
+Read all retained trial receipts using the existing summary command:
+
+```sh
+python -m scripts.summarize_g6_trials /private/trials/attempt-01 /private/trials/attempt-02
+```
+
+Summary `g6-q09-summary/v3` places **all three** metric groups under
+`releases[model_release_ref]`: `golden_path`, `failed_verify` and `action_safety`.
+There are no pooled failed-verify/safety totals across models. Empty categories
+have zero observations, not acceptance; `not_terminal` preserves failed attempts.
+Duplicate directory arguments, including symlink aliases, are rejected. Existing
+v2 evidence files remain unchanged; consumers of newly generated summaries must
+read the v3 nesting. The CLI is read-only and always reports `G6_accepted=false`.
+Q-09/Q-10 still require the actual trial/audit and mandatory safety evidence;
+summary structure and software tests do not grant those gates.

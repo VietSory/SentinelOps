@@ -434,8 +434,11 @@ từ đúng main này, manifest `9434dd2b3678c8026c535279d37dcdf16401bc31c430e53
 Chưa select/rollout: approval bridge từ chối API-only rollout và Docker status.
 Lần status mới quan sát API/health/incidents inactive; worker stream vẫn `b95058b4…`,
 release cũ `5c520ae6…`, không đổi session/model/epoch/checkpoints.
-Lệnh `lane_b resume-control` đang bổ sung recovery DB cũ qua ownership/data guards;
-28 focused tests PASS, native container/row-preservation kiểm theo CI đúng head.
+Lệnh `lane_b resume-control` đã merge qua #59, giữ ownership/data guards;
+28 focused tests và native container/row-preservation PASS trên CI đúng head.
+Sau update main `43e9eb3`, lượt chạy local vẫn bị chặn ở Docker socket;
+escalated execution trả `Denied, expired, cancelled, or unavailable`.
+Chưa có DB recovery/readback hoặc UI rollout trên host từ lượt này.
 AWS tiếp tục **offline only** theo lựa chọn owner; không cấp quyền provision/push/deploy.
 
 Follow-up dashboard 2026-11-15: B thêm CloudWatch operations definition offline
@@ -557,13 +560,15 @@ adapter/H3, provider/AWS và các quality gates ở mục 10 vẫn mở. Chi ti�
 
 ### Offline prerequisites — follow-up 2026-11-15
 
-- PR #59 (`8d339e3`, run `43710482812`), #60 (`d9c0c93`, run `43710734737`)
-  và #61 (`c309905`, run `43711388890`) đã được đối chiếu đúng head:
-  **mỗi run 14/14 PASS, 0 skipped jobs**. Cả ba còn mở khi kiểm GitHub;
-  approval bridge từ chối merge #60 với `Denied, expired, cancelled, or unavailable`.
+- PR #59 (`8d339e3`, run `43710482812`), #60 (`d9c0c93`, run `43710734737`),
+  #61 (`c309905`, run `43711388890`) và #62 (`a9c4371`, run `43717793230`)
+  đã được đối chiếu đúng head: **mỗi run 14/14 PASS, 0 skipped jobs**.
+  Cả bốn hiện đã MERGED; CI main `43720130331` trên đúng
+  `43e9eb3bd72c37f72a93156cf96093d333ce306c` cũng **14/14 PASS, 0 skipped jobs**.
+  Các lượt merge trước bị approval bridge từ chối không phải kết quả merge cuối.
   Đây lần lượt là guarded control-volume recovery, OIDC provider/app-client
   configuration tắt mặc định và credential-free control DB deployment bootstrap.
-  Không coi PR head/CI merge checkout là main đã merge.
+  PR head và checkout merge của CI vẫn là các identity riêng.
 - Commerce có thêm `infra/commerce/001-deployment.sql`: chỉ cho DB PostgreSQL 16
   mới, role owner/runtime NOLOGIN không password, runtime chỉ SELECT inventory
   và INSERT payment. Không tạo DB/login/Secret/catalog và không đổi local init.
@@ -572,7 +577,27 @@ adapter/H3, provider/AWS và các quality gates ở mục 10 vẫn mở. Chi ti�
   Native CI kiểm actual SQL/permission trong container fixture mới, không mount,
   không host port/network, không dùng DB A/B hiện có. Syntax/diff và 37 focused
   manifest/CI checks PASS; Docker local bị approval bridge từ chối, nên kết quả
-  native phải lấy từ CI đúng head, không nhận local runtime PASS.
+  native lấy từ CI đúng head #62: SQL/permission PASS, không nhận local runtime PASS.
 - Owner vẫn chọn **offline only** cho AWS. Host DB/UI rollout chưa được thực thi;
   release UI đã build/verify nhưng chưa select. Q-09/G6 `de38fc6b`, remote worker
   adapter/source policy, H3 và các gate nghiệm thu vẫn giữ nguyên điều kiện.
+
+### Local trial bootstrap and Q-09 preparation — 2026-11-15
+
+B/platform review phát hiện S2/H4 và G6 copy cả hai bootstrap 001 qua glob sau
+#61, khiến fresh trial DB tạo trùng role. Đã đổi sang danh sách local SQL explicit;
+hai staging regressions FAIL trước sửa, PASS sau sửa. Không sửa worker/source,
+model/threshold, policy hay dữ liệu hiện có. G6 chỉ thêm migration 005, không tự
+thêm deployment bootstrap hoặc quarantine 006.
+
+Summary Q-09 v2 gộp failed-verify/safety giữa releases dù golden-path đã tách.
+V3 tách cả ba nhóm theo model release và chặn lặp directory/symlink để không
+nhân mẫu số. **12 focused tests PASS**; CI integration phải kiểm theo head của
+patch này, không kế thừa main CI. Đọc receipt cũ `g6-de38fc6b-01` bằng v3 cho
+đúng release `092290ce…`: 1 attempt, 0 recovered, `TRIAL_FAILED`, 0 failed-verify
+observations và 0 mutations. Receipt và lần thất bại được giữ nguyên.
+
+[Protocol local](../runbooks/CONTROLLED_REMEDIATION.md#q-09-preparation-for-the-current-alibaba-release)
+ghi thứ tự, retained attempts và operator/known-good boundary. Đây là chuẩn bị
+phần mềm; chưa có campaign Q-09 hoàn tất hoặc G6 acceptance. Docker/host execution
+và approval cụ thể vẫn là điều kiện trước khi thu evidence mới.

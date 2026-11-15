@@ -40,7 +40,7 @@ import yaml
 from scripts.check_kubernetes_testbed import BusinessSandbox
 from scripts.check_rollback_kubernetes import PROJECT, private_file
 from scripts.kubernetes_testbed import NAMESPACE, SERVICES
-from scripts.run_s2_h4 import (PAYMENT, TOKEN_DURATION, bad_image, ceil_minute, clean_commit, clock, connect_pool,
+from scripts.run_s2_h4 import (LOCAL_CONTROL_MIGRATIONS, PAYMENT, TOKEN_DURATION, bad_image, ceil_minute, clean_commit, clock, connect_pool,
                                health_profile, healthy_history_minutes,
                                deploy, drive, emit, wait_ready)
 from sentinelops.ml.registry import ModelRegistry
@@ -75,8 +75,8 @@ def control_db(sandbox, postgres, owned):
     """Private control DB with incident schemas and the action journal (001–005)."""
     bootstrap = sandbox.root / 'db-init'
     bootstrap.mkdir(mode=0o755)
-    for path in sorted((PROJECT / 'infra/control').glob('00[1-5]-*.sql')):
-        shutil.copyfile(path, bootstrap / path.name)
+    for filename in (*LOCAL_CONTROL_MIGRATIONS, '005-remediation.sql'):
+        shutil.copyfile(PROJECT / 'infra/control' / filename, bootstrap / filename)
     password = secrets.token_urlsafe(32)
     env = sandbox.root / 'db-bootstrap.env'
     fd = os.open(env, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
