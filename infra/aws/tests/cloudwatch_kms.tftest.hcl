@@ -8,6 +8,17 @@ mock_provider "aws" {
   mock_data "aws_availability_zones" {
     defaults = { names = ["eu-central-1a", "eu-central-1b", "eu-central-1c"] }
   }
+  # These unrelated provider-rendered policies are not the subject of this
+  # test. Keep their stand-in valid JSON; key/caller JSON above is NOT mocked.
+  mock_data "aws_iam_policy_document" {
+    defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
+  }
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::123456789012:role/software-fixture" }
+  }
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = { arn = "arn:aws:logs:eu-central-1:123456789012:log-group:/software-fixture" }
+  }
   mock_resource "aws_kms_key" {
     defaults = { arn = "arn:aws:kms:eu-central-1:123456789012:key/11111111-2222-3333-4444-555555555555" }
   }
