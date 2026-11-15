@@ -31,6 +31,8 @@ API + business manifests **14/14 valid** với fixture references; CI `436184724
 `9b5f71b` đã triển khai (**87 focused tests PASS**, **5 valid manifests**). PR #53
 đã **MERGED** vào `6590a8c`; CI head `f1d4aff`, run `43620994259`: **14/14 PASS,
 0 skipped jobs**. Reader vẫn phải có SELECT-only và optional migrations đúng runbook.
+CI sau merge #53: run `43665706369`, đúng SHA
+`6590a8cb0de5e704a630614032cf6e1a2791bf81`, **14/14 PASS, 0 skipped jobs**.
 
 ECR PR #49 đã được B review/sửa guard và **MERGED** vào `0364251`; head `fd7a010`,
 CI `43613141372` attempt 2 **14/14 PASS**, node pull IAM giữ baseline. Đây vẫn
@@ -41,8 +43,11 @@ không nới guard local để phát manifest worker.
 Follow-up CloudWatch/KMS: đã bổ sung key policy cho regional Logs, giới hạn đúng
 ba log-group ARN; telemetry-reader chỉ decrypt/describe qua Logs, flow-log writer
 chỉ dùng key cho nhóm VPC của mình. Đây là sửa prerequisite IaC, chưa có exporter
-workload hoặc AWS deployment. Terraform mock test/CI phải đối chiếu đúng head PR;
-không dùng kết quả validate cũ cho policy mới. Xem [binding](runbooks/AWS_BASELINE.md#cloudwatch-encryption-binding).
+workload hoặc AWS deployment. PR #54 head `7ac348d`, job IaC của run
+`43667473696`: Terraform validate/14 guard và **2 mock test PASS**, không có AWS
+credentials. Full CI của head cuối theo [PR #54](https://github.com/VietSory/SentinelOps/pull/54);
+không chuyển PASS của job IaC thành toàn bộ CI/deployment.
+Xem [binding](runbooks/AWS_BASELINE.md#cloudwatch-encryption-binding).
 
 Follow-up host: launcher quan sát API/health/incidents `inactive`, giữ release
 `5c520ae6…` và stream `b95058b4…`. Guarded restart API bị approval bridge từ chối;
