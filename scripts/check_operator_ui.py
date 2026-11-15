@@ -133,6 +133,9 @@ def exercise_fixtures(page, base, output, expect):
     page.route('**/ready',reply);page.route('**/ready/incidents',reply)
     page.route('**/v1/incidents**',reply);page.route('**/v1/actions/**',reply)
     page.goto(base+'/ui/',wait_until='networkidle')
+    page.locator('#nav-explanation').click()
+    expect(page.locator('#notice')).to_contain_text('Connect to your workspace, then choose an incident')
+    expect(page.locator('#api-token')).to_be_focused()
     page.locator('#api-token').focus(); page.keyboard.press('Tab')
     expect(page.get_by_role('button',name='Connect',exact=True)).to_be_focused()
     page.locator('#api-token').fill('wrong-token-value-that-is-long-enough')
@@ -144,6 +147,8 @@ def exercise_fixtures(page, base, output, expect):
     assert page.locator('#api-token').input_value() == ''
     assert token not in page.locator('body').inner_text()
     assert page.evaluate('localStorage.length + sessionStorage.length') == 0
+    page.locator('#nav-actions').click()
+    expect(page.locator('#notice')).to_contain_text('Choose an incident from the feed')
     page.locator('#load-more').click(); expect(page.locator('[data-testid=incident-row]')).to_have_count(2)
     page.locator('#state-filter').select_option('recovered'); page.get_by_role('button',name='Apply filters').click()
     expect(page.get_by_text('No incidents in this view',exact=True)).to_be_visible()
@@ -157,7 +162,8 @@ def exercise_fixtures(page, base, output, expect):
     assert page.locator('#detail-pane img').count() == 0
     assert '1970' not in page.locator('#detail-pane').inner_text()
     assert page.locator('#detail-pane a[href^="javascript:"]').count() == 0
-    page.get_by_role('button',name='Explanation',exact=True).focus();page.keyboard.press('Enter')
+    page.locator('#nav-explanation').focus();page.keyboard.press('Enter')
+    expect(page.locator('#nav-explanation')).to_have_attribute('aria-current','page')
     expect(page.get_by_text('Deterministic fallback',exact=True)).to_be_visible()
     expect(page.locator('.explanation-summary')).to_contain_text('revision 3')
     expect(page.locator('.explanation-claim p')).to_have_text('<img src=x onerror="window.__explanation_xss=true">')
@@ -175,7 +181,8 @@ def exercise_fixtures(page, base, output, expect):
     page.get_by_role('button',name='Timeline',exact=True).focus(); page.keyboard.press('Enter')
     page.get_by_role('button',name='Load more revisions',exact=True).click()
     expect(page.locator('.timeline li')).to_have_count(3)
-    page.get_by_role('button',name='Actions',exact=True).focus(); page.keyboard.press('Enter')
+    page.locator('#nav-actions').focus(); page.keyboard.press('Enter')
+    expect(page.locator('#nav-actions')).to_have_attribute('aria-current','page')
     expect(page.locator('.evidence-card')).to_have_count(1)
     page.locator('.evidence-card summary').click()
     expect(page.locator('.evidence-body > p').first).to_have_text('<img src=x onerror="window.__action_xss=true">')
