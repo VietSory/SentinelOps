@@ -73,6 +73,7 @@ role.
 | Workload | May | May not |
 | --- | --- | --- |
 | `telemetry-reader` | Read CloudWatch metrics/logs and X-Ray traces | Write anything |
+| `telemetry-exporter` | Create/write `otel-metrics-*` and `otel-logs-*` streams in the workload group, send traces in the configured region, use the workload log key through Logs | Create log groups, change retention, read DB/S3, use reader authority, invoke Bedrock or remediate |
 | `data-worker` | Read `models/`, write `features/` and `incidents/`, read the DB secret | Mutate Kubernetes, read `known-good/`, invoke Bedrock |
 | `explanation` | Invoke only explicitly named Bedrock models in this region | Any remediation, any S3 write, any DB access |
 | `controller` | Read `known-good/` evidence, image metadata, the DB secret | Any AWS mutation; rollback is Kubernetes RBAC only |
@@ -109,7 +110,8 @@ This follows the [CloudWatch Logs KMS permission model](https://docs.aws.amazon.
 The apply principal still needs permission to create/manage the key policy and
 `kms:DescribeKey` when associating the key with log groups. These operator
 permissions are external prerequisites, not grants made to workloads here.
-An application collector/exporter role, its CloudWatch/X-Ray configuration,
+The [offline collector binding](#offline-aws-collector) now describes the separate
+application exporter role and CloudWatch/X-Ray configuration. Deployment,
 delivery verification and H3 source capture remain outstanding.
 
 ## Prerequisites the owner confirms before any apply
@@ -195,8 +197,9 @@ This slice delivers the described, validated baseline. It does not deliver:
 
 - An applied workload bundle. The business-service slice can now be rendered
   offline as described below; the [API image/manifests](CONTROL_PLANE_IMAGE.md)
-  are also prepared offline. Worker/source adapters and observability deployment
-  bindings remain separate work; none of these artifacts is an applied environment.
+  are also prepared offline. The collector gateway can be rendered offline as
+  described below. Worker/source adapters, stdout log shipping and target delivery
+  remain separate work; none of these artifacts is an applied environment.
 - An applied environment, live CloudWatch/X-Ray source capture, or H3 handoff.
 - A Grafana/operational dashboard.
 - Model activation (H1/G3) or remediation acceptance (H4/G6).
@@ -257,3 +260,93 @@ API was called by rendering/validation. Image availability, external commerce
 schema/Secret, collector reachability and target admission/RBAC remain deployment
 prerequisites. This is configuration evidence, not a running AWS workload, H3
 source parity, known-good approval or G7 acceptance.
+
+## Offline AWS collector
+
+`scripts/render_collector_manifests.py` renders an OTLP gateway with **six**
+resources: Namespace, dedicated ServiceAccount, public ConfigMap, Deployment,
+ClusterIP Service and ingress NetworkPolicy. It uses collector-contrib; the core
+collector in the local Compose stack does not supply these AWS exporters.
+The checked component set is contrib **0.162.0**, registry digest
+`sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6`.
+Use that image or validate an explicitly selected replacement before deployment.
+
+```sh
+mkdir -p artifacts/deployment
+python -m scripts.render_collector_manifests \
+  --collector-image "$COLLECTOR_IMAGE_DIGEST" \
+  --region "$AWS_TARGET_REGION" --environment dev \
+  --exporter-role-arn "$TELEMETRY_EXPORTER_ROLE_ARN" \
+  --trace-sampling-percentage "$TRACE_SAMPLING_PERCENTAGE" \
+  --output artifacts/deployment/collector.yaml
+```
+
+`region`, `environment`, `exporter_role_arn`, workload log group and sampling
+percentage are exposed by the public Terraform `collector_bindings` output.
+Use the owner-approved target values; rendering does not create those resources.
+The environment must be `dev`, `staging` or `prod`, matching the IaC baseline.
+The workload group is derived as `/sentinelops/<environment>/workloads` and must
+already exist with its KMS/retention binding. The role ARN must name the declared
+`<name-prefix>-telemetry-exporter` role. No static credential, token value,
+arbitrary group, endpoint override or TLS bypass is accepted as input.
+
+The pod explicitly projects a one-hour service-account token with audience
+`sts.amazonaws.com` and supplies the AWS web-identity SDK environment. It does
+not require a mutating webhook to inject an IRSA token. Automatic Kubernetes API
+token mounting is disabled; no Kubernetes RBAC is granted. The trust policy pins
+the cluster OIDC provider, exact `sentinelops:telemetry-exporter` service account
+and STS audience. IMDS credential lookup is disabled. This still requires real
+OIDC/STS access, correct IAM provisioning and node IMDS restrictions on the target;
+the renderer cannot prove credential isolation against a compromised node. See
+[AWS IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html).
+
+| Signal | Destination and behavior |
+| --- | --- |
+| Business OTLP metrics | `awsemf` writes EMF to `otel-metrics-<collector-pod-uid>` in the existing workload group, namespace `SentinelOps/<environment>`. Only the three `sentinelops_http_*` instruments are declared, with service/route/status dimensions and no automatic dimension rollups. Metric publication uses Logs, not `cloudwatch:PutMetricData`. |
+| OTLP logs | `awscloudwatchlogs` writes `otel-logs-<collector-pod-uid>`, retaining the OTLP record envelope (`raw_log=false`). It does **not** read container stdout or host files. Current business services emit JSON stdout logs; a reviewed log shipper/OTLP emitter is still required. |
+| OTLP traces | `awsxray` writes segments in the configured region, links the workload group, skips EC2 metadata and leaves exporter telemetry disabled. A deterministic TraceID sampler uses the **explicit percentage**, with producer sampling-priority overrides removed. Metrics and logs are not sampled. |
+
+The Terraform sampling fraction is multiplied by 100 for this renderer: `0.1`
+becomes `10`, not `0.1` percent. The AWS X-Ray sampling rule alone does not make
+the existing OTel SDK sample; this collector processor applies the selected rate.
+Record it in H3 coverage. It is not a model/SLO threshold or an accuracy claim.
+Exporter settings follow the pinned upstream [EMF](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.162.0/exporter/awsemfexporter/README.md),
+[Logs](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.162.0/exporter/awscloudwatchlogsexporter/README.md)
+and [X-Ray](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/v0.162.0/exporter/awsxrayexporter/README.md) components.
+
+The ingress policy admits OTLP only from pods labelled
+`app.kubernetes.io/part-of=sentinelops` in the same namespace. The target CNI must
+actually enforce NetworkPolicy. OTLP is internal plaintext; there is no public
+listener, ingress or LoadBalancer. Network labels are access configuration, not
+authenticated source provenance. Egress still requires the approved target's
+DNS/STS/Logs/X-Ray routing and network controls.
+
+The Deployment is non-root with a read-only filesystem, resource limits and
+bounded processing/queues. A config checksum rolls the pod when destinations or
+sampling change; changing the role ARN also changes the template. It uses one
+replica with `Recreate` because EMF cumulative-to-delta conversion keeps local
+state: load-balancing the same cumulative series over replicas would split it.
+Rollout/restart can lose queued records and the initial cumulative baseline;
+this is not a durable or highly available gateway. Health probes check the
+collector process, **not successful AWS authentication or delivery**.
+
+```sh
+python -m pytest -q tests/test_collector_manifests.py tests/test_aws_iac.py
+python -m scripts.check_collector_config --pull
+terraform -chdir=infra/aws test -filter=tests/cloudwatch_kms.tftest.hcl
+kubeconform -strict -summary -kubernetes-version 1.34.0 artifacts/deployment/collector.yaml
+```
+
+The config checker pulls only the pinned public collector image when `--pull`
+is selected. It runs the real binary's **validate** subcommand in containers with
+network `none`, no AWS credentials, no host mounts and no exporters started.
+It checks the rendered config and rejects an intentionally invalid exporter key.
+CI also evaluates the exact exporter trust/permission JSON with mocked AWS/TLS
+providers, and validates all six Kubernetes resources. These are software/config
+checks. They do not verify AWS delivery, projected-token rotation or CNI behavior.
+
+Before H3, verify real metric/log/trace delivery and errors on the authorized
+target, including time/unit mappings, histogram conversion and restart gaps.
+Do not interpret EMF histogram statistics as validated p95 or feed this source
+into the existing local model/worker policy. Source adapters/parity belong to
+the A/B handoff; no worker manifest or remote ownership exception is added here.

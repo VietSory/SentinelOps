@@ -498,3 +498,22 @@ CI/merge của action-reader đã được đối chiếu GitHub; resume host ch
 launcher có guard khi môi trường cho phép. Q-09/G6 cho `de38fc6b`, remote worker
 adapter/H3, provider/AWS và các quality gates ở mục 10 vẫn mở. Chi tiết tổng hợp
 ở [báo cáo lane B](../reports/LANE_B_DELIVERY_REPORT_2026-11-14.md).
+
+### Collector/exporter offline — follow-up 2026-11-15
+
+- PR #54 KMS đã **MERGED** vào `ed878da`; head `ae62a6a`, run `43667608441`:
+  **14/14 PASS, 0 skipped jobs**. CI sau merge là run `43669428327`, cần đối chiếu
+  riêng với `ed878dad53177ceb52f528fc36a58427bae36166`.
+- Renderer mới tạo 6 resources cho gateway OTLP, config CloudWatch EMF/Logs/X-Ray,
+  role `telemetry-exporter` và projected STS token riêng. Không tạo credential,
+  log group, retention, DB/S3/action permission hoặc worker manifest.
+- **111 focused Python tests PASS**. Contrib 0.162.0 digest pin đã validate config
+  thật trong container `network=none`. Checker tự động và kubeconform local bị
+  approval bridge chặn; CI chạy lại checker hợp lệ/invalid, IAM mock assertions
+  và schema Kubernetes 1.34 theo đúng head. Chưa claim các bước pending là PASS.
+- Sampling traces phải explicit và ghi trong H3; metrics/logs không sampled.
+  Một replica/Recreate giữ state delta theo series, nhưng restart có thể mất
+  queue/baseline. Probes chỉ kiểm process, không chứng minh AWS delivery.
+- Business logs hiện là stdout: còn cần shipper/OTLP emitter. CNI/IRSA/delivery,
+  histogram/time/unit parity và remote worker source policy chưa kiểm trên target.
+  Đây là configuration-only, không phải AWS deployment, source parity hoặc gate.
