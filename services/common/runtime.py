@@ -13,6 +13,7 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from services.common.observability import configure, extract_context, kubernetes_identity
+from services.common.log_export import export_event
 
 correlation_id_var: ContextVar[str] = ContextVar("correlation_id", default="unknown")
 request_instance_id_var: ContextVar[str | None] = ContextVar("request_instance_id", default=None)
@@ -37,7 +38,9 @@ def log_event(service: str, event: str, **fields: object) -> None:
         **kubernetes_identity(),
         **fields,
     }
-    logger.info(json.dumps(payload, default=str, separators=(",", ":")))
+    body = json.dumps(payload, default=str, separators=(",", ":"))
+    logger.info(body)
+    export_event(payload, body)
 
 
 def install_request_context(app: FastAPI, service_name: str) -> None:

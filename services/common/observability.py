@@ -16,6 +16,8 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import SpanKind
 
+from services.common.log_export import configure_logs
+
 _CONFIGURED = False
 
 
@@ -69,6 +71,7 @@ def configure(service_name: str) -> tuple[trace.Tracer, metrics.Meter]:
     )
 
     if not _CONFIGURED:
+        configure_logs(resource)
         tracer_provider = TracerProvider(resource=resource)
         tracer_provider.add_span_processor(
             BatchSpanProcessor(
