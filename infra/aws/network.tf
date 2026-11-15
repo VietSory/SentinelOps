@@ -135,6 +135,11 @@ resource "aws_flow_log" "vpc" {
   traffic_type    = "REJECT"
   vpc_id          = aws_vpc.main.id
 
+  depends_on = [
+    aws_iam_role_policy.vpc_flow_log,
+    aws_iam_role_policy.vpc_flow_logs_key,
+  ]
+
   tags = { Name = "${var.name_prefix}-flow-log" }
 }
 

@@ -3,7 +3,7 @@
 # unlimited retention is an unbounded cost (TECHNICAL_SPEC §14).
 
 resource "aws_cloudwatch_log_group" "cluster" {
-  name              = "/aws/eks/${var.name_prefix}-${var.environment}/cluster"
+  name              = local.log_group_names.cluster
   retention_in_days = var.log_retention_days
   kms_key_id        = aws_kms_key.main.arn
 
@@ -11,7 +11,7 @@ resource "aws_cloudwatch_log_group" "cluster" {
 }
 
 resource "aws_cloudwatch_log_group" "workloads" {
-  name              = "/sentinelops/${var.environment}/workloads"
+  name              = local.log_group_names.workloads
   retention_in_days = var.log_retention_days
   kms_key_id        = aws_kms_key.main.arn
 
@@ -19,7 +19,7 @@ resource "aws_cloudwatch_log_group" "workloads" {
 }
 
 resource "aws_cloudwatch_log_group" "vpc_flow" {
-  name              = "/sentinelops/${var.environment}/vpc-flow"
+  name              = local.log_group_names.vpc_flow
   retention_in_days = var.log_retention_days
   kms_key_id        = aws_kms_key.main.arn
 
