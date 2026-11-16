@@ -173,6 +173,15 @@ thứ ba nên chưa chứng minh RCA đúng hoặc nghiệm thu Q-08. Independen
 MTTD vẫn chưa đo. Q-09 của release mới cần bộ trial riêng; 9/10 cũ thuộc
 `badf9da0`. Xem [checklist local hiện hành](delivery/LANE_B_CHECKPOINT.md#10-local-follow-up-sau-merge--2026-11-14).
 
+**Trial G6 đầu tiên `recovered` trên `de38fc6b` (2026-11-16):** operator duyệt
+known-good lúc `14:28:17Z`, thay đổi xấu lúc `14:29:02Z`, H4 cấp dispatch
+authority revision 2, một lần rollback về đúng image đã duyệt và verify
+`telemetry_verified` trên 3 bucket sau action, hash chain đầy đủ. Đọc cùng
+receipt `-01` được giữ nguyên, release này đang ở **1/2 golden-path recovered,
+0 failed-verify, `unsafe_actions == []`** — tức **1/10**, nên **Q-09 chưa hoàn
+tất và G6 chưa PASS**. Mỗi attempt sau cần known-good và authorization policy
+riêng của operator. Xem [trial `g6-de38fc6b-02`](delivery/LANE_B_CHECKPOINT.md#trial-g6-g6-de38fc6b-02--2026-11-16).
+
 ## Việc tiếp theo
 
 - **A:** đã train lại theo ADR-019 (`de38fc6b`); lớp 2 `ald` (2026-11-14) cho kết quả phát triển S1/S3 tốt, chưa nghiệm thu Q-04…Q-07 (thiếu S2/S4, MTTD live, holdout); full G4/G8 chưa nghiệm thu.

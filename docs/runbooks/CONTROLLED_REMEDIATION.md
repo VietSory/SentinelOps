@@ -582,6 +582,20 @@ existing `g6-de38fc6b-01` preparation ended `TRIAL_FAILED` with no approved ledg
 no exported action journal and no mutation. Preserve and include that receipt;
 it is not a recovered trial. There is no new completed Q-09 campaign yet.
 
+Attempt `g6-de38fc6b-02` (2026-11-16, source `4288277`) is the first authorized
+golden-path trial on this release that reached a terminal outcome: the operator
+approved the known-good image at `14:28:17Z`, the bad change was deployed at
+`14:29:02Z`, `NativeH4Authority` granted dispatch authority on revision 2, and
+the single rollback patched exactly the approved image and verified with
+`post-action-current-slo/v1` (`three-current-eligible-post-action-buckets`) for
+`action_outcome=recovered` with a complete `prepared → recovered` hash chain.
+Read with the retained `-01` receipt the release now stands at **1 recovered of
+2 golden-path attempts**, `unsafe_actions == []` over 1 mutation and **0
+failed-verify observations**. That is neither the `>=9/10` golden-path target nor
+the required failed-verify attempt, so Q-09 remains incomplete and G6 unaccepted.
+Every further attempt needs its own operator known-good decision and rollback
+policy authorization; neither this receipt nor its approval carries over.
+
 Each fresh B-owned trial must accept the existing model's required healthy
 history, collect the exact target UID/image/health evidence, and wait for the
 operator's concrete known-good decision before the bad change. The operator must
