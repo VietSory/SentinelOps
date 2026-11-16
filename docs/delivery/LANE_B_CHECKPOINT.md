@@ -650,7 +650,52 @@ operator: `start` báo `active` rồi worker exit `FileNotFoundError` hết rest
 budget. Đã sửa để ghi cùng path tuyệt đối ở cả hai chỗ, regression fail trước
 sửa và pass sau sửa. Không nới guard, session identity hay model/approval.
 
+### Trial G6 `g6-de38fc6b-02` — 2026-11-16
+
+Operator (`nvtank`) đã cấp hai quyền cụ thể cho **đúng** lượt này: duyệt
+known-good và bật `--enable-rollback-policy`. B không tự ký approval, không tự
+bật policy. Sandbox kind `sentinelops-b-actions-f3a24f8290`, source `4288277`,
+release `092290ce…`.
+
+| Mốc | Thời điểm (UTC) |
+| --- | --- |
+| `awaiting-operator-approval` | 14:12:35 |
+| Operator ký known-good (`approved_by=nvtank`) | **14:28:17** |
+| Deploy image xấu `a5769aa7…` | **14:29:02** |
+| `prepared` → `dispatching` | 14:35:37 |
+| `recovered` | 14:40:38 |
+
+Known-good được duyệt **trước** thay đổi xấu 44,1 giây — điều kiện mà `-01` chưa
+bao giờ tới được. Kết quả:
+
+- `action_outcome=recovered`, `scenario=golden-path`, `policy_enabled=true`.
+- `h4.dispatch_authority=true`, `revision=2`, `missing_reason` rỗng.
+- `patch_receipt.image` = `57f70b68…` = đúng image đã duyệt; **một** lần patch.
+- Verify `post-action-current-slo/v1`, `status=telemetry_verified`,
+  `reason=three-current-eligible-post-action-buckets`, `required_buckets=3` kèm
+  `support` có batch_ref/signal_id thật.
+- Hash chain đầy đủ `prepared → dispatching → verifying ×2 → recovered`;
+  `last_event_hash` khớp event cuối; `summarize_g6_trials` tính
+  `audit_complete=true` độc lập.
+- Cleanup đúng guard: `action-journal.json` đã export, **không** còn
+  `action-audit-pending.json`, cluster đã xoá, không có `KILL_SWITCH`.
+
+`g6-q09-summary/v3` trên **cả hai** receipt cùng release `092290ce…`:
+
+| Nhóm | Số đo | Target |
+| --- | --- | --- |
+| `golden_path` | 2 trials, **1 recovered**, `not_terminal=[g6-de38fc6b-01]` | `>=9/10 recovered` |
+| `failed_verify` | **0 trials**, 0 escalated-with-audit | 100% escalated with audit |
+| `action_safety` | `unsafe_actions=[]`, 1 mutation | `unsafe_actions == []` |
+
+`G6_accepted=false`. Đây là **1/10 golden-path và 0 failed-verify** — chưa phải
+campaign Q-09 hoàn tất, và G6 acceptance vẫn là quyết định owner. Receipt `-01`
+(`TRIAL_FAILED`, `phases: []`) được giữ nguyên trong mẫu số; nguyên nhân thật của
+nó là `wait_for_file` hết hạn chờ `approved-ledger-ref` — file đó chưa bao giờ
+được ghi, chỉ có `AWAITING_OPERATOR_APPROVAL` — chứ không phải lỗi phần mềm.
+Mỗi attempt tiếp theo cần quyết định known-good và authorization policy riêng.
+
 Chưa làm trong lượt này: health worker trên epoch hiện hành (sẽ ghi bucket mới
 vào stream bàn giao sau gap 47 giờ và khi chưa có traffic — cần quyết định của
-owner trước), protected API/UI rollout, và Q-09/G6 `de38fc6b` (vẫn cần operator
-duyệt known-good cụ thể trước thay đổi xấu; B không tự ký approval hay bật policy).
+owner trước), protected API/UI rollout, và 9 golden-path + 1 failed-verify còn
+lại của Q-09 `de38fc6b`.
