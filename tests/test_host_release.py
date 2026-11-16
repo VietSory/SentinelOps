@@ -99,6 +99,19 @@ def test_roles_preserve_b_source_stores_and_explicit_incident_stream(tmp_path, m
     assert '--project' in args and 'sentinelops-b' in args
 
 
+def test_incident_model_store_is_recorded_as_the_absolute_path_the_unit_can_resolve(tmp_path, monkeypatch):
+    # The unit carries no WorkingDirectory, so a relative store would only resolve
+    # for the operator shell and leave the worker failing after start reported active.
+    monkeypatch.setattr(lane_b, 'ROOT', tmp_path / 'b')
+    store = tmp_path / 'b' / 'models' / 'release-under-test'
+    store.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    args = host.arguments('incidents', tmp_path, 'a' * 64, Path('b/models/release-under-test'), 'artifact://manifests/x.json')
+    recorded = args[args.index('--model-store') + 1]
+    assert recorded == str(store.resolve()) and Path(recorded).is_absolute()
+    assert args == host.arguments('incidents', tmp_path, 'a' * 64, store, 'artifact://manifests/x.json')
+
+
 def test_foreign_unit_is_rejected_before_any_lifecycle_mutation(tmp_path, monkeypatch):
     from types import SimpleNamespace
     monkeypatch.setattr(lane_b, 'ROOT', tmp_path / 'b')

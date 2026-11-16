@@ -176,7 +176,11 @@ def arguments(role, root, stream, model_store=None, model_ref=None, *, epoch=Non
     # v1 sessions keep their exact recorded arguments; only an explicit profile is appended.
     if role == 'health': return ['--store', str(health_root), *shared, *(['--source-profile', source_profile] if source_profile else [])]
     if not stream or not re.fullmatch('[0-9a-f]{64}', stream): raise HostGuard('explicit accepted health stream required')
-    models = ['--model-store', str(model_store), '--model-release-ref', model_ref] if model_store and model_ref else []
+    # The unit runs without a working directory, so a relative store would resolve
+    # against systemd's cwd and fail after start already reported the unit active.
+    # Record the same absolute path `lane_b.runtime_environment` admits.
+    models = (['--model-store', str(Path(model_store).resolve()), '--model-release-ref', model_ref]
+              if model_store and model_ref else [])
     return ['--health-stream', stream, '--source-store', str(health_root),
             '--store', str(incident_root), '--project', lane_b.NAME,
             '--jaeger', 'http://127.0.0.1:26686', '--rca-policy', str(root / 'configs/rca_policy.json'),

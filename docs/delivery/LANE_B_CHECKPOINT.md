@@ -614,3 +614,43 @@ API/health/incidents vẫn inactive/PID 0; selected release `5c520ae6…`, strea
 `b95058b4…` được giữ nguyên. Chưa có DB-history readback, protected API/UI hoặc
 checkpoint-freshness verification trên host từ các lượt này. Release UI
 `229452c2…` đã verify nhưng chưa select; không dùng CI runner thay bằng chứng host.
+
+### Host toolchain recovery và resume consumer — 2026-11-16
+
+Máy `local-nixos-host` mất interpreter mà host release pin: store path
+`js941…-python3-3.11.15` đã bị nix GC, nên `.venv` hỏng và
+`lane_b_host verify` trả `BLOCKED / host release interpreter identity changed`.
+Guard đúng: `scripts/host_runtime.py:47-49` so `record['interpreter']` và
+`record['python_version']` với interpreter của tiến trình gọi, nên mọi host
+release hiện có là **không khởi động được** cho tới khi đúng interpreter trở lại.
+Không mint release mới để né guard. Khôi phục bằng `nix-store --realise` đúng
+store path (`interpreter_sha256` khớp `659ebfa7…`), ghim GC root tại
+`~/.local/state/nix/gcroots/sentinelops-lane-b-python311`, dựng lại `.venv` trên
+đúng 3.11.15 rồi `verify` → **VERIFIED**. `nixpkgs#python311` của `nixos-25.11`
+cho đúng store path này; đã khai báo `python311` trong NixOS config của host để
+GC không xoá lại. Regression suite sau khôi phục: **1.772 tests PASS**,
+contracts 34 schemas/16 samples/3 configs PASS.
+
+Resume consumer cũ trên stack B thật (9 container healthy, control DB qua
+`lane_b resume-control`, ownership/volume guards giữ nguyên):
+
+| Mục | Quan sát |
+| --- | --- |
+| Consumer | `0d27b26c…` `READY`, `actions_allowed=false`; tổng consumers vẫn 5 → nối lại, không fork |
+| Checkpoint tiến | bucket `2026-11-14T14:23:00Z` → `14:25:00Z`, steps 688 → 690, backlog 2 → 0, `processing_ms` 348,8 |
+| Durability | `checkpoint_updated_at` `2026-11-14 14:25:48Z` → `2026-11-16 13:25:54Z`; `last_state_ref` đổi sang `3a5ae779…` |
+| Jobs | `created_jobs: []` — hai bucket tồn đọng là healthy, không sinh incident mới |
+| Freshness | Đầu stream vẫn `2026-11-14T14:25:00Z`. Consumer bắt kịp **stream**, không phải telemetry tươi; health worker chưa chạy nên gap 47 giờ vẫn **UNKNOWN** |
+
+Lần start đầu lộ một defect thật: `lane_b.runtime_environment` resolve H1 store
+cho `SENTINELOPS_MODEL_STORE` nhưng `arguments()` ghi path thô vào `--model-store`
+của ExecStart. Unit cố ý không có `WorkingDirectory`
+(`tests/test_host_release.py:88`), nên store tương đối chỉ resolve trong shell của
+operator: `start` báo `active` rồi worker exit `FileNotFoundError` hết restart
+budget. Đã sửa để ghi cùng path tuyệt đối ở cả hai chỗ, regression fail trước
+sửa và pass sau sửa. Không nới guard, session identity hay model/approval.
+
+Chưa làm trong lượt này: health worker trên epoch hiện hành (sẽ ghi bucket mới
+vào stream bàn giao sau gap 47 giờ và khi chưa có traffic — cần quyết định của
+owner trước), protected API/UI rollout, và Q-09/G6 `de38fc6b` (vẫn cần operator
+duyệt known-good cụ thể trước thay đổi xấu; B không tự ký approval hay bật policy).
