@@ -169,6 +169,18 @@ variable "database_instance_class" {
   default     = "db.t4g.medium"
 }
 
+variable "database_multi_az" {
+  description = "Multi-AZ control database. null follows availability_zone_count; false for free plan accounts."
+  type        = bool
+  default     = null
+}
+
+variable "database_storage_autoscaling" {
+  description = "Let RDS grow storage up to twice the allocation; disable to keep a fixed size and cost bound."
+  type        = bool
+  default     = true
+}
+
 variable "database_allocated_storage_gb" {
   description = "RDS allocated storage in GiB."
   type        = number

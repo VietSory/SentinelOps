@@ -96,8 +96,9 @@ resource "aws_db_instance" "control" {
   engine_version = var.database_engine_version
   instance_class = var.database_instance_class
 
-  allocated_storage     = var.database_allocated_storage_gb
-  max_allocated_storage = var.database_allocated_storage_gb * 2
+  allocated_storage = var.database_allocated_storage_gb
+  # 0 disables storage autoscaling; used to bound size and cost on the free-plan deployment.
+  max_allocated_storage = var.database_storage_autoscaling ? var.database_allocated_storage_gb * 2 : 0
   storage_type          = "gp3"
   storage_encrypted     = true
   kms_key_id            = aws_kms_key.main.arn
@@ -114,7 +115,7 @@ resource "aws_db_instance" "control" {
   vpc_security_group_ids = [aws_security_group.database.id]
   publicly_accessible    = false
 
-  multi_az                = var.availability_zone_count >= 2
+  multi_az                = var.database_multi_az == null ? var.availability_zone_count >= 2 : var.database_multi_az
   backup_retention_period = var.database_backup_retention_days
   copy_tags_to_snapshot   = true
   deletion_protection     = var.database_deletion_protection
