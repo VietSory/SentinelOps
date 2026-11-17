@@ -90,6 +90,18 @@ resource "aws_db_subnet_group" "control" {
   tags = { Name = "${var.name_prefix}-control" }
 }
 
+# Least-privilege runtime credential (control_writer), filled after the deployment bootstrap
+# (infra/control/001-deployment-roles.sql). Workloads never read the RDS-managed master secret,
+# which holds the schema-owning bootstrap login.
+resource "aws_secretsmanager_secret" "control_runtime" {
+  name                    = "${var.name_prefix}/${var.environment}/control-runtime"
+  description             = "Control PostgreSQL runtime (control_writer) DSN; set by the operator after bootstrap"
+  kms_key_id              = aws_kms_key.main.arn
+  recovery_window_in_days = 7
+
+  tags = { Name = "${var.name_prefix}-control-runtime" }
+}
+
 resource "aws_db_instance" "control" {
   identifier     = "${var.name_prefix}-control-${var.environment}"
   engine         = "postgres"
