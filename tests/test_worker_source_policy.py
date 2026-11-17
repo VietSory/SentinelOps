@@ -179,3 +179,63 @@ def test_health_adapter_uses_remote_policy_for_configuration_and_capture(remote,
     source.verify_configuration.assert_called_once()
     assert pool.call_args.kwargs["user"] == "control_writer"
     assert pool.call_args.kwargs["ssl"].check_hostname
+
+
+CLUSTER = "http://prometheus.sentinelops-b-actions.svc.cluster.local:9090"
+
+
+@pytest.fixture
+def in_cluster(tmp_path):
+    password = tmp_path / "control-password"
+    password.write_text("synthetic-test-credential")
+    password.chmod(0o600)
+    return SourcePolicy("in-cluster", CLUSTER, DATABASE, "control_writer", password, None)
+
+
+def test_in_cluster_accepts_the_pinned_service_endpoint_without_a_credential(in_cluster):
+    assert in_cluster.prometheus(CLUSTER) == CLUSTER
+    assert in_cluster.prometheus(CLUSTER + "/") == CLUSTER
+    assert in_cluster.headers() == {}
+
+
+def test_in_cluster_sends_a_bearer_only_when_a_credential_reference_is_configured(in_cluster, tmp_path):
+    token = tmp_path / "token"
+    token.write_text("synthetic-test-credential")
+    token.chmod(0o600)
+    assert replace(in_cluster, prometheus_token_file=token).headers() == {
+        "Authorization": "Bearer synthetic-test-credential"}
+
+
+@pytest.mark.parametrize("endpoint", [CLUSTER.replace("http:", "https:"),
+    CLUSTER.replace(".svc.cluster.local", ".example.com"), CLUSTER.replace(":9090", ""),
+    CLUSTER.replace("://", "://user:secret@"), CLUSTER.replace("://", "://user@"),
+    CLUSTER + "/path", CLUSTER + "?token=secret", CLUSTER + "#fragment", CLUSTER + "\n",
+    "http://prometheus.svc.cluster.local:9090", "http://127.0.0.1:9090"])
+def test_in_cluster_rejects_anything_but_the_pinned_service_dns(in_cluster, endpoint):
+    with pytest.raises(ValueError):
+        replace(in_cluster, remote_prometheus=endpoint).prometheus(endpoint)
+
+
+def test_in_cluster_refuses_an_endpoint_it_has_not_pinned(in_cluster):
+    with pytest.raises(ValueError, match="in-cluster source requires"):
+        in_cluster.prometheus(CLUSTER.replace("prometheus", "other"))
+    with pytest.raises(ValueError, match="in-cluster source requires"):
+        replace(in_cluster, remote_prometheus=None).prometheus(CLUSTER)
+
+
+@pytest.mark.parametrize("worker", ["health", "incident"])
+def test_in_cluster_keeps_the_control_database_on_the_tls_only_remote_rules(in_cluster, worker):
+    options = in_cluster.database_options(DATABASE, worker=worker)
+    assert options["user"] == "control_writer" and isinstance(options["ssl"], ssl.SSLContext)
+    for dsn in ("postgresql://control_writer@localhost:5432/sentinelops_control",
+                DATABASE.replace("?sslmode=verify-full", ""),
+                DATABASE.replace("://", "://control_writer:secret@")):
+        with pytest.raises(ValueError):
+            replace(in_cluster, remote_control_database=dsn).database_options(dsn, worker=worker)
+
+
+def test_in_cluster_is_selectable_on_the_command_line_without_changing_the_default():
+    parser = argparse.ArgumentParser()
+    source_policy_arguments(parser)
+    assert parser.parse_args(["--source-policy", "in-cluster"]).source_policy == "in-cluster"
+    assert parser.parse_args([]).source_policy == "local"
