@@ -16,10 +16,10 @@ import yaml
 from sentinelops.remediation.domain import image_digest
 
 PROJECT = Path(__file__).resolve().parents[1]
+# Frozen Payment known-good contract: D-10 pins sentinelops-b-actions for both targets.
 NAMESPACE = 'sentinelops-b-actions'
 IMAGE_KEYS = {'application', 'postgres', 'otel-collector', 'prometheus', 'jaeger'}
 SERVICES = ('checkout-service', 'payment-service', 'inventory-service')
-EKS_NAMESPACE = 'sentinelops-b-actions'  # Frozen Payment known-good contract namespace.
 SOURCE_PROFILE = 'prometheus-increase-60s-5s/v2'
 EKS_APPLICATION = re.compile(
     r'[0-9]{12}\.dkr\.ecr\.ap-southeast-1\.amazonaws\.com/'
@@ -43,7 +43,7 @@ def render(images, *, target='local'):
     eks = target == 'eks'
     if eks and not EKS_APPLICATION.fullmatch(images['application']):
         raise ValueError('EKS requires ap-southeast-1 ECR sentinelops/application@sha256 digest')
-    namespace = EKS_NAMESPACE if eks else NAMESPACE
+    namespace = NAMESPACE
     documents = [{'apiVersion': 'v1', 'kind': 'Namespace',
                   'metadata': {'name': namespace, 'labels': {'sentinelops.dev/lane': 'B'}}}]
 

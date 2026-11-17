@@ -48,6 +48,17 @@ def eks_images():
             '123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/application@sha256:' + 'b' * 64}
 
 
+@pytest.mark.parametrize('target', ['local', 'eks'])
+def test_namespace_preserves_frozen_payment_known_good_contract(target):
+    assert NAMESPACE == 'sentinelops-b-actions'
+    for document in render(eks_images(), target=target):
+        metadata = document['metadata']
+        if document['kind'] == 'Namespace':
+            assert metadata['name'] == 'sentinelops-b-actions'
+        else:
+            assert metadata['namespace'] == 'sentinelops-b-actions'
+
+
 def test_eks_stack_budget_is_schedulable_on_two_small_nodes_without_credentials_or_public_services():
     documents = render(eks_images(), target='eks')
     deployments = {d['metadata']['name']: d for d in documents if d['kind'] == 'Deployment'}
