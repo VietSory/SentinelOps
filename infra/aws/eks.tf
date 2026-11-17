@@ -46,11 +46,13 @@ resource "aws_iam_openid_connect_provider" "cluster" {
 }
 
 resource "aws_eks_node_group" "main" {
-  cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "${var.name_prefix}-workers"
-  node_role_arn   = aws_iam_role.node.arn
-  subnet_ids      = aws_subnet.private[*].id
-  instance_types  = var.node_instance_types
+  cluster_name = aws_eks_cluster.main.name
+  # A prefix (not a fixed name) lets a replacement group be created while an earlier one
+  # with the same base name still exists, e.g. stuck in CREATING after a rejected instance type.
+  node_group_name_prefix = "${var.name_prefix}-workers-"
+  node_role_arn          = aws_iam_role.node.arn
+  subnet_ids             = aws_subnet.private[*].id
+  instance_types         = var.node_instance_types
 
   scaling_config {
     desired_size = var.node_desired_size
