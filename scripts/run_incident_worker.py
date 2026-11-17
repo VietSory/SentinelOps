@@ -29,7 +29,17 @@ from sentinelops.workers.source_policy import SourcePolicy, source_policy_argume
 
 async def run(args):
     dsn = os.environ.get("CONTROL_DATABASE_URL", "")
-    database_options = SourcePolicy.from_args(args).database_options(dsn, worker="incident")
+    selected = SourcePolicy.from_args(args)
+    database_options = selected.database_options(dsn, worker="incident")
+    from sentinelops.workers.kubernetes_evidence import explicit_environment, remote_jaeger
+    environment = explicit_environment(getattr(args, 'environment', 'local'))
+    if selected.name != 'local':
+        if environment == 'local' or not getattr(args, 'kubernetes_config', None):
+            raise ValueError('remote incident worker requires a non-local environment and explicit Kubernetes config')
+        selected.prometheus(args.prometheus)
+        remote_jaeger(args.jaeger, getattr(args, 'remote_jaeger', None))
+    elif environment != 'local' or getattr(args, 'remote_jaeger', None) is not None:
+        raise ValueError('non-local incident worker requires an explicit remote source policy')
     endpoint = getattr(args, "metrics_otlp_endpoint", None)
     if args.status and endpoint:
         raise ValueError("read-only incident status cannot start a metrics exporter")
@@ -40,7 +50,7 @@ async def run(args):
         # Start the private provider before DB initialization so startup failures
         # are observable and every allocated resource belongs to this cleanup.
         if endpoint:
-            metrics = IncidentWorkerMetrics.otlp(endpoint, environment="local", instance=args.metrics_instance)
+            metrics = IncidentWorkerMetrics.otlp(endpoint, environment=environment, instance=args.metrics_instance)
         if metrics: metrics.heartbeat(ready=False)
         component = "database"
         pool = await asyncpg.create_pool(dsn, min_size=2, max_size=4, command_timeout=10, **database_options)
@@ -60,7 +70,9 @@ async def run(args):
                 token_file=Path(config['token_file']), ca_file=Path(config['ca_file']))
             try:
                 collector = KubernetesIncidentEvidence(kube, config['deployment_uids'],
-                    prometheus_endpoint=args.prometheus, jaeger_endpoint=args.jaeger)
+                    prometheus_endpoint=args.prometheus, jaeger_endpoint=args.jaeger,
+                    environment=environment, source_policy=selected,
+                    remote_jaeger_endpoint=getattr(args, 'remote_jaeger', None))
             except BaseException:
                 await kube.close()
                 raise
@@ -154,6 +166,8 @@ async def run(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     source_policy_arguments(parser)
+    parser.add_argument("--environment", default="local")
+    parser.add_argument("--remote-jaeger", help="Exact explicitly allowed Jaeger URL for remote Kubernetes evidence")
     parser.add_argument("--health-stream", required=True)
     parser.add_argument("--source-store", type=Path, required=True)
     parser.add_argument("--store", type=Path, required=True)

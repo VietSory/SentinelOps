@@ -10,7 +10,8 @@ from datetime import timedelta
 import hashlib
 import json
 import math
-from urllib.parse import urlencode
+import re
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 import yaml
@@ -22,11 +23,34 @@ from sentinelops.remediation.domain import Target, KubernetesUnavailable, image_
 from sentinelops.remediation.kubernetes import _owner
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.prometheus import REQUESTS, matches_source_configuration, decode_capture
+from sentinelops.workers.source_policy import SourcePolicy
 from sentinelops.workers.incident_evidence import (
-    LOG_BYTES, LOG_FIELDS, TRACE_BYTES, NativeIncidentEvidence, completion_records, now,
+    LOG_BYTES, LOG_FIELDS, LOG_RECORDS, TRACE_BYTES, TRACES_PER_ENTRY,
+    NativeIncidentEvidence, completion_records, now,
 )
 
 K8S_FIELDS = {'k8s.pod.uid', 'k8s.pod.name', 'k8s.namespace.name'}
+
+
+def explicit_environment(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', value):
+        raise ValueError('Kubernetes evidence requires an explicit environment label')
+    return value
+
+
+def remote_jaeger(endpoint, pinned):
+    """HTTPS by default; the demo permits only its exact internal HTTP Service."""
+    if not isinstance(endpoint, str) or not isinstance(pinned, str):
+        raise ValueError('Kubernetes evidence requires a pinned Jaeger endpoint')
+    parts = urlsplit(endpoint)
+    if (endpoint.rstrip('/') != pinned.rstrip('/') or not parts.hostname or not parts.port
+        or not re.fullmatch(r'[a-z0-9.-]+', parts.hostname)
+        or parts.username is not None or parts.password is not None or '?' in endpoint or '#' in endpoint
+        or parts.path not in ('', '/') or any(c.isspace() or ord(c) < 32 for c in endpoint)
+        or (parts.scheme != 'https' and endpoint.rstrip('/') !=
+            'http://jaeger.sentinelops-b-actions.svc.cluster.local:16686')):
+        raise ValueError('Kubernetes evidence requires the pinned credential-free Jaeger endpoint')
+    return endpoint.rstrip('/')
 
 
 def project_inventory(deployments, replicasets, pods, *, target, deployment_uids):
@@ -74,10 +98,10 @@ def pod_query(service):
     return 'sum by (k8s_pod_uid,k8s_namespace_name) (increase(' + REQUESTS + '{' + selector + '}[60s]))'
 
 
-def verify_pod_counter(body, expected, raw):
+def verify_pod_counter(body, expected, raw, *, environment='local'):
     """Exact instant/UID and the entire business request denominator must match."""
     end = utc_time(raw['bucket_end'])
-    decoded = decode_capture(raw, environment='local')
+    decoded = decode_capture(raw, environment=explicit_environment(environment))
     if not decoded['quality']['eligible_for_inference']:
         raise ValueError('Kubernetes binding requires an eligible original HTTP bucket')
     if body.get('status') != 'success' or body.get('warnings') or body.get('data', {}).get('resultType') != 'vector':
@@ -159,19 +183,57 @@ def kubernetes_completions(body, identity, lower, upper, received):
 class KubernetesIncidentEvidence(NativeIncidentEvidence):
     requires_source_state = True
 
-    def __init__(self, kubernetes, deployment_uids, *, prometheus_endpoint, jaeger_endpoint):
+    def __init__(self, kubernetes, deployment_uids, *, prometheus_endpoint, jaeger_endpoint,
+                 environment='local', source_policy: SourcePolicy | None = None,
+                 remote_jaeger_endpoint=None):
         if (set(deployment_uids) != set(BUSINESS_ROUTES)
             or deployment_uids.get('payment-service') != kubernetes.target.deployment_uid
             or any(not isinstance(v,str) or not 1 <= len(v) <= 128 for v in deployment_uids.values())):
             raise ValueError('pin three Kubernetes Deployment UIDs')
-        super().__init__('kubernetes-read-only', prometheus_endpoint=prometheus_endpoint, jaeger_endpoint=jaeger_endpoint)
+        self.environment = explicit_environment(environment)
+        self.source_policy = source_policy or SourcePolicy()
+        if self.source_policy.name == 'local':
+            if self.environment != 'local' or remote_jaeger_endpoint is not None:
+                raise ValueError('non-local Kubernetes evidence requires an explicit remote source policy')
+            super().__init__('kubernetes-read-only', prometheus_endpoint=prometheus_endpoint, jaeger_endpoint=jaeger_endpoint)
+        else:
+            if self.environment == 'local':
+                raise ValueError('remote Kubernetes evidence requires an explicit non-local environment')
+            self.prometheus_endpoint = self.source_policy.prometheus(prometheus_endpoint)
+            self.jaeger_endpoint = remote_jaeger(jaeger_endpoint, remote_jaeger_endpoint)
+            # No Compose discovery or infrastructure source exists in this branch.
+            # Reuse only the bounded HTTP/log/trace capture methods of the base.
+            self.infrastructure = None
+            self.client = httpx.AsyncClient(timeout=5., trust_env=False, follow_redirects=False)
+            self.profile = {'environment': self.environment,
+                'jaeger_endpoint': self.jaeger_endpoint, 'prometheus_endpoint': self.prometheus_endpoint,
+                'infrastructure_source': None, 'log_byte_limit_per_service': LOG_BYTES,
+                'completion_limit_per_service': LOG_RECORDS, 'trace_byte_limit': TRACE_BYTES,
+                'traces_per_entry': TRACES_PER_ENTRY, 'docker_timeout_seconds': 8, 'trace_timeout_seconds': 6}
         self.kube, self.deployment_uids = kubernetes, dict(deployment_uids)
         self.profile.update(profile_version='kubernetes-incident-evidence/v1',
             target=dict(vars(kubernetes.target)), deployment_uids=self.deployment_uids)
-        self.profile.pop('compose_project')
+        self.profile.pop('compose_project', None)
 
     async def _http(self, path, *, limit):
         try:
+            if self.source_policy.name != 'local':
+                if path.startswith(self.prometheus_endpoint + '/api/'):
+                    headers = self.source_policy.headers()
+                elif path.startswith(self.jaeger_endpoint + '/api/'):
+                    headers = {}
+                else:
+                    raise ValueError('Kubernetes telemetry URL is outside the pinned sources')
+                async with asyncio.timeout(6.):
+                    async with self.client.stream('GET', path, headers=headers) as response:
+                        response.raise_for_status()
+                        pieces, size = [], 0
+                        async for piece in response.aiter_bytes():
+                            size += len(piece)
+                            if size > limit:
+                                raise ValueError('Kubernetes telemetry response exceeds byte budget')
+                            pieces.append(piece)
+                return b''.join(pieces)
             return await super()._http(path, limit=limit)
         except (httpx.HTTPError, TimeoutError):
             raise KubernetesUnavailable('kubernetes-telemetry-http-unavailable') from None
@@ -181,7 +243,7 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
         finally: await self.kube.close()
 
     async def verify_source(self, identity):
-        if (identity['environment'] != 'local'
+        if (identity['environment'] != self.environment
             or identity['endpoint_hash'] != stable_id({'endpoint': self.prometheus_endpoint})):
             raise ValueError('Kubernetes evidence endpoint differs from accepted health source')
         await self.kube.require_observer()
@@ -303,7 +365,7 @@ class KubernetesIncidentEvidence(NativeIncidentEvidence):
             url = self.prometheus_endpoint + '/api/v1/query?' + urlencode({
                 'query': pod_query(service), 'time': bucket_end.timestamp()})
             body = json.loads(await self._http(url, limit=TRACE_BYTES))
-            verify_pod_counter(body, inventory[service], raw)
+            verify_pod_counter(body, inventory[service], raw, environment=self.environment)
             pod_counters.append({'raw_ref': reference, 'expression': pod_query(service),
                                  'response': body, 'collected_at': timestamp(now())})
         after = await self.verify_source(kwargs['health_identity'])
@@ -324,7 +386,7 @@ def verify_kubernetes_binding(store, capture, health_identity):
     required = {'source_state_ref', 'feature_batch_ref', 'pod_counters', 'inventory_after'}
     if (set(pack) not in (required, required | {'trace_completed_by'})
         or profile['profile_version'] != 'kubernetes-incident-evidence/v1'
-        or health_identity['environment'] != 'local'
+        or health_identity['environment'] != explicit_environment(profile.get('environment', 'local'))
         or health_identity['endpoint_hash'] != stable_id({'endpoint':profile['prometheus_endpoint']})):
         raise ValueError('Kubernetes capture profile/source binding differs')
     target = Target(**profile['target'])
@@ -350,7 +412,7 @@ def verify_kubernetes_binding(store, capture, health_identity):
         if (row['expression'] != pod_query(service) or raw['source_profile'] != health_identity['source_profile']
             or not utc_time(raw['collected_at']) <= utc_time(row['collected_at']) <= utc_time(capture['analyzed_at'])):
             raise ValueError('Kubernetes counter query/receipt differs from accepted source')
-        verify_pod_counter(row['response'], inventory[service], raw)
+        verify_pod_counter(row['response'], inventory[service], raw, environment=health_identity['environment'])
     if seen != set(BUSINESS_ROUTES): raise ValueError('Kubernetes binding lacks a business service')
     logs = store.read(capture['evidence_refs']['logs'])
     receipts = logs['source_receipts']
