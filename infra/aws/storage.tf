@@ -90,15 +90,6 @@ resource "aws_db_subnet_group" "control" {
   tags = { Name = "${var.name_prefix}-control" }
 }
 
-resource "aws_secretsmanager_secret" "control_database" {
-  name                    = "${var.name_prefix}/${var.environment}/control-database"
-  description             = "Control PostgreSQL credentials; rotated by RDS, never committed"
-  kms_key_id              = aws_kms_key.main.arn
-  recovery_window_in_days = 7
-
-  tags = { Name = "${var.name_prefix}-control-database" }
-}
-
 resource "aws_db_instance" "control" {
   identifier     = "${var.name_prefix}-control-${var.environment}"
   engine         = "postgres"

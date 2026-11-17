@@ -121,7 +121,7 @@ data "aws_iam_policy_document" "data_worker" {
     sid       = "ReadControlDatabaseSecret"
     effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.control_database.arn]
+    resources = [aws_db_instance.control.master_user_secret[0].secret_arn]
   }
 }
 
@@ -186,6 +186,19 @@ data "aws_iam_policy_document" "controller" {
   }
 
   statement {
+    sid       = "DecryptViaS3AndSecretsManager"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.main.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["s3.${var.region}.amazonaws.com", "secretsmanager.${var.region}.amazonaws.com"]
+    }
+  }
+
+  statement {
     sid       = "ReadImageMetadata"
     effect    = "Allow"
     actions   = ["ecr:DescribeImages", "ecr:BatchGetImage", "ecr:GetAuthorizationToken"]
@@ -196,7 +209,7 @@ data "aws_iam_policy_document" "controller" {
     sid       = "ReadControlDatabaseSecret"
     effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.control_database.arn]
+    resources = [aws_db_instance.control.master_user_secret[0].secret_arn]
   }
 }
 
@@ -220,7 +233,7 @@ data "aws_iam_policy_document" "api" {
     sid       = "ReadControlDatabaseSecret"
     effect    = "Allow"
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.control_database.arn]
+    resources = [aws_db_instance.control.master_user_secret[0].secret_arn]
   }
 
   statement {
