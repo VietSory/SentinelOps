@@ -41,6 +41,13 @@ COPY_CREDENTIALS = (
     'import os, shutil, sys; from pathlib import Path; os.umask(0o077); '
     '[shutil.copyfile(p, Path(sys.argv[1]) / Path(p).name) for p in sys.argv[2:]]'
 )
+# Exec probes do not expand Kubernetes $(VAR) arguments. Replace the process
+# with the CLI after resolving only whole environment references; never use a shell.
+STATUS_EXEC = (
+    'import os, sys; os.execv(sys.executable, [sys.executable, '
+    '*[os.environ[a[2:-1]] if a.startswith("$(") and a.endswith(")") else a '
+    'for a in sys.argv[1:]]])'
+)
 
 
 def _server(value):
@@ -186,11 +193,12 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                 volumes.append({'name': 'models', 'persistentVolumeClaim': {'claimName': model_claim, 'readOnly': True}})
                 mounts.append({'name': 'models', 'mountPath': '/models', 'readOnly': True})
                 args += ['--model-store', '$(SENTINELOPS_MODEL_STORE)', '--model-release-ref', '$(SENTINELOPS_MODEL_RELEASE_REF)']
+        status_command = ['python', '-c', STATUS_EXEC, f'scripts/run_{worker}_worker.py', *args, '--status']
         documents.append({'apiVersion': 'apps/v1', 'kind': 'Deployment', 'metadata': metadata(name), 'spec': {
             'replicas': 1, 'strategy': {'type': 'Recreate'}, 'selector': {'matchLabels': {'app': name}},
             'template': {'metadata': {'labels': {**labels, 'app': name}, 'annotations': {
                 'sentinelops.io/config-sha256': config_sha256,
-                'sentinelops.io/readiness-scope': 'Process only; inspect worker READY and durable checkpoints separately'}},
+                'sentinelops.io/readiness-scope': 'Read-only CLI status: runtime control DB access and durable status; not processing progress'}},
                 'spec': {'serviceAccountName': worker + '-worker', 'automountServiceAccountToken': False,
                     'securityContext': {'runAsNonRoot': True, 'runAsUser': 10001, 'runAsGroup': 10001,
                                         'fsGroup': 10001, 'seccompProfile': {'type': 'RuntimeDefault'}},
@@ -201,6 +209,14 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                                       'limits': {'cpu': '100m', 'memory': '64Mi'}}}],
                     'containers': [{'name': worker + '-worker', 'image': image, 'imagePullPolicy': 'IfNotPresent',
                         'command': ['python', f'scripts/run_{worker}_worker.py'], 'args': args,
+                        # A probe opens one DB connection. Keep polling sparse and
+                        # allow sustained dependency recovery before restarting.
+                        'readinessProbe': {'exec': {'command': list(status_command)},
+                            'initialDelaySeconds': 15, 'timeoutSeconds': 10,
+                            'periodSeconds': 30, 'failureThreshold': 3},
+                        'livenessProbe': {'exec': {'command': list(status_command)},
+                            'initialDelaySeconds': 120, 'timeoutSeconds': 10,
+                            'periodSeconds': 120, 'failureThreshold': 6},
                         'envFrom': [{'configMapRef': {'name': CONFIG}}], 'env': [
                             {'name': 'CONTROL_DATABASE_URL', 'valueFrom': {'secretKeyRef': {
                                 'name': 'control-runtime', 'key': 'database-url', 'optional': False}}},

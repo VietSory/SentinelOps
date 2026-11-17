@@ -53,7 +53,8 @@ async def run(args):
             metrics = IncidentWorkerMetrics.otlp(endpoint, environment=environment, instance=args.metrics_instance)
         if metrics: metrics.heartbeat(ready=False)
         component = "database"
-        pool = await asyncpg.create_pool(dsn, min_size=2, max_size=4, command_timeout=10, **database_options)
+        pool = await asyncpg.create_pool(dsn, min_size=1 if args.status else 2,
+                                        max_size=1 if args.status else 4, command_timeout=10, **database_options)
         component = "configuration"
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()

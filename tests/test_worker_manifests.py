@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import timedelta
 import hashlib
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -81,7 +82,7 @@ def test_resources_have_valid_references_and_separate_worker_entrypoints():
         assert container['env'][0] == {'name': 'CONTROL_DATABASE_URL', 'valueFrom': {'secretKeyRef': {
             'name': 'control-runtime', 'key': 'database-url', 'optional': False}}}
         assert '--source-policy' in container['args'] and 'in-cluster' in container['args']
-        assert not any(k in container for k in ('ports', 'readinessProbe', 'livenessProbe'))
+        assert 'ports' not in container
     assert not any(d['kind'] in ('Secret', 'PersistentVolumeClaim', 'Service') for d in documents)
 
 
@@ -101,6 +102,92 @@ def test_observer_rbac_is_read_only_and_never_bound_to_health_worker():
     serialized = yaml.safe_dump_all(documents)
     assert 'remediation' not in serialized and 'eks.amazonaws.com/role-arn' not in serialized
     assert 'hostPath' not in serialized and 'docker.sock' not in serialized
+
+
+@pytest.mark.parametrize('optional_wiring', [False, True])
+def test_status_probes_preserve_runtime_arguments_and_bound_connection_cost(optional_wiring, monkeypatch):
+    extra = {'prometheus_secret': 'prometheus-auth', 'prometheus_token_key': 'token',
+             'model_claim': 'models', 'model_release_ref': RELEASE} if optional_wiring else {}
+    documents = worker.render(IMAGE, **PARAMETERS, **extra)
+    runtime = configs(documents)[worker.CONFIG]
+    for deployment, cli in zip(deployments(documents), (run_health_worker, run_incident_worker), strict=True):
+        container, = deployment['spec']['template']['spec']['containers']
+        for key, delay, period, failures in (('readinessProbe', 15, 30, 3), ('livenessProbe', 120, 120, 6)):
+            probe = container[key]
+            assert probe == {'exec': {'command': ['python', '-c', worker.STATUS_EXEC,
+                container['command'][1], *container['args'], '--status']},
+                'initialDelaySeconds': delay, 'timeoutSeconds': 10,
+                'periodSeconds': period, 'failureThreshold': failures}
+            command = probe['exec']['command']
+            arguments = [runtime[a[2:-1]] if a.startswith('$(') else a for a in command[4:]]
+            seen = []
+            async def capture(args):
+                seen.append(args)
+            monkeypatch.setattr(cli, 'run', capture)
+            monkeypatch.setattr(sys, 'argv', [command[3], *arguments])
+            cli.main()
+            args, = seen
+            assert args.status is True and args.metrics_otlp_endpoint is None
+            assert args.environment == PARAMETERS['environment']
+            assert args.remote_control_database == DATABASE
+            assert args.control_database_user == 'control_writer'
+            assert args.control_database_password_file == Path('/credentials/database-password')
+            assert bool(args.prometheus_token_file) is optional_wiring
+
+
+def test_status_exec_expands_environment_without_shell_and_preserves_failure(tmp_path):
+    script = tmp_path / 'inspect.py'
+    script.write_text('import json, os, sys\n'
+                      'print(json.dumps([sys.argv[1:], os.environ["CONTROL_DATABASE_URL"], '
+                      'os.environ["SSL_CERT_FILE"]]))\n'
+                      'sys.exit(17)\n')
+    value = 'literal with spaces; $(do-not-run)'
+    result = subprocess.run([sys.executable, '-c', worker.STATUS_EXEC, str(script),
+        '--environment', '$(SENTINELOPS_ENV)', '--status'], capture_output=True, text=True,
+        env={**os.environ, 'SENTINELOPS_ENV': value, 'CONTROL_DATABASE_URL': DATABASE,
+             'SSL_CERT_FILE': '/etc/sentinelops/tls/ca-bundle.crt'})
+    assert result.returncode == 17 and not result.stderr
+    assert json.loads(result.stdout) == [['--environment', value, '--status'], DATABASE,
+                                        '/etc/sentinelops/tls/ca-bundle.crt']
+
+
+@pytest.mark.parametrize('status', [False, True])
+def test_incident_cli_pool_sizes_and_database_failure_are_preserved(status, monkeypatch):
+    documents = worker.render(IMAGE, **PARAMETERS)
+    runtime = configs(documents)[worker.CONFIG]
+    incident = deployments(documents)[1]['spec']['template']['spec']['containers'][0]
+    arguments = [runtime[a[2:-1]] if a.startswith('$(') else a for a in incident['args']]
+    if status:
+        arguments.append('--status')
+    monkeypatch.setattr(sys, 'argv', [incident['command'][1], *arguments])
+    monkeypatch.setenv('CONTROL_DATABASE_URL', DATABASE)
+    monkeypatch.setattr(SourcePolicy, 'database_options', lambda *args, **kwargs: {})
+    create_pool = AsyncMock(side_effect=ConnectionError('control DB unavailable'))
+    monkeypatch.setattr(run_incident_worker.asyncpg, 'create_pool', create_pool)
+    with pytest.raises(SystemExit, match='incident worker failed: ConnectionError'):
+        run_incident_worker.main()
+    create_pool.assert_awaited_once_with(DATABASE, min_size=1 if status else 2,
+                                         max_size=1 if status else 4, command_timeout=10)
+
+
+def test_health_status_fails_when_control_database_is_unavailable(monkeypatch):
+    documents = worker.render(IMAGE, **PARAMETERS)
+    runtime = configs(documents)[worker.CONFIG]
+    health = deployments(documents)[0]['spec']['template']['spec']['containers'][0]
+    arguments = [runtime[a[2:-1]] if a.startswith('$(') else a for a in health['args']]
+    monkeypatch.setattr(sys, 'argv', [health['command'][1], *arguments, '--status'])
+    monkeypatch.setenv('CONTROL_DATABASE_URL', DATABASE)
+    monkeypatch.setattr(SourcePolicy, 'database_options', lambda *args, **kwargs: {})
+    monkeypatch.setattr(run_health_worker.PrometheusSource, 'verify_configuration',
+                        lambda self: {'configuration_hash': 'a' * 64})
+    # Configuration I/O is already stubbed; keep this DB failure check independent
+    # of thread-pool scheduling and network access.
+    monkeypatch.setattr(run_health_worker.asyncio, 'to_thread', AsyncMock(side_effect=lambda fn: fn()))
+    create_pool = AsyncMock(side_effect=ConnectionError('control DB unavailable'))
+    monkeypatch.setattr(run_health_worker.asyncpg, 'create_pool', create_pool)
+    with pytest.raises(SystemExit, match='health worker failed: ConnectionError'):
+        run_health_worker.main()
+    assert create_pool.await_args.kwargs['min_size'] == 1
 
 
 def test_artifacts_preserve_source_path_and_models_are_read_only_on_a_separate_claim():
