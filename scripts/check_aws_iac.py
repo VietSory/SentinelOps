@@ -91,6 +91,29 @@ def _assignments(body: str) -> dict[str, list[str]]:
     return found
 
 
+def _direct_assignments(body: str) -> dict[str, list[str]]:
+    """Assignments at this block level, excluding assignments in child blocks."""
+    found: dict[str, list[str]] = {}
+    depth = 0
+    for line in body.splitlines():
+        line = line.split('#', 1)[0].split('//', 1)[0].strip()
+        if depth == 0:
+            match = re.fullmatch(r'([A-Za-z_][A-Za-z0-9_]*) = (.+?),?', line)
+            if match:
+                found.setdefault(match.group(1), []).append(match.group(2).strip())
+        depth += line.count('{') - line.count('}')
+    return found
+
+
+def _child_blocks(body: str, name: str) -> list[str]:
+    """Return the bodies of named child HCL blocks without evaluating HCL."""
+    found = []
+    pattern = re.compile(r'^\s*'+re.escape(name)+r'\s*\{', re.MULTILINE)
+    for match in pattern.finditer(body):
+        found.append(normalize(body[match.end():_close(body, match.end())]))
+    return found
+
+
 def _locals() -> dict[str, list[str]]:
     merged: dict[str, list[str]] = {}
     for path in sorted(ROOT.glob('*.tf')):  # several files may each hold a `locals` block
@@ -178,6 +201,104 @@ def assert_private_by_default(blocks: dict[str, dict]) -> list[str]:
         raise ValueError('the image registry must not carry a resource policy that could grant outside access')
     checks.append('image registry: two declared repositories, immutable, scanned, environment KMS key, untagged-only 14-day expiry, no resource policy')
     return checks
+
+
+def assert_ebs_csi_scoped(blocks: dict[str, dict], documents: dict[str, dict]) -> list[str]:
+    """Accept only the EBS CSI role, policy, trust, and add-on bindings described here."""
+    managed = [(key, block) for key, block in blocks.items()
+               if block['kind'] == 'aws_iam_role_policy_attachment'
+               and _direct_assignments(block['body']).get('role') == ['aws_iam_role.ebs_csi.name']]
+    expected_managed = {
+        'role': ['aws_iam_role.ebs_csi.name'],
+        'policy_arn': ['"arn:aws:iam::aws:policy/AmazonEBSCSIDriverPolicyV2"'],
+    }
+    if len(managed) != 1 or managed[0][0] != 'aws_iam_role_policy_attachment.ebs_csi':
+        raise ValueError('the EBS CSI role must have exactly one managed policy attachment')
+    if _direct_assignments(managed[0][1]['body']) != expected_managed:
+        raise ValueError('the EBS CSI role must use AmazonEBSCSIDriverPolicyV2, not the legacy account-wide policy')
+
+    role = blocks.get('aws_iam_role.ebs_csi')
+    if role is None or _direct_assignments(role['body']).get('assume_role_policy') != [
+            'data.aws_iam_policy_document.ebs_csi_pod_identity.json']:
+        raise ValueError('the EBS CSI role must use the scoped pod identity trust policy')
+
+    inline = [(key, block) for key, block in blocks.items()
+              if block['kind'] == 'aws_iam_role_policy'
+              and _direct_assignments(block['body']).get('role') == ['aws_iam_role.ebs_csi.id']]
+    expected_inline = {
+        'name': ['"ebs-csi-kms"'],
+        'role': ['aws_iam_role.ebs_csi.id'],
+        'policy': ['data.aws_iam_policy_document.ebs_csi_kms.json'],
+    }
+    if len(inline) != 1 or inline[0][0] != 'aws_iam_role_policy.ebs_csi_kms':
+        raise ValueError('the EBS CSI role must have exactly one inline policy')
+    if _direct_assignments(inline[0][1]['body']) != expected_inline:
+        raise ValueError('the EBS CSI inline policy must be ebs_csi_kms')
+
+    trust = documents.get('ebs_csi_pod_identity')
+    statements = [] if trust is None else _child_blocks(trust['body'], 'statement')
+    expected_trust = {
+        'effect': ['"Allow"'],
+        'actions': ['["sts:AssumeRole", "sts:TagSession"]'],
+    }
+    if len(statements) != 1 or _direct_assignments(statements[0]) != expected_trust:
+        raise ValueError('the EBS CSI pod identity trust must contain only the expected statement')
+    principals = _child_blocks(statements[0], 'principals')
+    if len(principals) != 1 or _direct_assignments(principals[0]) != {
+            'type': ['"Service"'], 'identifiers': ['["pods.eks.amazonaws.com"]']}:
+        raise ValueError('the EBS CSI pod identity trust must name only pods.eks.amazonaws.com')
+    expected_conditions = {tuple(sorted(condition)) for condition in (
+        (('test', ('"StringEquals"',)), ('variable', ('"aws:SourceAccount"',)),
+         ('values', ('[data.aws_caller_identity.current.account_id]',))),
+        (('test', ('"ArnEquals"',)), ('variable', ('"aws:SourceArn"',)),
+         ('values', ('[aws_eks_cluster.main.arn]',))),
+    )}
+    conditions = _child_blocks(statements[0], 'condition')
+    actual_conditions = {tuple(sorted((key, tuple(values))
+                                      for key, values in _direct_assignments(condition).items()))
+                         for condition in conditions}
+    if len(conditions) != 2 or actual_conditions != expected_conditions:
+        raise ValueError('the EBS CSI pod identity trust must be bound only to this cluster and account')
+
+    kms = documents.get('ebs_csi_kms')
+    statements = [] if kms is None else _child_blocks(kms['body'], 'statement')
+    expected_kms = (
+        ({
+            'sid': ['"GrantsForEbsOnly"'], 'effect': ['"Allow"'],
+            'actions': ['["kms:CreateGrant", "kms:ListGrants", "kms:RevokeGrant"]'],
+            'resources': ['[aws_kms_key.main.arn]'],
+        }, {
+            'test': ['"Bool"'], 'variable': ['"kms:GrantIsForAWSResource"'], 'values': ['["true"]'],
+        }),
+        ({
+            'sid': ['"UseKeyThroughEc2"'], 'effect': ['"Allow"'],
+            'actions': ['["kms:Encrypt", "kms:Decrypt", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:DescribeKey"]'],
+            'resources': ['[aws_kms_key.main.arn]'],
+        }, {
+            'test': ['"StringEquals"'], 'variable': ['"kms:ViaService"'],
+            'values': ['["ec2.${var.region}.amazonaws.com"]'],
+        }),
+    )
+    if len(statements) != len(expected_kms):
+        raise ValueError('the EBS CSI KMS permissions must contain exactly two statements')
+    for statement, (expected_assignments, expected_condition) in zip(statements, expected_kms):
+        conditions = _child_blocks(statement, 'condition')
+        if (_direct_assignments(statement) != expected_assignments or len(conditions) != 1
+                or _direct_assignments(conditions[0]) != expected_condition):
+            raise ValueError('the EBS CSI KMS permissions must be limited to the environment key and EC2 grants')
+
+    addon = blocks.get('aws_eks_addon.ebs_csi')
+    if addon is None or _direct_assignments(addon['body']).get('cluster_name') != ['aws_eks_cluster.main.name']:
+        raise ValueError('the EBS CSI add-on must be bound to this cluster')
+    addon_assignments = _direct_assignments(addon['body'])
+    if (addon_assignments.get('addon_name') != ['"aws-ebs-csi-driver"']
+            or addon_assignments.get('addon_version') != ['var.ebs_csi_addon_version']):
+        raise ValueError('the EBS CSI add-on must use its named, pinned version variable')
+    associations = _child_blocks(addon['body'], 'pod_identity_association')
+    if len(associations) != 1 or _direct_assignments(associations[0]) != {
+            'service_account': ['"ebs-csi-controller-sa"'], 'role_arn': ['aws_iam_role.ebs_csi.arn']}:
+        raise ValueError('the EBS CSI add-on must have exactly one controller pod identity association')
+    return ['EBS CSI role: V2 managed policy only, pod identity bound to this cluster, KMS only via EC2 grants']
 
 
 def assert_bounded_retention(blocks: dict[str, dict]) -> list[str]:
@@ -333,6 +454,7 @@ def exercise(output: Path | None) -> dict:
     checks += assert_private_by_default(blocks)
     checks += assert_bounded_retention(blocks)
     checks += assert_no_overbroad_identity(blocks, documents)
+    checks += assert_ebs_csi_scoped(blocks, documents)
     checks += assert_no_static_credentials()
     checks += assert_operator_identity(blocks)
     checks += assert_grants_no_authority()

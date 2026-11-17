@@ -216,12 +216,32 @@ revisions and audit history.
 # 1. Confirm what would be destroyed; never run destroy from memory.
 terraform -chdir=infra/aws plan -destroy
 
-# 2. Deletion protection is deliberate; drop it only for an intended teardown.
+# 2. Before removing the CSI add-on or cluster, drain dynamically provisioned EBS volumes.
+#    First scale every PVC consumer to zero, then decide whether its data needs a
+#    backup and whether the PV should be Retained or Deleted. The supplied
+#    StorageClass uses Delete; set Retain before deleting a PVC when keeping its volume.
+kubectl scale deployment/<pvc-consumer> --replicas=0
+kubectl delete pvc/<claim> -n sentinelops
+
+#    Wait for the PV to disappear and for the matching CSI-tagged EBS volume list
+#    to be empty. Repeat for every dynamic PVC before continuing.
+kubectl get pv
+aws ec2 describe-volumes \
+  --filters Name=tag:ebs.csi.aws.com/cluster,Values=true \
+            Name=tag:CSIVolumeName,Values=<pvc-name>
+
+# 3. Deletion protection is deliberate; drop it only for an intended teardown.
 terraform -chdir=infra/aws apply -var 'database_deletion_protection=false'
 
-# 3. Destroy.
+# 4. Only after the PVs and their EBS volumes are gone, remove the CSI add-on and destroy the cluster.
 terraform -chdir=infra/aws destroy
 ```
+
+For each dynamic EBS volume, the teardown order is fixed: scale PVC consumers
+to zero, decide backup / `Retain` versus `Delete`, delete the PVC, and wait until
+both its PV and the EBS volume are gone. Use `aws ec2 describe-volumes` filtered
+by the CSI tags (`ebs.csi.aws.com/cluster` and `CSIVolumeName`) to confirm the
+volume is gone; do not remove the CSI add-on or destroy the cluster first.
 
 What survives on purpose, and must be handled explicitly:
 

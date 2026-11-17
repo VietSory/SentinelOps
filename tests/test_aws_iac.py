@@ -12,7 +12,7 @@ import pytest
 
 from scripts.check_aws_iac import (
     ROOT, assert_bounded_retention, assert_grants_no_authority, assert_no_overbroad_identity,
-    assert_no_static_credentials, assert_operator_identity, assert_private_by_default,
+    assert_ebs_csi_scoped, assert_no_static_credentials, assert_operator_identity, assert_private_by_default,
     normalize, policy_documents, resources)
 
 BLOCKS = resources()
@@ -40,8 +40,8 @@ def mutate(key, old, new, blocks=None):
 def test_real_configuration_satisfies_every_guard():
     checks = (assert_private_by_default(BLOCKS) + assert_bounded_retention(BLOCKS)
               + assert_no_overbroad_identity(BLOCKS, DOCUMENTS) + assert_no_static_credentials()
-              + assert_operator_identity(BLOCKS) + assert_grants_no_authority())
-    assert len(checks) == 15
+              + assert_operator_identity(BLOCKS) + assert_grants_no_authority() + assert_ebs_csi_scoped(BLOCKS, DOCUMENTS))
+    assert len(checks) == 16
 
 
 def test_expected_surface_is_described():
@@ -353,3 +353,66 @@ def test_extra_identity_output_cannot_export_whole_client(copied, monkeypatch):
     monkeypatch.setattr(iac, 'ROOT', copied)
     with pytest.raises(ValueError, match='no credentials'):
         assert_operator_identity(iac.resources())
+
+
+def test_legacy_ebs_csi_policy_is_rejected():
+    with pytest.raises(ValueError, match='V2'):
+        assert_ebs_csi_scoped(mutate('aws_iam_role_policy_attachment.ebs_csi', 'AmazonEBSCSIDriverPolicyV2',
+                                     'service-role/AmazonEBSCSIDriverPolicy'), DOCUMENTS)
+
+
+@pytest.mark.parametrize('old', ['variable = "aws:SourceArn"', '"pods.eks.amazonaws.com"'])
+def test_ebs_csi_trust_must_stay_bound_to_the_cluster(old):
+    documents = dict(DOCUMENTS)
+    documents['ebs_csi_pod_identity'] = {**documents['ebs_csi_pod_identity'],
+                                         'body': documents['ebs_csi_pod_identity']['body'].replace(old, '"x"')}
+    with pytest.raises(ValueError, match='trust'):
+        assert_ebs_csi_scoped(BLOCKS, documents)
+
+
+@pytest.mark.parametrize('old,new', [('variable = "kms:ViaService"', 'variable = "kms:Other"'),
+                                     ('resources = [aws_kms_key.main.arn]', 'resources = ["*"]')])
+def test_ebs_csi_kms_permissions_stay_scoped(old, new):
+    documents = dict(DOCUMENTS)
+    documents['ebs_csi_kms'] = {**documents['ebs_csi_kms'], 'body': documents['ebs_csi_kms']['body'].replace(old, new)}
+    with pytest.raises(ValueError, match='KMS'):
+        assert_ebs_csi_scoped(BLOCKS, documents)
+
+
+@pytest.mark.parametrize('old,new', [
+    ('resources = [aws_kms_key.main.arn]', 'resources = [aws_kms_key.main.arn, aws_kms_key.other.arn]'),
+    ('values = ["ec2.${var.region}.amazonaws.com"]',
+     'values = ["ec2.${var.region}.amazonaws.com", "s3.${var.region}.amazonaws.com"]'),
+    ('"kms:DescribeKey"]', '"kms:DescribeKey", "kms:ListKeys"]'),
+])
+def test_ebs_csi_kms_rejects_extra_key_service_or_action(old, new):
+    documents = dict(DOCUMENTS)
+    documents['ebs_csi_kms'] = {**documents['ebs_csi_kms'],
+                                'body': documents['ebs_csi_kms']['body'].replace(old, new)}
+    with pytest.raises(ValueError, match='KMS'):
+        assert_ebs_csi_scoped(BLOCKS, documents)
+
+
+def test_ebs_csi_rejects_an_extra_inline_policy():
+    blocks = dict(BLOCKS)
+    blocks['aws_iam_role_policy.ebs_csi_extra'] = {
+        'kind': 'aws_iam_role_policy',
+        'body': ('name = "ebs-csi-extra"\nrole = aws_iam_role.ebs_csi.id\n'
+                 'policy = data.aws_iam_policy_document.ebs_csi_kms.json'),
+        'file': 'test.tf',
+    }
+    with pytest.raises(ValueError, match='exactly one inline policy'):
+        assert_ebs_csi_scoped(blocks, DOCUMENTS)
+
+
+def test_ebs_csi_rejects_a_detached_kms_policy():
+    blocks = mutate('aws_iam_role_policy.ebs_csi_kms', 'role = aws_iam_role.ebs_csi.id',
+                    'role = aws_iam_role.data_worker.id')
+    with pytest.raises(ValueError, match='inline policy'):
+        assert_ebs_csi_scoped(blocks, DOCUMENTS)
+
+
+def test_ebs_csi_requires_the_controller_pod_identity_association():
+    blocks = mutate('aws_eks_addon.ebs_csi', 'pod_identity_association {', 'association {')
+    with pytest.raises(ValueError, match='pod identity association'):
+        assert_ebs_csi_scoped(blocks, DOCUMENTS)

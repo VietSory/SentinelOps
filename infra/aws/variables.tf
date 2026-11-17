@@ -135,6 +135,17 @@ variable "cluster_public_access_cidrs" {
   }
 }
 
+variable "ebs_csi_addon_version" {
+  description = "Explicit aws-ebs-csi-driver addon version; unpinned addons drift between applies."
+  type        = string
+  default     = "v1.68.0-eksbuild.1"
+
+  validation {
+    condition     = can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+-eksbuild\\.[0-9]+$", var.ebs_csi_addon_version))
+    error_message = "ebs_csi_addon_version must be an explicit vX.Y.Z-eksbuild.N version."
+  }
+}
+
 variable "pod_identity_addon_version" {
   description = "Explicit eks-pod-identity-agent addon version; unpinned addons drift between applies."
   type        = string
