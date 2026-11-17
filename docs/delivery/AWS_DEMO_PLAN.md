@@ -34,6 +34,8 @@ Hoàn thành khi kịch bản demo chạy **3 lượt liên tiếp** trên EKS m
 | Ngân sách | $150; chưa đặt email cảnh báo |
 | Bedrock | Tắt. Giải thích dùng backend cố định dựa trên bằng chứng (chạy thật, không phải LLM) |
 | Model | `de38fc6b`, release đã được D-27 duyệt có điều kiện |
+| Người chạy phần AWS của B | **A**, owner giao ngày 2026-11-18 ("chạy hết phần của B trên aws"): đẩy ECR, triển khai stack, worker, API, tạo Secret. Sửa code vùng B vẫn qua PR để B review; mọi thao tác ghi lên AWS qua self-review và Codex `xhigh` |
+| Login runtime DB | **Ngoại lệ cho demo:** bật `LOGIN` có hạn (2026-11-25 00:00 UTC) trên chính role `control_writer`, vì `src/sentinelops/workers/source_policy.py` bắt buộc username `control_writer`; khác runbook (nhóm `NOLOGIN` + login riêng). API và worker dùng chung identity này. Teardown tắt `LOGIN` |
 
 ## 3. Kiến trúc demo
 
