@@ -60,6 +60,9 @@ resource "aws_eks_node_group" "main" {
 
   update_config {
     max_unavailable = 1
+    # MINIMAL replaces one node at a time without scaling up first, so an update
+    # never needs vCPU quota beyond the configured node count.
+    update_strategy = "MINIMAL"
   }
 
   depends_on = [
