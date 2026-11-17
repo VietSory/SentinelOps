@@ -538,3 +538,15 @@ def test_nonlocal_v2_kubernetes_capture_and_replay_bind_environment_and_original
         finally:
             await source.close()
     asyncio.run(run())
+
+
+def test_incident_worker_runs_on_the_node_holding_the_read_write_once_health_volume():
+    pods = {d['metadata']['name']: d['spec']['template']['spec'] for d in deployments(worker.render(IMAGE, **PARAMETERS))}
+    incident = pods['sentinelops-incident-worker']
+    term, = incident['affinity']['podAffinity']['requiredDuringSchedulingIgnoredDuringExecution']
+    assert term == {'labelSelector': {'matchLabels': {'app': 'sentinelops-health-worker'}},
+                    'topologyKey': 'kubernetes.io/hostname'}
+    health_labels = next(d for d in deployments(worker.render(IMAGE, **PARAMETERS))
+                         if d['metadata']['name'] == 'sentinelops-health-worker')['spec']['template']['metadata']['labels']
+    assert health_labels['app'] == 'sentinelops-health-worker'
+    assert 'affinity' not in pods['sentinelops-health-worker']

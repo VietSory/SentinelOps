@@ -200,6 +200,11 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                 'sentinelops.io/config-sha256': config_sha256,
                 'sentinelops.io/readiness-scope': 'Read-only CLI status: runtime control DB access and durable status; not processing progress'}},
                 'spec': {'serviceAccountName': worker + '-worker', 'automountServiceAccountToken': False,
+                    # The health artifact claim is EBS ReadWriteOnce: it attaches to one node. The incident
+                    # worker reads it, so it must run on the node where the health worker holds the volume.
+                    **({'affinity': {'podAffinity': {'requiredDuringSchedulingIgnoredDuringExecution': [{
+                        'labelSelector': {'matchLabels': {'app': 'sentinelops-health-worker'}},
+                        'topologyKey': 'kubernetes.io/hostname'}]}}} if incident else {}),
                     'securityContext': {'runAsNonRoot': True, 'runAsUser': 10001, 'runAsGroup': 10001,
                                         'fsGroup': 10001, 'seccompProfile': {'type': 'RuntimeDefault'}},
                     'initContainers': [{'name': 'private-credentials', 'image': image, 'imagePullPolicy': 'IfNotPresent',
