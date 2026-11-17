@@ -14,7 +14,11 @@ FaultMode = Literal["healthy", "latency", "error"]
 
 def require_fault_injection() -> None:
     enabled = os.getenv("ENABLE_FAULT_INJECTION", "false").lower() == "true"
-    sandbox = os.getenv("DEPLOYMENT_ENVIRONMENT", "local") in ("local", "test")
+    environment = os.getenv("DEPLOYMENT_ENVIRONMENT")
+    # Keep the environment allowlist fixed: operators may opt dev in, but
+    # cannot expand it to production (or an unknown/missing environment).
+    dev_opt_in = os.getenv("ALLOW_DEV_FAULT_INJECTION", "false").lower() == "true"
+    sandbox = environment in ("local", "test") or (environment == "dev" and dev_opt_in)
     if not enabled or not sandbox:
         raise HTTPException(status_code=404, detail="fault injection disabled")
 
