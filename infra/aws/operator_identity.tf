@@ -1,5 +1,7 @@
-# Optional operator-only provider. Offline configuration is not cloud authority.
+# Optional operator-only provider. Configuration validation is not cloud authority.
 # No user/password, producer client, client secret or application AWS role.
+# Teardown: ACTIVE blocks pool deletion. A must first review/apply a separate
+# change to INACTIVE while this provider remains enabled, then review destroy.
 variable "operator_identity_enabled" {
   description = "Describe an optional Cognito operator provider; enabling this does not authorize apply or user enrollment."
   type        = bool
@@ -104,4 +106,9 @@ output "operator_oidc_binding" {
     audience_claim = "client_id"
     operator_scope = "sentinelops/incidents.read"
   } : null
+}
+
+output "operator_login_domain" {
+  description = "Optional public Cognito hosted-login base URL for the external code/PKCE client; not the OIDC issuer. Null when disabled."
+  value       = var.operator_identity_enabled ? "https://${aws_cognito_user_pool_domain.operator[0].domain}.auth.${var.region}.amazoncognito.com" : null
 }

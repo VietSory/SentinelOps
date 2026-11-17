@@ -12,7 +12,8 @@ import pytest
 
 from scripts.check_aws_iac import (
     ROOT, assert_bounded_retention, assert_grants_no_authority, assert_no_overbroad_identity,
-    assert_no_static_credentials, assert_private_by_default, normalize, policy_documents, resources)
+    assert_no_static_credentials, assert_operator_identity, assert_private_by_default,
+    normalize, policy_documents, resources)
 
 BLOCKS = resources()
 DOCUMENTS = policy_documents()
@@ -39,8 +40,8 @@ def mutate(key, old, new, blocks=None):
 def test_real_configuration_satisfies_every_guard():
     checks = (assert_private_by_default(BLOCKS) + assert_bounded_retention(BLOCKS)
               + assert_no_overbroad_identity(BLOCKS, DOCUMENTS) + assert_no_static_credentials()
-              + assert_grants_no_authority())
-    assert len(checks) == 14
+              + assert_operator_identity(BLOCKS) + assert_grants_no_authority())
+    assert len(checks) == 15
 
 
 def test_expected_surface_is_described():
@@ -283,3 +284,72 @@ def test_extra_registry_resources_cannot_escape_the_reviewed_surface(kind):
     blocks = {**BLOCKS, kind + '.unreviewed': {'body': 'name = "unreviewed"'}}
     with pytest.raises(ValueError, match='declared'):
         assert_private_by_default(blocks)
+
+
+@pytest.mark.parametrize('key', [
+    'aws_cognito_user_pool.operators', 'aws_cognito_resource_server.operator_api',
+    'aws_cognito_user_pool_client.operator', 'aws_cognito_user_pool_domain.operator',
+])
+def test_operator_identity_resources_cannot_escape_disabled_gate(key):
+    with pytest.raises(ValueError, match='must be gated'):
+        assert_operator_identity(mutate(key, 'count = var.operator_identity_enabled ? 1 : 0', 'count = 1'))
+
+
+def test_operator_identity_cannot_be_enabled_by_default(copied, monkeypatch):
+    import scripts.check_aws_iac as iac
+    path = copied/'operator_identity.tf'
+    path.write_text(path.read_text().replace('default     = false', 'default     = true'))
+    monkeypatch.setattr(iac, 'ROOT', copied)
+    with pytest.raises(ValueError, match='disabled by default'):
+        assert_operator_identity(iac.resources())
+
+
+@pytest.mark.parametrize('key', [
+    'aws_cognito_user_pool_client.producer', 'aws_cognito_user.operator',
+    'aws_cognito_user_group.operators', 'aws_cognito_identity_pool.application',
+])
+def test_operator_identity_rejects_producer_clients_and_enrolled_users(key):
+    blocks = {**BLOCKS, key: {'body': 'count = var.operator_identity_enabled ? 1 : 0'}}
+    with pytest.raises(ValueError, match='no producer client or enrolled user'):
+        assert_operator_identity(blocks)
+
+
+@pytest.mark.parametrize(('old', 'new'), [
+    ('generate_secret = false', 'generate_secret = true'),
+    ('generate_secret = false', 'generate_secret = true # generate_secret = false'),
+    ('allowed_oauth_flows = ["code"]', 'allowed_oauth_flows = ["client_credentials"]'),
+    ('allowed_oauth_scopes = ["openid", "sentinelops/incidents.read"]',
+     'allowed_oauth_scopes = ["openid", "sentinelops/ingest"]'),
+])
+def test_operator_identity_rejects_secrets_and_producer_flows(old, new):
+    with pytest.raises(ValueError, match='no client secret or producer flow'):
+        assert_operator_identity(mutate('aws_cognito_user_pool_client.operator', old, new))
+
+
+@pytest.mark.parametrize(('old', 'new'), [
+    ('audience       = aws_cognito_user_pool_client.operator[0].id',
+     'audience       = aws_cognito_user_pool_client.operator[0].client_secret'),
+    ('operator_scope = "sentinelops/incidents.read"',
+     'operator_scope = "sentinelops/incidents.read"\n    password = "leak"'),
+    ('audience_claim = "client_id"', 'audience_claim = "aud"'),
+    ('  } : null', '  } : {}'),
+    ('${aws_cognito_user_pool_domain.operator[0].domain}',
+     '${aws_cognito_user_pool_client.operator[0].client_secret}'),
+])
+def test_operator_identity_binding_rejects_credentials_and_wrong_claims(copied, monkeypatch, old, new):
+    import scripts.check_aws_iac as iac
+    path = copied/'operator_identity.tf'
+    assert old in path.read_text()
+    path.write_text(path.read_text().replace(old, new))
+    monkeypatch.setattr(iac, 'ROOT', copied)
+    with pytest.raises(ValueError, match='only public identifiers'):
+        assert_operator_identity(iac.resources())
+
+
+def test_extra_identity_output_cannot_export_whole_client(copied, monkeypatch):
+    import scripts.check_aws_iac as iac
+    with (copied/'outputs.tf').open('a') as stream:
+        stream.write('\noutput "debug" {\n  value = aws_cognito_user_pool_client.operator\n}\n')
+    monkeypatch.setattr(iac, 'ROOT', copied)
+    with pytest.raises(ValueError, match='no credentials'):
+        assert_operator_identity(iac.resources())
