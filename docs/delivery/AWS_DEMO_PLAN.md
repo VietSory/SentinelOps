@@ -26,7 +26,9 @@ Hoàn thành khi kịch bản demo chạy **3 lượt liên tiếp** trên EKS m
 | Region | `ap-southeast-1` |
 | Account | account của owner; Terraform chỉ chạy trên account này (`allowed_account_ids`) |
 | Người apply | **A**, owner giao cho lần demo này. A không sửa IaC của B; sửa thì gửi PR để B review |
-| Cluster | EKS 1.34, 2 node `t3.large`, tối đa 2 (quota account 5 vCPU, không xin tăng) |
+| Gói AWS | **Free plan**, owner chọn giữ (2026-11-17). EC2 chỉ nhận loại máy free-tier; RDS từ chối `db.t4g.medium` (`FreeTierRestrictionError`). Hết credit thì account bị khóa |
+| Cluster | EKS 1.34, 2 node `m7i-flex.large` (2 vCPU, 8 GB), tối đa 2 (quota 5 vCPU, không xin tăng); cập nhật node kiểu `MINIMAL` |
+| Control DB | RDS PostgreSQL `db.t4g.micro`, một AZ, 20 GB, không tự mở rộng (biến `database_multi_az`, `database_storage_autoscaling` của PR #68) |
 | Truy cập cluster | Endpoint public chỉ cho IP `/32` của người vận hành; access entry tạo bằng CLI ngoài Terraform |
 | State Terraform | Local trên máy A, sao lưu vào bucket artifacts dưới `terraform-state/` |
 | Ngân sách | $150; chưa đặt email cảnh báo |
@@ -38,7 +40,7 @@ Hoàn thành khi kịch bản demo chạy **3 lượt liên tiếp** trên EKS m
 - **Trong EKS:** Checkout, Payment, Inventory, PostgreSQL commerce, OTel Collector,
   **Prometheus trong cluster**, Jaeger; API, health worker, incident worker dùng image
   `control-plane` (đã có script worker và thư viện ML).
-- **Ngoài EKS (Terraform):** RDS control PostgreSQL, S3 artifacts/model store, ECR, KMS, IAM.
+- **Ngoài EKS (Terraform):** RDS control PostgreSQL (micro, một AZ), S3 artifacts/model store, ECR, KMS, IAM.
 - **Đường số liệu:** dịch vụ → Collector → Prometheus → health worker, đúng profile
   `prometheus-increase-60s-5s/v2` mà model và parity đã dùng. Đường CloudWatch/X-Ray chưa
   từng chạy thật nên để ngoài demo.
@@ -53,7 +55,8 @@ Hoàn thành khi kịch bản demo chạy **3 lượt liên tiếp** trên EKS m
 | 4 | Kiểm tra bằng chứng rollback và audit | Rollback thật trên EKS; operator duyệt known-good trước | `recovered` và `telemetry_verified`; một lượt failed-verify chuyển `escalated` |
 | 5 | Viết kịch bản demo và con số kỳ vọng | Tập dượt 3 lượt, khóa phiên bản | 3 lượt liên tiếp không sửa tay |
 
-Hủy hạ tầng ngay sau buổi demo theo [AWS_BASELINE § Teardown](../runbooks/AWS_BASELINE.md#teardown).
+Hủy hạ tầng ngay sau buổi demo theo [AWS_BASELINE § Teardown](../runbooks/AWS_BASELINE.md#teardown)
+và checklist ở mục 8.
 
 ## 5. Quyết định còn mở
 
@@ -76,6 +79,24 @@ Hủy hạ tầng ngay sau buổi demo theo [AWS_BASELINE § Teardown](../runboo
 | Rủi ro | Xử lý |
 | --- | --- |
 | Hết bộ nhớ trên 2 node | Ước tính toàn bộ stack khoảng 4 GB trên khoảng 14 GB dùng được; giảm replica nếu cần |
+| RDS micro (1 GB RAM) chậm hoặc hết kết nối | Demo chỉ có một API và hai worker; theo dõi `db_connections` |
+| Hết credit của Free plan giữa tuần | Khoảng $10–12/ngày (EKS, 2 NAT, 2 node, RDS micro); kiểm tra credit còn lại mỗi sáng trong Billing |
 | Parity trên EKS không đạt ngay | Ngày 2–3 có dư; demo không phụ thuộc parity đạt ngưỡng |
 | Rollback trên EKS chưa từng chạy | Dành trọn ngày 4 |
 | Trễ quá ngày 5 | Lùi theo bậc: trọn vòng trên EKS → phát hiện tới giải thích trên EKS, rollback trên cluster local → trọn vòng trên local |
+
+## 8. Checklist dọn dẹp sau demo
+
+Mỗi bước tạo/xóa tài nguyên AWS qua self-review và Codex review trước khi chạy. Từ review Codex
+2026-11-17 (PR #68), `destroy` sẽ bị chặn hoặc để lại tài nguyên tính tiền nếu bỏ qua các bước sau:
+
+| Bước | Lý do |
+| --- | --- |
+| Owner chốt: **giữ hay hủy dữ liệu đã mã hóa** | Snapshot RDS cuối, bucket artifacts và bản sao state cùng dùng KMS key chính. `destroy` đưa key vào hàng chờ xóa: dữ liệu không đọc được ngay, mất hẳn sau 30 ngày. Giữ dữ liệu thì phải giữ key |
+| Thu hồi access entry `kubectl` của A và B (`access-entry.sh --revoke`) | Tạo ngoài Terraform nên `destroy` không theo dõi |
+| Xóa image trong 2 repo ECR | Repo không có `force_delete`; còn image thì `destroy` lỗi |
+| Làm rỗng bucket artifacts, kể cả mọi version | Bucket versioned, không có `force_destroy` |
+| Apply `database_deletion_protection = false` (plan riêng, review) | RDS đang bật chống xóa |
+| `terraform destroy`, rồi kiểm tra lại không còn NAT, EIP, node, RDS | Các tài nguyên tính tiền theo giờ |
+| Xóa log group `/aws/rds/instance/sentinelops-control-dev/postgresql` | RDS tự tạo, Terraform không quản lý |
+| Xóa snapshot RDS cuối nếu owner chọn hủy dữ liệu | Snapshot tính tiền lưu trữ |
