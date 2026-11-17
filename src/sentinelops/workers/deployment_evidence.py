@@ -27,7 +27,8 @@ def _source(profile, identity, policy):
     if (stable_id({'root':str(root)}) != identity['artifact_root_hash']
         or stable_id(policy) != identity['policy_sha256']):
         raise ValueError('deployment evidence health root or policy differs from accepted source')
-    return SimpleNamespace(stream_id=stable_id(identity),policy=policy,store=ArtifactStore(root))
+    return SimpleNamespace(stream_id=stable_id(identity),policy=policy,store=ArtifactStore(root),
+                           environment=identity['environment'])
 
 
 def _matching(store, reference, *, source, target, inventory, onset, bucket_end, as_of):

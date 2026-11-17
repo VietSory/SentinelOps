@@ -139,3 +139,53 @@ def test_change_interval_starts_before_the_baseline_api_read_not_at_its_receipt(
         assert verified['change_interval']==(beginning,beginning+timedelta(seconds=25))
         assert verified['available_at']==clock[0]
     asyncio.run(run())
+
+
+def _observed(tmp_path, environment):
+    async def run():
+        _, source, kube, clock = image_setup(tmp_path)
+        review = DeploymentChangeReview(source, kube, ArtifactStore(tmp_path/'changes'), TARGET,
+                                        environment=environment, clock=lambda: clock[0])
+        opened = await review.open()
+        clock[0] += timedelta(seconds=20)
+        change(kube)
+        return review, source, clock, await review.complete(opened['baseline_ref'])
+    return asyncio.run(run())
+
+
+def test_non_local_environment_is_recorded_and_bound_to_the_accepted_health_stream(tmp_path):
+    from types import SimpleNamespace
+    review, source, clock, result = _observed(tmp_path, 'aws-dev')
+    event = review.store.read(result['change_ref'])
+    assert event['environment'] == 'aws-dev'
+    assert review.store.read(event['baseline_ref'])['environment'] == 'aws-dev'
+    validate_payload('payment-deployment-change.schema.json', event)
+    remote = SimpleNamespace(stream_id=source.stream_id, policy=source.policy, store=source.store, environment='aws-dev')
+    verify_change(review.store, result['change_ref'], source=remote, target=TARGET, as_of=clock[0])
+    # A local health stream must never accept a change observed for another environment.
+    with pytest.raises(Blocked, match='source-or-target-mismatch'):
+        verify_change(review.store, result['change_ref'], source=source, target=TARGET, as_of=clock[0])
+
+
+def test_local_change_is_never_evidence_for_a_non_local_health_stream(tmp_path):
+    from types import SimpleNamespace
+    review, source, clock, result = _observed(tmp_path, 'local')
+    assert review.store.read(result['change_ref'])['environment'] == 'local'
+    remote = SimpleNamespace(stream_id=source.stream_id, policy=source.policy, store=source.store, environment='aws-dev')
+    with pytest.raises(Blocked, match='source-or-target-mismatch'):
+        verify_change(review.store, result['change_ref'], source=remote, target=TARGET, as_of=clock[0])
+
+
+@pytest.mark.parametrize('environment', ['', 'AWS', 'aws dev', None, 'x'*64])
+def test_environment_must_be_an_explicit_label(tmp_path, environment):
+    _, source, kube, clock = image_setup(tmp_path)
+    with pytest.raises(ValueError, match='explicit health stream environment'):
+        DeploymentChangeReview(source, kube, ArtifactStore(tmp_path/'changes'), TARGET, environment=environment)
+
+
+@pytest.mark.parametrize('environment', ['', 'AWS', 'aws dev', 'x'*64])
+def test_schema_rejects_an_unlabelled_environment(tmp_path, environment):
+    review, _, _, result = _observed(tmp_path, 'local')
+    event = {**review.store.read(result['change_ref']), 'environment': environment}
+    with pytest.raises(ValueError):
+        validate_payload('payment-deployment-change.schema.json', event)

@@ -10,6 +10,7 @@ import pytest
 from sentinelops.remediation.authority import NativeH4Authority, qualify
 from sentinelops.remediation.domain import Blocked
 from sentinelops.telemetry.core import stable_id, timestamp
+from sentinelops.telemetry.deployment_changes import DeploymentChangeReview
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers.deployment_evidence import (
     DeploymentIncidentEvidence, add_deployment_support, verify_deployment_evidence,
@@ -27,6 +28,8 @@ def test_observed_change_joins_exact_source_and_preserves_interval_in_rca(tmp_pa
         worker=HealthWorker(None,source.store,source.policy,endpoint='http://localhost:9090',
                            environment='fixture',configuration_hash='a'*64)
         assert worker.stream_id==source.stream_id
+        # The observer records the same explicit environment as the accepted health stream.
+        review=DeploymentChangeReview(source,kube,review.store,TARGET,environment='fixture',clock=lambda:clock[0])
         clock[0]=END-timedelta(seconds=90)
         baseline=await review.open();clock[0]+=timedelta(seconds=20);change(kube)
         event=await review.complete(baseline['baseline_ref'])

@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
+import re
 
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.remediation.domain import Blocked, Policy, fresh, image_digest
@@ -23,8 +25,20 @@ def observer_boot():
     return stable_id(Path('/proc/sys/kernel/random/boot_id').read_text().strip())
 
 
-def source_scope(source, target):
-    return {"target": asdict(target), "environment": "local", "health_stream_id": source.stream_id,
+ENVIRONMENT = re.compile(r"[a-z][a-z0-9-]{0,62}")
+
+
+def environment_of(source):
+    """The accepted health stream's environment; sources without one are the original local profile."""
+    value = getattr(source, 'environment', 'local')
+    if not isinstance(value, str) or not ENVIRONMENT.fullmatch(value):
+        raise ValueError('deployment change environment must be an explicit health stream environment')
+    return value
+
+
+def source_scope(source, target, environment=None):
+    environment = environment_of(source if environment is None else SimpleNamespace(environment=environment))
+    return {"target": asdict(target), "environment": environment, "health_stream_id": source.stream_id,
             "health_policy_sha256": stable_id(source.policy),
             "source_root_sha256": stable_id({"root": str(source.store.root)})}
 
@@ -49,11 +63,11 @@ def verify_change(store, reference, *, source, target, as_of):
     return _verify_event(store, store.read(reference), reference, source=source, target=target, as_of=as_of)
 
 
-def _verify_event(store, event, reference, *, source, target, as_of):
+def _verify_event(store, event, reference, *, source, target, as_of, environment=None):
     validate_payload('payment-deployment-change.schema.json', event)
     baseline = store.read(event['baseline_ref'])
     validate_payload('payment-deployment-baseline.schema.json', baseline)
-    expected = source_scope(source, target)
+    expected = source_scope(source, target, environment)
     if any(event[k] != v or baseline[k] != v for k, v in expected.items()):
         raise Blocked('deployment-change-source-or-target-mismatch')
     if (event['before_ref'] != baseline['before_ref'] or event['opened_at'] != baseline['opened_at']
@@ -80,7 +94,11 @@ def _verify_event(store, event, reference, *, source, target, as_of):
 
 class DeploymentChangeReview:
     """Read-only observer; an original source and a separate evidence store."""
-    def __init__(self, source, kubernetes, store, target, *, clock=lambda: datetime.now(timezone.utc)):
+    def __init__(self, source, kubernetes, store, target, *, environment='local',
+                 clock=lambda: datetime.now(timezone.utc)):
+        # The environment is explicit configuration, never inferred from names. Verification binds
+        # it to the accepted health stream identity, so a mismatch fails closed downstream.
+        self.environment = environment_of(SimpleNamespace(environment=environment))
         original = source.store.root
         if store.root == original or store.root in original.parents or original in store.root.parents:
             raise ValueError('deployment evidence store must be separate from original health source')
@@ -103,7 +121,7 @@ class DeploymentChangeReview:
         if (before.observed_generation != before.generation
             or not before.ready_for(before.image, prior_generation=0, old_pods=())):
             raise Blocked('deployment-change-baseline-not-settled')
-        record = {'record_version': 'payment-deployment-baseline/v1', **source_scope(self.source, self.target),
+        record = {'record_version': 'payment-deployment-baseline/v1', **source_scope(self.source, self.target, self.environment),
                   'observer_boot_sha256': observer_boot(), 'before_ref': self._write_snapshot(before),
                   'opened_at': timestamp(started), 'recorded_at': timestamp(ended), **FLAGS}
         validate_payload('payment-deployment-baseline.schema.json', record)
@@ -113,7 +131,7 @@ class DeploymentChangeReview:
     async def complete(self, baseline_ref):
         record = self.store.read(baseline_ref)
         validate_payload('payment-deployment-baseline.schema.json', record)
-        expected = source_scope(self.source, self.target)
+        expected = source_scope(self.source, self.target, self.environment)
         if any(record[k] != v for k, v in expected.items()) or record['observer_boot_sha256'] != observer_boot():
             raise Blocked('deployment-change-source-target-or-host-mismatch')
         started = self.clock()
@@ -139,7 +157,8 @@ class DeploymentChangeReview:
         # rejected observations remain diagnostic evidence, never approval.
         validate_payload('payment-deployment-change.schema.json', event)
         ref = 'artifact://manifests/' + stable_id(event) + '.json'
-        verified = _verify_event(self.store, event, ref, source=self.source, target=self.target, as_of=ended)
+        verified = _verify_event(self.store, event, ref, source=self.source, target=self.target, as_of=ended,
+                                 environment=self.environment)
         if self.store.write('manifests', event) != ref:
             raise ValueError('deployment event content identity mismatch')
         return {'status': 'CHANGE_OBSERVED', 'change_ref': ref,

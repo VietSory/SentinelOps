@@ -28,7 +28,9 @@
       "$ref": "https://sentinelops.local/contracts/payment-image-review.schema.json#/properties/target"
     },
     "environment": {
-      "const": "local"
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$",
+      "description": "Environment of the accepted health stream that observed the change; equals that stream's identity environment"
     },
     "health_stream_id": {
       "type": "string",
