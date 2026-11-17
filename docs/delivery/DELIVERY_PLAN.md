@@ -236,7 +236,9 @@ cho từng sửa CSS. Dùng CI đúng SHA ở mốc integration.
   blocked khi H4 thiếu qualification. Không dùng explanation làm authorization.
 - **B4:** chỉ deploy/activate khi có quyền cloud/budget/region và H1/H3 đủ gate.
   Lệnh apply AWS, mở final holdout và activation model không được cấp quyền chỉ
-  bởi checklist này. Phạm vi hiện tại vẫn local; không provision AWS.
+  bởi checklist này. Từ 2026-11-17 owner cho phép provision AWS cho một buổi demo,
+  A chạy apply: xem [kế hoạch demo AWS 5 ngày](AWS_DEMO_PLAN.md). Model activation
+  và final holdout vẫn không được cấp quyền bởi kế hoạch đó.
 
 ### Thứ tự commit dự kiến
 
