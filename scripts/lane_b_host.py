@@ -209,6 +209,29 @@ def health_source_profile():
     return None
 
 
+def validate_action_reader(reader, port=15433, *, sandbox=None, container=None):
+    """Pin a reader DSN to Compose B or one explicitly owned G6 DB binding."""
+    parsed = urlsplit(reader)
+    if (not str(port).isdecimal() or not 1 <= int(port) <= 65535
+        or parsed.scheme not in ('postgres', 'postgresql') or parsed.hostname != '127.0.0.1'
+        or parsed.port != int(port) or parsed.path != '/sentinelops_control' or parsed.query or parsed.fragment
+        or not parsed.username or not parsed.password):
+        raise HostGuard('action reader must select the explicit loopback control database')
+    if sandbox is None:
+        if int(port) != 15433 or container is not None:
+            raise HostGuard('non-Compose reader port requires owned trial container')
+        lane_b.require_owned_containers()
+    else:
+        if not container:
+            raise HostGuard('owned trial container required')
+        label = sandbox.docker('inspect', '--format', '{{index .Config.Labels "sentinelops.g6-trial"}}',
+                               container).decode().strip()
+        binding = sandbox.docker('port', container, '5432/tcp').decode().strip()
+        if label != sandbox.name or binding != f'127.0.0.1:{int(port)}':
+            raise HostGuard('trial reader database ownership or binding differs')
+    return reader
+
+
 def start(role, identifier, stream=None, model_store=None, model_ref=None, *, epoch=None, source_profile=None):
     health_root, _ = lane_b.stream_roots(epoch)
     with locked() as home:
@@ -234,12 +257,8 @@ def start(role, identifier, stream=None, model_store=None, model_ref=None, *, ep
             with socket.socket() as reservation:
                 reservation.bind(('127.0.0.1', 18000))  # Never stop/adopt a foreground or foreign listener.
         if role == 'api' and os.getenv('SENTINELOPS_ACTION_READ_DATABASE_URL'):
-            reader = os.environ['SENTINELOPS_ACTION_READ_DATABASE_URL'];parsed = urlsplit(reader)
-            if (parsed.scheme not in ('postgres', 'postgresql') or parsed.hostname != '127.0.0.1'
-                or parsed.port != 15433 or parsed.path != '/sentinelops_control' or parsed.query or parsed.fragment
-                or not parsed.username or not parsed.password):
-                raise HostGuard('managed action reader must select B control database')
-            selected['SENTINELOPS_ACTION_READ_DATABASE_URL'] = reader
+            selected['SENTINELOPS_ACTION_READ_DATABASE_URL'] = validate_action_reader(
+                os.environ['SENTINELOPS_ACTION_READ_DATABASE_URL'])
         folder = home / uuid4().hex;folder.mkdir(mode=0o700)
         session = folder / 'session.json'
         payload = {'role': role, 'release_id': identifier, 'release_manifest_sha256': digest(root / 'release.json'),

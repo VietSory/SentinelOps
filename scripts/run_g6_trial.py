@@ -30,6 +30,8 @@ from pathlib import Path
 import secrets
 import shutil
 import signal
+import socket
+import sys
 import subprocess
 from uuid import uuid4
 
@@ -40,6 +42,7 @@ import yaml
 from scripts.check_kubernetes_testbed import BusinessSandbox
 from scripts.check_rollback_kubernetes import PROJECT, private_file
 from scripts.kubernetes_testbed import NAMESPACE, SERVICES
+from scripts.lane_b_host import validate_action_reader
 from scripts.run_s2_h4 import (LOCAL_CONTROL_MIGRATIONS, PAYMENT, TOKEN_DURATION, bad_image, ceil_minute, clean_commit, clock, connect_pool,
                                health_profile, healthy_history_minutes,
                                deploy, drive, emit, wait_ready)
@@ -114,6 +117,108 @@ async def action_dsn(port, bootstrap_password):
     return f'postgresql://g6_action:{runtime}@127.0.0.1:{port}/sentinelops_control'
 
 
+DEMO_RECEIPT = {'demo_mode': True, 'run_purpose': 'demo', 'q09_eligible': False, 'G6_accepted': False}
+
+
+async def demo_reader_dsn(port, bootstrap_password):
+    """A distinct SELECT-only login; never grant API membership in a writer role."""
+    for _ in range(60):
+        try:
+            conn = await asyncpg.connect(
+                f'postgresql://postgres:{bootstrap_password}@127.0.0.1:{port}/sentinelops_control', timeout=2)
+            break
+        except (OSError, TimeoutError, asyncpg.CannotConnectNowError, asyncpg.InvalidPasswordError):
+            await asyncio.sleep(.5)
+    else:
+        raise TimeoutError('private control database not ready')
+    try:
+        password = secrets.token_urlsafe(32)
+        statement = await conn.fetchval("SELECT format('CREATE ROLE g6_api_reader LOGIN PASSWORD %L "
+            "IN ROLE control_action_reader NOSUPERUSER NOCREATEDB NOCREATEROLE', $1::text)", password)
+        await conn.execute(statement)
+        await conn.execute('GRANT USAGE ON SCHEMA sentinel_control TO g6_api_reader')
+        await conn.execute('GRANT SELECT ON ALL TABLES IN SCHEMA sentinel_control TO g6_api_reader')
+    finally:
+        await conn.close()
+    return f'postgresql://g6_api_reader:{password}@127.0.0.1:{port}/sentinelops_control'
+
+
+def demo_api_environment(reader, args, token):
+    # Do not inherit producer/writer credentials, demo fixtures or OIDC settings.
+    env = {k: v for k, v in os.environ.items() if not k.startswith('SENTINELOPS_')
+           and k not in ('CONTROL_DATABASE_URL', 'DATABASE_URL', 'COMMERCE_EVIDENCE_DATABASE_URL')}
+    env.update(CONTROL_DATABASE_URL=reader, SENTINELOPS_ACTION_READ_DATABASE_URL=reader,
+               SENTINELOPS_ENV='local', SENTINELOPS_ENABLE_DEMO='false',
+               SENTINELOPS_OPERATOR_TOKEN=token, SENTINELOPS_MODEL_STORE=str(args.model_store.resolve()),
+               SENTINELOPS_MODEL_RELEASE_REF=args.model_release_ref)
+    return env
+
+
+async def start_demo_api(sandbox, port, password, container, args):
+    validate_action_reader(f'postgresql://g6_api_reader:pending@127.0.0.1:{port}/sentinelops_control',
+                           port, sandbox=sandbox, container=container)
+    reader = await demo_reader_dsn(port, password)
+    token = secrets.token_urlsafe(48)
+    private_file(sandbox.root / 'operator-token', (token + '\n').encode())
+    with socket.socket() as listener, (sandbox.root / 'demo-api.log').open('x') as log:
+        listener.bind(('127.0.0.1', args.demo_api_port))
+        listener.listen(128)
+        api_port = listener.getsockname()[1]
+        process = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'sentinelops.main:app',
+                                    '--fd', str(listener.fileno())], pass_fds=(listener.fileno(),),
+                                   env=demo_api_environment(reader, args, token), cwd=PROJECT,
+                                   stdout=log, stderr=log)
+    try:
+        async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
+            for _ in range(60):
+                if process.poll() is not None:
+                    raise RuntimeError('demo API stopped; inspect private demo-api.log')
+                try:
+                    response = await client.get(f'http://127.0.0.1:{api_port}/ready/actions',
+                                                headers={'Authorization': 'Bearer ' + token})
+                    if response.status_code == 200:
+                        break
+                except httpx.HTTPError:
+                    pass
+                await asyncio.sleep(1)
+            else:
+                raise TimeoutError('demo action reader did not become ready')
+    except BaseException:
+        stop_demo_api(process)
+        raise
+    emit('demo-api-ready', ui=f'http://127.0.0.1:{api_port}/ui/',
+         token_file=str(sandbox.root / 'operator-token'), q09_eligible=False)
+    return process
+
+
+def stop_demo_api(process):
+    if process is not None and process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
+async def keep_demo_alive(root, report, require_alive):
+    initial = json.loads((root / 'verification.json').read_text()) if (root / 'verification.json').exists() else {}
+    report = {**initial, **report, **DEMO_RECEIPT}
+    (root / 'verification.json').write_text(json.dumps(report, indent=2, default=str) + '\n')
+    emit('demo-awaiting-operator-stop', report=str(root / 'verification.json'), q09_eligible=False)
+    while True:
+        try:
+            require_alive()
+        except Exception as exc:
+            # After the trial, preserve read access even if traffic/consumer fail.
+            # Safety checks before every trial side effect remain strict.
+            if 'demo_background_failure' not in report:
+                report['demo_background_failure'] = type(exc).__name__
+                (root / 'verification.json').write_text(json.dumps(report, indent=2, default=str) + '\n')
+                emit('demo-background-stopped', error_type=type(exc).__name__, q09_eligible=False)
+        await asyncio.sleep(1)
+
+
 def reissue(sandbox, account, filename):
     token = sandbox.kubectl('-n', NAMESPACE, 'create', 'token', account, '--duration=' + TOKEN_DURATION).strip()
     path = sandbox.root / filename
@@ -179,7 +284,7 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
     pending_audit = root / PENDING_AUDIT
     urls = {s: sandbox.forward(s, 8000) for s in SERVICES}
     prometheus, jaeger = sandbox.forward('prometheus', 9090), sandbox.forward('jaeger', 16686)
-    report = {'phases': []}
+    report = {'phases': [], **(DEMO_RECEIPT if getattr(args, 'demo_keep_alive', False) else {})}
     async with httpx.AsyncClient(timeout=8, trust_env=False) as client:
         for url in (*[u + '/ready' for u in urls.values()], prometheus + '/-/ready', jaeger + '/api/v3/services'):
             await wait_ready(client, url)
@@ -242,6 +347,9 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                 report['action'] = action
 
             def require_alive():
+                api = getattr(args, '_demo_api_process', None)
+                if api is not None and api.poll() is not None:
+                    raise RuntimeError('demo API stopped; inspect private demo-api.log')
                 for name, task in (('consumer', consumer), ('traffic', traffic)):
                     if task.done():
                         exc = task.exception() if not task.cancelled() else None
@@ -374,14 +482,21 @@ async def trial(sandbox, dsn, port, bootstrap_password, bad, registry, args):
                 if not isinstance(exc, Exception):
                     raise
             finally:
-                stop.set()
-                failures = {}
-                for name, task in (('traffic', traffic), ('consumer', consumer)):
-                    if task.done() and not task.cancelled() and task.exception() is not None:
-                        failures[name] = type(task.exception()).__name__
-                    task.cancel()
-                await asyncio.gather(traffic, consumer, return_exceptions=True)
-                report['background_task_failures'] = failures
+                try:
+                    if getattr(args, 'demo_keep_alive', False) and report.get('failure', {}).get('error_type') not in ('CancelledError', 'KeyboardInterrupt'):
+                        report.update(health_stream_id=health.stream_id, consumer_id=journal.consumer_id,
+                                      model_release_ref=args.model_release_ref,
+                                      scenario=FAILED_VERIFY_SCENARIO if args.failed_verify_scenario else 'golden-path')
+                        await keep_demo_alive(root, report, require_alive)
+                finally:
+                    stop.set()
+                    failures = {}
+                    for name, task in (('traffic', traffic), ('consumer', consumer)):
+                        if task.done() and not task.cancelled() and task.exception() is not None:
+                            failures[name] = type(task.exception()).__name__
+                        task.cancel()
+                    await asyncio.gather(traffic, consumer, return_exceptions=True)
+                    report['background_task_failures'] = failures
             report.update(health_stream_id=health.stream_id, consumer_id=journal.consumer_id)
             return report
         finally:
@@ -405,7 +520,12 @@ def main():
     parser.add_argument('--failed-verify-scenario', action='store_true',
                         help='Negative Q-09 trial: after dispatch, scale the in-cluster commerce PostgreSQL to zero; '
                              'expected outcome escalated with a complete audit')
+    parser.add_argument('--demo-keep-alive', action='store_true',
+                        help='Demo only, excluded from Q-09; keep API/workers alive until operator stop; retain sandbox')
+    parser.add_argument('--demo-api-port', type=int, default=18000)
     args = parser.parse_args()
+    if not 0 <= args.demo_api_port <= 65535:
+        parser.error('demo API port must be between 0 and 65535')
     commit = clean_commit()
     registry = ModelRegistry.load(ArtifactStore(args.model_store), args.model_release_ref)
     if not registry.available:
@@ -419,8 +539,13 @@ def main():
     if not private:
         raise SystemExit('output must be on a permission-enforcing filesystem (not /mnt/<drive> on WSL): '
                          'private credential files cannot be created there')
+    if args.demo_keep_alive:
+        (root / 'DEMO_ONLY').write_text('Excluded from Q-09\n')
+        (root / 'verification.json').write_text(json.dumps({**DEMO_RECEIPT, 'action_outcome': 'DEMO_STARTED',
+            'model_release_ref': args.model_release_ref, 'source_commit': commit}) + '\n')
     sandbox = BusinessSandbox(root, args.kind)
     owned = []
+    api_process = None
     emit('sandbox-owned', cluster=sandbox.name, commit=commit, policy_enabled=args.enable_rollback_policy)
 
     def terminate(signum, frame):
@@ -431,12 +556,18 @@ def main():
         bad = bad_image(sandbox, images['application'])
         port, password = control_db(sandbox, images['postgres'], owned)
         dsn = WRITER_DSN_PREFIX + port + '/sentinelops_control'
-        report = asyncio.run(trial(sandbox, dsn, port, password, bad, registry, args))
+        async def run():
+            nonlocal api_process
+            if args.demo_keep_alive:
+                api_process = await start_demo_api(sandbox, port, password, owned[0], args)
+                args._demo_api_process = api_process
+            return await trial(sandbox, dsn, port, password, bad, registry, args)
+        report = asyncio.run(run())
         result = {'version': 'g6-local-trial/v1', 'source_commit': commit, 'healthy_image': images['application'],
                   'bad_image': bad, 'model_release_ref': args.model_release_ref, **report,
                   'policy_enabled': args.enable_rollback_policy,
                   'scenario': FAILED_VERIFY_SCENARIO if args.failed_verify_scenario else 'golden-path',
-                  'G6_accepted': False}
+                  'G6_accepted': False, **(DEMO_RECEIPT if args.demo_keep_alive else {})}
         (root / 'verification.json').write_text(json.dumps(result, indent=2, default=str) + '\n')
         emit('g6-trial-complete', action_outcome=report.get('action_outcome'), report=str(root / 'verification.json'))
         if report.get('failure'):
@@ -447,8 +578,12 @@ def main():
         emit('command-failed', operation=Path(exc.cmd[0]).name, code=exc.returncode)
         raise
     finally:
+        stop_demo_api(api_process)
         try:
-            if owned and (root / PENDING_AUDIT).exists():
+            if args.demo_keep_alive:
+                emit('demo-sandbox-retained', cluster=sandbox.name, container=owned[0] if owned else None,
+                     note='operator owns explicit cleanup; this demo is excluded from Q-09')
+            elif owned and (root / PENDING_AUDIT).exists():
                 emit('control-db-retained-for-audit', container=owned[0],
                      note='an action intent may exist that was not exported; inspect, then remove manually')
             elif owned:
@@ -456,8 +591,9 @@ def main():
                 if label == sandbox.name:
                     sandbox.docker('rm', '-f', '-v', owned[0])
         finally:
-            sandbox.cleanup()
-            emit('owned-sandbox-cleaned', cluster=sandbox.name)
+            if not args.demo_keep_alive:
+                sandbox.cleanup()
+                emit('owned-sandbox-cleaned', cluster=sandbox.name)
 
 
 if __name__ == '__main__':
