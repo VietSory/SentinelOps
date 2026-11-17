@@ -8,22 +8,19 @@ import os
 from pathlib import Path
 import signal
 import sys
-from urllib.parse import urlparse
 
 import asyncpg
 import httpx
 
 from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE, SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
-from sentinelops.workers.health import DATABASE_SHUTDOWN_ERRORS, DATABASE_TIMEOUT_SECONDS, HealthWorker, local_endpoint
+from sentinelops.workers.health import DATABASE_SHUTDOWN_ERRORS, DATABASE_TIMEOUT_SECONDS, HealthWorker
+from sentinelops.workers.source_policy import SourcePolicy, source_policy_arguments
 from sentinelops.workers.metrics import WorkerMetrics
 
 
 async def run(args):
-    parsed = urlparse(os.environ.get("CONTROL_DATABASE_URL", ""))
-    if (parsed.scheme not in ("postgres", "postgresql") or parsed.hostname not in ("127.0.0.1", "localhost")
-        or parsed.username != "control_writer" or parsed.path != "/sentinelops_control"):
-        raise ValueError("health worker requires the dedicated loopback control_writer database")
+    SourcePolicy.from_args(args).database_options(os.environ.get("CONTROL_DATABASE_URL", ""), worker="health")
     metrics_endpoint = getattr(args, "metrics_otlp_endpoint", None)
     if args.status and metrics_endpoint:
         raise ValueError("read-only worker status cannot start a metrics exporter")
@@ -41,8 +38,12 @@ async def run(args):
 
 
 async def run_worker(args, metrics):
-    endpoint = local_endpoint(args.prometheus)
+    selected = SourcePolicy.from_args(args)
+    database_options = selected.database_options(os.environ.get("CONTROL_DATABASE_URL", ""), worker="health")
+    endpoint = selected.prometheus(args.prometheus)
+    headers = selected.headers()
     source = PrometheusSource(endpoint)
+    if headers: source.client.headers.update(headers)
     source.client.timeout = httpx.Timeout(1.)
     try:
         try:
@@ -54,7 +55,8 @@ async def run_worker(args, metrics):
         source.close()
     try:
         pool = await asyncpg.create_pool(os.environ["CONTROL_DATABASE_URL"], min_size=1, max_size=4,
-                                        command_timeout=DATABASE_TIMEOUT_SECONDS, timeout=DATABASE_TIMEOUT_SECONDS)
+                                        command_timeout=DATABASE_TIMEOUT_SECONDS, timeout=DATABASE_TIMEOUT_SECONDS,
+                                        **database_options)
     except Exception:
         if metrics: metrics.error("database")
         raise
@@ -68,7 +70,7 @@ async def run_worker(args, metrics):
         worker = HealthWorker(pool, ArtifactStore(args.store), json.loads(args.policy.read_text()),
                               endpoint=endpoint, environment=args.environment,
                               configuration_hash=configuration["configuration_hash"],
-                              source_profile=getattr(args, "source_profile", SOURCE_PROFILE))
+                              source_profile=getattr(args, "source_profile", SOURCE_PROFILE), source_policy=selected)
         await worker.check_ready()
         ready = True
         if args.status:
@@ -121,6 +123,7 @@ async def run_worker(args, metrics):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    source_policy_arguments(parser)
     parser.add_argument("--store", type=Path, required=True)
     parser.add_argument("--policy", type=Path, default=Path("configs/slo_health_policy.json"))
     parser.add_argument("--environment", default="local")
