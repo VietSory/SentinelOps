@@ -95,6 +95,7 @@ Mỗi bước tạo/xóa tài nguyên AWS qua self-review và Codex review trư�
 | --- | --- |
 | Owner chốt: **giữ hay hủy dữ liệu đã mã hóa** | Snapshot RDS cuối, bucket artifacts và bản sao state cùng dùng KMS key chính. `destroy` đưa key vào hàng chờ xóa: dữ liệu không đọc được ngay, mất hẳn sau 30 ngày. Giữ dữ liệu thì phải giữ key |
 | **A** thu hồi access entry của từng người: `access-entry.sh revoke arn:aws:iam::<account>:user/<user>` cho `hviet` và user của B, rồi xác nhận `aws eks list-access-entries` không còn chúng. **Hạn chót 2026-11-24** kể cả khi chưa `destroy` | Tạo ngoài Terraform; tag `Expires` không tự thu hồi quyền cluster-admin |
+| **A** tắt login runtime (`ALTER ROLE control_writer NOLOGIN`, hạn trong DB là 2026-11-25 00:00 UTC) và xóa secret `sentinelops/dev/control-runtime` cùng Kubernetes Secret `control-runtime` | Secret runtime tạo bởi Terraform nhưng giá trị do script ghi; login phải tắt kể cả khi `destroy` bị chặn |
 | Xóa image trong 2 repo ECR | Repo không có `force_delete`; còn image thì `destroy` lỗi |
 | Làm rỗng bucket artifacts, kể cả mọi version | Bucket versioned, không có `force_destroy` |
 | Apply `database_deletion_protection = false` (plan riêng, review) | RDS đang bật chống xóa |
