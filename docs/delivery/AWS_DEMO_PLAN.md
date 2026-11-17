@@ -63,9 +63,9 @@ và checklist ở mục 8.
 | Quyết định | Phương án | Ai quyết, trước khi nào |
 | --- | --- | --- |
 | Đăng nhập UI | API production bắt buộc OIDC. (a) Bật Cognito theo IaC optional có sẵn của B; (b) chạy API ở máy vận hành nối vào cluster | B đề xuất, owner chốt, trước ngày 3 |
-| Manifest worker | Chưa có; dùng lại image `control-plane` | B, ngày 3 |
+| Manifest worker | Có `scripts/render_worker_manifests.py` (`915377d`), dùng image `control-plane`; **code-only**, PR #70 OPEN, chưa merge; chưa runtime EKS, chưa apply/gọi AWS | B, ngày 3 |
 | Đưa DSN runtime vào pod | Repo không có External Secrets/CSI. (a) Operator tạo Kubernetes Secret thủ công từ secret `control-runtime`; (b) thêm đồng bộ. Demo: (a) | A đề xuất, B review, trước ngày 3 |
-| Bộ dựng phần dịch vụ | `kubernetes_testbed.py` (đã có Prometheus trong cluster) hay `render_business_manifests.py` cộng Prometheus | B, ngày 2 |
+| Bộ dựng phần dịch vụ | Đã chọn `kubernetes_testbed.py --target eks` (`c018fad`), có Prometheus trong cluster; **code-only**, PR #70 OPEN, chưa merge; chưa runtime EKS, chưa apply/gọi AWS | B, ngày 2 |
 | Người duyệt known-good | Owner hoặc nvtank, phải có mặt ngày 4 | Owner |
 
 ## 6. Giới hạn nói rõ khi demo

@@ -476,9 +476,14 @@ dưới `docs/`.
   input giống nhau giữ template ổn định. Regression rotation fail trước fix và
   pass sau fix. Secret bytes không được đọc/hash; rotation cùng Secret name cần
   rollout explicit hoặc chọn Secret name mới.
-- **Chưa có cloud worker manifest.** Loopback/source ownership/checkpoint guards
-  giữ nguyên; cần adapter remote/source policy và H3 trước triển khai. Provider,
-  observability bindings và AWS apply vẫn thuộc giai đoạn được cấp quyền riêng.
+- **Cập nhật 2026-11-17: PR #70 OPEN, chưa merge; mức code-only (§1).** Đã có
+  cloud worker renderer (`915377d`), source policy `in-cluster` (`d826571`) và
+  transport rollback remote (`f528e78`). Loopback/source ownership/checkpoint
+  guards giữ nguyên; transport không cấp action authority. Chưa runtime EKS,
+  chưa apply, chưa gọi AWS; test phần mềm với transport giả không phải bằng chứng
+  runtime hay nghiệm thu G5/G6/G7/G8. **H3 và quyền cloud vẫn chặn**; provider,
+  observability bindings/G7 và AWS apply vẫn thuộc giai đoạn được cấp quyền riêng;
+  holdout vẫn mở.
 
 ### Follow-up 2026-11-15 (giờ Việt Nam)
 
