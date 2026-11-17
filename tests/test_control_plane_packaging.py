@@ -207,3 +207,48 @@ def test_ci_image_proof_does_not_appropriate_an_unregistered_lane_b_runtime(tmp_
     lane_b.init_runtime()
     assert (lane_b.ROOT/'runtime.json').is_file()
     assert json.loads(output.read_text())['status'] == 'PASS'
+
+
+def test_remote_control_database_uses_a_private_password_file_and_the_rds_ca():
+    from scripts.render_worker_manifests import COPY_CREDENTIALS, CREDENTIAL_ROOT
+    documents = api.render(IMAGE, **PARAMETERS, control_database_user='control_writer',
+                           database_ca_config='rds-ca', namespace='sentinelops-b-actions')
+    kinds = {d['kind']: d for d in documents}
+    assert kinds['Namespace']['metadata'] == {'name': 'sentinelops-b-actions', 'labels': {
+        'app.kubernetes.io/part-of': 'sentinelops', 'sentinelops.dev/lane': 'B'}}
+    assert {d['metadata']['namespace'] for d in documents if d['kind'] != 'Namespace'} == {'sentinelops-b-actions'}
+    config = kinds['ConfigMap']['data']
+    assert config['CONTROL_DATABASE_USER'] == 'control_writer'
+    assert config['CONTROL_DATABASE_PASSWORD_FILE'] == CREDENTIAL_ROOT + '/database-password'
+    assert config['SSL_CERT_FILE'] == '/etc/sentinelops/tls/ca-bundle.crt'
+    pod = kinds['Deployment']['spec']['template']['spec']
+    assert pod['securityContext']['fsGroup'] == 10001
+    init, = pod['initContainers']
+    assert init['args'] == [CREDENTIAL_ROOT, '/secret-database/database-password']
+    assert init['command'] == ['python', '-c', COPY_CREDENTIALS]
+    secret = next(v for v in pod['volumes'] if v['name'] == 'database-password')['secret']
+    assert secret['items'] == [{'key': 'password', 'path': 'database-password'}] and secret['defaultMode'] == 0o440
+    container, = pod['containers']
+    assert {m['mountPath'] for m in container['volumeMounts']} >= {CREDENTIAL_ROOT, '/etc/sentinelops/tls'}
+    assert not any(m['mountPath'] == '/secret-database' for m in container['volumeMounts'])
+    # The database URL still comes only from the Secret's credential-free key.
+    assert container['env'] == [{'name': 'CONTROL_DATABASE_URL', 'valueFrom': {'secretKeyRef': {
+        'name': PARAMETERS['control_secret'], 'key': 'database-url', 'optional': False}}}]
+
+
+@pytest.mark.parametrize('values', [
+    {'control_database_user': 'control_writer'},
+    {'database_ca_config': 'rds-ca'},
+    {'control_database_user': 'control_bootstrap', 'database_ca_config': 'rds-ca'},
+    {'namespace': 'kube-system'},
+])
+def test_remote_control_database_wiring_rejects_partial_or_wrong_configuration(values):
+    with pytest.raises(ValueError):
+        api.render(IMAGE, **{**PARAMETERS, **values})
+
+
+def test_default_api_manifest_is_unchanged_by_the_remote_database_option():
+    documents = api.render(IMAGE, **PARAMETERS)
+    pod = next(d for d in documents if d['kind'] == 'Deployment')['spec']['template']['spec']
+    assert 'initContainers' not in pod and 'fsGroup' not in pod['securityContext']
+    assert next(d for d in documents if d['kind'] == 'Namespace')['metadata']['name'] == 'sentinelops'

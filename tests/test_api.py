@@ -1,4 +1,6 @@
 import json
+
+import pytest
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -117,3 +119,29 @@ def test_relative_alibaba_model_rejects_single_window_direct_inference_with_a_po
         assert "service_signals" in response.json()["message"]
         assert api.post(route, json={}).status_code == 422
     assert api.get("/ready").json()["direct_inference"] is False
+
+
+def test_remote_control_database_options_read_a_private_password_file(tmp_path):
+    import os, ssl
+    from sentinelops.api import control_database_options
+    assert control_database_options(Settings()) == {}
+    secret = tmp_path / 'database-password'
+    secret.write_text('s3cret-value\n'); os.chmod(secret, 0o600)
+    options = control_database_options(Settings(environment='aws', control_database_url='postgresql://db:5432/x?sslmode=verify-full',
+                                                control_database_user='control_writer', control_database_password_file=str(secret)))
+    assert options['user'] == 'control_writer' and options['password'] == 's3cret-value'
+    assert isinstance(options['ssl'], ssl.SSLContext) and options['ssl'].check_hostname
+    os.chmod(secret, 0o644)
+    with pytest.raises(ValueError):
+        control_database_options(Settings(environment='aws', control_database_url='postgresql://db:5432/x',
+                                          control_database_user='control_writer', control_database_password_file=str(secret)))
+
+
+@pytest.mark.parametrize('settings', [
+    {'control_database_user': 'control_writer'},
+    {'control_database_password_file': '/credentials/database-password'},
+    {'control_database_user': 'control_writer', 'control_database_password_file': '/credentials/database-password'},
+])
+def test_remote_control_database_settings_must_be_complete(settings):
+    with pytest.raises(ValueError):
+        Settings(**settings)

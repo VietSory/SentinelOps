@@ -7,6 +7,8 @@ import json
 import logging
 import re
 import secrets
+import ssl
+from pathlib import Path
 
 import asyncpg
 from fastapi import Depends, FastAPI, Query, Request, Response
@@ -98,6 +100,18 @@ def _reject_direct_inference(registry):
         raise ApiError(409, "model_requires_stream_history", STREAM_HISTORY_DETAIL)
 
 
+def control_database_options(settings: Settings) -> dict:
+    """Credential and TLS options for a remote control DB; empty for the local loopback URL."""
+    if not settings.control_database_password_file:
+        return {}
+    from sentinelops.workers.source_policy import _credential
+    # Same private-file rules as the workers; TLS verifies the server with the default context
+    # (SSL_CERT_FILE selects the RDS CA bundle in the deployment).
+    return {"user": settings.control_database_user,
+            "password": _credential(Path(settings.control_database_password_file)),
+            "ssl": ssl.create_default_context()}
+
+
 def create_app(settings: Settings | None = None,*,repository=None,model_registry=None,action_reader=None,
                explanation_provider: ExplanationProvider | None = None, identity_verifier=None) -> FastAPI:
     settings = settings or Settings.from_env()
@@ -120,7 +134,7 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
             # rechecks readiness, so a restored DB can recover without restart.
             try:
                 pool = await asyncpg.create_pool(settings.control_database_url,min_size=0,max_size=10,
-                                                command_timeout=5,timeout=5)
+                                                command_timeout=5,timeout=5,**control_database_options(settings))
                 app.state.incident_repository = IncidentRepository(pool)
             except (ValueError,*STORE_ERRORS):
                 logger.error("control_store_configuration_invalid")

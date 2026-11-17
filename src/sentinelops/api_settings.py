@@ -17,6 +17,11 @@ class Settings:
     action_database_url: str | None = field(default=None,repr=False)
     operator_token: str | None = field(default=None,repr=False)
     oidc: OidcConfig | None = None
+    # Appended last so existing positional construction keeps its order. Remote control DB (e.g. RDS):
+    # credential-free URL plus a separate user and private password file, the same contract as the
+    # cloud workers (src/sentinelops/workers/source_policy.py).
+    control_database_user: str | None = None
+    control_database_password_file: str | None = field(default=None,repr=False)
 
     def __post_init__(self):
         if self.oidc is not None and (self.api_token or self.operator_token):
@@ -31,6 +36,10 @@ class Settings:
             raise ValueError("operator and producer credentials must be distinct")
         if self.demo_mode and self.environment not in ("local","test"):
             raise ValueError("demo mode is restricted to local/test environments")
+        if bool(self.control_database_user) != bool(self.control_database_password_file):
+            raise ValueError("a remote control database requires both a user and a password file")
+        if self.control_database_password_file and not self.control_database_url:
+            raise ValueError("a control database password file requires CONTROL_DATABASE_URL")
         if bool(self.model_store) != bool(self.model_release_ref):
             raise ValueError("model activation requires both trusted store and release reference")
 
@@ -38,6 +47,8 @@ class Settings:
     def from_env(cls):
         return cls(environment=os.getenv("SENTINELOPS_ENV","local"),
                    control_database_url=os.getenv("CONTROL_DATABASE_URL"),
+                   control_database_user=os.getenv("CONTROL_DATABASE_USER"),
+                   control_database_password_file=os.getenv("CONTROL_DATABASE_PASSWORD_FILE"),
                    action_database_url=os.getenv("SENTINELOPS_ACTION_READ_DATABASE_URL"),
                    api_token=os.getenv("SENTINELOPS_API_TOKEN"),
                    operator_token=os.getenv("SENTINELOPS_OPERATOR_TOKEN"),
