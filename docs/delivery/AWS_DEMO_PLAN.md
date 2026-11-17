@@ -51,7 +51,7 @@ Hoàn thành khi kịch bản demo chạy **3 lượt liên tiếp** trên EKS m
 | --- | --- | --- | --- |
 | 1 | `plan`/`apply`; quyền `kubectl` cho A và B; sao lưu state | Build và đẩy image `application`, `control-plane` lên ECR | `kubectl get nodes` thấy 2 node Ready; image có digest trong ECR |
 | 2 | Kiểm tra số liệu: bucket Prometheus đủ, đúng nhãn, đúng service | Triển khai service, PostgreSQL commerce, Collector, Prometheus, Jaeger | Ba service ready, có traffic, Prometheus có số liệu |
-| 3 | Kiểm tra một incident đi trọn đường, bằng chứng đúng revision | API, health worker, incident worker trên EKS; đăng nhập UI (mục 5) | Một lỗi Payment thật tạo IER đọc được trên UI |
+| 3 | Tạo login runtime kế thừa `control_writer` (bootstrap chỉ tạo role `NOLOGIN`), ghi DSN TLS vào secret `control-runtime`, đưa vào Kubernetes Secret `control-runtime` key `database-url`; kiểm tra một incident đi trọn đường | API, health worker, incident worker trên EKS; đăng nhập UI (mục 5) | Workload kết nối RDS bằng login runtime (không dùng master); một lỗi Payment thật tạo IER đọc được trên UI |
 | 4 | Kiểm tra bằng chứng rollback và audit | Rollback thật trên EKS; operator duyệt known-good trước | `recovered` và `telemetry_verified`; một lượt failed-verify chuyển `escalated` |
 | 5 | Viết kịch bản demo và con số kỳ vọng | Tập dượt 3 lượt, khóa phiên bản | 3 lượt liên tiếp không sửa tay |
 
@@ -64,6 +64,7 @@ và checklist ở mục 8.
 | --- | --- | --- |
 | Đăng nhập UI | API production bắt buộc OIDC. (a) Bật Cognito theo IaC optional có sẵn của B; (b) chạy API ở máy vận hành nối vào cluster | B đề xuất, owner chốt, trước ngày 3 |
 | Manifest worker | Chưa có; dùng lại image `control-plane` | B, ngày 3 |
+| Đưa DSN runtime vào pod | Repo không có External Secrets/CSI. (a) Operator tạo Kubernetes Secret thủ công từ secret `control-runtime`; (b) thêm đồng bộ. Demo: (a) | A đề xuất, B review, trước ngày 3 |
 | Bộ dựng phần dịch vụ | `kubernetes_testbed.py` (đã có Prometheus trong cluster) hay `render_business_manifests.py` cộng Prometheus | B, ngày 2 |
 | Người duyệt known-good | Owner hoặc nvtank, phải có mặt ngày 4 | Owner |
 
@@ -93,7 +94,7 @@ Mỗi bước tạo/xóa tài nguyên AWS qua self-review và Codex review trư�
 | Bước | Lý do |
 | --- | --- |
 | Owner chốt: **giữ hay hủy dữ liệu đã mã hóa** | Snapshot RDS cuối, bucket artifacts và bản sao state cùng dùng KMS key chính. `destroy` đưa key vào hàng chờ xóa: dữ liệu không đọc được ngay, mất hẳn sau 30 ngày. Giữ dữ liệu thì phải giữ key |
-| Thu hồi access entry `kubectl` của A và B (`access-entry.sh --revoke`) | Tạo ngoài Terraform nên `destroy` không theo dõi |
+| **A** thu hồi access entry của từng người: `access-entry.sh revoke arn:aws:iam::<account>:user/<user>` cho `hviet` và user của B, rồi xác nhận `aws eks list-access-entries` không còn chúng. **Hạn chót 2026-11-24** kể cả khi chưa `destroy` | Tạo ngoài Terraform; tag `Expires` không tự thu hồi quyền cluster-admin |
 | Xóa image trong 2 repo ECR | Repo không có `force_delete`; còn image thì `destroy` lỗi |
 | Làm rỗng bucket artifacts, kể cả mọi version | Bucket versioned, không có `force_destroy` |
 | Apply `database_deletion_protection = false` (plan riêng, review) | RDS đang bật chống xóa |
