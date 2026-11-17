@@ -25,6 +25,9 @@ TERMINAL = ('recovered', 'escalated', 'blocked')
 def trial(directory):
     path = Path(directory)
     verification = json.loads((path / 'verification.json').read_text())
+    if ((path / 'DEMO_ONLY').exists() or verification.get('demo_mode') is True
+        or verification.get('q09_eligible') is False or verification.get('run_purpose') == 'demo'):
+        raise ValueError('demo receipt is ineligible for Q-09: ' + path.name)
     journal_path = path / 'action-journal.json'
     journal = json.loads(journal_path.read_text()) if journal_path.exists() else None
     action = verification.get('action') or {}
@@ -53,6 +56,8 @@ def trial(directory):
 def summarize(rows):
     releases = defaultdict(list)
     for row in rows:
+        if row.get('demo_mode') is True or row.get('q09_eligible') is False or row.get('run_purpose') == 'demo':
+            raise ValueError('demo receipt is ineligible for Q-09')
         releases[row['release']].append(row)
     results = {}
     for release, items in releases.items():

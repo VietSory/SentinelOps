@@ -62,7 +62,8 @@ run "operator_identity_is_disabled_by_default" {
       length(aws_cognito_user_pool_client.operator) == 0 &&
       length(aws_cognito_resource_server.operator_api) == 0 &&
       length(aws_cognito_user_pool_domain.operator) == 0 &&
-      output.operator_oidc_binding == null
+      output.operator_oidc_binding == null &&
+      output.operator_login_domain == null
     )
     error_message = "Baseline plans must not create a provider, client, domain or public identity binding implicitly."
   }
@@ -111,6 +112,10 @@ run "operator_identity_is_read_only_and_requires_enrollment" {
     }
     error_message = "Renderer configuration must match Cognito access-token client_id and the existing read scope."
   }
+  assert {
+    condition     = output.operator_login_domain == "https://sentinelops-dev-123456789012-operators.auth.eu-central-1.amazoncognito.com"
+    error_message = "The public login URL must use the declared domain and region, without credentials or tokens."
+  }
 }
 
 run "operator_identity_requires_explicit_callback" {
@@ -119,6 +124,19 @@ run "operator_identity_requires_explicit_callback" {
     operator_identity_enabled = true
   }
   expect_failures = [aws_cognito_user_pool.operators]
+}
+
+run "operator_login_domain_follows_demo_region" {
+  command = plan
+  variables {
+    region                    = "ap-southeast-1"
+    operator_identity_enabled = true
+    operator_callback_urls    = ["https://operator.example.invalid/oauth/callback"]
+  }
+  assert {
+    condition     = output.operator_login_domain == "https://sentinelops-dev-123456789012-operators.auth.ap-southeast-1.amazoncognito.com"
+    error_message = "The demo login URL must follow ap-southeast-1 rather than a fixed region."
+  }
 }
 
 run "operator_callback_rejects_credential_urls" {

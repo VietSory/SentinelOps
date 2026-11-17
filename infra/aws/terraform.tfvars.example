@@ -30,3 +30,18 @@ bedrock_model_ids = []
 
 monthly_budget_usd         = 300
 budget_notification_emails = ["owner@example.invalid"]
+
+# Optional demo login (owner decision before day 3). This opt-in does not change
+# the module default (false). A applies from the existing state in ap-southeast-1;
+# keep that environment's other settings rather than copying this whole file.
+operator_identity_enabled = true
+# Replace with the exact HTTPS callback of an operator-owned code/PKCE client.
+# The API token-paste UI does not implement an OAuth callback. This placeholder
+# passes validation but must be replaced by a reachable client before login.
+operator_callback_urls = ["https://operator.example.invalid/oauth/callback"]
+# API: operator_oidc_binding -> SENTINELOPS_OIDC_{ISSUER,JWKS_URL,AUDIENCE};
+# also set SENTINELOPS_OIDC_AUDIENCE_CLAIM=client_id and use the access token
+# carrying sentinelops/incidents.read (not an ID token). operator_login_domain
+# is the hosted login URL, not the issuer. Enrollment/password/TOTP stay outside
+# Terraform. Preserve MFA ON; ACTIVE deletion protection needs a separate
+# reviewed change to INACTIVE before disabling identity or destroying the pool.

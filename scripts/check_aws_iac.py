@@ -258,6 +258,55 @@ def assert_no_static_credentials(root: Path = ROOT) -> list[str]:
     return ['no static AWS key or inline password; database password managed by AWS']
 
 
+def assert_operator_identity(blocks: dict[str, dict]) -> list[str]:
+    """Keep the optional provider operator-only and its outputs public-only."""
+    expected = {
+        'aws_cognito_user_pool.operators', 'aws_cognito_resource_server.operator_api',
+        'aws_cognito_user_pool_client.operator', 'aws_cognito_user_pool_domain.operator',
+    }
+    if {key for key in blocks if key.startswith('aws_cognito_')} != expected:
+        raise ValueError('operator identity permits only the declared pool, read scope, client and domain; no producer client or enrolled user')
+    variables = _blocks(re.compile(r'^variable\s+"([^"]+)"\s*\{', re.MULTILINE))
+    if _assignments(variables['operator_identity_enabled']['body']).get('default') != ['false']:
+        raise ValueError('operator identity must be disabled by default')
+    for key in expected:
+        if _assignments(blocks[key]['body']).get('count') != ['var.operator_identity_enabled ? 1 : 0']:
+            raise ValueError('every operator identity resource must be gated by operator_identity_enabled')
+    client = _assignments(blocks['aws_cognito_user_pool_client.operator']['body'])
+    for name, value in (
+        ('generate_secret', 'false'),
+        ('allowed_oauth_flows', '["code"]'),
+        ('allowed_oauth_scopes', '["openid", "sentinelops/incidents.read"]'),
+        ('explicit_auth_flows', '["ALLOW_REFRESH_TOKEN_AUTH"]'),
+    ):
+        if client.get(name) != [value]:
+            raise ValueError('operator client must use code flow/read scope only, with no client secret or producer flow')
+
+    # Exact public expressions also reject exporting a whole resource object or
+    # a newly added field under an innocuous name. No secret-value evaluation.
+    public_values = {
+        'operator_oidc_binding': '''var.operator_identity_enabled ? {
+          issuer = "https://${aws_cognito_user_pool.operators[0].endpoint}"
+          audience = aws_cognito_user_pool_client.operator[0].id
+          jwks_url = "https://${aws_cognito_user_pool.operators[0].endpoint}/.well-known/jwks.json"
+          audience_claim = "client_id"
+          operator_scope = "sentinelops/incidents.read"
+        } : null''',
+        'operator_login_domain': 'var.operator_identity_enabled ? "https://${aws_cognito_user_pool_domain.operator[0].domain}.auth.${var.region}.amazoncognito.com" : null',
+    }
+    outputs = _blocks(re.compile(r'^output\s+"([^"]+)"\s*\{', re.MULTILINE))
+    identity_outputs = {name: block for name, block in outputs.items()
+                        if block['file'] == 'operator_identity.tf' or name.startswith('operator_')
+                        or 'aws_cognito_' in block['body']}
+    if set(identity_outputs) != set(public_values):
+        raise ValueError('operator outputs must contain only the declared public OIDC binding and login domain; no credentials')
+    for name, expected_value in public_values.items():
+        value = re.search(r'^\s*value = (.+)\Z', identity_outputs[name]['body'], re.MULTILINE | re.DOTALL)
+        if value is None or re.sub(r'\s+', '', value.group(1)) != re.sub(r'\s+', '', expected_value):
+            raise ValueError('operator outputs must contain only public identifiers and URLs, null when disabled; no credentials')
+    return ['operator identity default-off, gated, operator-only, no enrolled users/client secret; public-only outputs']
+
+
 def assert_grants_no_authority(root: Path = ROOT) -> list[str]:
     outputs = (root/'outputs.tf').read_text()
     for name in ('model_activation_allowed', 'remediation_approval'):
@@ -285,6 +334,7 @@ def exercise(output: Path | None) -> dict:
     checks += assert_bounded_retention(blocks)
     checks += assert_no_overbroad_identity(blocks, documents)
     checks += assert_no_static_credentials()
+    checks += assert_operator_identity(blocks)
     checks += assert_grants_no_authority()
 
     result = {'status': 'PASS', 'scope': 'aws-configuration-description-only',

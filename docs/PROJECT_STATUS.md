@@ -36,9 +36,13 @@ CI sau merge #53: run `43665706369`, đúng SHA
 
 ECR PR #49 đã được B review/sửa guard và **MERGED** vào `0364251`; head `fd7a010`,
 CI `43613141372` attempt 2 **14/14 PASS**, node pull IAM giữ baseline. Đây vẫn
-là packaging/IaC offline, chưa registry publication hoặc deployment AWS. Cloud
-worker adapters/source policy, observability delivery thực tế và H3 còn thiếu;
-không nới guard local để phát manifest worker.
+chỉ là packaging/IaC offline, chưa registry publication hoặc deployment AWS.
+[PR #70](https://github.com/VietSory/SentinelOps/pull/70) đang **OPEN, chưa merge**:
+có source policy `in-cluster` (`d826571`), transport rollback remote (`f528e78`)
+và cloud worker renderer (`915377d`), mức **code-only** theo checkpoint §1.
+Chưa runtime EKS, chưa apply, chưa gọi AWS; test phần mềm với transport giả
+không phải bằng chứng runtime hay nghiệm thu G5/G6/G7/G8. Observability delivery
+thực tế/G7, H3 và quyền cloud vẫn chặn; không nới guard local.
 
 Follow-up CloudWatch/KMS: đã bổ sung key policy cho regional Logs, giới hạn đúng
 ba log-group ARN; telemetry-reader chỉ decrypt/describe qua Logs, flow-log writer
@@ -90,10 +94,12 @@ Local socket/launcher execution vẫn bị approval bridge chặn. Follow-up đ�
 Chỉ business events được export; stdout hạ tầng/DB/uvicorn còn cần collection riêng.
 Xem [log export](runbooks/AWS_BASELINE.md#business-event-log-export).
 
-Follow-up host: launcher quan sát API/health/incidents `inactive`, giữ release
+Follow-up host trước recovery 2026-11-16: launcher quan sát API/health/incidents `inactive`, giữ release
 `5c520ae6…` và stream `b95058b4…`. Guarded restart API bị approval bridge từ chối;
-**chưa khôi phục runtime sau reboot**. CI image/host-process trên runner không
-thay bằng chứng host đang hoạt động. Xem [báo cáo B cập nhật](reports/LANE_B_DELIVERY_REPORT_2026-11-14.md).
+runtime chưa khôi phục ở mốc đó. Checkpoint 2026-11-16 đã ghi khôi phục toolchain,
+control DB và resume consumer; health worker chưa chạy lại, protected API/UI
+rollout vẫn mở. CI image/host-process trên runner không thay bằng chứng host
+đang hoạt động. Xem [recovery hiện hành](delivery/LANE_B_CHECKPOINT.md#host-toolchain-recovery-và-resume-consumer--2026-11-16).
 
 [ADR-018](adr/ADR-018-proposed-monotone-latency-detector.md) bị owner từ chối 2026-11-12:
 detection phải do model đã train quyết định, không dùng MAD/slope; epoch `alc` dừng khi chưa chấm và đã xoá.
@@ -185,7 +191,7 @@ riêng của operator. Xem [trial `g6-de38fc6b-02`](delivery/LANE_B_CHECKPOINT.m
 ## Việc tiếp theo
 
 - **A:** đã train lại theo ADR-019 (`de38fc6b`); lớp 2 `ald` (2026-11-14) cho kết quả phát triển S1/S3 tốt, chưa nghiệm thu Q-04…Q-07 (thiếu S2/S4, MTTD live, holdout); full G4/G8 chưa nghiệm thu.
-- **B:** đã tích hợp local bundle `de38fc6b` theo D-27: parity P1–P6, baseline và live-check đã PASS trong phạm vi integration ([báo cáo](reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md)). Installed API/business manifests, action reader, collector/OTLP logs, dashboard, UI #58 và prerequisites #59–#62 đã merge. SQL selection và summary/protocol Q-09 theo từng model release cũng đã merge qua #63 vào `786ffd17`; PR head `da5ebc48`, CI `43723300314` **14/14 PASS**. CI main `43726609291` trên đúng merge SHA cũng **14/14 PASS, 0 skipped jobs** ([checkpoint](delivery/LANE_B_CHECKPOINT.md#local-trial-bootstrap-and-q-09-preparation--2026-11-15)). Runtime local vẫn chưa resume: guarded DB/API execution bị approval bridge chặn; API/health/incidents inactive/PID 0, UI release mới chưa select. Chưa có campaign Q-09 hoàn tất cho release mới; cần known-good và quyền trial cụ thể, không tự bật auto-remediation. Owner chọn AWS offline only; remote worker policy/adapter và H3 còn cần A/B review và deployment được cấp quyền.
+- **B:** đã tích hợp local bundle `de38fc6b` theo D-27: parity P1–P6, baseline và live-check đã PASS trong phạm vi integration ([báo cáo](reports/LANE_B_ALIBABA_DE38FC6B_ACTIVATION.md)). Installed API/business manifests, action reader, collector/OTLP logs, dashboard, UI #58 và prerequisites #59–#62 đã merge. SQL selection và summary/protocol Q-09 theo từng model release cũng đã merge qua #63 vào `786ffd17`; PR head `da5ebc48`, CI `43723300314` **14/14 PASS**. CI main `43726609291` trên đúng merge SHA cũng **14/14 PASS, 0 skipped jobs** ([checkpoint](delivery/LANE_B_CHECKPOINT.md#local-trial-bootstrap-and-q-09-preparation--2026-11-15)). Checkpoint 2026-11-16 đã ghi recovery toolchain/control DB, stack 9 container healthy và resume consumer cũ READY (`actions_allowed=false`), backlog 2→0; health worker chưa chạy lại nên gap telemetry 47 giờ vẫn UNKNOWN, protected API/UI rollout còn mở. Việc tiếp theo là khôi phục health/freshness theo quyết định owner và rollout protected API/UI. Chưa có campaign Q-09 hoàn tất cho release mới; cần known-good và quyền trial cụ thể, không tự bật auto-remediation. Owner đã chọn demo AWS theo [AWS_DEMO_PLAN](delivery/AWS_DEMO_PLAN.md); remote worker source policy/transport đã có trong PR #70 OPEN, chưa merge, mức code-only; H3, quyền cloud và deployment được cấp quyền vẫn chặn, G7 và holdout vẫn mở.
 
 [Lane B checkpoint](delivery/LANE_B_CHECKPOINT.md) chốt mức bằng chứng từng
 capability (runtime-verified / fixture-tested / code-only / blocked), commit và CI

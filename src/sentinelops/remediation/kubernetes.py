@@ -1,4 +1,4 @@
-"""Explicit local HTTPS Kubernetes adapter, with no ambient kubeconfig or AWS SDK.
+"""Explicit HTTPS Kubernetes adapter, with no ambient kubeconfig or AWS SDK.
 
 Only a named Payment Deployment can be patched; the caller still needs the
 executor's policy, authority, approved ledger and committed dispatch journal.
@@ -31,6 +31,31 @@ def local_server(endpoint):
     return endpoint.rstrip('/')
 
 
+def configured_server(endpoint):
+    """Remote access requires an exact operator-selected endpoint opt-in.
+
+    SENTINELOPS_KUBERNETES_REMOTE_SERVER must equal the supplied endpoint.
+    This selects transport only; it grants no action or known-good authority.
+    Local callers retain their original validation and error messages.
+    """
+    selected = os.environ.get('SENTINELOPS_KUBERNETES_REMOTE_SERVER')
+    if not selected or selected != endpoint:
+        return local_server(endpoint)
+    try:
+        parsed = urlsplit(endpoint)
+        valid = (parsed.scheme == 'https' and parsed.hostname
+            and (parsed.port is None or 1 <= parsed.port <= 65535)
+            and parsed.username is None and parsed.password is None
+            and not parsed.query and not parsed.fragment and parsed.path in ('', '/')
+            and not any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in endpoint)
+            and not any(c in endpoint for c in ('\\', '?', '#', '%')))
+    except (ValueError, TypeError):
+        valid = False
+    if not valid:
+        raise ValueError('rollback adapter requires an explicit credential-free remote HTTPS API server')
+    return endpoint.rstrip('/')
+
+
 def _bound(value, replicas, *, surge=False):
     if type(value) is int and value >= 0:
         return value
@@ -48,7 +73,7 @@ def _owner(body, uid, kind):
 class LocalKubernetes:
     def __init__(self, endpoint: str, target: Target, *, token_file: Path, ca_file: Path,
                  transport=None, clock=lambda: datetime.now(timezone.utc)):
-        endpoint = local_server(endpoint)
+        endpoint = configured_server(endpoint)
         metadata = token_file.lstat()
         if (not token_file.is_file() or token_file.is_symlink() or metadata.st_mode & 0o077
             or metadata.st_uid != os.getuid()):

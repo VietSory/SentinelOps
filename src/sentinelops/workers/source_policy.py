@@ -49,6 +49,20 @@ def _remote_url(value: str, expected: str | None, *, database: bool = False):
     return parsed
 
 
+def _cluster_url(value: str, expected: str | None):
+    # In-cluster traffic to a pinned Service DNS name never leaves the cluster
+    # network, so it carries plain HTTP. Nothing else may: a public endpoint
+    # still goes through the TLS-only remote rules.
+    parsed = urlsplit(value)
+    if (expected is None or value.rstrip("/") != expected.rstrip("/") or not parsed.port
+        or parsed.username is not None or parsed.password is not None or "#" in value or "?" in value
+        or any(char.isspace() or ord(char) < 32 for char in value) or parsed.scheme != "http"
+        or not re.fullmatch(r"[a-z0-9-]+\.[a-z0-9-]+\.svc\.cluster\.local", parsed.hostname or "")
+        or parsed.path not in ("", "/")):
+        raise ValueError("in-cluster source requires the pinned credential-free Service DNS endpoint and explicit port")
+    return parsed
+
+
 @dataclass(frozen=True)
 class SourcePolicy:
     name: str = "local"
@@ -59,7 +73,7 @@ class SourcePolicy:
     prometheus_token_file: Path | None = None
 
     def __post_init__(self):
-        if self.name not in ("local", "remote"):
+        if self.name not in ("local", "remote", "in-cluster"):
             raise ValueError("unsupported worker source policy")
 
     @classmethod
@@ -70,14 +84,23 @@ class SourcePolicy:
     def prometheus(self, endpoint: str) -> str:
         if self.name == "local":
             return local_endpoint(endpoint)
-        _remote_url(endpoint, self.remote_prometheus)
+        if self.name == "in-cluster":
+            _cluster_url(endpoint, self.remote_prometheus)
+        else:
+            _remote_url(endpoint, self.remote_prometheus)
         return endpoint.rstrip("/")
 
     def headers(self) -> dict:
-        return {"Authorization": "Bearer " + _credential(self.prometheus_token_file)} if self.name == "remote" else {}
+        # A public remote source must authenticate; an in-cluster Service may
+        # be unauthenticated, so its credential reference stays optional.
+        if self.name == "remote" or (self.name == "in-cluster" and self.prometheus_token_file is not None):
+            return {"Authorization": "Bearer " + _credential(self.prometheus_token_file)}
+        return {}
 
     def database_options(self, dsn: str, *, worker: str) -> dict:
-        if self.name == "remote":
+        # The control database is RDS outside the cluster either way, so an
+        # in-cluster source still reaches it under the TLS-only remote rules.
+        if self.name != "local":
             _remote_url(dsn, self.remote_control_database, database=True)
             if self.control_database_user != "control_writer":
                 raise ValueError("remote worker requires the dedicated control_writer username reference")
@@ -98,7 +121,7 @@ class SourcePolicy:
 
 
 def source_policy_arguments(parser):
-    parser.add_argument("--source-policy", choices=("local", "remote"), default="local")
+    parser.add_argument("--source-policy", choices=("local", "remote", "in-cluster"), default="local")
     parser.add_argument("--remote-prometheus", help="Exact allowed HTTPS source URL, including port")
     parser.add_argument("--remote-control-database", help="Exact allowed PostgreSQL URL with sslmode=verify-full")
     parser.add_argument("--control-database-user", help="Separate remote DB username; must be control_writer")
