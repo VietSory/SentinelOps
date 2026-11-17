@@ -11,7 +11,6 @@ import json
 import os
 from pathlib import Path
 import signal
-from urllib.parse import urlsplit
 
 import asyncpg
 import yaml
@@ -25,15 +24,12 @@ from sentinelops.workers.model_signals import ModelIncidentEvidence
 from sentinelops.ml.registry import ModelRegistry
 from sentinelops.workers.metrics import IncidentWorkerMetrics
 from sentinelops.remediation.domain import KubernetesUnavailable
+from sentinelops.workers.source_policy import SourcePolicy, source_policy_arguments
 
 
 async def run(args):
     dsn = os.environ.get("CONTROL_DATABASE_URL", "")
-    selected = urlsplit(dsn)
-    if (selected.scheme not in ("postgres", "postgresql") or selected.hostname not in ("127.0.0.1", "localhost")
-        or selected.username != "control_writer" or selected.path != "/sentinelops_control"
-        or not selected.port or selected.query or selected.fragment):
-        raise ValueError("continuous incident worker requires the explicit loopback control_writer database")
+    database_options = SourcePolicy.from_args(args).database_options(dsn, worker="incident")
     endpoint = getattr(args, "metrics_otlp_endpoint", None)
     if args.status and endpoint:
         raise ValueError("read-only incident status cannot start a metrics exporter")
@@ -47,7 +43,7 @@ async def run(args):
             metrics = IncidentWorkerMetrics.otlp(endpoint, environment="local", instance=args.metrics_instance)
         if metrics: metrics.heartbeat(ready=False)
         component = "database"
-        pool = await asyncpg.create_pool(dsn, min_size=2, max_size=4, command_timeout=10)
+        pool = await asyncpg.create_pool(dsn, min_size=2, max_size=4, command_timeout=10, **database_options)
         component = "configuration"
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
@@ -97,7 +93,8 @@ async def run(args):
         component = "database"
         await journal.initialize()
         component = "configuration"
-        worker = IncidentWorker(journal, collector, connect=lambda: asyncpg.connect(dsn, timeout=5., command_timeout=10))
+        worker = IncidentWorker(journal, collector,
+            connect=lambda: asyncpg.connect(dsn, timeout=5., command_timeout=10, **database_options))
         print(json.dumps({"status": "READY", "consumer_id": journal.consumer_id,
                           "health_stream_id": source.stream_id, "project": args.project, "actions_allowed": False}), flush=True)
         ticks = 0
@@ -156,6 +153,7 @@ async def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    source_policy_arguments(parser)
     parser.add_argument("--health-stream", required=True)
     parser.add_argument("--source-store", type=Path, required=True)
     parser.add_argument("--store", type=Path, required=True)

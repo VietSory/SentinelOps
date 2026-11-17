@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, timezone
 import json
 import re
 import time
-from urllib.parse import urlparse
 
 import httpx
 import asyncpg
@@ -18,6 +17,7 @@ from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import PrometheusSource, SOURCE_PROFILE, SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.workers.source_policy import SourcePolicy, local_endpoint
 
 DATABASE_TIMEOUT_SECONDS = 10
 DATABASE_SHUTDOWN_ERRORS = (asyncpg.AdminShutdownError, asyncpg.CrashShutdownError, asyncpg.CannotConnectNowError)
@@ -34,27 +34,18 @@ def _connection_closed(conn) -> bool:
         raise
 
 
-def local_endpoint(endpoint: str) -> str:
-    parsed = urlparse(endpoint)
-    try:
-        if parsed.port is not None and not 1 <= parsed.port <= 65535:
-            raise ValueError("invalid port")
-    except ValueError:
-        raise ValueError("local health worker requires a valid loopback port") from None
-    if (parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost")
-        or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment
-        or parsed.path not in ("", "/")):
-        raise ValueError("local health worker requires a credential-free loopback Prometheus endpoint")
-    return endpoint.rstrip("/")
-
-
 def latest_bucket(now: datetime) -> datetime:
     timestamp(now)
     return datetime.fromtimestamp(int((now - timedelta(seconds=30)).timestamp()) // 60 * 60, timezone.utc)
 
 
-def native_capture(endpoint: str, service: str, end: datetime, *, profile: str = SOURCE_PROFILE) -> dict:
+def native_capture(endpoint: str, service: str, end: datetime, *, profile: str = SOURCE_PROFILE,
+                   source_policy: SourcePolicy | None = None) -> dict:
+    selected = source_policy or SourcePolicy()
+    endpoint = selected.prometheus(endpoint)
+    headers = selected.headers()
     source = PrometheusSource(endpoint)
+    if headers: source.client.headers.update(headers)
     source.client.timeout = httpx.Timeout(1.)
     try:
         return source.capture(service, end, profile=profile)
@@ -64,7 +55,8 @@ def native_capture(endpoint: str, service: str, end: datetime, *, profile: str =
 
 class HealthWorker:
     def __init__(self, pool, store: ArtifactStore, policy: dict, *, endpoint: str, environment: str,
-                 configuration_hash: str, source_profile: str = SOURCE_PROFILE):
+                 configuration_hash: str, source_profile: str = SOURCE_PROFILE,
+                 source_policy: SourcePolicy | None = None):
         validate_policy(policy)
         if not environment or not re.fullmatch(r"[0-9a-f]{64}", configuration_hash):
             raise ValueError("health worker source identity is incomplete")
@@ -72,7 +64,8 @@ class HealthWorker:
             raise ValueError("unsupported continuous health source profile")
         self.pool, self.store = pool, store
         self.policy = json.loads(json.dumps(policy, allow_nan=False))
-        self.endpoint, self.environment = local_endpoint(endpoint), environment
+        self.source_policy = source_policy or SourcePolicy()
+        self.endpoint, self.environment = self.source_policy.prometheus(endpoint), environment
         self.identity = {"worker_version": "continuous-health/v1", "source_profile": source_profile,
                          "environment": environment, "policy_sha256": stable_id(policy),
                          "prometheus_configuration_hash": configuration_hash,
@@ -186,6 +179,7 @@ class HealthWorker:
         history_done = time.monotonic()
         profile = self.identity["source_profile"]
         capture_options = {"profile": profile} if profile != SOURCE_PROFILE else {}
+        if self.source_policy.name == "remote": capture_options["source_policy"] = self.source_policy
         current_captures = [] if missed else await asyncio.gather(*(
             asyncio.to_thread(native_capture, self.endpoint, service, end, **capture_options)
             for service in sorted(BUSINESS_ROUTES)))
