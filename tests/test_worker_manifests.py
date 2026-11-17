@@ -541,12 +541,23 @@ def test_nonlocal_v2_kubernetes_capture_and_replay_bind_environment_and_original
 
 
 def test_incident_worker_runs_on_the_node_holding_the_read_write_once_health_volume():
-    pods = {d['metadata']['name']: d['spec']['template']['spec'] for d in deployments(worker.render(IMAGE, **PARAMETERS))}
+    documents = worker.render(IMAGE, **PARAMETERS)
+    pods = {d['metadata']['name']: d['spec']['template']['spec'] for d in deployments(documents)}
     incident = pods['sentinelops-incident-worker']
     term, = incident['affinity']['podAffinity']['requiredDuringSchedulingIgnoredDuringExecution']
     assert term == {'labelSelector': {'matchLabels': {'app': 'sentinelops-health-worker'}},
                     'topologyKey': 'kubernetes.io/hostname'}
-    health_labels = next(d for d in deployments(worker.render(IMAGE, **PARAMETERS))
+    health_labels = next(d for d in deployments(documents)
                          if d['metadata']['name'] == 'sentinelops-health-worker')['spec']['template']['metadata']['labels']
     assert health_labels['app'] == 'sentinelops-health-worker'
     assert 'affinity' not in pods['sentinelops-health-worker']
+    assert all(d['spec']['strategy'] == {'type': 'Recreate'} for d in deployments(documents))
+
+
+def test_eks_rwo_runbook_serializes_incident_and_health_worker_rollouts():
+    plan = (Path(__file__).resolve().parents[1] / 'docs/delivery/AWS_DEMO_PLAN.md').read_text()
+    stop = plan.index('Scale `sentinelops-incident-worker` về `0`')
+    health_ready = plan.index('`sentinelops-health-worker`, rồi chờ pod health `Ready`')
+    restart = plan.index('Scale `sentinelops-incident-worker` lại `1`')
+    assert stop < health_ready < restart
+    assert 'cùng node với\n   health worker' in plan

@@ -202,6 +202,7 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                 'spec': {'serviceAccountName': worker + '-worker', 'automountServiceAccountToken': False,
                     # The health artifact claim is EBS ReadWriteOnce: it attaches to one node. The incident
                     # worker reads it, so it must run on the node where the health worker holds the volume.
+                    # Recreate serializes each Deployment only; the two Deployments must not roll concurrently.
                     **({'affinity': {'podAffinity': {'requiredDuringSchedulingIgnoredDuringExecution': [{
                         'labelSelector': {'matchLabels': {'app': 'sentinelops-health-worker'}},
                         'topologyKey': 'kubernetes.io/hostname'}]}}} if incident else {}),

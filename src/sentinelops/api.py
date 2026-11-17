@@ -104,7 +104,13 @@ def control_database_options(settings: Settings) -> dict:
     """Credential and TLS options for a remote control DB; empty for the local loopback URL."""
     if not settings.control_database_password_file:
         return {}
-    from sentinelops.workers.source_policy import _credential
+    from sentinelops.workers.source_policy import _credential, _remote_url
+    # Keep the API's RDS connection contract aligned with remote workers. The
+    # API also accepts libpq's equivalent ``postgres`` URI scheme.
+    _remote_url(settings.control_database_url, settings.control_database_url, database=True,
+                database_schemes=("postgres", "postgresql"))
+    if settings.control_database_user != "control_writer":
+        raise ValueError("remote control database requires the dedicated control_writer username reference")
     # Same private-file rules as the workers; TLS verifies the server with the default context
     # (SSL_CERT_FILE selects the RDS CA bundle in the deployment).
     return {"user": settings.control_database_user,

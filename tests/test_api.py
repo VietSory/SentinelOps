@@ -121,20 +121,77 @@ def test_relative_alibaba_model_rejects_single_window_direct_inference_with_a_po
     assert api.get("/ready").json()["direct_inference"] is False
 
 
-def test_remote_control_database_options_read_a_private_password_file(tmp_path):
+@pytest.mark.parametrize('database_url', [
+    'postgresql://control.example.invalid:5432/sentinelops_control?sslmode=verify-full',
+    'postgres://control.example.invalid:5432/sentinelops_control?sslmode=verify-full',
+])
+def test_remote_control_database_options_accept_the_worker_rds_contract(tmp_path, database_url):
     import os, ssl
     from sentinelops.api import control_database_options
     assert control_database_options(Settings()) == {}
     secret = tmp_path / 'database-password'
     secret.write_text('s3cret-value\n'); os.chmod(secret, 0o600)
-    options = control_database_options(Settings(environment='aws', control_database_url='postgresql://db:5432/x?sslmode=verify-full',
-                                                control_database_user='control_writer', control_database_password_file=str(secret)))
+    options = control_database_options(Settings(environment='aws', control_database_url=database_url,
+                                                control_database_user='control_writer',
+                                                control_database_password_file=str(secret)))
     assert options['user'] == 'control_writer' and options['password'] == 's3cret-value'
     assert isinstance(options['ssl'], ssl.SSLContext) and options['ssl'].check_hostname
-    os.chmod(secret, 0o644)
+
+
+@pytest.mark.parametrize(('database_url', 'database_user'), [
+    ('postgresql://control_writer:secret@control.example.invalid:5432/sentinelops_control?sslmode=verify-full',
+     'control_writer'),
+    ('postgresql://control.example.invalid:5432/sentinelops_control?sslmode=verify-full', 'other_writer'),
+    ('postgresql://control.example.invalid:5432/other?sslmode=verify-full', 'control_writer'),
+    ('postgresql://control.example.invalid/sentinelops_control?sslmode=verify-full', 'control_writer'),
+    ('postgresql://control.example.invalid:5432/sentinelops_control?sslmode=disable', 'control_writer'),
+    ('postgresql://control.example.invalid:5432/sentinelops_control', 'control_writer'),
+    ('postgresql://control.example.invalid:5432/sentinelops_control?sslmode=verify-full&application_name=api',
+     'control_writer'),
+    ('postgresql://control.example.invalid:5432/sentinelops_control?sslmode=verify-full#fragment',
+     'control_writer'),
+])
+def test_remote_control_database_options_reject_each_invalid_rds_contract(tmp_path, database_url, database_user):
+    import os
+    from sentinelops.api import control_database_options
+    secret = tmp_path / 'database-password'
+    secret.write_text('s3cret-value\n'); os.chmod(secret, 0o600)
     with pytest.raises(ValueError):
-        control_database_options(Settings(environment='aws', control_database_url='postgresql://db:5432/x',
-                                          control_database_user='control_writer', control_database_password_file=str(secret)))
+        control_database_options(Settings(environment='aws', control_database_url=database_url,
+                                          control_database_user=database_user,
+                                          control_database_password_file=str(secret)))
+
+
+def test_remote_control_database_options_reject_a_nonprivate_password_file(tmp_path):
+    import os
+    from sentinelops.api import control_database_options
+    secret = tmp_path / 'database-password'
+    secret.write_text('s3cret-value\n'); os.chmod(secret, 0o644)
+    with pytest.raises(ValueError):
+        control_database_options(Settings(environment='aws',
+                                          control_database_url='postgresql://control.example.invalid:5432/sentinelops_control?sslmode=verify-full',
+                                          control_database_user='control_writer',
+                                          control_database_password_file=str(secret)))
+
+
+def test_invalid_remote_control_database_configuration_never_creates_a_pool(tmp_path, monkeypatch, caplog):
+    import logging
+    import os
+    from unittest.mock import AsyncMock
+    import sentinelops.api as api_module
+
+    secret = tmp_path / 'database-password'
+    secret.write_text('s3cret-value\n'); os.chmod(secret, 0o600)
+    create_pool = AsyncMock()
+    monkeypatch.setattr(api_module.asyncpg, 'create_pool', create_pool)
+    settings = Settings(environment='aws',
+                        control_database_url='postgresql://control.example.invalid:5432/other?sslmode=verify-full',
+                        control_database_user='control_writer', control_database_password_file=str(secret))
+    caplog.set_level(logging.ERROR, logger='sentinelops-api')
+    with TestClient(create_app(settings)):
+        pass
+    create_pool.assert_not_awaited()
+    assert 'control_store_configuration_invalid' in caplog.text
 
 
 @pytest.mark.parametrize('settings', [
