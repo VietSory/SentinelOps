@@ -652,7 +652,7 @@ def assert_edge(blocks: dict[str, dict]) -> list[str]:
     require('aws_cloudfront_distribution.edge', 'error_code', 'custom_error_response.value')
     require('aws_cloudfront_response_headers_policy.edge', 'header', '"Cache-Control"')
     require('aws_cloudfront_response_headers_policy.edge', 'value', '"no-store"')
-    if _locals().get('edge_cache_policy_id') != ['"413f1600-8ff0-4b7d-9f5a-2f0e013a5a6a"']:
+    if _locals().get('edge_cache_policy_id') != ['"4135ea2d-6df8-44a3-9df3-4b5a84be39ad"']:
         raise ValueError('edge must use the AWS managed CachingDisabled policy')
     if _locals().get('edge_origin_request_policy_id') != ['"216adef6-5c7f-47e4-b989-5492eafa07d3"']:
         raise ValueError('edge must forward viewer Host, Authorization, cookies and OAuth query parameters')

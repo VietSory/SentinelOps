@@ -12,7 +12,8 @@ locals {
   }
   # AWS managed CachingDisabled and AllViewer. Forward Host, Authorization,
   # cookies and query strings (OAuth state/code), never cache authenticated data.
-  edge_cache_policy_id          = "413f1600-8ff0-4b7d-9f5a-2f0e013a5a6a"
+  # Managed-CachingDisabled; verified with `aws cloudfront list-cache-policies --type managed`.
+  edge_cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
   edge_origin_request_policy_id = "216adef6-5c7f-47e4-b989-5492eafa07d3"
 }
 

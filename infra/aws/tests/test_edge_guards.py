@@ -27,7 +27,7 @@ def test_real_edge():
     ('"/grafana", "/grafana/*"', '"/grafana", "/grafana/*", "/prometheus/*"'),
     ('"fixed-response"', '"forward"'),
     ('status_code  = "403"', 'status_code  = "200"'),
-    ('413f1600-8ff0-4b7d-9f5a-2f0e013a5a6a', '658327ea-f89d-4fab-a63d-7e88639e58f6'),
+    ('4135ea2d-6df8-44a3-9df3-4b5a84be39ad', '658327ea-f89d-4fab-a63d-7e88639e58f6'),
     ('origin_request_policy_id   = local.edge_origin_request_policy_id', 'origin_request_policy_id   = "none"'),
     ('enabled             = !var.edge_vpc_origin_bootstrap', 'enabled             = true'),
     ('target_type = "instance"', 'target_type = "ip"'),

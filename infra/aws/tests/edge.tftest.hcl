@@ -124,10 +124,10 @@ run "private_uncached_https_edge" {
     condition = (
       aws_cloudfront_distribution.edge[0].enabled &&
       aws_cloudfront_distribution.edge[0].default_cache_behavior[0].viewer_protocol_policy == "https-only" &&
-      aws_cloudfront_distribution.edge[0].default_cache_behavior[0].cache_policy_id == "413f1600-8ff0-4b7d-9f5a-2f0e013a5a6a" &&
+      aws_cloudfront_distribution.edge[0].default_cache_behavior[0].cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" &&
       alltrue([for behavior in aws_cloudfront_distribution.edge[0].ordered_cache_behavior :
         behavior.viewer_protocol_policy == "https-only" &&
-        behavior.cache_policy_id == "413f1600-8ff0-4b7d-9f5a-2f0e013a5a6a" &&
+        behavior.cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" &&
         behavior.origin_request_policy_id == "216adef6-5c7f-47e4-b989-5492eafa07d3" &&
         one(behavior.function_association).event_type == "viewer-request"
       ]) &&
