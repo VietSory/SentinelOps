@@ -24,6 +24,7 @@ from control_job import EXPIRES, MIGRATIONS
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 RUNTIME_NAME = "sentinelops/dev/control-runtime"
+LOGIN_ACTIONS = ("runtime", "action-runtime")
 
 
 def command(argv, payload=None):
@@ -129,6 +130,13 @@ def execute(args):
             raise ValueError("wrong runtime secret name")
         sync(args)
         return
+    if args.action == "action-runtime":
+        if args.namespace != "sentinelops-b-actions":
+            raise ValueError("action-runtime requires sentinelops-b-actions namespace")
+        if datetime.now(timezone.utc) >= EXPIRES:
+            raise ValueError("demo exception expired")
+        if kubectl(args, "get", "secret", "remediation-runtime", "--ignore-not-found", "-o", "name").strip():
+            raise ValueError("remediation-runtime already exists; review before replacing")
     if args.action == "runtime":
         if datetime.now(timezone.utc) >= EXPIRES:
             raise ValueError("demo exception expired")
@@ -147,7 +155,7 @@ def execute(args):
     suffix = uuid4().hex[:12]
     master_name, config_name = "control-master-" + suffix, "control-sql-" + suffix
     values = {"master.json": json.dumps(master)}
-    if args.action == "runtime":
+    if args.action in LOGIN_ACTIONS:
         values["runtime-password"] = secrets.token_urlsafe(36)
     config = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": config_name, "namespace": args.namespace},
               "data": {"control_job.py": (HERE / "control_job.py").read_text(),
@@ -161,8 +169,14 @@ def execute(args):
         # Mark first so a lost API response still triggers cleanup of the unique name.
         config_created = True
         apply(args, config, create=True)
-        runtime_attempted = args.action == "runtime"
+        runtime_attempted = args.action in LOGIN_ACTIONS
         run_job(args, master_name, config_name)
+        if args.action == "action-runtime":
+            password = values["runtime-password"]
+            dsn = (f"postgresql://control_action_writer:{quote(password, safe='')}@{args.host}:5432/"
+                   "sentinelops_control?sslmode=verify-full")
+            # Fresh create only: never replace live action credentials or write Secrets Manager.
+            apply(args, secret_document(args, "remediation-runtime", {"action-database-url": dsn}), create=True)
         if args.action == "runtime":
             password = values["runtime-password"]
             endpoint = f"postgresql://{args.host}:5432/sentinelops_control?sslmode=verify-full"
@@ -184,9 +198,9 @@ def execute(args):
         if runtime_attempted:
             try:
                 run_job(args, master_name, config_name, action="disable")
-                print("Runtime failure: control_writer disabled and its sessions terminated", file=sys.stderr)
+                print("Runtime failure: both demo logins disabled and their sessions terminated", file=sys.stderr)
             except Exception:
-                print("URGENT: revoke control_writer manually using the disable command in the runbook", file=sys.stderr)
+                print("URGENT: revoke both demo logins manually using the disable command in the runbook", file=sys.stderr)
         raise
     finally:
         # If Job deletion failed, these may also fail: report the non-secret names for manual cleanup.
@@ -199,7 +213,7 @@ def execute(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "runtime", "sync-runtime", "disable"))
+    parser.add_argument("action", choices=("bootstrap", "runtime", "action-runtime", "sync-runtime", "disable"))
     parser.add_argument("--host", required=True, help="Terraform control_database_endpoint")
     parser.add_argument("--image", required=True, help="Terraform image_repository_urls[control-plane] + @sha256:...")
     parser.add_argument("--namespace", default="sentinelops-b-actions")

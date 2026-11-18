@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import time
 from types import SimpleNamespace
+from urllib.parse import parse_qs, unquote, urlsplit
 import unittest
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -123,6 +124,110 @@ class OfflineChecks(unittest.TestCase):
         self.assertEqual(actions, ["runtime", "disable"])
         self.assertNotIn(password, repr([op for op, _ in requests]))
 
+    def action_execution(self, *, publication_fails=False, job_fails=False, existing=False, **overrides):
+        args = self.args(action="action-runtime", runtime_secret_arn=None, **overrides)
+        actions, documents, requests = [], [], []
+        password = "RAM-only:/@?#%+" + secrets.token_urlsafe(36)
+        def fake_aws(_args, *operation, data=None):
+            requests.append(operation)
+            if operation == ("sts", "get-caller-identity"):
+                return json.dumps({"Account": "123456789012"})
+            self.assertEqual(operation, ("secretsmanager", "get-secret-value", "--secret-id", args.master_secret_arn))
+            return json.dumps({"SecretString": json.dumps({"username": "control_bootstrap", "password": "master-in-RAM"})})
+        def fake_apply(_args, doc, **kwargs):
+            self.assertTrue(kwargs.get("create"))
+            documents.append(doc)
+            if doc["metadata"]["name"] == "remediation-runtime":
+                self.assertEqual(actions, ["action-runtime"])
+                if publication_fails:
+                    raise RuntimeError("publication unavailable")
+        def fake_job(*args, **kwargs):
+            action = kwargs.get("action", "action-runtime")
+            actions.append(action)
+            if job_fails and action == "action-runtime":
+                raise RuntimeError("job verification failed")
+        output = io.StringIO()
+        with patch.object(control, "aws", side_effect=fake_aws), \
+             patch.object(control, "kubectl", return_value="secret/remediation-runtime" if existing else ""), \
+             patch.object(control, "apply", side_effect=fake_apply), \
+             patch.object(control.secrets, "token_urlsafe", return_value=password), \
+             patch.object(control, "run_job", side_effect=fake_job), \
+             contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            if publication_fails or job_fails or existing or args.namespace != "sentinelops-b-actions":
+                with self.assertRaises((RuntimeError, ValueError)):
+                    control.execute(args)
+            else:
+                control.execute(args)
+        self.assertNotIn(password, output.getvalue())
+        self.assertNotIn(password, repr(requests))
+        return args, actions, documents, password
+
+    def test_action_runtime_publishes_only_k8s_encoded_dsn_after_job(self):
+        args, actions, documents, password = self.action_execution()
+        self.assertEqual(actions, ["action-runtime"])
+        doc = documents[-1]
+        self.assertEqual(doc["metadata"], {"name": "remediation-runtime", "namespace": "sentinelops-b-actions"})
+        self.assertEqual(list(doc["data"]), ["action-database-url"])
+        dsn = control.base64.b64decode(doc["data"]["action-database-url"]).decode()
+        url = urlsplit(dsn)
+        self.assertEqual(unquote(url.username), "control_action_writer")
+        self.assertEqual(unquote(url.password), password)
+        self.assertNotIn(password, dsn)
+        self.assertEqual((url.hostname, url.port, url.path), (args.host, 5432, "/sentinelops_control"))
+        self.assertEqual(parse_qs(url.query), {"sslmode": ["verify-full"]})
+
+    def test_action_runtime_publication_failure_disables_both_logins(self):
+        _, actions, _, _ = self.action_execution(publication_fails=True)
+        self.assertEqual(actions, ["action-runtime", "disable"])
+
+    def test_action_runtime_job_failure_revokes_without_publishing(self):
+        _, actions, documents, _ = self.action_execution(job_fails=True)
+        self.assertEqual(actions, ["action-runtime", "disable"])
+        self.assertNotIn("remediation-runtime", [doc["metadata"]["name"] for doc in documents])
+
+    def test_action_runtime_refuses_existing_secret_or_other_namespace(self):
+        for overrides in ({"existing": True}, {"namespace": "sentinelops"}):
+            with self.subTest(overrides=overrides):
+                _, actions, documents, _ = self.action_execution(**overrides)
+                self.assertEqual(actions, [])
+                self.assertEqual(documents, [])
+
+    def test_action_job_enforces_attributes_tls_and_privileges(self):
+        for attributes, tls, privileges in ((False, True, True), (True, False, True),
+                                           (True, True, False), (True, True, True)):
+            with self.subTest(attributes=attributes, tls=tls, privileges=privileges):
+                master_conn = SimpleNamespace(fetchval=AsyncMock(side_effect=[True, True, False, attributes]),
+                                              execute=AsyncMock(), close=AsyncMock())
+                runtime_conn = SimpleNamespace(fetchval=AsyncMock(side_effect=[tls, privileges]), close=AsyncMock())
+                driver = SimpleNamespace(connect=AsyncMock(side_effect=[master_conn, runtime_conn]))
+                password = secrets.token_urlsafe(36)
+                master = json.dumps({"username": "control_bootstrap", "password": "master-in-RAM"})
+                with patch.dict("sys.modules", {"asyncpg": driver}), \
+                     patch.object(Path, "read_text", side_effect=[master, password]), \
+                     patch.dict("os.environ", {"CONTROL_HOST": "control.example.rds.amazonaws.com"}), \
+                     patch.object(control_job, "verify_schema", new=AsyncMock()), \
+                     patch.object(control_job.ssl, "create_default_context", return_value=__import__("ssl").create_default_context()), \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    if attributes and tls and privileges:
+                        asyncio.run(control_job.run("action-runtime"))
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            asyncio.run(control_job.run("action-runtime"))
+                if attributes:
+                    statement = master_conn.execute.call_args.args[0]
+                    self.assertIn("ALTER ROLE control_action_writer LOGIN PASSWORD 'SCRAM-SHA-256$", statement)
+                    self.assertNotIn(password, statement)
+                    for forbidden in ("NOSUPERUSER", "NOREPLICATION", "NOBYPASSRLS"):
+                        self.assertNotIn(forbidden, statement)
+                    options = driver.connect.call_args.kwargs
+                    self.assertEqual(options["user"], "control_action_writer")
+                    self.assertTrue(options["ssl"].check_hostname)
+                    self.assertEqual(options["ssl"].verify_mode, __import__("ssl").CERT_REQUIRED)
+                    runtime_conn.close.assert_awaited_once()
+                else:
+                    master_conn.execute.assert_not_awaited()
+                master_conn.close.assert_awaited_once()
+
     def test_job_rejects_non_tls_session(self):
         connection = SimpleNamespace(fetchval=AsyncMock(return_value=False), close=AsyncMock())
         driver = SimpleNamespace(connect=AsyncMock(return_value=connection))
@@ -173,7 +278,10 @@ def postgres_fixture(image):
                'cat > "$PGDATA/pg_hba.conf"',
                data="local all all trust\nhost all all 127.0.0.1/32 scram-sha-256\n")
         sql("SELECT pg_reload_conf(); CREATE ROLE control_bootstrap LOGIN CREATEROLE CREATEDB; "
+            "GRANT pg_signal_backend TO control_bootstrap; "
             "ALTER DATABASE sentinelops_control OWNER TO control_bootstrap;")
+        if sql("SELECT rolsuper FROM pg_roles WHERE rolname='control_bootstrap'") != "f":
+            raise RuntimeError("fixture master must not be superuser")
         bootstrap = (control.ROOT / "infra/control" / control_job.MIGRATIONS[0]).read_text()
         sql(bootstrap, user="control_bootstrap", database="postgres", success=False)
         for filename in control_job.MIGRATIONS:
@@ -198,11 +306,20 @@ def postgres_fixture(image):
                "AND member='control_bootstrap'::regrole") != "f":
             raise RuntimeError("master inherited owner rights after migration")
         sql(bootstrap, user="control_bootstrap", success=False)
-        sql("ALTER ROLE control_writer LOGIN PASSWORD '" + control_job.scram_verifier(password) +
-            "' VALID UNTIL '2026-11-25 00:00:00+00'", user="control_bootstrap")
-        def login(statement, success=True):
+        for role in control_job.RUNTIME_ROLES.values():
+            sql(f"ALTER ROLE {role} CREATEDB", user="control_bootstrap")
+            if sql(control_job.role_attributes_sql(role), user="control_bootstrap") != "f":
+                raise RuntimeError("elevated runtime attribute was accepted")
+            sql(f"ALTER ROLE {role} NOCREATEDB", user="control_bootstrap")
+            if sql(control_job.role_attributes_sql(role), user="control_bootstrap") != "t":
+                raise RuntimeError("runtime role carries elevated attributes")
+            sql(control_job.runtime_login_sql(role, password), user="control_bootstrap")
+            if sql(f"SELECT rolvaliduntil = '2026-11-25 00:00:00+00'::timestamptz "
+                   f"FROM pg_roles WHERE rolname='{role}'", user="control_bootstrap") != "t":
+                raise RuntimeError("runtime expiry differs")
+        def login(statement, success=True, role="control_writer"):
             return docker("exec", "-i", name, "sh", "-c",
-                          'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -h 127.0.0.1 -U control_writer '
+                          f'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -h 127.0.0.1 -U {role} '
                           '-d sentinelops_control -qAt -v ON_ERROR_STOP=1', data=password + "\n" + statement, success=success)
         if login("SELECT current_user;") != "control_writer":
             raise RuntimeError("SCRAM authentication failed")
@@ -211,11 +328,110 @@ def postgres_fixture(image):
                           "TRUNCATE sentinel_control.incident_versions CASCADE",
                           "SELECT * FROM sentinel_remediation.states"):
             login(forbidden, success=False)
-        sql("ALTER ROLE control_writer NOLOGIN PASSWORD NULL", user="control_bootstrap")
-        login("SELECT 1", success=False)
+        action_role = "control_action_writer"
+        if login("SELECT current_user", role=action_role) != action_role:
+            raise RuntimeError("action SCRAM authentication failed")
+        if login(control_job.runtime_privileges_sql(action_role), role=action_role) != "t":
+            raise RuntimeError("action privilege boundary differs")
+        # Seed an incident as its owner, then exercise all five 005 action tables
+        # through the actual action login, including its column-scoped UPDATEs.
+        sql("""SET ROLE control_owner; BEGIN;
+            INSERT INTO sentinel_control.incidents(incident_id,current_revision,lifecycle_stage)
+                VALUES('fixture-incident',1,'open');
+            INSERT INTO sentinel_control.incident_versions(incident_id,revision,idempotency_key,
+                request_hash,payload,context,actor,reason)
+                VALUES('fixture-incident',1,'fixture-key',repeat('0',64),'{}','{}','fixture','fixture');
+            COMMIT; RESET ROLE;""", user="control_bootstrap")
+        login("""BEGIN;
+            INSERT INTO sentinel_remediation.intents(action_id,idempotency_key,request_hash,intent_hash,
+                target_key,incident_id,incident_revision,payload)
+                VALUES(repeat('a',64),'fixture-action',repeat('b',64),repeat('c',64),repeat('d',64),
+                    'fixture-incident',1,'{}');
+            INSERT INTO sentinel_remediation.states(action_id,revision,phase,facts)
+                VALUES(repeat('a',64),1,'prepared','{}');
+            INSERT INTO sentinel_remediation.events(action_id,revision,phase,facts,event_hash)
+                VALUES(repeat('a',64),1,'prepared','{}',repeat('e',64));
+            INSERT INTO sentinel_remediation.targets(target_key,active_action)
+                VALUES(repeat('d',64),repeat('a',64));
+            INSERT INTO sentinel_remediation.dispatches(action_id,target_key,incident_id)
+                VALUES(repeat('a',64),repeat('d',64),'fixture-incident');
+            UPDATE sentinel_remediation.states SET revision=2,phase='blocked',facts='{}',updated_at=now();
+            UPDATE sentinel_remediation.targets SET active_action=NULL,last_dispatch_at=now();
+            COMMIT;""", role=action_role)
+        for forbidden in ("SET ROLE control_owner", "SET ROLE control_writer", "SET ROLE control_action_resolver",
+                          "CREATE SCHEMA forbidden", "CREATE TABLE sentinel_remediation.forbidden(id int)",
+                          "CREATE TABLE sentinel_control.forbidden(id int)", "CREATE DATABASE forbidden",
+                          "UPDATE sentinel_control.incidents SET lifecycle_stage='closed'",
+                          "INSERT INTO sentinel_control.incidents(incident_id,current_revision,lifecycle_stage) "
+                          "VALUES('forbidden',1,'open')",
+                          "INSERT INTO sentinel_control.incident_versions SELECT * FROM sentinel_control.incident_versions",
+                          "DELETE FROM sentinel_control.incidents", "TRUNCATE sentinel_control.incidents CASCADE",
+                          "UPDATE sentinel_remediation.intents SET payload='{}'",
+                          "UPDATE sentinel_remediation.states SET action_id=repeat('f',64)",
+                          "DELETE FROM sentinel_remediation.events", "TRUNCATE sentinel_remediation.targets CASCADE"):
+            login(forbidden, success=False, role=action_role)
+        # A missing INSERT or an accidental incident/owner/schema/database grant
+        # must fail the same production query, rather than just the example SQL.
+        for grant, revoke in (
+            ("REVOKE INSERT ON sentinel_remediation.events FROM control_action_writer",
+             "GRANT INSERT ON sentinel_remediation.events TO control_action_writer"),
+            ("GRANT UPDATE ON sentinel_control.incidents TO control_action_writer",
+             "REVOKE UPDATE ON sentinel_control.incidents FROM control_action_writer"),
+            ("GRANT CREATE ON DATABASE sentinelops_control TO control_action_writer",
+             "REVOKE CREATE ON DATABASE sentinelops_control FROM control_action_writer"),
+            ("GRANT CREATE ON SCHEMA public TO control_action_writer",
+             "REVOKE CREATE ON SCHEMA public FROM control_action_writer")):
+            as_owner = "ON DATABASE" not in grant and "ON SCHEMA public" not in grant
+            sql("SET ROLE control_owner; " + grant if as_owner else grant,
+                user="control_bootstrap")
+            if login(control_job.runtime_privileges_sql(action_role), role=action_role) != "f":
+                raise RuntimeError("unsafe action privileges were accepted")
+            sql("SET ROLE control_owner; " + revoke if as_owner else revoke,
+                user="control_bootstrap")
+        sql("GRANT control_owner TO control_action_writer WITH INHERIT FALSE, SET TRUE", user="control_bootstrap")
+        if login(control_job.runtime_privileges_sql(action_role), role=action_role) != "f":
+            raise RuntimeError("SET-only owner membership was accepted")
+        sql("REVOKE control_owner FROM control_action_writer", user="control_bootstrap")
+        # pg_signal_backend models the RDS master's non-superuser termination capability.
+        sessions = []
+        try:
+            for role in control_job.RUNTIME_ROLES.values():
+                session = subprocess.Popen(["docker", "exec", "-i", name, "sh", "-c",
+                    f'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -h 127.0.0.1 -U {role} '
+                    '-d sentinelops_control -qAt -v ON_ERROR_STOP=1'],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                sessions.append(session)
+                session.stdin.write(password + "\nSELECT pg_sleep(60);\n")
+                session.stdin.close()
+            for _ in range(50):
+                if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN "
+                       "('control_writer','control_action_writer') AND wait_event='PgSleep'") == "2":
+                    break
+                time.sleep(0.1)
+            else:
+                raise RuntimeError("persistent runtime sessions not ready")
+            for statement in control_job.disable_statements():
+                sql(statement, user="control_bootstrap")
+            for session in sessions:
+                if session.wait(timeout=10) == 0:
+                    raise RuntimeError("disable failed to terminate runtime session")
+        finally:
+            for session in sessions:
+                if session.poll() is None:
+                    session.kill()
+                session.wait(timeout=10)
+        for role in control_job.RUNTIME_ROLES.values():
+            login("SELECT 1", success=False, role=role)
+        if sql("SELECT bool_and(NOT rolcanlogin AND rolpassword IS NULL) FROM pg_authid "
+               "WHERE rolname IN ('control_writer','control_action_writer')") != "t":
+            raise RuntimeError("disable did not clear both credentials")
+        if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN "
+               "('control_writer','control_action_writer')") != "0":
+            raise RuntimeError("runtime sessions remain")
         print(json.dumps({"postgres_image": image, "status": "PASS", "core_versions": [1, 2, 3],
             "remediation_versions": [1, 2], "restricted_master": True, "scram_auth": True,
             "runtime_forbidden_operations_rejected": True, "wrong_database_and_replay_rejected": True,
+            "action_runtime_privileges": True, "both_logins_and_sessions_revoked": True,
             "aws_calls": False, "host_ports": False, "network": "none", "rds_or_tls_proof": False}))
     finally:
         docker("rm", "--force", name)

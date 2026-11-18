@@ -6,9 +6,11 @@ kubectl, Terraform, jq, curl và openssl. Image control-plane đã build/push ri
 không dùng image/tag khác hoặc `latest`. Không cần psql trong image.
 
 Phạm vi: bootstrap **DB mới** `sentinelops_control`, migration deployment 001 rồi
-002–006, ngoại lệ demo `control_writer LOGIN` hết hạn **2026-11-25 00:00 UTC**,
+002–006, hai ngoại lệ demo `control_writer LOGIN` và `control_action_writer LOGIN`
+hết hạn **2026-11-25 00:00 UTC**,
 Secrets Manager **sentinelops/dev/control-runtime**, Kubernetes Secret
-**control-runtime** key **database-url**, và upload archive model khi được bàn giao.
+**control-runtime** key **database-url**, Kubernetes Secret **remediation-runtime**
+key **action-database-url**, và upload archive model khi được bàn giao.
 Không dùng `001-local-roles.sql`. Không cấp quyền action cho `control_writer`.
 
 Claude/A cần hoàn tất self-review và Codex `xhigh` trước các thao tác ghi AWS theo
@@ -208,6 +210,55 @@ decode nội dung. Nếu bước runtime/publish/sync lỗi, CLI thử chạy Jo
 cleanup/revoke; áp dụng cùng quy trình. Secret có thể đã ghi một phần: không
 thử bootstrap lại hoặc tự mở lại login khi chưa review.
 
+### 4.1. Login action — ngoại lệ thứ hai đã duyệt
+
+Owner/nvtank duyệt ngày **2026-11-18** cho trial/remediation dùng chính username
+`control_action_writer`, giữ nguyên các grant của `005-remediation.sql` và phần
+đọc của 006. Login này ghi remediation, không ghi incident và không dùng chung
+identity với worker. Hạn password vẫn **2026-11-25 00:00 UTC**.
+
+Sau bootstrap 001–006 và review, dùng cùng `COMMON` ở namespace bắt buộc
+**sentinelops-b-actions**; không cần `--runtime-secret-arn`:
+
+```bash
+# Render offline để review, không đọc credential hay gọi tool cloud:
+python3.11 scripts/aws_demo/control.py action-runtime "${COMMON[@]}" \
+  > artifacts/aws-demo/control/action-runtime.rendered.json
+# Operator thực hiện sau review:
+python3.11 scripts/aws_demo/control.py action-runtime "${COMMON[@]}" \
+  --master-secret-arn "$MASTER_ARN" --execute
+kubectl --context "$CONTEXT" -n "$NS" describe secret remediation-runtime
+```
+
+Password random trong RAM, đưa qua stdin vào Secret master tạm key
+`runtime-password`, được mount read-only trong Job như luồng `runtime`. Job kiểm
+`pg_roles` để từ chối SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS, rồi chạy
+`ALTER ROLE control_action_writer LOGIN PASSWORD '<SCRAM verifier>' VALID UNTIL
+'2026-11-25 00:00:00+00'`. **RDS master không phải superuser**; PostgreSQL 16 cấm
+ghi `NOSUPERUSER/NOREPLICATION/NOBYPASSRLS` trong ALTER ROLE, vì vậy chỉ kiểm các
+thuộc tính này bằng `pg_roles`, không thêm chúng vào lệnh ALTER.
+
+Job đăng nhập thật bằng password mới, xác minh TLS với CA/hostname và kiểm đủ
+SELECT/INSERT trên năm bảng action, UPDATE đúng các cột states/targets theo 005;
+không DELETE/TRUNCATE remediation, không ghi bảng core/incident, không là thành
+viên `control_owner`, `control_writer`, `control_action_resolver`, không CREATE
+schema/database. CLI chỉ tạo Secret sau khi Job PASS:
+
+- Secret: `sentinelops-b-actions/remediation-runtime`.
+- Key duy nhất: `action-database-url`.
+- DSN: `postgresql://control_action_writer:<password URL-encoded>@<RDS host>:5432/sentinelops_control?sslmode=verify-full`.
+
+Consumer action/trial phải bind đúng key và mount CA cùng `SSL_CERT_FILE` như §2.
+Không tạo/ghi Secrets Manager cho action. CLI từ chối nếu Secret này đã tồn tại;
+không rotate ngầm, không có `sync-runtime` cho credential action. Nếu mất bản K8s,
+review thu hồi và tạo lại login với password mới; password cũ không được lưu để
+đồng bộ. Không decode/in Secret ra terminal hay file.
+
+Nếu Job hoặc việc tạo Secret thất bại, CLI thử `disable`, thu hồi **cả hai** demo
+login và ngắt session, nên worker dùng `control_writer` cũng mất kết nối. Nếu
+operator bị ngắt hoặc có `URGENT`, chạy §7 ngay, kiểm tra Secret có thể đã được
+tạo trước khi response bị mất; review trước lần bật lại.
+
 ## 5. Đồng bộ lại / dùng cho API hoặc trial
 
 Không có External Secrets/CSI; thay đổi Secrets Manager không tự cập nhật K8s.
@@ -286,13 +337,14 @@ metrics trong phạm vi observability/budget đã review; không tự bật bằ
 
 ## 7. Thu hồi và cleanup — chạy cả khi destroy bị chặn
 
-Dừng các consumer trước (chỉ các Deployment đã triển khai), sau đó revoke:
+Dừng các consumer trước (chỉ các Deployment đã triển khai), gồm action/trial nếu
+đang chạy, sau đó revoke cả hai login:
 
 ```bash
 kubectl --context "$CONTEXT" -n "$NS" scale deployment/sentinelops-health-worker deployment/sentinelops-incident-worker --replicas=0
 python3.11 scripts/aws_demo/control.py disable "${COMMON[@]}" \
   --master-secret-arn "$MASTER_ARN" --execute
-kubectl --context "$CONTEXT" -n "$NS" delete secret control-runtime --ignore-not-found
+kubectl --context "$CONTEXT" -n "$NS" delete secret control-runtime remediation-runtime --ignore-not-found
 # Nếu đã tạo bản cho API ở §5, dừng trial/API rồi xóa bản đó:
 kubectl --context "$CONTEXT" -n sentinelops delete secret control-runtime --ignore-not-found
 
@@ -302,8 +354,10 @@ kubectl --context "$CONTEXT" -n sentinelops delete secret control-runtime --igno
 aws --region "$REGION" secretsmanager delete-secret --secret-id "$RUNTIME_ARN" --recovery-window-in-days 7
 ```
 
-Job `disable` chạy `ALTER ROLE control_writer NOLOGIN PASSWORD NULL` và
-`pg_terminate_backend` cho mọi session control_writer. Nếu master không có quyền
+Job `disable` chạy `ALTER ROLE ... NOLOGIN PASSWORD NULL` cho **control_writer và
+control_action_writer**, rồi `pg_terminate_backend` cho mọi session của cả hai.
+Các bước NOLOGIN/PASSWORD NULL được commit trước bước terminate, để lỗi ngắt
+session không rollback việc khóa login. Nếu master không có quyền
 ngắt một session, Job fail: operator có quyền RDS phù hợp phải xác nhận không còn
 session. Password expiry không thay thế bước này. Không xóa RDS managed master
 secret bằng tay. Phần infrastructure/snapshot/KMS/S3 teardown theo AWS_BASELINE và
@@ -338,11 +392,20 @@ Không đưa credentials/state/node_modules vào bản sao. Bản sao không có
 không có git dubious ownership. SQL/runner là bản source hiện tại chưa commit;
 không có commit/push trong bộ kiểm tra.
 
-6 behavioral checks bao gồm offline không gọi tool, reject checksum sai,
+Behavioral checks bao gồm offline không gọi tool, reject checksum sai,
 readback hỏng, sync worker/API đúng dạng DSN, revoke khi publish secret thất bại,
-reject session DB không TLS. Fixture PostgreSQL chạy toàn bộ migrations dưới
+reject session DB không TLS; action-runtime tạo đúng Secret/DSN URL-encoded sau
+Job, không ghi Secrets Manager, từ chối Secret có sẵn/namespace khác, thu hồi khi
+publish lỗi, kiểm thuộc tính role/TLS/quyền action. Fixture PostgreSQL chạy toàn bộ migrations dưới
 master CREATEROLE/CREATEDB **không superuser**, kiểm ledger, SCRAM login, rollback
-quyền tạm khi lỗi 005, từ chối sai DB/replay/quyền runtime và NOLOGIN teardown.
+quyền tạm khi lỗi 005, từ chối sai DB/replay/quyền runtime. Fixture thử SCRAM bằng
+cả hai login, ghi thật năm bảng remediation/UPDATE đúng cột, từ chối ghi incident,
+owner/CREATE/quyền ngoài 005; cố tình thay đổi grant để kiểm query phát hiện sai
+quyền. Teardown kiểm NOLOGIN/PASSWORD NULL và ngắt hai session đang mở, với
+`pg_signal_backend` cấp riêng cho fixture master để mô phỏng khả năng terminate
+của RDS master; master vẫn không superuser. Fixture local không cấu hình TLS,
+không phải bằng chứng kết nối RDS/TLS; các kiểm tra TLS ở đây dùng mock, Job cloud
+vẫn bắt buộc CA/hostname verification và kiểm `pg_stat_ssl` cho cả hai kết nối.
 Đây là kiểm tra phần mềm, không phải chứng nhận RDS rds_superuser, CA thực tế,
 Secrets Manager/KMS, EKS hoặc model bundle. Checker cũ
 `scripts/check_deployment_bootstrap.py` chỉ kiểm core 001–004 trên PostgreSQL 16

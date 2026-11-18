@@ -18,6 +18,79 @@ MIGRATIONS = (
     "004-incident-consumer.sql", "005-remediation.sql", "006-quarantine-review.sql",
 )
 EXPIRES = datetime(2026, 11, 25, tzinfo=timezone.utc)
+RUNTIME_ROLES = {"runtime": "control_writer", "action-runtime": "control_action_writer"}
+
+
+def role_attributes_sql(role):
+    if role not in RUNTIME_ROLES.values():
+        raise ValueError("unsupported runtime role")
+    return ("SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls) "
+            f"FROM pg_roles WHERE rolname='{role}'")
+
+
+def runtime_privileges_sql(role):
+    if role == "control_writer":
+        return """SELECT current_user='control_writer'
+            AND has_table_privilege(current_user,'sentinel_control.incident_versions','INSERT')
+            AND NOT has_table_privilege(current_user,'sentinel_control.incident_versions','UPDATE,DELETE,TRUNCATE')
+            AND NOT has_schema_privilege(current_user,'sentinel_control','CREATE')
+            AND NOT has_schema_privilege(current_user,'sentinel_remediation','USAGE')
+            AND NOT pg_has_role(current_user,'control_owner','MEMBER')
+            AND NOT pg_has_role(current_user,'control_action_writer','MEMBER')
+            AND NOT pg_has_role(current_user,'control_action_resolver','MEMBER')
+            AND NOT has_database_privilege(current_user,current_database(),'CREATE')"""
+    if role != "control_action_writer":
+        raise ValueError("unsupported runtime role")
+    # Check each privilege separately: PostgreSQL's comma-list checks mean ANY,
+    # so has_table_privilege(..., 'SELECT,INSERT') would miss a missing INSERT.
+    return """SELECT current_user='control_action_writer'
+        AND has_schema_privilege(current_user,'sentinel_control','USAGE')
+        AND has_schema_privilege(current_user,'sentinel_remediation','USAGE')
+        AND NOT EXISTS (
+            SELECT FROM (VALUES ('intents'),('states'),('events'),('targets'),('dispatches')) AS t(name)
+            WHERE NOT has_table_privilege(current_user,'sentinel_remediation.' || name,'SELECT')
+               OR NOT has_table_privilege(current_user,'sentinel_remediation.' || name,'INSERT'))
+        AND NOT EXISTS (
+            SELECT FROM (VALUES ('states','revision'),('states','phase'),('states','facts'),
+                ('states','updated_at'),('targets','active_action'),('targets','last_dispatch_at')) AS c(tbl,col)
+            WHERE NOT has_column_privilege(current_user,'sentinel_remediation.' || tbl,col,'UPDATE'))
+        AND NOT EXISTS (
+            SELECT FROM information_schema.columns
+            WHERE table_schema='sentinel_remediation'
+              AND has_column_privilege(current_user,table_schema || '.' || table_name,column_name,'UPDATE')
+              AND NOT (table_name='states' AND column_name IN ('revision','phase','facts','updated_at')
+                    OR table_name='targets' AND column_name IN ('active_action','last_dispatch_at')))
+        AND NOT EXISTS (
+            SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname='sentinel_remediation' AND c.relkind IN ('r','p','v')
+              AND (has_table_privilege(current_user,c.oid,'DELETE,TRUNCATE')
+                   OR c.relname NOT IN ('intents','states','events','targets','dispatches')
+                      AND has_any_column_privilege(current_user,c.oid,'INSERT')))
+        AND NOT EXISTS (
+            SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname='sentinel_control' AND c.relkind IN ('r','p','v')
+              AND (has_any_column_privilege(current_user,c.oid,'INSERT,UPDATE')
+                   OR has_table_privilege(current_user,c.oid,'DELETE,TRUNCATE')))
+        AND NOT EXISTS (
+            SELECT FROM pg_namespace WHERE has_schema_privilege(current_user,oid,'CREATE'))
+        AND NOT pg_has_role(current_user,'control_owner','MEMBER')
+        AND NOT pg_has_role(current_user,'control_writer','MEMBER')
+        AND NOT pg_has_role(current_user,'control_action_resolver','MEMBER')
+        AND NOT has_database_privilege(current_user,current_database(),'CREATE')"""
+
+
+def runtime_login_sql(role, password):
+    role_attributes_sql(role)  # Restrict interpolation to the two reviewed role names.
+    return (f"ALTER ROLE {role} LOGIN PASSWORD '{scram_verifier(password)}' "
+            "VALID UNTIL '2026-11-25 00:00:00+00'")
+
+
+def disable_statements():
+    # Revoke BOTH logins before terminating sessions, including failure recovery.
+    return ("ALTER ROLE control_writer NOLOGIN PASSWORD NULL",
+            "ALTER ROLE control_action_writer NOLOGIN PASSWORD NULL",
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE usename IN ('control_writer','control_action_writer') AND pid<>pg_backend_pid()")
 
 
 def scram_verifier(password: str, salt: bytes | None = None) -> str:
@@ -69,7 +142,7 @@ async def verify_schema(conn):
 async def run(action: str):
     import asyncpg
 
-    if action not in ("bootstrap", "runtime", "disable"):
+    if action not in ("bootstrap", *RUNTIME_ROLES, "disable"):
         raise ValueError("unsupported action")
     master = json.loads(Path("/run/control/master.json").read_text())
     if master["username"] != "control_bootstrap" or not master["password"]:
@@ -92,44 +165,33 @@ async def run(action: str):
             await verify_schema(conn)
             if await conn.fetchval("SELECT rolcanlogin FROM pg_roles WHERE rolname='control_writer'"):
                 raise RuntimeError("bootstrap must leave runtime NOLOGIN")
-        elif action == "runtime":
+        elif action in RUNTIME_ROLES:
+            role = RUNTIME_ROLES[action]
             await verify_schema(conn)
             if await conn.fetchval("SELECT clock_timestamp() >= $1", EXPIRES):
                 raise RuntimeError("demo exception expired")
             password = Path("/run/control/runtime-password").read_text()
             if len(password) < 32 or not password.isascii() or not all(c.isalnum() or c in "-_" for c in password):
                 raise ValueError("invalid generated password")
-            verifier = scram_verifier(password)
             # RDS master is CREATEROLE, not superuser: PostgreSQL 16 rejects naming
-            # SUPERUSER/REPLICATION/BYPASSRLS (even NO*) in ALTER ROLE. 001 created the
+            # SUPERUSER/REPLICATION/BYPASSRLS (even NO*) in ALTER ROLE. Migrations created the
             # role with those defaults off; verify them instead of re-asserting them.
-            if not await conn.fetchval("""SELECT NOT (rolsuper OR rolcreatedb OR rolcreaterole
-                    OR rolreplication OR rolbypassrls) FROM pg_roles WHERE rolname='control_writer'"""):
-                raise RuntimeError("control_writer carries an elevated attribute")
-            await conn.execute("ALTER ROLE control_writer LOGIN PASSWORD '" + verifier + "' "
-                               "VALID UNTIL '2026-11-25 00:00:00+00'")
+            if not await conn.fetchval(role_attributes_sql(role)):
+                raise RuntimeError("runtime role carries an elevated attribute")
+            await conn.execute(runtime_login_sql(role, password))
             # Authenticate using the new password, verify the real TLS session and privilege boundary.
-            runtime = await asyncpg.connect(user="control_writer", password=password, **options)
+            runtime = await asyncpg.connect(user=role, password=password, **options)
             try:
-                safe = await runtime.fetchval("""SELECT current_user='control_writer'
-                    AND (SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid())
-                    AND has_table_privilege(current_user,'sentinel_control.incident_versions','INSERT')
-                    AND NOT has_table_privilege(current_user,'sentinel_control.incident_versions','UPDATE,DELETE,TRUNCATE')
-                    AND NOT has_schema_privilege(current_user,'sentinel_control','CREATE')
-                    AND NOT has_schema_privilege(current_user,'sentinel_remediation','USAGE')
-                    AND NOT pg_has_role(current_user,'control_owner','MEMBER')
-                    AND NOT pg_has_role(current_user,'control_action_writer','MEMBER')
-                    AND NOT pg_has_role(current_user,'control_action_resolver','MEMBER')
-                    AND NOT has_database_privilege(current_user,current_database(),'CREATE')""")
-                if not safe:
+                if (not await runtime.fetchval("SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()")
+                    or not await runtime.fetchval(runtime_privileges_sql(role))):
                     raise RuntimeError("runtime privilege verification failed")
             finally:
                 await runtime.close()
         else:
-            await conn.execute("ALTER ROLE control_writer NOLOGIN PASSWORD NULL")
-            await conn.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                               "WHERE usename='control_writer' AND pid<>pg_backend_pid()")
-            if await conn.fetchval("SELECT count(*) FROM pg_stat_activity WHERE usename='control_writer'"):
+            for statement in disable_statements():
+                await conn.execute(statement)
+            if await conn.fetchval("SELECT count(*) FROM pg_stat_activity "
+                                   "WHERE usename IN ('control_writer','control_action_writer')"):
                 raise RuntimeError("runtime sessions remain; operator must verify termination")
         print(json.dumps({"action": action, "status": "PASS"}), flush=True)
     finally:
