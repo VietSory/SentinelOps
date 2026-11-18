@@ -13,7 +13,8 @@ from sentinelops.telemetry.core import stable_id
 
 TARGET = Target('cluster', 'sentinelops-b-actions', 'namespace', 'payment-service', 'deployment', 'payment')
 GOOD = 'registry.invalid/sentinelops/application@sha256:' + 'a' * 64
-BAD = 'registry.invalid/sentinelops/payment-regression@sha256:' + 'b' * 64
+# Same repository as GOOD: the executor only rolls back to a distinct same-repository digest.
+BAD = 'registry.invalid/sentinelops/application@sha256:' + 'b' * 64
 
 
 class Clock:
@@ -261,6 +262,15 @@ def test_explicit_approve_as_records_rehearsal_identity(tmp_path):
 def test_empty_approve_as_fails_before_regression(tmp_path, name):
     backend = Backend()
     with pytest.raises(ValueError): execute(tmp_path, backend, approve_as=name)
+    assert backend.deployed == []
+
+
+@pytest.mark.parametrize('image', [GOOD, 'registry.invalid/sentinelops/payment-regression@sha256:' + 'b' * 64])
+def test_unrecoverable_regression_image_fails_before_deploy(tmp_path, image):
+    backend = Backend()
+    backend.regression_image = image
+    with pytest.raises(ValueError, match='distinct digest in the known-good image repository'):
+        execute(tmp_path, backend)
     assert backend.deployed == []
 
 

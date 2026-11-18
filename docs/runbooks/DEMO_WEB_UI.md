@@ -176,7 +176,7 @@ Driver riêng cho mỗi service, cửa sổ 30 giây; giữ traffic suốt revie
 
 2. Điền biến từ môi trường đã review: `ACTION_READ_DSN`, `REGRESSION_IMAGE`, `KUBE_SERVER`, `HEALTH_STREAM`, `LEDGER_REF`, `OWNER`, các store/path/token/CA và `TARGET_JSON`.
 `CONTROLLER_STORE_MOUNT` là đường nhìn thấy đúng artifact controller từ nơi chạy driver; `--controller-store` là đường trong pod. Không tùy tiện copy store làm mất binding.
-`REGRESSION_IMAGE` phải chứa `/payment-regression@sha256:<64hex>`; báo cáo ECR lại ghi regression chung repo application: **Không có bằng chứng digest đã push dùng thẳng được cho driver**. Dừng chuẩn bị nếu không khớp.
+`REGRESSION_IMAGE` phải là digest khác known-good **trong cùng repo** với known-good (executor chỉ rollback về digest cùng repo, `src/sentinelops/remediation/domain.py` `rollback_patch`); trên AWS dev là `833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/application@sha256:766dd5f5a32eba9950c4854451f6f6891483d82df735ac93c7046597af7584e0` (cùng tiền tố registry với known-good `…/sentinelops/application@sha256:e520e702…`) (tag `git-d200fc0-payment-regression`). Driver từ chối trước khi deploy nếu khác repo hoặc trùng digest known-good.
 Căn cứ: `scripts/run_runbook_demo.py:417`, `scripts/run_runbook_demo.py:436`, `scripts/run_runbook_demo.py:486`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:75`.
 
 ```sh

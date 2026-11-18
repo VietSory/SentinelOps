@@ -100,6 +100,11 @@ async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_swit
         before = await backend.deployment()
         if before.image != good.image:
             raise ValueError('Payment must be on the approved known-good image before every round')
+        # The executor only rolls back to a distinct digest in the same repository
+        # (domain.rollback_patch), so a regression elsewhere could never be recovered.
+        if not kill_switch_run and (backend.regression_image == good.image
+                                    or backend.regression_image.split('@')[0] != good.image.split('@')[0]):
+            raise ValueError('regression must be a distinct digest in the known-good image repository')
         baseline = {ref for ref, _ in await backend.decisions()}
         dispatches_before = await backend.dispatches()
         started = timestamp(now())
@@ -415,8 +420,6 @@ async def run(args):
     if args.failed_verify_run and args.fault_token_file is None:
         raise ValueError('--failed-verify-run requires --fault-token-file (pods/proxy access)')
     image_digest(args.regression_image)
-    if '/payment-regression@sha256:' not in args.regression_image:
-        raise ValueError('select a digest-pinned payment-regression image')
     dsn = os.environ.get('SENTINELOPS_ACTION_READ_DATABASE_URL', '')
     selected = urlsplit(dsn)
     if (selected.scheme not in ('postgresql', 'postgres') or not selected.hostname
