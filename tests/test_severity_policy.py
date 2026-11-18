@@ -38,21 +38,21 @@ def classify(tmp_path, observations, *, roots=None):
 
 
 @pytest.mark.parametrize("latency,expected", [
-    (749.999, "medium"), (750, "medium"), (750.001, "low"),
-    (1250, "low"), (1250.001, "medium"), (1500, "medium"), (1500.001, "medium")])
+    (749.999, "medium"), (750, "medium"), (750.001, "medium"),
+    (1250, "medium"), (1250.001, "medium"), (1500, "medium"), (1500.001, "medium")])
 def test_non_checkout_latency_boundaries(tmp_path, latency, expected):
     assert classify(tmp_path, {PAYMENT: [bucket(0, latency), bucket(1, latency)]}) == expected
 
 
-@pytest.mark.parametrize("errors,expected", [(0, "low"), (.049999, "low"), (.05, "low"),
+@pytest.mark.parametrize("errors,expected", [(0, "medium"), (.049999, "medium"), (.05, "medium"),
                                             (.050001, "medium"), (.20, "medium")])
 def test_non_checkout_error_boundary_never_establishes_critical(tmp_path, errors, expected):
     assert classify(tmp_path, {PAYMENT: [bucket(0, errors=errors), bucket(1, errors=errors)]}) == expected
 
 
 @pytest.mark.parametrize("latency,errors,expected", [
-    (750, 0, "low"), (1250, 0, "low"), (1500, 0, "low"), (1500.001, 0, "high"),
-    (1030, .049999, "low"), (1030, .05, "high"), (1030, .050001, "high"),
+    (750, 0, "high"), (1250, 0, "high"), (1500, 0, "high"), (1500.001, 0, "high"),
+    (1030, .049999, "high"), (1030, .05, "high"), (1030, .050001, "high"),
     (1030, .199999, "high"), (1030, .20, "critical"), (1030, .200001, "critical")])
 def test_checkout_boundaries_with_mild_payment(tmp_path, latency, errors, expected):
     observations = {PAYMENT: [bucket(0), bucket(1)],
@@ -61,15 +61,15 @@ def test_checkout_boundaries_with_mild_payment(tmp_path, latency, errors, expect
 
 
 @pytest.mark.parametrize("items,expected", [
-    ([bucket(0, errors=.2)], "medium"),
-    ([bucket(0, errors=.2), bucket(2, errors=.2)], "medium"),
+    ([bucket(0, errors=.2)], "high"),
+    ([bucket(0, errors=.2), bucket(2, errors=.2)], "high"),
     ([bucket(0, errors=.2), bucket(1, errors=.199999)], "high"),
     ([bucket(0, errors=.2), bucket(1, errors=.2)], "critical"),
     ([bucket(1, errors=.2), bucket(0, errors=.2)], "critical"),
-    ([bucket(0, errors=.2), bucket(0, errors=.2)], "medium"),
-    ([bucket(0, errors=.2), bucket(1, errors=.2), bucket(2)], "medium"),
-    ([bucket(0, 1501), bucket(2, 1501)], "medium"),
-    ([bucket(0, 1501), bucket(1, 1500)], "medium"),
+    ([bucket(0, errors=.2), bucket(0, errors=.2)], "high"),
+    ([bucket(0, errors=.2), bucket(1, errors=.2), bucket(2)], "high"),
+    ([bucket(0, 1501), bucket(2, 1501)], "high"),
+    ([bucket(0, 1501), bucket(1, 1500)], "high"),
     ([bucket(0, errors=.05), bucket(1, 1501)], "high"),
 ])
 def test_checkout_requires_two_distinct_adjacent_latest_buckets(tmp_path, items, expected):
@@ -84,15 +84,15 @@ def test_checkout_requires_two_distinct_adjacent_latest_buckets(tmp_path, items,
     [bucket(0, 1600), bucket(1, 1600, eligible=False)],
     [bucket(0, None, None, False), bucket(1, None, None, False)],
 ])
-def test_missing_or_ineligible_quality_cannot_establish_low_high_or_critical(tmp_path, service, items):
+def test_missing_or_ineligible_quality_cannot_establish_critical_but_checkout_impact_is_high(tmp_path, service, items):
     observations = {PAYMENT: [bucket(0), bucket(1)], CHECKOUT: [bucket(0, 1030), bucket(1, 1030)]}
     observations[service] = items
-    assert classify(tmp_path, observations) == "medium"
+    assert classify(tmp_path, observations) == "high"
 
 
-@pytest.mark.parametrize("roots,expected", [([PAYMENT], "low"), ([PAYMENT, PAYMENT], "low"),
+@pytest.mark.parametrize("roots,expected", [([PAYMENT], "high"), ([PAYMENT, PAYMENT], "high"),
                                            ([PAYMENT, INVENTORY], "high")])
-def test_structural_roots_are_counted_instead_of_affected_services(tmp_path, roots, expected):
+def test_affected_services_determine_high_regardless_of_structural_roots(tmp_path, roots, expected):
     observations = {PAYMENT: [bucket(0), bucket(1)], INVENTORY: [bucket(0), bucket(1)],
                     CHECKOUT: [bucket(0, 1030), bucket(1, 1030)]}
     assert classify(tmp_path, observations, roots=roots) == expected
@@ -103,43 +103,42 @@ def test_critical_takes_precedence_over_independent_roots(tmp_path):
                     roots=[PAYMENT, INVENTORY]) == "critical"
 
 
-def test_every_non_checkout_service_must_meet_low_and_use_its_maximum(tmp_path):
+def test_two_affected_services_are_high_at_any_latency_or_error_rate(tmp_path):
     observations = {PAYMENT: [bucket(0, 740), bucket(1, 1250)],
                     INVENTORY: [bucket(0), bucket(1, 1250.001)]}
-    assert classify(tmp_path / "moderate", observations) == "medium"
+    assert classify(tmp_path / "moderate", observations) == "high"
     observations[INVENTORY][-1] = bucket(1, 1250)
-    assert classify(tmp_path / "mild", observations) == "low"
+    assert classify(tmp_path / "mild", observations) == "high"
     observations[INVENTORY][0] = bucket(0, errors=.050001)
-    assert classify(tmp_path / "errors", observations) == "medium"
+    assert classify(tmp_path / "errors", observations) == "high"
 
 
-def test_checkout_only_below_high_is_low_but_empty_group_is_medium(tmp_path):
-    assert classify(tmp_path / "checkout", {CHECKOUT: [bucket(0, 1030), bucket(1, 1030)]}) == "low"
+def test_checkout_only_is_high_but_empty_group_is_medium(tmp_path):
+    assert classify(tmp_path / "checkout", {CHECKOUT: [bucket(0, 1030), bucket(1, 1030)]}) == "high"
     assert classify(tmp_path / "empty", {}) == "medium"
 
 
 def test_demo_uses_the_same_implementation_for_live_and_replay_without_mutation(tmp_path):
     from sentinelops.workers.incident_journal import group_severity as live_severity
 
-    args = evidence(tmp_path, {PAYMENT: [bucket(0, 960), bucket(1, 960)],
+    args = evidence(tmp_path, {PAYMENT: [bucket(0, 981), bucket(1, 981)],
                                CHECKOUT: [bucket(0, 1030), bucket(1, 1030)]})
     before = deepcopy(args[1:])
     assert live_severity is group_severity
-    assert group_severity(*args) == live_severity(*args) == "low"
+    assert group_severity(*args) == live_severity(*args) == "high"
     assert args[1:] == before
 
 
-def test_policy_is_cached_and_hash_covers_severity_and_referenced_slo_thresholds(tmp_path, caplog, monkeypatch):
+def test_policy_is_cached_and_hash_covers_original_severity_without_latency_bands(tmp_path, caplog, monkeypatch):
     policy = load_policy()
     severity = json.loads((CONFIGS / "severity_policy.json").read_text())
-    health = json.loads((CONFIGS / "slo_health_policy.json").read_text())
-    assert policy.sha256 == stable_id({"severity_policy": severity, "slo_health_policy": health})
-    assert policy.version == "severity/v2"
-    assert policy.latency_min_ms == health["latency_ms"] and policy.error_rate == health["error_rate"]
+    assert policy.sha256 == stable_id(severity)
+    assert policy.version == "severity/v1"
+    assert not any("latency" in key or "structural" in key for key in severity)
     monkeypatch.setattr("sentinelops.incidents.severity.CONFIGS", tmp_path / "must-not-reload")
     assert load_policy() is policy
     with caplog.at_level(logging.INFO, logger="sentinelops.incidents.severity"):
-        assert classify(tmp_path / "evidence", {PAYMENT: [bucket(0), bucket(1)]}) == "low"
+        assert classify(tmp_path / "evidence", {PAYMENT: [bucket(0), bucket(1)]}) == "medium"
     assert "severity_policy_sha256=" + policy.sha256 in caplog.text
 
 
@@ -147,7 +146,7 @@ def test_installed_worker_loads_deployed_configs_from_working_directory(tmp_path
     expected = load_policy()
     runtime = tmp_path / "runtime"
     (runtime / "configs").mkdir(parents=True)
-    for name in ("severity_policy.json", "slo_health_policy.json"):
+    for name in ("severity_policy.json",):
         (runtime / "configs" / name).write_bytes((CONFIGS / name).read_bytes())
     load_policy.cache_clear()
     try:
@@ -155,5 +154,23 @@ def test_installed_worker_loads_deployed_configs_from_working_directory(tmp_path
             patch.setattr("sentinelops.incidents.severity.CONFIGS", tmp_path / "site-packages/configs")
             patch.chdir(runtime)
             assert load_policy() == expected
+    finally:
+        load_policy.cache_clear()
+
+
+@pytest.mark.parametrize("change", [
+    {"policy_version": "severity/v2"}, {"critical_checkout_error_rate": .19},
+    {"high_checkout_impacted": False}, {"high_min_affected_services": 3},
+    {"high_min_affected_services": True}, {"consecutive_buckets": 1},
+    {"bucket_seconds": 30}, {"fallback_severity": "low"}, {"low_latency_max_ms": 1250},
+])
+def test_original_policy_cannot_be_recalibrated_for_demo(tmp_path, monkeypatch, change):
+    policy = json.loads((CONFIGS / "severity_policy.json").read_text())
+    (tmp_path / "severity_policy.json").write_text(json.dumps({**policy, **change}))
+    load_policy.cache_clear()
+    try:
+        monkeypatch.setattr("sentinelops.incidents.severity.CONFIGS", tmp_path)
+        with pytest.raises(ValueError, match="frozen severity/v1"):
+            load_policy()
     finally:
         load_policy.cache_clear()

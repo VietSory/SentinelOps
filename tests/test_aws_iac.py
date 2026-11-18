@@ -318,12 +318,66 @@ def test_operator_identity_rejects_producer_clients_and_enrolled_users(key):
     ('generate_secret = false', 'generate_secret = true'),
     ('generate_secret = false', 'generate_secret = true # generate_secret = false'),
     ('allowed_oauth_flows = ["code"]', 'allowed_oauth_flows = ["client_credentials"]'),
-    ('allowed_oauth_scopes = ["openid", "sentinelops/incidents.read"]',
+    ('allowed_oauth_scopes = ["openid", "sentinelops/incidents.read", "sentinelops/remediation.approve"]',
      'allowed_oauth_scopes = ["openid", "sentinelops/ingest"]'),
 ])
 def test_operator_identity_rejects_secrets_and_producer_flows(old, new):
     with pytest.raises(ValueError, match='no client secret or producer flow'):
         assert_operator_identity(mutate('aws_cognito_user_pool_client.operator', old, new))
+
+
+@pytest.mark.parametrize('scopes', [
+    '["openid", "sentinelops/incidents.read"]',
+    '["openid", "sentinelops/remediation.approve"]',
+    '["sentinelops/incidents.read", "sentinelops/remediation.approve"]',
+    '["openid", "sentinelops/incidents.read", "sentinelops/remediation.approve", "sentinelops/incidents.write"]',
+    '["openid", "sentinelops/incidents.read", "sentinelops/remediation.approve", "sentinelops/remediation.dispatch"]',
+])
+def test_operator_client_requires_exact_read_and_approval_scopes(scopes):
+    with pytest.raises(ValueError, match='exactly openid/read/proposal-approval scopes'):
+        assert_operator_identity(mutate(
+            'aws_cognito_user_pool_client.operator',
+            'allowed_oauth_scopes = ["openid", "sentinelops/incidents.read", "sentinelops/remediation.approve"]',
+            'allowed_oauth_scopes = '+scopes))
+
+
+@pytest.mark.parametrize(('old', 'new'), [
+    ('identifier = "sentinelops"', 'identifier = "other-api"'),
+    ('scope_name = "remediation.approve"', 'scope_name = "remediation.dispatch"'),
+    ('scope_name = "remediation.approve"', 'scope_name = "incidents.read"'),
+    ('scope_name = "incidents.read"', 'scope_name = "incidents.write"'),
+    ('all executor guards still apply', 'bypass executor guards'),
+])
+def test_operator_resource_server_rejects_changed_scope_contract(old, new):
+    with pytest.raises(ValueError, match='exactly incidents.read and remediation.approve'):
+        assert_operator_identity(mutate('aws_cognito_resource_server.operator_api', old, new))
+
+
+@pytest.mark.parametrize('change', ['missing', 'extra', 'dynamic'])
+def test_operator_resource_server_rejects_missing_or_extra_scopes(change):
+    from scripts.check_aws_iac import _child_blocks
+
+    key = 'aws_cognito_resource_server.operator_api'
+    body = BLOCKS[key]['body']
+    scope = next(scope for scope in _child_blocks(body, 'scope') if 'remediation.approve' in scope)
+    if change == 'missing':
+        altered = body.replace('scope {'+scope+'}', '')
+    elif change == 'extra':
+        altered = body+'\nscope {\n scope_name = "remediation.dispatch"\n scope_description = "Dispatch arbitrary commands"\n}'
+    else:
+        altered = body+'\ndynamic "scope" {\n for_each = var.extra_scopes\n content {\n scope_name = scope.value\n }\n}'
+    assert altered != body
+    with pytest.raises(ValueError, match='exactly incidents.read and remediation.approve'):
+        assert_operator_identity({**BLOCKS, key: {**BLOCKS[key], 'body': altered}})
+
+
+@pytest.mark.parametrize('scope', ['sentinelops/incidents.read', 'sentinelops/remediation.approve'])
+def test_grafana_client_cannot_acquire_operator_scopes(scope):
+    with pytest.raises(ValueError, match='only identity scopes'):
+        assert_operator_identity(mutate(
+            'aws_cognito_user_pool_client.grafana',
+            'allowed_oauth_scopes = ["openid", "email", "profile"]',
+            'allowed_oauth_scopes = ["openid", "email", "profile", "'+scope+'"]'))
 
 
 @pytest.mark.parametrize(('old', 'new'), [
@@ -332,6 +386,11 @@ def test_operator_identity_rejects_secrets_and_producer_flows(old, new):
     ('operator_scope = "sentinelops/incidents.read"',
      'operator_scope = "sentinelops/incidents.read"\n    password = "leak"'),
     ('audience_claim = "client_id"', 'audience_claim = "aud"'),
+    ('    approval_scope = "sentinelops/remediation.approve"\n', ''),
+    ('approval_scope = "sentinelops/remediation.approve"',
+     'approval_scope = "sentinelops/incidents.read"'),
+    ('approval_scope = "sentinelops/remediation.approve"',
+     'approve_scope = "sentinelops/remediation.approve"'),
     ('  } : null', '  } : {}'),
     ('${aws_cognito_user_pool_domain.operator[0].domain}',
      '${aws_cognito_user_pool_client.operator[0].client_secret}'),

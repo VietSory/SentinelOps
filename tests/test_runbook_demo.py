@@ -127,7 +127,7 @@ def test_three_rounds_require_ledger_before_deploy_and_observed_recovery(tmp_pat
 @pytest.mark.parametrize('change', [
     {'score': .79}, {'margin': .14}, {'score': float('nan')}, {'score': float('inf')},
     {'score': True}, {'decision': 'auto'}, {'runbook_id': 'manual'},
-    {'executor_runbook': 'other'}, {'symptoms': {'severity': 'medium'}},
+    {'executor_runbook': 'other'}, {'symptoms': {'severity': 'unknown'}}, {'symptoms': None},
     {'incident_revision': '1'}, {'incident_id': None}])
 def test_unqualified_decisions_never_produce_success_receipts(tmp_path, change):
     backend = Backend()
@@ -262,3 +262,260 @@ def test_empty_approve_as_fails_before_regression(tmp_path, name):
     backend = Backend()
     with pytest.raises(ValueError): execute(tmp_path, backend, approve_as=name)
     assert backend.deployed == []
+
+
+@pytest.mark.parametrize('severity', ['low', 'medium', 'high', 'critical'])
+def test_operator_flow_accepts_every_severity(tmp_path, severity):
+    backend = Backend()
+    backend.change = lambda card: {**card, 'symptoms': {'severity': severity}}
+    receipts, _, _ = execute(tmp_path, backend)
+    assert [r['phase'] for r in receipts] == ['recovered'] * 3
+
+
+class FailedVerifyBackend(Backend):
+    def __init__(self):
+        super().__init__()
+        self.action_reads = 0
+        self.fault_active = False
+        self.terminal = 'escalated'
+        self.reason = 'verification-timeout-target-quarantined'
+
+    async def action(self, decision):
+        state = await super().action(decision)
+        self.action_reads += 1
+        phase = 'verifying' if self.action_reads == 1 else self.terminal
+        state.update(phase=phase)
+        state['facts'] = {'reason': self.reason, 'telemetry': {'status': 'pending'}}
+        if phase == 'recovered':
+            state['facts']['telemetry']['status'] = 'telemetry_verified'
+        self.events.append(phase)
+        return self.state_change(state)
+
+    async def start_verify_fault(self, action):
+        assert action['phase'] == 'verifying' and self.dispatch_count == 1
+        self.fault_active = True
+        self.events.append('fault-on')
+        return {'pod_uid': 'replacement', 'mode': 'error'}
+
+    async def hold_verify_fault(self, fault):
+        assert self.fault_active and fault['pod_uid'] == 'replacement'
+
+    async def clear_verify_fault(self):
+        self.events.append('fault-off')
+        self.fault_active = False
+        return {'pod_uid': 'replacement', 'mode': 'healthy', 'delay_ms': 0}
+
+
+def test_failed_verify_escalates_after_dispatch_and_cleans_after_verdict(tmp_path):
+    backend = FailedVerifyBackend()
+    receipts, _, _ = execute(tmp_path, backend, failed_verify_run=True)
+    assert backend.events == ['known-good', 'deploy', 'verifying', 'fault-on', 'escalated', 'fault-off']
+    assert not backend.fault_active and backend.deployed == [1]
+    receipt, = receipts
+    assert receipt == json.loads((tmp_path / '1.json').read_text())
+    assert receipt['phase'] == 'escalated' and receipt['constraint'] == 'C-R08'
+    assert receipt['telemetry']['status'] != 'telemetry_verified'
+    assert receipt['action_id'] == 'action-1' and receipt['last_event_hash'] == 'c' * 64
+    assert receipt['dispatches_after'] - receipt['dispatches_before'] == 1
+    assert receipt['fault']['pod_uid'] == receipt['fault_cleanup']['pod_uid']
+    assert receipt['fault']['injected_at'] <= receipt['verdict_observed_at'] <= receipt['fault_cleared_at']
+
+
+@pytest.mark.parametrize('phase,reason', [
+    ('recovered', 'verification-timeout-target-quarantined'),
+    ('blocked', 'verification-timeout-target-quarantined'),
+    ('escalated', 'kubernetes-rbac-denied'), ('verifying', 'pending')])
+def test_failed_verify_never_accepts_recovery_guard_failure_or_timeout(tmp_path, phase, reason):
+    backend = FailedVerifyBackend()
+    backend.terminal, backend.reason = phase, reason
+    with pytest.raises((ValueError, TimeoutError)):
+        execute(tmp_path, backend, failed_verify_run=True)
+    assert not backend.fault_active and backend.events[-1] == 'fault-off'
+    assert not list(tmp_path.glob('*.json'))
+
+
+def test_failed_verify_without_observed_fault_cannot_pass(tmp_path):
+    backend = FailedVerifyBackend()
+    async def not_ready(action):
+        return None
+    backend.start_verify_fault = not_ready
+    with pytest.raises(ValueError, match='C-R08'):
+        execute(tmp_path, backend, failed_verify_run=True)
+
+
+def test_failed_verify_cleanup_failure_prevents_success_receipt(tmp_path):
+    backend = FailedVerifyBackend()
+    async def cleanup_failed():
+        raise ValueError('cleanup failed')
+    backend.clear_verify_fault = cleanup_failed
+    with pytest.raises(ValueError, match='cleanup failed'):
+        execute(tmp_path, backend, failed_verify_run=True)
+    assert not list(tmp_path.glob('*.json'))
+
+
+@pytest.mark.parametrize('mode', ['reject_run', 'failed_verify_run'])
+def test_negative_modes_cannot_be_combined_before_mutation(tmp_path, mode):
+    backend = Backend()
+    with pytest.raises(ValueError, match='mutually exclusive'):
+        execute(tmp_path, backend, kill_switch_run=True, **{mode: True})
+    assert not backend.events
+
+
+class RejectBackend(Backend):
+    async def action(self, decision):
+        return None
+
+    async def rejection(self, decision):
+        from sentinelops.remediation.approvals import create_slot, read_slot
+        pid = decision['proposal_id']
+        if read_slot(self.store, 'approval', pid) is None:
+            demo.record_approval(self.store, proposal_id=pid, approved_by='external-oncall',
+                decision='reject', confirm_oncall_approval=True, now=Clock().now())
+        if read_slot(self.store, 'outcome', pid) is None:
+            create_slot(self.store, 'outcome', pid, {
+                'outcome_version': 'runbook-approval-outcome/v1', 'proposal_id': pid,
+                'incident_id': decision['incident_id'], 'incident_revision': decision['incident_revision'],
+                'phase': 'escalated', 'reason': 'approval-rejected'})
+        return await demo.Backend.rejection(self, decision)
+
+
+@pytest.mark.parametrize('actor', [None, 'named-oncall'])
+def test_rejection_observes_controller_outcome_with_zero_rollback(tmp_path, capsys, actor):
+    receipts, backend, clock = execute(tmp_path, RejectBackend(), reject_run=True, approve_as=actor)
+    receipt, = receipts
+    assert receipt['phase'] == 'engineer' and receipt['reason'] == 'approval-rejected'
+    assert receipt['dispatches_before'] == receipt['dispatches_after'] == receipt['mutation_count'] == 0
+    assert receipt['rejection']['approval']['decision'] == 'reject'
+    assert receipt['rejection']['outcome']['phase'] == 'escalated'
+    assert receipt['rejection']['approval']['approved_by'] == (actor or 'external-oncall')
+    assert clock.seconds == 20 and backend.deployed == [1]
+    assert '--decision reject' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('failure', ['late-dispatch', 'action', 'image', 'generation', 'no-outcome', 'used', 'binding'])
+def test_rejection_cannot_pass_without_bound_outcome_or_when_action_changes(tmp_path, failure):
+    backend = RejectBackend()
+    original = backend.rejection
+    async def rejection(decision):
+        result = await original(decision)
+        if failure == 'late-dispatch':
+            backend.dispatch_count += 1
+        elif failure == 'action':
+            backend.action = lambda card: asyncio.sleep(0, result={'phase': 'prepared'})
+        elif failure in ('image', 'generation'):
+            snapshot = await backend.deployment()
+            setattr(snapshot, failure, BAD if failure == 'image' else 99)
+            backend.deployment = lambda: asyncio.sleep(0, result=snapshot)
+        elif failure == 'no-outcome':
+            return None
+        elif failure == 'used':
+            from sentinelops.remediation.approvals import create_slot, read_slot
+            if read_slot(backend.store, 'used', decision['proposal_id']) is None:
+                create_slot(backend.store, 'used', decision['proposal_id'], {'used': True})
+        elif failure == 'binding':
+            return await demo.Backend.rejection(backend, {**decision, 'incident_revision': 99})
+        return result
+    backend.rejection = rejection
+    with pytest.raises((ValueError, TimeoutError)):
+        execute(tmp_path, backend, reject_run=True)
+    assert not list(tmp_path.glob('*.json'))
+
+
+class FaultKube:
+    def __init__(self):
+        self.mode, self.calls = 'healthy', []
+        self.uncertain = False
+        self.inventory = {'items': [{'metadata': {'name': 'payment-new', 'uid': 'replacement'}}]}
+
+    async def _request(self, method, path, **kwargs):
+        self.calls.append((method, path, kwargs))
+        if path.endswith('/pods'):
+            return self.inventory
+        if method == 'POST':
+            self.mode = kwargs['json']['mode']
+            if self.uncertain and self.mode == 'error':
+                raise OSError('lost POST response')
+        return {'service': 'payment-service', 'mode': self.mode, 'delay_ms': 0}
+
+
+def fault_backend(tmp_path):
+    kube = FaultKube()
+    backend = demo.Backend(SimpleNamespace(store=tmp_path, regression_image=BAD), None, None, None,
+                           fault_kube=kube)
+    current = SimpleNamespace(image=GOOD, generation=3, target=TARGET,
+        pods=[SimpleNamespace(uid='replacement')], ready_for=lambda *a, **kw: True)
+    backend.deployment = lambda **kw: asyncio.sleep(0, result=current)
+    state = {'phase': 'verifying', 'intent': {'evidence': {
+        'before': {'generation': 2, 'pods': [{'uid': 'regression'}]}, 'known_good': {'image': GOOD}}},
+        'facts': {'patch_receipt': {'image': GOOD, 'generation': 3}}}
+    return backend, kube, current, state
+
+
+def test_fault_posts_to_new_pod_proxy_then_checks_and_cleans(tmp_path):
+    backend, kube, current, state = fault_backend(tmp_path)
+    async def run():
+        fault = await backend.start_verify_fault(state)
+        await backend.hold_verify_fault(fault)
+        return fault, await backend.clear_verify_fault()
+    fault, cleanup = asyncio.run(run())
+    assert fault['pod_uid'] == cleanup['pod_uid'] == 'replacement'
+    posts = [(path, kw['json']) for method, path, kw in kube.calls if method == 'POST']
+    path = '/api/v1/namespaces/sentinelops-b-actions/pods/payment-new:8000/proxy/internal/faults'
+    assert posts == [(path, {'mode': 'error', 'delay_ms': 0}), (path, {'mode': 'healthy', 'delay_ms': 0})]
+    assert kube.mode == 'healthy' and backend.pending_fault is None
+
+
+@pytest.mark.parametrize('failure', ['not-verifying', 'no-patch', 'wrong-patch', 'not-ready',
+    'generation', 'pod-missing', 'pagination', 'existing-fault'])
+def test_fault_never_posts_before_sent_rollback_and_ready_new_pod(tmp_path, failure):
+    backend, kube, current, state = fault_backend(tmp_path)
+    if failure == 'not-verifying': state['phase'] = 'prepared'
+    elif failure == 'no-patch': state['facts'] = {}
+    elif failure == 'wrong-patch': state['facts']['patch_receipt']['image'] = BAD
+    elif failure == 'not-ready': current.ready_for = lambda *a, **kw: False
+    elif failure == 'generation': current.generation = 4
+    elif failure == 'pod-missing': kube.inventory['items'] = []
+    elif failure == 'pagination': kube.inventory['metadata'] = {'continue': 'more'}
+    elif failure == 'existing-fault': kube.mode = 'latency'
+    if failure == 'not-ready':
+        assert asyncio.run(backend.start_verify_fault(state)) is None
+    else:
+        with pytest.raises(ValueError): asyncio.run(backend.start_verify_fault(state))
+    assert all(method != 'POST' for method, _, _ in kube.calls)
+
+
+def test_uncertain_fault_post_still_cleans_up(tmp_path):
+    backend, kube, _, state = fault_backend(tmp_path)
+    kube.uncertain = True
+    async def run():
+        try:
+            await backend.start_verify_fault(state)
+        finally:
+            await backend.clear_verify_fault()
+    with pytest.raises(OSError): asyncio.run(run())
+    assert kube.mode == 'healthy' and backend.pending_fault is None
+
+
+@pytest.mark.parametrize('failure', ['pod', 'mode'])
+def test_fault_cannot_disappear_before_verdict(tmp_path, failure):
+    backend, kube, current, state = fault_backend(tmp_path)
+    async def run():
+        fault = await backend.start_verify_fault(state)
+        if failure == 'pod': current.pods = [SimpleNamespace(uid='different')]
+        else: kube.mode = 'healthy'
+        try:
+            await backend.hold_verify_fault(fault)
+        finally:
+            await backend.clear_verify_fault()
+    with pytest.raises(ValueError): asyncio.run(run())
+    assert kube.mode == 'healthy'
+
+
+def test_fault_wait_uses_inflight_inventory_validation(tmp_path):
+    calls = []
+    snapshot = SimpleNamespace(validate=lambda policy, **kw: calls.append(kw))
+    kube = SimpleNamespace(target=TARGET, observe=lambda: asyncio.sleep(0, result=snapshot))
+    backend = demo.Backend(SimpleNamespace(store=tmp_path, regression_image=BAD), None, kube, None)
+    asyncio.run(backend.deployment())
+    asyncio.run(backend.deployment(inflight=True))
+    assert calls == [{'before_dispatch': True}, {'before_dispatch': False}]

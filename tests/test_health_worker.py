@@ -3,13 +3,18 @@ from datetime import datetime, timezone, timedelta
 import json
 from pathlib import Path
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import asyncpg
+import httpx
 
+from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
+from sentinelops.telemetry import prometheus
 from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.workers import health
 from sentinelops.workers.health import HealthWorker, latest_bucket, local_endpoint
+from sentinelops.workers.source_policy import SourcePolicy
 
 POLICY = json.loads(Path("configs/slo_health_policy.json").read_text())
 
@@ -45,6 +50,96 @@ def test_restarting_same_source_resumes_same_stream_but_policy_root_or_config_ch
     policy["minimum_requests"] += 1
     assert first.policy == POLICY and first.stream_id != worker().stream_id
     assert -(2 ** 63) <= first.lock_id < 2 ** 63
+
+
+def test_in_cluster_tick_passes_source_policy_to_native_capture_and_commits_current_bucket(tmp_path, monkeypatch):
+    endpoint = "http://prometheus.sentinelops-b-actions.svc.cluster.local:9090"
+    source_policy = SourcePolicy(name="in-cluster", remote_prometheus=endpoint)
+    end = datetime(2026, 10, 28, 0, 10, tzinfo=timezone.utc)
+    now = end + timedelta(seconds=40)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None): return now
+
+    monkeypatch.setattr(health, "datetime", Clock)
+    monkeypatch.setattr(prometheus, "datetime", Clock)
+    assert latest_bucket(now) == end
+    assert 30 <= (now - end).total_seconds() <= POLICY["maximum_lag_seconds"]
+
+    class Connection:
+        fetchval = AsyncMock(return_value=True)
+        fetchrow = AsyncMock()
+        fetch = AsyncMock(return_value=[])
+        execute = AsyncMock(return_value="UPDATE 1")
+        def is_closed(self): return False
+        def transaction(self): return Acquire()
+
+    conn = Connection()
+
+    class Acquire:
+        async def __aenter__(self): return conn
+        async def __aexit__(self, *args): pass
+
+    class Pool:
+        def acquire(self, *, timeout): return Acquire()
+
+    # Keep native_capture, PrometheusSource.capture and normalization real;
+    # replace only the database and HTTP transport, as in the worker/source fixtures.
+    values = {"requests": [({}, 120)], "errors": [({}, 0)],
+              "buckets": [({"le": "0"}, 0), ({"le": "100"}, 120), ({"le": "+Inf"}, 120)],
+              "scrapes": [({}, 12)], "series_scrapes": [({}, 12)], "up": [({}, 1)]}
+    responses = {expression: values[key] for service in BUSINESS_ROUTES
+                 for key, expression in prometheus.queries(service).items()}
+    requests = []
+
+    def handle(request):
+        assert str(request.url).split("?")[0] == endpoint + "/api/v1/query"
+        assert float(request.url.params["time"]) == end.timestamp()
+        assert "Authorization" not in request.headers
+        expression = request.url.params["query"]
+        requests.append(expression)
+        return httpx.Response(200, json={"status": "success", "data": {
+            "resultType": "vector", "result": [
+                {"metric": labels, "value": [end.timestamp(), str(value)]}
+                for labels, value in responses[expression]]}})
+
+    monkeypatch.setattr(health, "PrometheusSource", lambda url: prometheus.PrometheusSource(
+        url, transport=httpx.MockTransport(handle)))
+    capture = Mock(wraps=health.native_capture)
+    monkeypatch.setattr(health, "native_capture", capture)
+    store = ArtifactStore(tmp_path)
+    worker = HealthWorker(Pool(), store, POLICY, endpoint=endpoint, environment="fixture-in-cluster",
+                          configuration_hash="a" * 64, source_policy=source_policy)
+    conn.fetchrow.return_value = {"identity": json.dumps(worker.identity), "initial_bucket_end": end,
+                                 "last_bucket_end": None, "last_batch_ref": None}
+
+    result = asyncio.run(worker.tick())
+
+    assert result["status"] == "COMMITTED" and result["bucket_end"] == timestamp(end)
+    assert capture.call_count == len(BUSINESS_ROUTES)
+    assert {call.args[1] for call in capture.call_args_list} == set(BUSINESS_ROUTES)
+    for call in capture.call_args_list:
+        assert call.args[0] == endpoint and call.args[2] == end
+        assert call.kwargs["source_policy"] is source_policy
+    assert sorted(requests) == sorted(expression for service in BUSINESS_ROUTES
+                                      for expression in prometheus.queries(service).values())
+    batch = store.read(result["manifest_ref"])
+    assert batch["source_status"] == "queried"
+    raws = [store.read(ref) for ref in batch["current_raw_refs"]]
+    assert len(raws) == len(BUSINESS_ROUTES)
+    assert {raw["service"] for raw in raws} == set(BUSINESS_ROUTES)
+    assert all(raw["bucket_end"] == timestamp(end) for raw in raws)
+    normalized = store.read(batch["normalization_manifest_ref"])
+    assert normalized["observation_count"] == len(BUSINESS_ROUTES)
+    assert normalized["quarantine_refs"] == []
+    signals = [store.read(ref) for ref in batch["signal_refs"]]
+    assert len(signals) == len(BUSINESS_ROUTES)
+    assert all(signal["availability"] == "ELIGIBLE" and signal["health"] == "healthy" for signal in signals)
+    assert sum("INSERT INTO sentinel_control.health_batches" in call.args[0]
+               for call in conn.execute.call_args_list) == 1
+    assert sum("INSERT INTO sentinel_control.health_signals" in call.args[0]
+               for call in conn.execute.call_args_list) == len(BUSINESS_ROUTES)
 
 
 @pytest.mark.parametrize("closed", [True, False])

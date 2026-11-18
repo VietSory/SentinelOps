@@ -1,9 +1,9 @@
 {
-  "policy_version": "severity/v2",
+  "policy_version": "severity/v1",
   "critical_checkout_error_rate": 0.20,
-  "high_checkout_latency_ms": 1500.0,
-  "low_latency_max_ms": 1250.0,
-  "independent_structural_roots": 2,
+  "high_checkout_impacted": true,
+  "high_min_affected_services": 2,
+  "fallback_severity": "medium",
   "consecutive_buckets": 2,
   "bucket_seconds": 60
 }

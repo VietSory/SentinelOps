@@ -64,7 +64,7 @@ và checklist ở mục 8.
 
 | Quyết định | Phương án | Ai quyết, trước khi nào |
 | --- | --- | --- |
-| Đăng nhập UI | **Owner chốt 2026-11-18:** dùng UI chỉ đọc của pod trial G6 trên EKS, truy cập qua `kubectl port-forward` (token operator trong pod), không bật Cognito, không chạy API always-on trên EKS. Health/incident worker always-on vẫn chạy trên RDS để phát hiện thật. UI và receipt của trial là demo-only (`q09_eligible: false`) | Đã chốt |
+| Đăng nhập UI + API + Grafana | **Owner/nvtank chốt 2026-11-18, thay quyết định owner `f7244d2` cho phạm vi demo:** đưa UI demo và API always-on trên EKS ra internet qua **CloudFront VPC origin → ALB nội bộ trong private subnet**, đăng nhập **Cognito với MFA bắt buộc**, kèm **Grafana** tại `/grafana/` dùng client OAuth riêng. Không có ALB public; không mở Prometheus, Jaeger, `/internal/faults` hay `/docs` của service. Callback UI `/ui/callback`, Grafana `/grafana/login/generic_oauth` trên domain CloudFront. Hạ tầng edge mặc định tắt, triển khai theo [EDGE.md](../../scripts/aws_demo/EDGE.md); code/test offline không phải bằng chứng đã publish. Health/incident worker vẫn chạy trên RDS để phát hiện thật; UI và receipt của trial vẫn demo-only (`q09_eligible: false`), không đổi nghiệm thu G0–G8 | Đã chốt bởi chủ repo nvtank, 18/11/2026 |
 | Manifest worker | Có `scripts/render_worker_manifests.py` (`915377d`), dùng image `control-plane`; **code-only**, PR #70 OPEN, chưa merge; chưa runtime EKS, chưa apply/gọi AWS | B, ngày 3 |
 | Đưa DSN runtime vào pod | Repo không có External Secrets/CSI. (a) Operator tạo Kubernetes Secret thủ công từ secret `control-runtime`; (b) thêm đồng bộ. Demo: (a) | A đề xuất, B review, trước ngày 3 |
 | Bộ dựng phần dịch vụ | Đã chọn `kubernetes_testbed.py --target eks` (`c018fad`), có Prometheus trong cluster; **code-only**, PR #70 OPEN, chưa merge; chưa runtime EKS, chưa apply/gọi AWS | B, ngày 2 |
@@ -90,17 +90,28 @@ và checklist ở mục 8.
 
 ## 8. Checklist dọn dẹp sau demo
 
-Mỗi bước tạo/xóa tài nguyên AWS qua self-review và Codex review trước khi chạy. Từ review Codex
+Mọi lệnh ghi AWS, gồm Terraform, CLI và thao tác Kubernetes cấp phát/xóa tài nguyên AWS,
+phải qua **self-review + Codex `xhigh`** trên đúng lệnh/manifest trước khi chạy;
+còn `BLOCK` thì dừng, sửa và review lại. Từ review Codex
 2026-11-17 (PR #68), `destroy` sẽ bị chặn hoặc để lại tài nguyên tính tiền nếu bỏ qua các bước sau:
 
 | Bước | Lý do |
 | --- | --- |
 | Owner chốt: **giữ hay hủy dữ liệu đã mã hóa** | Snapshot RDS cuối, bucket artifacts và bản sao state cùng dùng KMS key chính. `destroy` đưa key vào hàng chờ xóa: dữ liệu không đọc được ngay, mất hẳn sau 30 ngày. Giữ dữ liệu thì phải giữ key |
+| [ ] Dừng traffic/demo, API duyệt, worker/controller, recorder; suspend CronJob, lưu log và receipt rồi xóa **Job và ConfigMap `review`/`approve`** cùng pod copy di trú | Job có thể tiếp tục ghi ledger dù Deployment đã scale về 0; giữ bằng chứng trước khi xóa, không ghi credential vào log |
+| [ ] Chốt retention/backup đã kiểm restore, rồi dọn **cả năm PVC** `health-artifacts`, `incident-artifacts`, `remediation-artifacts`, `review-artifacts`, **`deployment-change-artifacts`**, cả bản `-kms` nếu đã di trú | Theo [hướng dẫn di trú](../../scripts/aws_demo/PVC_MIGRATION.md); xóa PVC trước EBS CSI/node/cluster. Kiểm PV, EBS volume và snapshot còn lại, đặc biệt PV nguồn `Retain`; không xóa bản duy nhất của ledger hoặc KMS key còn dùng |
+| [ ] Gỡ **CIDR `/32` thứ hai** nếu đã thêm, cùng mọi `/32` tạm, khỏi `cluster_public_access_cidrs` và cấu hình endpoint thực tế | Ghi đủ cả hai IP trong inventory riêng, không đưa IP vào báo cáo. Giữ đường quản trị cần thiết đến khi xong dọn Kubernetes, tránh khóa operator giữa teardown |
 | **A** thu hồi access entry của từng người: `access-entry.sh revoke arn:aws:iam::<account>:user/<user>` cho `hviet` và user của B, rồi xác nhận `aws eks list-access-entries` không còn chúng. **Hạn chót 2026-11-24** kể cả khi chưa `destroy` | Tạo ngoài Terraform; tag `Expires` không tự thu hồi quyền cluster-admin |
 | **A** chạy action `disable` để tắt cả `control_writer` và `control_action_writer` (`NOLOGIN PASSWORD NULL`, ngắt mọi session; hạn password 2026-11-25 00:00 UTC), xóa secret `sentinelops/dev/control-runtime` cùng Kubernetes Secrets `control-runtime` và `sentinelops-b-actions/remediation-runtime` | Secret runtime tạo bởi Terraform nhưng giá trị do script ghi; cả hai login phải tắt kể cả khi `destroy` bị chặn; action không có Secrets Manager riêng |
-| Xóa image trong 2 repo ECR | Repo không có `force_delete`; còn image thì `destroy` lỗi |
+| [ ] Xóa mọi tag/digest trong 2 repo ECR, gồm **image `control-plane` mới** đã build/deploy sau báo cáo, bản cũ và `payment-regression` trong repo `application` | Repo không có `force_delete`; kiểm cả image không tag, không chỉ danh sách tag cũ trong báo cáo |
 | Làm rỗng bucket artifacts, kể cả mọi version | Bucket versioned, không có `force_destroy` |
 | Apply `database_deletion_protection = false` (plan riêng, review) | RDS đang bật chống xóa |
 | `terraform destroy`, rồi kiểm tra lại không còn NAT, EIP, node, RDS | Các tài nguyên tính tiền theo giờ |
 | Xóa log group `/aws/rds/instance/sentinelops-control-dev/postgresql` | RDS tự tạo, Terraform không quản lý |
 | Xóa snapshot RDS cuối nếu owner chọn hủy dữ liệu | Snapshot tính tiền lưu trữ |
+| [ ] Xóa **budget toàn tài khoản tạo bằng CLI** và notification/subscriber của nó; kiểm riêng budget IaC sau destroy | Budget CLI ngoài state, không được Terraform dọn; giữ cảnh báo tới khi xác minh hết tài nguyên tính tiền |
+
+Các dòng chưa có dấu tick là checklist phải xác nhận khi teardown, không phải bằng
+chứng đã xóa. Thu hồi access entry sau các bước Kubernetes cần quyền operator,
+nhưng không muộn hơn hạn chót. Nếu destroy bị chặn, vẫn thu hồi login và quyền,
+đồng thời ghi rõ PVC/PV/EBS, snapshot, KMS và budget còn lại để tiếp tục dọn.

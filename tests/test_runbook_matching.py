@@ -73,14 +73,16 @@ def test_five_catalog_entries_and_single_allowlisted_executor(catalog):
         "payment-bad-deploy-rollback", "inventory-bad-deploy", "payment-errors-no-change",
         "db-lock-contention", "checkout-latency-downstream"}
     executable = [e for e in catalog["entries"] if e["executable"]]
-    assert len(executable) == 1 and executable[0]["allowed_severities"] == ["low"]
+    assert len(executable) == 1
+    assert all(e["allowed_severities"] == ["low", "medium", "high", "critical"] for e in catalog["entries"])
     assert all(e["executor_runbook"] is None for e in catalog["entries"] if not e["executable"])
     assert all(any(ord(char) > 127 for char in " ".join(e["manual_steps"])) for e in catalog["entries"])
 
 
-def test_5xx_without_change_selects_manual_but_medium_routes_engineer(catalog):
+@pytest.mark.parametrize('severity', ['low', 'medium', 'high', 'critical'])
+def test_5xx_without_change_selects_manual_at_every_severity(catalog, severity):
     derived, observations = inputs()
-    derived["severity"] = "medium"
+    derived["severity"] = severity
     derived["rca"]["candidates"][0]["components"]["recent_change_support"]["value"] = 0.0
     observations["payment-service"][0].update(p95_latency_ms=400.0, error_rate=.12)
     s = extract_symptoms(derived=derived, observations=observations)
@@ -88,7 +90,7 @@ def test_5xx_without_change_selects_manual_but_medium_routes_engineer(catalog):
     assert s["modality"] == "errors" and s["deployment_change"] is False
     assert result["runbook_id"] == "payment-errors-no-change" and result["score"] == 1.0
     assert result["decision"] == "engineer" and result["executor_runbook"] is None
-    assert result["reasons"] == ["severity-not-supported"]
+    assert result["reasons"] == ["manual-runbook"]
     assert decide({**s, "severity": "low"}, catalog)["decision"] == "engineer"
 
 
@@ -98,11 +100,12 @@ def test_unknown_symptoms_do_not_pick_a_runbook(catalog):
     assert result["decision"] == "engineer" and result["runbook_id"] is None
 
 
-@pytest.mark.parametrize("severity", ["medium", "high", "critical"])
-def test_high_match_never_overrides_severity(catalog, severity):
+@pytest.mark.parametrize("severity", ["low", "medium", "high", "critical"])
+def test_high_match_proposes_approval_at_every_severity(catalog, severity):
     result = decide(symptoms(severity=severity), catalog)
-    assert result["score"] == 1.0 and result["decision"] == "engineer"
-    assert result["reasons"] == ["severity-not-supported"]
+    assert result["score"] == 1.0 and result["decision"] == "oncall"
+    assert result["reasons"] == ["oncall-approval-required"]
+    assert result["symptoms"]["severity"] == severity
 
 
 def test_abstention_precedes_severity_and_preserves_null_root(catalog):
@@ -155,11 +158,12 @@ def test_margin_threshold_is_configurable(catalog):
     (.79, .20, 'engineer'), (.80, .15, 'oncall'), (.80, .149, 'engineer'),
     (1., .50, 'oncall'), (.50, .50, 'engineer'),
 ])
-def test_approval_threshold_boundaries_never_auto(catalog, monkeypatch, top, margin, expected):
+@pytest.mark.parametrize('severity', ['low', 'medium', 'high', 'critical'])
+def test_approval_threshold_boundaries_never_auto(catalog, monkeypatch, top, margin, expected, severity):
     monkeypatch.setattr(matching, 'rank', lambda *args: [
         {'id': catalog['entries'][0]['id'], 'score': top},
         {'id': catalog['entries'][1]['id'], 'score': top - margin}])
-    result = decide(symptoms(), catalog)
+    result = decide(symptoms(severity=severity), catalog)
     assert result['decision'] == expected
     assert result['decision'] != 'auto'
 
@@ -279,6 +283,9 @@ def test_fingerprint_is_stable_but_changes_with_each_identity_field(field):
 
 
 @pytest.mark.parametrize("mutation", [
+    lambda c: c["entries"][0].update(allowed_severities=["low"]),
+    lambda c: c["entries"][0]["required"].update(severity="low"),
+    lambda c: c["entries"][0]["features"][0].update(field="severity", equals="low"),
     lambda c: c.update(extra=True),
     lambda c: c["thresholds"].update(extra=True),
     lambda c: c["thresholds"].update(auto_min_score=1.1),

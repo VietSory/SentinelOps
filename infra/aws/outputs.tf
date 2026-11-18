@@ -103,3 +103,13 @@ output "image_repository_urls" {
   description = "Private ECR repositories; deployment manifests pin images from these by digest."
   value       = { for name, repository in aws_ecr_repository.images : name => repository.repository_url }
 }
+
+output "edge_domain" {
+  description = "Demo CloudFront domain; null when disabled. UI at /ui/, Grafana at /grafana/."
+  value       = var.edge_enabled ? aws_cloudfront_distribution.edge[0].domain_name : null
+}
+
+output "edge_grafana_client_id" {
+  description = "Public ID of Grafana's confidential code/PKCE client; the sensitive client secret is never output."
+  value       = var.operator_identity_enabled && var.edge_enabled ? aws_cognito_user_pool_client.grafana[0].id : null
+}

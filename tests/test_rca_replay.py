@@ -30,7 +30,7 @@ def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False
         for raw in captured:raw['queries']['errors']['response']['data']['result'][0]['value'][1]='0'
     if severity_demo:
         captured=[]
-        for service,latency in [('payment-service',960),('checkout-service',1030)]:
+        for service,latency in [('payment-service',981),('checkout-service',1030)]:
             for index in range(2):
                 raw=capture(index);raw['service']=service
                 for key,expression in queries(service).items():raw['queries'][key]['expression']=expression
@@ -139,12 +139,12 @@ def test_verified_raw_adapter_scores_actual_fields_and_archives_a_portable_repla
     with pytest.raises(FileExistsError):replay_rca(source,health,correlation,ref,POLICY,tmp_path/'one')
 
 
-def test_zero_error_payment_checkout_demo_replays_as_low_with_policy_provenance(tmp_path):
+def test_zero_error_payment_checkout_demo_replays_as_high_with_original_policy_provenance(tmp_path):
     source,health,correlation,ref,_=source_scope(tmp_path,severity_demo=True)
     report=replay_rca(source,health,correlation,ref,POLICY,tmp_path/'demo')
     assert report['group_count']==1
     row=report['results'][0]
-    assert row['severity']=='low' and row['severity_policy_sha256']==severity_policy().sha256
+    assert row['severity']=='high' and row['severity_policy_sha256']==severity_policy().sha256
     group=next(g for g in row['rca']['correlation']['groups'] if g['group_id']==row['group_id'])
     assert group['affected_services']==['checkout-service','payment-service']
     assert group['structural_candidates']==['payment-service']

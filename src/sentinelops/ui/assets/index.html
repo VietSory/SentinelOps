@@ -17,7 +17,7 @@
     <a id="nav-incidents" class="nav-item active" href="#workspace" aria-current="page"><span aria-hidden="true">▤</span> Incidents<span class="nav-count" id="nav-count">—</span></a>
     <button id="nav-explanation" class="nav-item" type="button"><span aria-hidden="true">◇</span> Explanations <span class="soon">In detail</span></button>
     <button id="nav-actions" class="nav-item" type="button"><span aria-hidden="true">↗</span> Action history <span class="soon">In detail</span></button>
-    <div class="sidebar-bottom"><span class="small-mark" aria-hidden="true">◎</span><strong>Evidence first.</strong><p>Observe what happened.<br>Keep uncertainty visible.</p><span class="read-only">READ-ONLY CONSOLE</span></div>
+    <div class="sidebar-bottom"><span class="small-mark" aria-hidden="true">◎</span><strong>Evidence first.</strong><p>Observe what happened.<br>Keep uncertainty visible.</p><span class="read-only">OPERATOR CONSOLE</span></div>
   </aside>
   <div class="app-shell">
     <header class="topbar"><span class="breadcrumb">SentinelOps <span>/</span> <strong>Operator workspace</strong></span><div class="topbar-actions"><div class="language-switch" role="group" aria-label="Language"><button id="lang-en" type="button" aria-pressed="true">EN</button><button id="lang-vi" type="button" aria-pressed="false">VI</button></div><span id="session-label" class="session-label">Not connected</span><button id="disconnect" class="button quiet" hidden>Disconnect</button><span class="avatar" aria-hidden="true">SO</span></div></header>
@@ -29,13 +29,14 @@
         <li><b>03</b><span>Investigate<small>Ranked hypotheses</small></span></li>
         <li><b>04</b><span>Record<small>IER · revision · evidence</small></span></li>
         <li><b>05</b><span>Explain<small>Provider identified</small></span></li>
-        <li><b>06</b><span>Review rollback<small>Operator · CLI</small></span></li>
+        <li><b>06</b><span>Review rollback<small>Operator · UI</small></span></li>
         <li><b>07</b><span>Restore image<small>Action journal</small></span></li>
         <li><b>08</b><span>Verify recovery<small>Recovery source</small></span></li>
       </ol>
       <section class="connection-card" id="connection" aria-labelledby="connect-title">
-        <div class="connection-symbol" aria-hidden="true">⌘</div><div class="connection-copy"><h2 id="connect-title">Connect to your workspace</h2><p>Use your operator token or OIDC access token to read persisted incidents. It stays in this tab only.</p></div>
-        <form id="connect-form"><label class="sr-only" for="api-token">API access token</label><input id="api-token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste API access token" required minlength="32"><button class="button primary" type="submit">Connect <span aria-hidden="true">→</span></button></form>
+        <div class="connection-symbol" aria-hidden="true">⌘</div><div class="connection-copy"><h2 id="connect-title">Connect to your workspace</h2><p id="auth-status" role="status">Đang kiểm tra cấu hình đăng nhập…</p></div>
+        <button id="cognito-login" class="button primary" hidden>Đăng nhập Cognito</button>
+        <form id="connect-form" hidden><label class="sr-only" for="api-token">API access token</label><input id="api-token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste API access token" required minlength="32"><button class="button primary" type="submit">Connect <span aria-hidden="true">→</span></button></form>
       </section>
       <div id="notice" class="alert error" role="alert" hidden></div>
       <section class="dependency-strip" aria-label="Dependency status"><div><span class="dependency-label">Incident store</span><small>Readiness · dependency check</small><strong id="store-status"><span class="status-dot neutral"></span>Not checked</strong></div><div><span class="dependency-label">Model readiness</span><small>Availability · not diagnostic accuracy</small><strong id="model-status"><span class="status-dot neutral"></span>Not checked</strong></div><div class="dependency-note"><span class="dependency-label">EVIDENCE RULE</span><span class="status-dot neutral"></span>UNKNOWN means insufficient evidence, not healthy.<span id="readiness-error" class="small-error"></span></div></section>
@@ -49,7 +50,7 @@
         </section>
         <section id="detail-pane" class="panel detail-panel" aria-label="Incident details" aria-live="polite"></section>
       </div>
-      <footer class="page-footer"><span><span class="footer-mark" aria-hidden="true">S</span> SentinelOps <span class="footer-separator">/</span> Evidence-driven reliability</span><span>Read only · Approval happens through CLI</span></footer>
+      <footer class="page-footer"><span><span class="footer-mark" aria-hidden="true">S</span> SentinelOps <span class="footer-separator">/</span> Evidence-driven reliability</span><span>Review proposals · Approve or reject</span></footer>
     </main>
   </div>
 </body>

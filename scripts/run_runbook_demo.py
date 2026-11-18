@@ -6,6 +6,9 @@ and an explicit limited Payment Kubernetes credential. No ambient AWS/kubeconfig
 --kill-switch-run requires the controller's shared kill-switch file to exist and
 a fresh kill-switch decision (arrange a pending incident before starting). It
 never injects a regression or sends a PATCH, including dry-run PATCH.
+--reject-run and --failed-verify-run each run one negative round in a fresh
+output directory. Failed verification uses an explicit fault credential to POST
+/internal/faults through the Kubernetes proxy of the new known-good Payment pod.
 """
 from __future__ import annotations
 
@@ -29,7 +32,7 @@ from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.kubernetes import LocalKubernetes
 from sentinelops.remediation.reader import ActionReader
 from sentinelops.remediation.registry import KnownGoodRegistry
-from sentinelops.remediation.approvals import PROPOSAL_VERSION, record_approval
+from sentinelops.remediation.approvals import PROPOSAL_VERSION, read_slot, record_approval
 from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.telemetry.deployment_changes import DeploymentChangeReview
 from sentinelops.telemetry.store import ArtifactStore
@@ -60,17 +63,18 @@ def proposal_decision(card):
         and type(card.get('score')) in (int, float) and math.isfinite(card['score'])
         and .80 <= card['score'] <= 1 and type(card.get('margin')) in (int, float)
         and math.isfinite(card['margin']) and .15 <= card['margin'] <= 1
-        and card.get('symptoms', {}).get('severity') == 'low')
+        and (card.get('symptoms') or {}).get('severity') in ('low', 'medium', 'high', 'critical'))
 
 
-def approval_command(proposal, store, approved_by='<oncall-name>'):
+def approval_command(proposal, store, approved_by='<oncall-name>', *, decision='approve'):
     return shlex.join(['kubectl', '-n', 'sentinelops-b-actions', 'exec', 'deploy/remediation-controller',
         '--', 'python', 'scripts/approve_runbook.py', '--store', str(store),
         '--proposal-id', proposal['proposal_id'], '--approved-by', approved_by,
-        '--decision', 'approve', '--reason', 'on-call reviewed proposal', '--confirm-oncall-approval'])
+        '--decision', decision, '--reason', 'on-call reviewed proposal', '--confirm-oncall-approval'])
 
 
 async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_switch_run=False, approve_as=None,
+                   failed_verify_run=False, reject_run=False,
                    cooldown=COOLDOWN, timeout=1200., poll=10., clock=time.monotonic,
                    sleep=asyncio.sleep, now=lambda: datetime.now(timezone.utc)):
     """All external operations are injectable; receipts require observed evidence."""
@@ -80,7 +84,9 @@ async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_swit
     output = Path(output)
     if approve_as is not None and (not isinstance(approve_as, str) or not approve_as.strip()):
         raise ValueError('approve-as must name the on-call operator')
-    count = 3
+    if sum((kill_switch_run, failed_verify_run, reject_run)) > 1:
+        raise ValueError('negative demo modes are mutually exclusive')
+    count = 1 if failed_verify_run or reject_run else 3
     output.mkdir(parents=True, exist_ok=True)
     # Refuse reuse before doing anything that could mutate Payment.
     if any((output / f'{n}.json').exists() for n in range(1, count + 1)):
@@ -139,7 +145,7 @@ async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_swit
             'started_at': started, 'known_good_ledger_ref': good.ledger_ref,
             'known_good_image': good.image, 'target': asdict(before.target),
             'decision_ref': decision_ref, 'decision': decision,
-            'kill_switch_run': kill_switch_run}
+            'kill_switch_run': kill_switch_run, 'failed_verify_run': failed_verify_run, 'reject_run': reject_run}
         if kill_switch_run:
             # Observe for a full deadline, not merely one controller tick.
             end = clock() + timeout
@@ -151,45 +157,41 @@ async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_swit
                 resource_version_before=before.resource_version,
                 resource_version_after=(await backend.deployment()).resource_version)
         else:
-            print('On-call approval required: ' + approval_command(decision,
-                getattr(backend, 'controller_store', '/artifacts/remediation')), flush=True)
+            if await backend.dispatches() != dispatches_before:
+                raise ValueError('rollback dispatched before operator decision')
+            operator_decision = 'reject' if reject_run else 'approve'
+            print(('On-call rejection required: ' if reject_run else 'On-call approval required: ')
+                + approval_command(decision, getattr(backend, 'controller_store', '/artifacts/remediation'),
+                                   decision=operator_decision), flush=True)
             if approve_as is not None:
                 # Explicit rehearsal opt-in only; the controller still checks
                 # this same immutable approval and all executor guards.
                 record_approval(backend.store, proposal_id=decision['proposal_id'], approved_by=approve_as,
-                    decision='approve', reason='explicit demo rehearsal --approve-as',
+                    decision=operator_decision, reason='explicit demo rehearsal --approve-as',
                     confirm_oncall_approval=True, now=now())
-            async def action_read():
-                state = await backend.action(decision)
-                if state is None:
-                    return None
-                if state['phase'] in ('blocked', 'escalated'):
-                    raise ValueError('approved action did not recover: ' + state['phase'])
-                if state['phase'] != 'recovered':
-                    return None
-                intent, facts = state['intent'], state['facts']
-                evidence = intent.get('evidence') or {}
-                if (intent['request']['incident_id'] != decision['incident_id']
-                    or intent['request']['incident_revision'] != decision['incident_revision']
-                    or intent['policy']['target'] != asdict(before.target)
-                    or evidence.get('before', {}).get('image') != backend.regression_image
-                    or evidence.get('known_good', {}).get('image') != good.image
-                    or facts.get('telemetry', {}).get('status') != 'telemetry_verified'):
-                    raise ValueError('recovered action is missing matching regression/telemetry evidence')
-                return state
-            action = await wait_for(action_read, lambda v: v is not None,
-                timeout=timeout, poll=poll, clock=clock, sleep=sleep)
-            after = await backend.deployment()
-            if not after.ready_for(good.image, prior_generation=before.generation, old_pods=()):
-                raise ValueError('Payment has not returned to the ready known-good image')
-            dispatches_after = await backend.dispatches()
-            if dispatches_after - dispatches_before != 1:
-                raise ValueError('demo requires exactly one rollback dispatch per round')
-            receipt.update(regression_image=backend.regression_image, change_ref=change['change_ref'],
-                action_id=action['action_id'],
-                action_revision=action['revision'], last_event_hash=action['last_event_hash'],
-                phase='recovered', telemetry=action['facts']['telemetry'],
-                dispatches_before=dispatches_before, dispatches_after=dispatches_after)
+            if reject_run:
+                rejected_deployment = await backend.deployment()
+                async def rejection_read():
+                    if (await backend.dispatches() != dispatches_before
+                        or await backend.action(decision) is not None):
+                        raise ValueError('action observed during operator rejection')
+                    current = await backend.deployment()
+                    if (current.image, current.generation) != (rejected_deployment.image, rejected_deployment.generation):
+                        raise ValueError('Payment changed during operator rejection')
+                    return await backend.rejection(decision)
+                rejection = await wait_for(rejection_read, lambda v: v is not None,
+                    timeout=timeout, poll=poll, clock=clock, sleep=sleep)
+                end = clock() + timeout
+                while clock() < end:
+                    await sleep(min(poll, end - clock()))
+                    await rejection_read()
+                receipt.update(phase='engineer', reason='approval-rejected', rejection=rejection,
+                    mutation_count=0, dispatches_before=dispatches_before, dispatches_after=await backend.dispatches(),
+                    regression_image=backend.regression_image, change_ref=change['change_ref'])
+            else:
+                await complete_action(backend, decision, before, good, receipt, change,
+                    failed_verify_run=failed_verify_run, timeout=timeout, poll=poll,
+                    clock=clock, sleep=sleep, now=now, dispatches_before=dispatches_before)
         receipt['completed_at'] = timestamp(now())
         with (output / f'{number}.json').open('x') as stream:
             json.dump(receipt, stream, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False)
@@ -198,21 +200,85 @@ async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_swit
     return receipts
 
 
+async def complete_action(backend, decision, before, good, receipt, change, *, failed_verify_run,
+                          timeout, poll, clock, sleep, now, dispatches_before):
+    fault = None
+    cleanup = None
+    try:
+        async def action_read():
+            nonlocal fault
+            state = await backend.action(decision)
+            if state is None:
+                return None
+            intent, facts = state['intent'], state['facts']
+            evidence = intent.get('evidence') or {}
+            if (intent['request']['incident_id'] != decision['incident_id']
+                or intent['request']['incident_revision'] != decision['incident_revision']
+                or intent['policy']['target'] != asdict(before.target)
+                or evidence.get('before', {}).get('image') != backend.regression_image
+                or evidence.get('known_good', {}).get('image') != good.image):
+                raise ValueError('action is missing matching regression evidence')
+            if failed_verify_run:
+                if fault is None and state['phase'] == 'verifying':
+                    fault = await backend.start_verify_fault(state)
+                    if fault is not None:
+                        fault['injected_at'] = timestamp(now())
+                if fault is not None:
+                    await backend.hold_verify_fault(fault)
+                if state['phase'] in ('recovered', 'blocked', 'escalated'):
+                    if (state['phase'] != 'escalated' or fault is None
+                        or facts.get('reason') not in ('verification-timeout-target-quarantined',
+                            'telemetry-inconclusive-target-quarantined', 'verification-expired-during-source-read')
+                        or facts.get('telemetry', {}).get('status') == 'telemetry_verified'):
+                        raise ValueError('failed verification requires a fault and telemetry escalation (C-R08)')
+                    return state
+                return None
+            if state['phase'] in ('blocked', 'escalated'):
+                raise ValueError('approved action did not recover: ' + state['phase'])
+            if state['phase'] != 'recovered':
+                return None
+            if facts.get('telemetry', {}).get('status') != 'telemetry_verified':
+                raise ValueError('recovered action is missing matching regression/telemetry evidence')
+            return state
+        action = await wait_for(action_read, lambda v: v is not None,
+            timeout=timeout, poll=poll, clock=clock, sleep=sleep)
+        after = await backend.deployment()
+        if not after.ready_for(good.image, prior_generation=before.generation, old_pods=()):
+            raise ValueError('Payment has not returned to the ready known-good image')
+        dispatches_after = await backend.dispatches()
+        if dispatches_after - dispatches_before != 1:
+            raise ValueError('demo requires exactly one rollback dispatch per round')
+        receipt.update(regression_image=backend.regression_image, change_ref=change['change_ref'],
+            action_id=action['action_id'],
+            action_revision=action['revision'], last_event_hash=action['last_event_hash'],
+            phase=action['phase'], reason=action['facts'].get('reason'), telemetry=action['facts'].get('telemetry'),
+            dispatches_before=dispatches_before, dispatches_after=dispatches_after)
+        receipt['verdict_observed_at'] = timestamp(now())
+    finally:
+        if failed_verify_run:
+            # Also clean up uncertain POSTs, timeouts, cancellation and bad verdicts.
+            cleanup = await backend.clear_verify_fault()
+    if failed_verify_run:
+        receipt.update(constraint='C-R08', fault=fault, fault_cleanup=cleanup,
+                       fault_cleared_at=timestamp(now()))
+
+
 class Backend:
-    def __init__(self, args, pool, kube, registry, *, observer=None, source=None):
+    def __init__(self, args, pool, kube, registry, *, observer=None, source=None, fault_kube=None):
         self.args, self.pool, self.kube, self.registry = args, pool, kube, registry
         self.regression_image = args.regression_image
         self.store = ArtifactStore(args.store)
         self.controller_store = getattr(args, 'controller_store', Path('/artifacts/remediation'))
         self.journal = ActionJournal(pool)
         self.observer, self.source = observer, source
+        self.fault_kube, self.pending_fault = fault_kube, None
 
     async def known_good(self, instant):
         return await self.registry.resolve(self.kube.target, incident_at=instant)
 
-    async def deployment(self):
+    async def deployment(self, *, inflight=False):
         deployment = await self.kube.observe()
-        deployment.validate(Policy(self.kube.target))
+        deployment.validate(Policy(self.kube.target), before_dispatch=not inflight)
         return deployment
 
     async def deploy(self, before):
@@ -262,8 +328,92 @@ class Backend:
             raise ValueError('multiple actions for one incident revision')
         return await self.journal.get(rows[0]['action_id']) if rows else None
 
+    async def rejection(self, decision):
+        pid = decision['proposal_id']
+        approval = read_slot(self.store, 'approval', pid)
+        outcome = read_slot(self.store, 'outcome', pid)
+        if approval is None or outcome is None:
+            return None
+        if (approval.get('approval_version') != 'runbook-approval/v1'
+            or approval.get('proposal_sha256') != stable_id(decision) or approval.get('decision') != 'reject'
+            or approval.get('proposal_id') != pid or not approval.get('approved_by')
+            or outcome.get('outcome_version') != 'runbook-approval-outcome/v1'
+            or outcome.get('proposal_id') != pid or outcome.get('incident_id') != decision['incident_id']
+            or outcome.get('incident_revision') != decision['incident_revision']
+            or outcome.get('phase') != 'escalated' or outcome.get('reason') != 'approval-rejected'
+            or read_slot(self.store, 'used', pid) is not None):
+            raise ValueError('missing matching unused rejection and controller escalation')
+        return {'approval': approval, 'outcome': outcome,
+            'approval_ref': f'artifact://manifests/{stable_id(approval)}.json',
+            'outcome_ref': f'artifact://manifests/{stable_id(outcome)}.json'}
+
+    async def start_verify_fault(self, action):
+        """Select the ready replacement by UID, never a service or an old port-forward."""
+        if self.fault_kube is None:
+            raise ValueError('failed verification requires an explicit fault credential')
+        evidence, facts = action['intent']['evidence'], action['facts']
+        before, good = evidence['before'], evidence['known_good']['image']
+        patch = facts.get('patch_receipt') or {}
+        if (action['phase'] != 'verifying' or patch.get('image') != good
+            or patch.get('generation') != before['generation'] + 1):
+            raise ValueError('fault requires a sent rollback PATCH receipt')
+        current = await self.deployment(inflight=True)
+        if not current.ready_for(good, prior_generation=before['generation'],
+                                 old_pods=[p['uid'] for p in before['pods']]):
+            return None
+        if current.generation != before['generation'] + 1:
+            raise ValueError('unexpected generation before fault injection')
+        base = '/api/v1/namespaces/' + current.target.namespace + '/pods'
+        inventory = await self.fault_kube._request('GET', base, params={'limit': '100'})
+        if inventory.get('metadata', {}).get('continue'):
+            raise ValueError('incomplete fault pod inventory')
+        pods = [p for p in inventory['items'] if p['metadata']['uid'] == current.pods[0].uid]
+        if len(pods) != 1:
+            raise ValueError('replacement fault pod is missing')
+        name = pods[0]['metadata']['name']
+        if not re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,252}', name):
+            raise ValueError('invalid fault pod name')
+        fault = {'pod_uid': current.pods[0].uid, 'pod_name': name, 'image': good,
+                 'generation': current.generation, 'mode': 'error', 'delay_ms': 0}
+        path = base + '/' + name + ':8000/proxy/internal/faults'
+        original = await self.fault_kube._request('GET', path)
+        if original.get('mode') != 'healthy' or original.get('delay_ms') != 0:
+            raise ValueError('replacement pod already has a fault')
+        # Track before POST: a lost response must still trigger cleanup.
+        self.pending_fault = (path, fault)
+        await self._set_fault(path, 'error')
+        return fault
+
+    async def _set_fault(self, path, mode):
+        result = await self.fault_kube._request('POST', path, json={'mode': mode, 'delay_ms': 0})
+        if result.get('mode') != mode or result.get('delay_ms') != 0:
+            raise ValueError('fault endpoint did not acknowledge requested mode')
+        return result
+
+    async def hold_verify_fault(self, fault):
+        current = await self.deployment()
+        if (current.image != fault['image'] or current.generation != fault['generation']
+            or [p.uid for p in current.pods] != [fault['pod_uid']]):
+            raise ValueError('replacement pod changed during failed verification')
+        state = await self.fault_kube._request('GET', self.pending_fault[0])
+        if state.get('mode') != 'error' or state.get('delay_ms') != 0:
+            raise ValueError('verification fault was cleared before verdict')
+
+    async def clear_verify_fault(self):
+        if self.pending_fault is None:
+            return None
+        path, fault = self.pending_fault
+        await self._set_fault(path, 'healthy')
+        state = await self.fault_kube._request('GET', path)
+        if state.get('mode') != 'healthy' or state.get('delay_ms') != 0:
+            raise ValueError('fault cleanup was not verified')
+        self.pending_fault = None
+        return {'pod_uid': fault['pod_uid'], 'mode': 'healthy', 'delay_ms': 0}
+
 
 async def run(args):
+    if args.failed_verify_run and args.fault_token_file is None:
+        raise ValueError('--failed-verify-run requires --fault-token-file (pods/proxy access)')
     image_digest(args.regression_image)
     if '/payment-regression@sha256:' not in args.regression_image:
         raise ValueError('select a digest-pinned payment-regression image')
@@ -275,7 +425,7 @@ async def run(args):
         raise ValueError('explicit read-only database with sslmode=verify-full required')
     target = Target(**json.loads(args.target.read_text()))
     policy = json.loads(args.health_policy.read_text())
-    pool = kube = observer = None
+    pool = kube = observer = fault_kube = None
     try:
         pool = await asyncpg.create_pool(dsn, min_size=1, max_size=2, timeout=5, command_timeout=5)
         await ActionReader(pool).check_ready()
@@ -292,8 +442,12 @@ async def run(args):
         kube = LocalKubernetes(args.server, target, token_file=args.token_file, ca_file=args.ca_file)
         observer = LocalKubernetes(args.server, target, token_file=args.observer_token_file,
             ca_file=args.observer_ca_file)
-        return await run_demo(Backend(args, pool, kube, registry, observer=observer, source=source), output=args.output,
-            kill_switch_run=args.kill_switch_run, approve_as=args.approve_as, timeout=args.timeout, poll=args.poll_seconds)
+        if args.failed_verify_run:
+            fault_kube = LocalKubernetes(args.server, target, token_file=args.fault_token_file, ca_file=args.ca_file)
+        return await run_demo(Backend(args, pool, kube, registry, observer=observer, source=source,
+            fault_kube=fault_kube), output=args.output, kill_switch_run=args.kill_switch_run,
+            failed_verify_run=args.failed_verify_run, reject_run=args.reject_run,
+            approve_as=args.approve_as, timeout=args.timeout, poll=args.poll_seconds)
     finally:
         try:
             if kube is not None:
@@ -303,8 +457,12 @@ async def run(args):
                 if observer is not None:
                     await observer.close()
             finally:
-                if pool is not None:
-                    await pool.close()
+                try:
+                    if fault_kube is not None:
+                        await fault_kube.close()
+                finally:
+                    if pool is not None:
+                        await pool.close()
 
 
 def main():
@@ -318,7 +476,12 @@ def main():
     parser.add_argument('--output', type=Path, default=Path('artifacts/aws-demo/runs'))
     parser.add_argument('--timeout', type=float, default=1200.)
     parser.add_argument('--poll-seconds', type=float, default=10.)
-    parser.add_argument('--kill-switch-run', action='store_true')
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--kill-switch-run', action='store_true')
+    modes.add_argument('--failed-verify-run', action='store_true')
+    modes.add_argument('--reject-run', action='store_true')
+    parser.add_argument('--fault-token-file', type=Path,
+                        help='explicit credential for GET pods and GET/POST pods/proxy; failed-verify only')
     parser.add_argument('--approve-as', help='explicit on-call identity for automated rehearsal approval')
     parser.add_argument('--controller-store', type=Path, default=Path('/artifacts/remediation'),
                         help='store path inside the controller pod for the printed approval command')

@@ -1,0 +1,68 @@
+# New claims deliberately coexist with old claims during migration.
+# Prerequisite: sentinelops-b-actions namespace and sentinelops-gp3-kms
+# StorageClass with the real environment KMS key ARN. See PVC_MIGRATION.md.
+# Increase each request to at least the source PVC capacity before provisioning.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: health-artifacts-kms
+  namespace: sentinelops-b-actions
+  labels: {app.kubernetes.io/part-of: sentinelops}
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Filesystem
+  storageClassName: sentinelops-gp3-kms
+  resources:
+    requests: {storage: 5Gi}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: incident-artifacts-kms
+  namespace: sentinelops-b-actions
+  labels: {app.kubernetes.io/part-of: sentinelops}
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Filesystem
+  storageClassName: sentinelops-gp3-kms
+  resources:
+    requests: {storage: 5Gi}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: remediation-artifacts-kms
+  namespace: sentinelops-b-actions
+  labels: {app.kubernetes.io/part-of: sentinelops}
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Filesystem
+  storageClassName: sentinelops-gp3-kms
+  resources:
+    requests: {storage: 5Gi}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: review-artifacts-kms
+  namespace: sentinelops-b-actions
+  labels: {app.kubernetes.io/part-of: sentinelops}
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Filesystem
+  storageClassName: sentinelops-gp3-kms
+  resources:
+    requests: {storage: 5Gi}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: deployment-change-artifacts-kms
+  namespace: sentinelops-b-actions
+  labels: {app.kubernetes.io/part-of: sentinelops}
+spec:
+  accessModes: [ReadWriteOnce]
+  volumeMode: Filesystem
+  storageClassName: sentinelops-gp3-kms
+  resources:
+    requests: {storage: 5Gi}

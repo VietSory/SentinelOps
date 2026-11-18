@@ -69,7 +69,7 @@ run "operator_identity_is_disabled_by_default" {
   }
 }
 
-run "operator_identity_is_read_only_and_requires_enrollment" {
+run "operator_identity_has_read_and_proposal_approval_and_requires_enrollment" {
   command = plan
   variables {
     operator_identity_enabled = true
@@ -91,16 +91,20 @@ run "operator_identity_is_read_only_and_requires_enrollment" {
       !aws_cognito_user_pool_client.operator[0].generate_secret &&
       aws_cognito_user_pool_client.operator[0].enable_token_revocation &&
       aws_cognito_user_pool_client.operator[0].allowed_oauth_flows == toset(["code"]) &&
-      aws_cognito_user_pool_client.operator[0].allowed_oauth_scopes == toset(["openid", "sentinelops/incidents.read"]) &&
+      aws_cognito_user_pool_client.operator[0].allowed_oauth_scopes == toset(["openid", "sentinelops/incidents.read", "sentinelops/remediation.approve"]) &&
+      aws_cognito_resource_server.operator_api[0].identifier == "sentinelops" &&
       aws_cognito_resource_server.operator_api[0].scope == toset([{
         scope_name        = "incidents.read"
         scope_description = "Read incident, explanation and action observations; no writes or dispatch"
+        }, {
+        scope_name        = "remediation.approve"
+        scope_description = "Approve an already proposed runbook proposal; no arbitrary dispatch; all executor guards still apply"
       }]) &&
       aws_cognito_user_pool_client.operator[0].callback_urls == toset(["https://operator.example.invalid/callback"]) &&
       aws_cognito_user_pool_client.operator[0].access_token_validity == 15 &&
       aws_cognito_user_pool_client.operator[0].token_validity_units[0].access_token == "minutes"
     )
-    error_message = "The operator client must have only read scope/code flow, short-lived access tokens and no client secret."
+    error_message = "The public operator client must use only openid/read/proposal-approval scopes and code flow, short-lived access tokens and no client secret; executor guards still apply."
   }
   assert {
     condition = output.operator_oidc_binding == {
@@ -109,8 +113,9 @@ run "operator_identity_is_read_only_and_requires_enrollment" {
       jwks_url       = "https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_SOFTWAREFIXTURE/.well-known/jwks.json"
       audience_claim = "client_id"
       operator_scope = "sentinelops/incidents.read"
+      approval_scope = "sentinelops/remediation.approve"
     }
-    error_message = "Renderer configuration must match Cognito access-token client_id and the existing read scope."
+    error_message = "Renderer configuration must match Cognito access-token client_id, operator_scope and approval_scope (SENTINELOPS_OIDC_APPROVAL_SCOPE)."
   }
   assert {
     condition     = output.operator_login_domain == "https://sentinelops-dev-123456789012-operators.auth.eu-central-1.amazoncognito.com"
@@ -290,12 +295,26 @@ run "operations_dashboard_preserves_measurement_boundaries" {
 
   assert {
     condition = (
-      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[7].properties.metrics == [["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "sentinelops-control-dev", { unit = "Percent" }]] &&
+      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[7].properties.metrics == [["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "sentinelops-control-dev"]] &&
       jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[8].properties.stat == "Maximum" &&
       jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[9].properties.stat == "Minimum" &&
       strcontains(jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[10].properties.query, "filter @logStream like /^otel-logs-/")
     )
     error_message = "Control DB metrics must bind the actual RDS instance and raw OTLP logs must exclude the EMF stream."
+  }
+
+  assert {
+    condition = alltrue([for index, metric in [
+      { name = "CPUUtilization", stat = "Average", unit = "Percent" },
+      { name = "DatabaseConnections", stat = "Maximum", unit = "Count" },
+      { name = "FreeStorageSpace", stat = "Minimum", unit = "Bytes" },
+      ] : (
+      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[7 + index].properties.metrics == [["AWS/RDS", metric.name, "DBInstanceIdentifier", "sentinelops-control-dev"]] &&
+      length(jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[7 + index].properties.metrics[0]) == 4 &&
+      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[7 + index].properties.stat == metric.stat &&
+      jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[7 + index].properties.title == "Control PostgreSQL ${metric.name} (${metric.unit})"
+    )])
+    error_message = "Each RDS metric must retain its four-item tuple, native unit in the title and intended statistic; unit is not a metric rendering option."
   }
 
   assert {

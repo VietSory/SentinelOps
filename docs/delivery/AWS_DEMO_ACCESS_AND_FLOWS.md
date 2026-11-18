@@ -484,11 +484,28 @@ flowchart TD
 2. Kiểm runtime action `remediation-runtime`, TLS, target UID/binding, PVC topology và review store mount. Review healthy Payment, operator duyệt known-good qua approve Job, kiểm ledger resolve đúng image/stream và approval có trước bad change.
 3. Deploy controller sau review, policy bật tường minh `--policy-enabled`, kill switch off, nhưng **vẫn phải chờ on-call approval từng proposal**. Chưa hoàn tất các bước này thì dừng ở demo 12.1 hoặc luồng local đã xác nhận.
 4. Deploy **payment-regression digest đã review**, ghi physical deployment change/evidence đúng stream; không dùng fault flag thay bad image. Theo `scripts/run_runbook_demo.py`, runner đòi source/review/controller/change stores, target, TLS/token files, health stream, known-good ledger/actor và regression digest thật; không tự điền placeholder thành quyền chạy.
-5. Đợi incident LOW, score ≥0.80, margin ≥0.15 và log `runbook_proposal`. Cho thấy trước duyệt chưa có PATCH; on-call kiểm incident revision/evidence rồi chạy lệnh §7 ngay khi evidence còn mới.
+5. Đợi incident có score ≥0.80, margin ≥0.15 và log `runbook_proposal`, ở mọi severity hợp lệ (low/medium/high/critical). Cho thấy trước duyệt chưa có rollback dispatch; on-call kiểm incident revision/evidence, RCA, runbook và hai image rồi duyệt proposal trên UI đã được bàn giao hoặc chạy lệnh `approve_runbook.py` mà runner in ra ngay khi evidence còn mới. Runner không tự duyệt mặc định.
 6. Theo action journal: guards → dry-run → một PATCH Payment → rollout → 3 whole eligible post-action buckets → `recovered` **và** `telemetry_verified`. Nếu approval hết hạn/RCA stale/guard fail thì trình bày escalation đúng lý do, không bỏ guard để ép demo thành công.
-7. Chạy **3 lượt liên tiếp**, Payment bắt đầu mỗi lượt trên known-good, cách nhau ít nhất cooldown **600 giây**. Receipt runner ở `artifacts/aws-demo/runs/<n>.json`; không truyền `--approve-as` trong demo on-call thủ công. Cờ đó chỉ dành tập dượt có identity tường minh, không phải mặc định tự duyệt.
-8. Lượt kill switch qua `--kill-switch-run`: bật đúng file switch mà controller theo dõi, chứng minh **0 mutation** qua dispatch/action journal và workload observations. Không chỉ dựa số pod. Ca failed-verify riêng cần phạm vi fault đã review, phải escalated/quarantine; không nhận recovery nếu nguồn bị UNKNOWN.
-9. UI trial chỉ mở nếu phiên pod/port/token thật đã được bàn giao; dùng read-only xem cùng revision và action receipt. Nếu chưa có, trình bày Prometheus/Jaeger, logs và evidence/ledger thay vì bịa URL incident UI.
+7. Chạy **3 lượt liên tiếp** bằng một lần gọi runner không có cờ negative; mỗi lượt đi đủ deploy regression → incident → proposal → operator duyệt → rollback → `recovered` + `telemetry_verified`. Payment bắt đầu mỗi lượt trên known-good, cách nhau ít nhất cooldown **600 giây**. Receipt ở `<output>/1.json` đến `3.json`, ràng buộc incident/revision, target, change ref, image và journal hash. Không sửa tay giữa ba lượt. Không truyền `--approve-as` trong demo on-call thủ công; cờ đó chỉ dành tập dượt với identity tường minh (kết hợp `--reject-run` thì ghi quyết định **reject**).
+8. Lượt kill switch qua `--kill-switch-run`: bật đúng file switch mà controller theo dõi, bố trí pending incident để có quyết định mới, chứng minh **0 mutation** qua dispatch/action journal và workload observations trong cả cửa sổ quan sát. Runner giữ ba lượt quan sát hiện có; không deploy regression, không dry-run/PATCH. Không chỉ dựa số pod.
+9. Chạy **một lượt failed-verify** qua `--failed-verify-run --fault-token-file <private-token-path>` trong output mới. Image known-good phải đã bật fault endpoint đúng sandbox (`ENABLE_FAULT_INJECTION=true`; với môi trường dev còn cần `ALLOW_DEV_FAULT_INJECTION=true`, `DEPLOYMENT_ENVIRONMENT=dev`). Credential fault riêng cần GET/LIST pods và GET/POST `pods/proxy` trong namespace sandbox, dùng TLS CA đã chọn; không mở Service/Ingress public. Runner dùng Kubernetes API tường minh, không gọi kubectl hay lấy ambient credentials để tiêm fault.
+   Sau khi operator duyệt và journal ghi `verifying` cùng `patch_receipt`, runner đợi pod Payment **mới** chạy known-good sẵn sàng, kiểm UID khác pod regression, đúng generation và fault ban đầu healthy. Runner POST `{"mode":"error","delay_ms":0}` qua `/api/v1/namespaces/<namespace>/pods/<new-pod>:8000/proxy/internal/faults`, kiểm fault còn bật trong lúc verify. Business traffic tiếp tục tạo lỗi 503 nên telemetry không hồi phục. Chỉ nhận action **`escalated`** vì verify timeout/inconclusive, đúng một rollback dispatch; `recovered`, guard failure hay runner timeout đều làm lượt demo thất bại (**C-R08**). Sau khi thấy verdict, runner POST healthy và GET xác nhận; nhánh lỗi/cancel cũng chạy cleanup. Nếu cleanup lỗi thì không xuất receipt thành công. Receipt `<output>/1.json` có action id/revision/hash, lý do escalation, telemetry nếu journal có, UID/image/generation pod, thời điểm bật fault, verdict và cleanup. Escalation vẫn giữ quarantine; gỡ fault không tự release quarantine hay công nhận recovery.
+10. Chạy **một lượt operator từ chối** qua `--reject-run` trong output mới, Payment ban đầu known-good và kill switch off. Runner deploy regression, đợi proposal rồi in lệnh `--decision reject`; operator có thể từ chối cùng proposal trên UI. Runner phải thấy immutable rejection và outcome controller `escalated / approval-rejected`, chuyển xử lý engineer; không có action intent/approval-used và **0 rollback dispatch/PATCH**, image/generation không đổi trong toàn cửa sổ quan sát. Hai PATCH dùng để inject regression (dry-run + thật) nằm trước cửa sổ này và không được trình bày là rollback. Receipt ghi `phase=engineer`, approval/outcome refs và dispatch counts. Chạy ca reject cuối: nó để nguyên regression cho engineer, không tự PATCH dọn dẹp sau khi bị từ chối.
+11. UI chỉ mở nếu phiên pod/port/token thật đã được bàn giao; dùng cùng incident revision/proposal id để duyệt hoặc từ chối và xem action receipt. Nếu chưa có UI duyệt live, dùng CLI được runner in ra và nói rõ giới hạn; không trình bày CLI như bằng chứng đã duyệt trên UI/EKS.
+
+Các cờ negative loại trừ nhau; dùng thư mục output mới cho mỗi lệnh. Ví dụ dưới đây tái dùng mảng Bash `DEMO_ARGS` chứa **đầy đủ đối số preflight thật của bước 4**, không chứa `--output` hay cờ negative; không chép token/DSN vào receipt:
+
+```bash
+python scripts/run_runbook_demo.py "${DEMO_ARGS[@]}" --output artifacts/aws-demo/runs/recovery
+python scripts/run_runbook_demo.py "${DEMO_ARGS[@]}" --failed-verify-run \
+  --fault-token-file "$FAULT_TOKEN_FILE" --output artifacts/aws-demo/runs/failed-verify
+# Ca kill switch dùng pending incident mới và file switch đã bật trước lệnh này.
+python scripts/run_runbook_demo.py "${DEMO_ARGS[@]}" --kill-switch-run --output artifacts/aws-demo/runs/kill-switch
+# Tắt shared kill switch trước ca reject; Payment phải ở known-good.
+python scripts/run_runbook_demo.py "${DEMO_ARGS[@]}" --reject-run --output artifacts/aws-demo/runs/reject
+```
+
+Các lệnh này là hướng dẫn operator sau preflight/review, không phải bằng chứng đã chạy cloud. Receipts vẫn có `demo_mode=true`, `G6_accepted=false`, `q09_eligible=false`.
 
 ```mermaid
 flowchart LR
@@ -496,11 +513,11 @@ flowchart LR
   Detect --> Dependencies{"Model, known-good, action identity, controller sẵn sàng?"}
   Dependencies -->|"chưa"| Stop["Kết thúc ở detection; công bố giới hạn"]
   Dependencies -->|"rồi"| Bad["Bad image deployment và physical change evidence"]
-  Bad --> Proposal["LOW / match đạt → proposal"]
+  Bad --> Proposal["Mọi severity / match đạt → proposal"]
   Proposal --> Approve["On-call duyệt"]
   Approve --> Verify["Guards / PATCH / rollout / telemetry verify"]
   Verify --> Repeats["3 lượt, cooldown; lưu receipts"]
-  Repeats --> Negative["Kill switch: 0 mutation; failed-verify theo scope"]
+  Repeats --> Negative["Failed-verify: escalated + cleanup; kill switch: 0 mutation; reject: engineer / 0 rollback"]
   Negative --> Cleanup["Dọn và thu hồi trước hạn"]
 ```
 

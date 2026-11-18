@@ -7,7 +7,7 @@
       "title": "Payment chậm sau deploy image mới → rollback về image known-good",
       "executable": true,
       "executor_runbook": "payment-rollback-known-good/v1",
-      "allowed_severities": ["low"],
+      "allowed_severities": ["low", "medium", "high", "critical"],
       "required": {"root_service": "payment-service", "deployment_change": true, "rca_abstained": false},
       "features": [
         {"field": "modality", "equals": "latency", "weight": 0.30},
