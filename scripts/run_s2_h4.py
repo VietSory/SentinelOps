@@ -32,6 +32,7 @@ import yaml
 from scripts.check_kubernetes_testbed import BusinessSandbox
 from scripts.check_rollback_kubernetes import PROJECT, private_file
 from scripts.kubernetes_testbed import NAMESPACE, SERVICES, render
+from scripts.payment_regression import APPLICATION_REPOSITORY, LOCAL_TESTBED_REPOSITORY, dockerfile
 from sentinelops.experiments.traffic import PATHS
 from sentinelops.ml.registry import ModelRegistry
 from sentinelops.remediation.authority import NativeH4Authority
@@ -116,21 +117,13 @@ def bad_image(sandbox, base):
     """Same middleware/metrics/spans; Payment adds 0.95 s after a 130 s delay."""
     context = sandbox.root / 'payment-image-context'
     context.mkdir()
-    patch = r"""from pathlib import Path
-p = Path('/app/services/payment/app.py')
-s = p.read_text()
-gate = 'fault = FaultState()'
-marker = '    await fault.apply(SERVICE_NAME)'
-assert s.count(marker) == s.count(gate) == 1
-s = s.replace(gate, 'import asyncio\nimport time\n'+gate+'\n_s2_regression_after = time.monotonic() + 130')
-s = s.replace(marker, '    if time.monotonic() >= _s2_regression_after:\n        await asyncio.sleep(0.95)\n'+marker, 1)
-p.write_text(s)
-"""
-    (context / 'Dockerfile').write_text('FROM ' + base + '\nRUN ' + json.dumps(['python', '-c', patch]) + '\n')
+    local_base_prefix = f'localhost:{sandbox.port}/{LOCAL_TESTBED_REPOSITORY}@'
+    repository = LOCAL_TESTBED_REPOSITORY if base.startswith(local_base_prefix) else APPLICATION_REPOSITORY
+    (context / 'Dockerfile').write_text(dockerfile(base, repository=repository))
     # A real bad deployment is a new version of the SAME repository; the
     # executor only rolls back to a distinct digest of that repository.
     tag = f'localhost:{sandbox.port}/sentinelops-business:s2-regression'
-    sandbox.docker('build', '-f', str(context / 'Dockerfile'), '-t', tag, str(context))
+    sandbox.docker('build', '--build-arg', 'BASE=' + base, '-f', str(context / 'Dockerfile'), '-t', tag, str(context))
     sandbox.docker('push', tag)
     digests = json.loads(sandbox.docker('image', 'inspect', '--format', '{{json .RepoDigests}}', tag))
     image = next(r for r in digests if r.startswith(f'localhost:{sandbox.port}/sentinelops-business@sha256:'))

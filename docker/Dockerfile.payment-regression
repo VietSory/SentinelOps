@@ -1,0 +1,6 @@
+ARG BASE
+FROM ${BASE}
+ARG BASE
+LABEL sentinelops.dev/variant="payment-regression" \
+      sentinelops.dev/base-digest="${BASE}"
+RUN ["python", "-c", "from pathlib import Path\np = Path('/app/services/payment/app.py')\ns = p.read_text()\ngate = 'fault = FaultState()'\nmarker = '    await fault.apply(SERVICE_NAME)'\nassert s.count(marker) == s.count(gate) == 1\ns = s.replace(gate, 'import asyncio\\nimport time\\n'+gate+'\\n_s2_regression_after = time.monotonic() + 130')\ns = s.replace(marker, '    if time.monotonic() >= _s2_regression_after:\\n        await asyncio.sleep(0.95)\\n'+marker, 1)\np.write_text(s)\n"]
