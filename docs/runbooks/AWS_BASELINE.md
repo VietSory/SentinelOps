@@ -216,12 +216,47 @@ revisions and audit history.
 # 1. Confirm what would be destroyed; never run destroy from memory.
 terraform -chdir=infra/aws plan -destroy
 
-# 2. Deletion protection is deliberate; drop it only for an intended teardown.
+# 2. Before removing the CSI add-on or cluster, drain dynamically provisioned EBS volumes.
+#    Use infra/kubernetes/sentinelops-gp3-kms.storageclass.yaml for demo PVCs.
+#    Before applying it, replace <environment-kms-key-arn> with the environment
+#    KMS key ARN (`terraform -chdir=infra/aws state show aws_kms_key.main`, attribute arn). Its
+#    reclaim policy is Delete; set Retain before deleting a PVC when keeping data.
+kubectl scale deployment/<pvc-consumer> -n sentinelops-b-actions --replicas=0
+
+#    Record the PV and EBS volume ID before deleting the claim. Repeat this
+#    sequence for every PVC using sentinelops-gp3-kms.
+pv="$(kubectl get pvc/<claim> -n sentinelops-b-actions -o jsonpath='{.spec.volumeName}')"
+volume_id="$(kubectl get pv "$pv" -o jsonpath='{.spec.csi.volumeHandle}')"
+echo "PV: $pv; EBS volume: $volume_id"
+
+#    Optional, only when a deliberate backup/retention decision keeps the volume
+#    (then skip the NotFound check below and record the retained volume ID):
+# kubectl patch pv "$pv" -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
+kubectl delete pvc/<claim> -n sentinelops-b-actions
+
+#    With Delete, wait for the PV and the EBS volume to go (a volume can stay in
+#    `deleting` briefly), then describe-volumes must fail with InvalidVolume.NotFound.
+kubectl wait --for=delete pv/"$pv" --timeout=5m
+aws ec2 wait volume-deleted --region ap-southeast-1 --volume-ids "$volume_id"
+aws ec2 describe-volumes --region ap-southeast-1 --volume-ids "$volume_id"
+
+#    Final cluster-wide sweep: no PVC or PV may use sentinelops-gp3-kms.
+kubectl get pvc -A
+kubectl get pv
+
+# 3. Deletion protection is deliberate; drop it only for an intended teardown.
 terraform -chdir=infra/aws apply -var 'database_deletion_protection=false'
 
-# 3. Destroy.
+# 4. Only after the PVs and their EBS volumes are gone, remove the CSI add-on and destroy the cluster.
 terraform -chdir=infra/aws destroy
 ```
+
+For each dynamic EBS volume, the teardown order is fixed: scale PVC consumers
+to zero, record the PV name and its CSI `volumeHandle`, decide backup / `Retain`
+versus `Delete`, delete the PVC, and confirm `describe-volumes --volume-ids`
+returns `InvalidVolume.NotFound`. The final `kubectl get pvc -A` and `kubectl get
+pv` sweep must show no `sentinelops-gp3-kms` volumes; do not remove the CSI add-on
+or destroy the cluster first.
 
 What survives on purpose, and must be handled explicitly:
 

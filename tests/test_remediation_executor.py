@@ -223,6 +223,22 @@ def test_controller_rejects_cross_source_health_binding_before_any_kubernetes_re
     assert f.kube.calls==[]
 
 
+@pytest.mark.parametrize('block_at', [1, 2, None])
+def test_optional_authorize_hook_runs_before_prepare_and_immediately_before_real_patch(block_at):
+    async def run():
+        f=setup();calls=[]
+        async def authorize(request):
+            assert request == f.request
+            calls.append(list(f.kube.calls))
+            if len(calls)==block_at: raise Blocked('fixture-controller-no-longer-auto')
+        f.executor.authorize=authorize
+        result=await f.executor.execute(f.request)
+        assert calls==([[]] if block_at==1 else [[],[True]])
+        assert f.kube.calls==([] if block_at==1 else [True] if block_at==2 else [True,False])
+        assert result['phase']==('blocked' if block_at==1 else 'escalated' if block_at==2 else 'verifying')
+    asyncio.run(run())
+
+
 def test_native_mathematical_qualification_never_becomes_an_action_grant():
     async def run():
         f=setup()

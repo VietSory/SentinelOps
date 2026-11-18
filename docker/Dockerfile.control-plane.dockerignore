@@ -10,10 +10,13 @@
 !scripts/
 !scripts/run_health_worker.py
 !scripts/run_incident_worker.py
+!scripts/run_remediation_controller.py
 !configs/
 !configs/slo_health_policy.json
 !configs/rca_policy.json
 !configs/topology.yaml
+!configs/severity_policy.json
+!configs/runbook_catalog.json
 !docker/
 !docker/Dockerfile.control-plane
 !docker/Dockerfile.control-plane.dockerignore

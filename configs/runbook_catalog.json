@@ -1,0 +1,98 @@
+{
+  "catalog_version": "runbook-catalog/v1",
+  "thresholds": {"auto_min_score": 0.80, "auto_min_margin": 0.15, "oncall_min_score": 0.50},
+  "entries": [
+    {
+      "id": "payment-bad-deploy-rollback",
+      "title": "Payment chậm sau deploy image mới → rollback về image known-good",
+      "executable": true,
+      "executor_runbook": "payment-rollback-known-good/v1",
+      "allowed_severities": ["low"],
+      "required": {"root_service": "payment-service", "deployment_change": true, "rca_abstained": false},
+      "features": [
+        {"field": "modality", "equals": "latency", "weight": 0.30},
+        {"field": "latency_band", "in": ["mild", "moderate"], "weight": 0.25},
+        {"field": "db_lock", "equals": false, "weight": 0.20},
+        {"field": "onset", "in": ["abrupt", "unknown"], "weight": 0.15},
+        {"field": "checkout_impacted", "in": [true, false], "weight": 0.10}
+      ],
+      "manual_steps": [
+        "Đối chiếu thời điểm bắt đầu chậm với lịch sử thay đổi deployment của payment-service.",
+        "Xác minh image known-good đã được phê duyệt, trạng thái rollout và các chốt an toàn trước khi rollback.",
+        "Theo dõi độ trễ, tỷ lệ lỗi và checkout sau xử lý; chuyển kỹ sư trực nếu dịch vụ chưa hồi phục."
+      ]
+    },
+    {
+      "id": "inventory-bad-deploy",
+      "title": "Inventory suy giảm sau thay đổi deployment",
+      "executable": false,
+      "executor_runbook": null,
+      "allowed_severities": ["low", "medium", "high", "critical"],
+      "required": {"root_service": "inventory-service", "deployment_change": true, "rca_abstained": false},
+      "features": [
+        {"field": "modality", "in": ["latency", "errors", "both"], "weight": 0.50},
+        {"field": "onset", "in": ["abrupt", "unknown"], "weight": 0.30},
+        {"field": "db_lock", "equals": false, "weight": 0.20}
+      ],
+      "manual_steps": [
+        "Kiểm tra rollout, image và cấu hình vừa thay đổi của inventory-service.",
+        "Đối chiếu log và trace của yêu cầu lỗi; kỹ sư quyết định sửa cấu hình hay rollback theo quy trình phê duyệt.",
+        "Xác nhận tồn kho và checkout hoạt động bình thường trước khi đóng sự cố."
+      ]
+    },
+    {
+      "id": "payment-errors-no-change",
+      "title": "Payment tăng lỗi 5xx nhưng không có thay đổi deployment",
+      "executable": false,
+      "executor_runbook": null,
+      "allowed_severities": ["low", "medium", "high", "critical"],
+      "required": {"root_service": "payment-service", "deployment_change": false, "rca_abstained": false},
+      "features": [
+        {"field": "modality", "in": ["errors", "both"], "weight": 0.70},
+        {"field": "db_lock", "equals": false, "weight": 0.20},
+        {"field": "checkout_impacted", "in": [true, false], "weight": 0.10}
+      ],
+      "manual_steps": [
+        "Khoanh vùng mã lỗi 5xx bằng log và trace, kiểm tra cổng thanh toán và các phụ thuộc.",
+        "Kiểm tra kết nối, thông tin xác thực và giới hạn lưu lượng; giao kỹ sư xử lý nguyên nhân đã xác minh.",
+        "Không tự rollback khi chưa có bằng chứng thay đổi; kiểm tra tỷ lệ lỗi và tính nhất quán giao dịch sau xử lý."
+      ]
+    },
+    {
+      "id": "db-lock-contention",
+      "title": "Tranh chấp khóa cơ sở dữ liệu PostgreSQL hoặc RDS",
+      "executable": false,
+      "executor_runbook": null,
+      "allowed_severities": ["low", "medium", "high", "critical"],
+      "required": {"db_lock": true, "rca_abstained": false},
+      "features": [
+        {"field": "root_service", "in": ["rds", "postgresql", "postgres"], "weight": 0.60},
+        {"field": "modality", "in": ["latency", "both"], "weight": 0.30},
+        {"field": "checkout_impacted", "equals": true, "weight": 0.10}
+      ],
+      "manual_steps": [
+        "Đối chiếu bằng chứng khóa và áp lực kết nối với thời điểm sự cố.",
+        "Kỹ sư cơ sở dữ liệu kiểm tra giao dịch giữ khóa, truy vấn chờ và ảnh hưởng trước khi can thiệp.",
+        "Chỉ hủy truy vấn hoặc phiên sau phê duyệt; xác nhận giao dịch và độ trễ phục hồi."
+      ]
+    },
+    {
+      "id": "checkout-latency-downstream",
+      "title": "Checkout chậm do dịch vụ phụ thuộc",
+      "executable": false,
+      "executor_runbook": null,
+      "allowed_severities": ["low", "medium", "high", "critical"],
+      "required": {"deployment_change": false, "checkout_impacted": true, "rca_abstained": false},
+      "features": [
+        {"field": "modality", "in": ["latency", "both"], "weight": 0.60},
+        {"field": "latency_band", "in": ["mild", "moderate", "severe"], "weight": 0.30},
+        {"field": "root_service", "in": ["payment-service", "inventory-service", "checkout-service"], "weight": 0.10}
+      ],
+      "manual_steps": [
+        "Theo trace checkout để xác định nhánh payment, inventory hoặc cơ sở dữ liệu đang chậm.",
+        "Đối chiếu độ trễ từng phụ thuộc với RCA; chuyển đúng kỹ sư phụ trách để xử lý thủ công.",
+        "Xác nhận toàn bộ luồng checkout phục hồi và không phát sinh lỗi giao dịch."
+      ]
+    }
+  ]
+}

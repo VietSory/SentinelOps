@@ -10,8 +10,10 @@ from sentinelops.contracts import validate_payload
 from sentinelops.incidents.correlation_replay import replay_correlation
 from sentinelops.incidents.health_replay import replay_health_manifest
 from sentinelops.incidents.rca_replay import replay_rca
+from sentinelops.incidents.severity import load_policy as severity_policy
 from sentinelops.telemetry.core import BUSINESS_ROUTES,stable_id,timestamp
 from sentinelops.telemetry.pipeline import process_captures
+from sentinelops.telemetry.prometheus import queries
 from sentinelops.telemetry.store import ArtifactStore
 from test_slo_health import END,capture,POLICY as HEALTH_POLICY
 
@@ -21,11 +23,21 @@ TOPOLOGY=yaml.safe_load((ROOT/'configs/topology.yaml').read_text())
 TRACE='0123456789abcdef0123456789abcdef'
 
 
-def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False,entry=None,lock=None,lock_log=None):
+def source_scope(tmp_path,*,fresh=False,future=False,healthy=False,control=False,entry=None,lock=None,lock_log=None,severity_demo=False):
     telemetry=ArtifactStore(tmp_path/'source')
     captured=[capture(0),capture(1)]
     if healthy:
         for raw in captured:raw['queries']['errors']['response']['data']['result'][0]['value'][1]='0'
+    if severity_demo:
+        captured=[]
+        for service,latency in [('payment-service',960),('checkout-service',1030)]:
+            for index in range(2):
+                raw=capture(index);raw['service']=service
+                for key,expression in queries(service).items():raw['queries'][key]['expression']=expression
+                raw['queries']['errors']['response']['data']['result'][0]['value'][1]='0'
+                # One finite histogram bucket: interpolated p95 = .95 * bound.
+                raw['queries']['buckets']['response']['data']['result'][1]['metric']['le']=str(latency/.95)
+                captured.append(raw)
     norm=process_captures(captured,telemetry)
     base=int(END.timestamp())*1_000_000_000
     entries=[
@@ -111,6 +123,8 @@ def test_verified_raw_adapter_scores_actual_fields_and_archives_a_portable_repla
     first=replay_rca(source,health,correlation,ref,POLICY,tmp_path/'one')
     second=replay_rca(source,health,correlation,ref,POLICY,tmp_path/'two')
     assert first==second and first['group_count']==1
+    assert first['results'][0]['severity']=='medium'
+    assert first['results'][0]['severity_policy_sha256']==severity_policy().sha256
     result=first['results'][0]['rca'];validate_payload('rca-result.schema.json',result)
     pay=next(c for c in result['candidates'] if c['service']=='payment-service')
     assert pay['score']==pytest.approx(.25*(999_000_000/1_200_000_000)+.15)
@@ -123,6 +137,19 @@ def test_verified_raw_adapter_scores_actual_fields_and_archives_a_portable_repla
     copied=replay_rca(archived,archived,archived,ref,POLICY,tmp_path/'portable')
     assert copied==first and first['source_health_ref'] is not None
     with pytest.raises(FileExistsError):replay_rca(source,health,correlation,ref,POLICY,tmp_path/'one')
+
+
+def test_zero_error_payment_checkout_demo_replays_as_low_with_policy_provenance(tmp_path):
+    source,health,correlation,ref,_=source_scope(tmp_path,severity_demo=True)
+    report=replay_rca(source,health,correlation,ref,POLICY,tmp_path/'demo')
+    assert report['group_count']==1
+    row=report['results'][0]
+    assert row['severity']=='low' and row['severity_policy_sha256']==severity_policy().sha256
+    group=next(g for g in row['rca']['correlation']['groups'] if g['group_id']==row['group_id'])
+    assert group['affected_services']==['checkout-service','payment-service']
+    assert group['structural_candidates']==['payment-service']
+    archive=ArtifactStore(tmp_path/'demo')
+    assert replay_rca(archive,archive,archive,ref,POLICY,tmp_path/'portable-demo')==report
 
 
 @pytest.mark.parametrize('lock', ['overlap', 'disjoint', 'future', 'unknown-trace-receipt', 'bad-id'])

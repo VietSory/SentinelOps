@@ -10,6 +10,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import json
 import logging
+from typing import Awaitable, Callable
 
 from opentelemetry import metrics
 
@@ -36,7 +37,8 @@ class LedgerRecovery:
 
 class RollbackExecutor:
     def __init__(self,journal,kubernetes,authority,registry,recovery,policy,rca_policy,*,
-                 enabled=lambda:False,clock=lambda:datetime.now(timezone.utc)):
+                 enabled=lambda:False,clock=lambda:datetime.now(timezone.utc),
+                 authorize: Callable[[Request], Awaitable[None]] | None = None):
         validate_policy(rca_policy)
         if registry is not None and (registry.source.stream_id!=recovery.source.stream_id
             or authority.health_stream_id!=recovery.source.stream_id or recovery.target!=policy.target
@@ -45,6 +47,7 @@ class RollbackExecutor:
             raise ValueError('rollback health source/target/environment binding mismatch')
         self.journal,self.kube,self.authority,self.registry,self.recovery=journal,kubernetes,authority,registry,recovery
         self.policy,self.rca_policy,self.enabled,self.clock=policy,json.loads(json.dumps(rca_policy)),enabled,clock
+        self.authorize=authorize
         self.counter=metrics.get_meter('sentinelops-remediation').create_counter('sentinelops_remediation_state_observations_total')
 
     def _emit(self,state):
@@ -59,6 +62,7 @@ class RollbackExecutor:
 
     async def _prepare(self,request):
         self._enabled()
+        if self.authorize is not None: await self.authorize(request)
         assessment=await self.authority.assess(request,self.policy.target,now=self.clock())
         if assessment.dispatch_authority is not True: raise Blocked(assessment.missing_reason)
         validate_payload('rca-result.schema.json',assessment.rca)
@@ -110,6 +114,7 @@ class RollbackExecutor:
             if self.clock()-utc_time(state['facts']['dispatch_started_at'])>timedelta(seconds=self.policy.verification_seconds):
                 raise Blocked('dispatch-expired-before-send')
             self._enabled()  # Recheck immediately before handing the request to transport.
+            if self.authorize is not None: await self.authorize(request)
         except Blocked as exc:
             return self._emit(await self.journal.transition(state['action_id'],state['revision'],'escalated',
                 {**state['facts'],'reason':str(exc),'dispatch_cancelled_before_send':True},release=True))

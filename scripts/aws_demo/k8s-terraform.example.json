@@ -1,0 +1,17 @@
+{
+  "region": {"value": "ap-southeast-1"},
+  "cluster_endpoint": {"value": "https://eks.example.invalid"},
+  "control_database_endpoint": {"value": "control.example.invalid"},
+  "collector_bindings": {"value": {
+    "region": "ap-southeast-1", "environment": "dev",
+    "exporter_role_arn": "arn:aws:iam::123456789012:role/sentinelops-telemetry-exporter",
+    "workload_log_group": "/sentinelops/dev/workloads", "trace_sampling_percentage": 10
+  }},
+  "workload_role_arns": {"value": {
+    "telemetry-exporter": "arn:aws:iam::123456789012:role/sentinelops-telemetry-exporter"
+  }},
+  "image_repository_urls": {"value": {
+    "application": "123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/application",
+    "control-plane": "123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane"
+  }}
+}

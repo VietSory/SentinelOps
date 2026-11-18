@@ -11,6 +11,7 @@ from sentinelops.contracts import utc_time,validate_payload
 from sentinelops.incidents.correlation import topology_paths
 from sentinelops.incidents.rca import COMPONENTS,evaluate_rca,temporal_precedence,unavailable,validate_policy
 from sentinelops.incidents.rca_source import business_logs,epoch_ns,from_ns,trace_observations,verify_scope
+from sentinelops.incidents.severity import group_severity as _group_severity,load_policy as severity_policy
 from sentinelops.telemetry.core import BUSINESS_ROUTES,stable_id,timestamp
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.trace_evidence import span_tags
@@ -118,14 +119,7 @@ def lock_log_support(lock_log, intervals, lower, upper, as_of):
 
 
 def group_severity(telemetry, group, signals):
-    critical=False
-    for signal_id in group["signal_ids"]:
-        _,signal=signals[signal_id]
-        if signal["service"]!="checkout-service":continue
-        observed=sorted((telemetry.read(ref) for ref in signal["evidence_refs"]),key=lambda item:item["bucket_end"])
-        critical=(len(observed)>=2 and all(item["quality"]["eligible_for_inference"] and item["payload"]["error_rate"]>=.20 for item in observed[-2:])
-                  and utc_time(observed[-1]["bucket_end"])-utc_time(observed[-2]["bucket_end"])==timedelta(seconds=60))
-    return "critical" if critical else "high" if "checkout-service" in group["affected_services"] or len(group["affected_services"])>=2 else "medium"
+    return _group_severity(telemetry, group, signals)
 
 
 def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts,*,clock_mode="replay"):
@@ -223,7 +217,8 @@ def derive_group(telemetry,scope,group,policy,as_of,rows,lookup,log_counts,*,clo
         [{"service":service,"components":value} for service,value in components.items()],policy,as_of=as_of,
         evidence_availability=evidence.available,source_refs=scope["allowed_refs"])
     severity=group_severity(telemetry,group,scope["signals"])
-    return {"group_id":group["group_id"],"rca":result,"severity":severity,"source_counts":dict(counts)}
+    return {"group_id":group["group_id"],"rca":result,"severity":severity,
+        "severity_policy_sha256":severity_policy().sha256,"source_counts":dict(counts)}
 
 
 def _post_capture_cutoff(scope: dict):

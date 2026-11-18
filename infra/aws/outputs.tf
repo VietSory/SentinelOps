@@ -60,6 +60,11 @@ output "control_database_endpoint" {
   value       = aws_db_instance.control.address
 }
 
+output "control_runtime_secret_arn" {
+  description = "Secrets Manager ARN the workloads read for the control_writer runtime DSN (operator sets its value)."
+  value       = aws_secretsmanager_secret.control_runtime.arn
+}
+
 output "control_database_secret_arn" {
   description = "Secrets Manager ARN holding the generated control database credentials."
   value       = aws_db_instance.control.master_user_secret[0].secret_arn

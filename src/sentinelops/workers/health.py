@@ -179,7 +179,7 @@ class HealthWorker:
         history_done = time.monotonic()
         profile = self.identity["source_profile"]
         capture_options = {"profile": profile} if profile != SOURCE_PROFILE else {}
-        if self.source_policy.name == "remote": capture_options["source_policy"] = self.source_policy
+        if self.source_policy.name != "local": capture_options["source_policy"] = self.source_policy
         current_captures = [] if missed else await asyncio.gather(*(
             asyncio.to_thread(native_capture, self.endpoint, service, end, **capture_options)
             for service in sorted(BUSINESS_ROUTES)))
