@@ -180,7 +180,7 @@ def test_control_plane_build_context_allowlist_cannot_include_user_data_or_crede
     includes = {line[1:] for line in ignore if line.startswith('!')}
     assert includes == {'pyproject.toml', 'README.md', 'setup.py', 'MANIFEST.in', 'src/', 'src/**',
         'contracts/', 'contracts/*.schema.json', 'scripts/', 'scripts/run_health_worker.py',
-        'scripts/run_incident_worker.py', 'scripts/run_remediation_controller.py', 'configs/',
+        'scripts/run_incident_worker.py', 'scripts/run_remediation_controller.py', 'scripts/approve_runbook.py', 'configs/',
         'configs/slo_health_policy.json', 'configs/rca_policy.json', 'configs/topology.yaml',
         'configs/alibaba_relative_features.json',
         'configs/severity_policy.json', 'configs/runbook_catalog.json', 'docker/',
@@ -188,6 +188,7 @@ def test_control_plane_build_context_allowlist_cannot_include_user_data_or_crede
     # In particular the separately delivered bundle under docs/ is excluded too.
     assert not any(path.startswith(('docs', 'artifacts', 'data', 'models', '.env', '.aws')) for path in includes)
     dockerfile = (ROOT/'docker/Dockerfile.control-plane').read_text()
+    assert 'scripts/approve_runbook.py' in dockerfile
     assert '@sha256:' in dockerfile and 'USER 10001:10001' in dockerfile
     assert 'SENTINELOPS_ENV=production' in dockerfile and 'SENTINELOPS_ENABLE_DEMO=false' in dockerfile
     assert 'COPY . ' not in dockerfile and 'COPY src' not in dockerfile.split('FROM base AS runtime')[1]

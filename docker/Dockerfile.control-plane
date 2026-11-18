@@ -30,7 +30,7 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     OMP_NUM_THREADS=1
 WORKDIR /opt/sentinelops
 COPY --from=builder /opt/venv /opt/venv
-COPY scripts/run_health_worker.py scripts/run_incident_worker.py scripts/run_remediation_controller.py ./scripts/
+COPY scripts/run_health_worker.py scripts/run_incident_worker.py scripts/run_remediation_controller.py scripts/approve_runbook.py ./scripts/
 COPY configs/slo_health_policy.json configs/rca_policy.json configs/topology.yaml configs/severity_policy.json configs/runbook_catalog.json ./configs/
 USER 10001:10001
 EXPOSE 8000

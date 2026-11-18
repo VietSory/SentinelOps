@@ -54,7 +54,7 @@ def test_demo_auto_and_complete_audit_record(catalog):
     s = symptoms()
     before = deepcopy((s, catalog))
     result = decide(s, catalog)
-    assert result["decision"] == "auto"
+    assert result["decision"] == "oncall"
     assert result["score"] >= .80 and result["margin"] >= .15
     assert result["runbook_id"] == "payment-bad-deploy-rollback"
     assert result["executor_runbook"] == "payment-rollback-known-good/v1"
@@ -89,8 +89,7 @@ def test_5xx_without_change_selects_manual_but_medium_routes_engineer(catalog):
     assert result["runbook_id"] == "payment-errors-no-change" and result["score"] == 1.0
     assert result["decision"] == "engineer" and result["executor_runbook"] is None
     assert result["reasons"] == ["severity-not-supported"]
-    # §1 explicitly retains oncall as a recorded decision for low manual matches.
-    assert decide({**s, "severity": "low"}, catalog)["decision"] == "oncall"
+    assert decide({**s, "severity": "low"}, catalog)["decision"] == "engineer"
 
 
 def test_unknown_symptoms_do_not_pick_a_runbook(catalog):
@@ -122,7 +121,7 @@ def test_two_close_matches_prevent_auto_and_ties_sort_by_id(catalog):
     competing.update(id="nearby-manual", executable=False, executor_runbook=None)
     catalog["entries"].append(competing)
     result = decide(symptoms(), catalog)
-    assert result["decision"] == "oncall" and result["margin"] == 0.0
+    assert result["decision"] == "engineer" and result["margin"] == 0.0
     assert "insufficient-margin" in result["reasons"]
     assert result["ranking"][0]["id"] == "nearby-manual"
     catalog["entries"].reverse()
@@ -137,7 +136,7 @@ def test_single_entry_margin_is_its_score(catalog):
     catalog["entries"] = catalog["entries"][:1]
     result = decide(symptoms(), catalog)
     assert result["margin"] == result["score"] == 1.0
-    assert result["decision"] == "auto"
+    assert result["decision"] == "oncall"
 
 
 def test_margin_threshold_is_configurable(catalog):
@@ -147,9 +146,27 @@ def test_margin_threshold_is_configurable(catalog):
                              {"field": "db_lock", "equals": True, "weight": .125}]
     catalog["entries"].append(competing)
     result = decide(symptoms(), catalog)
-    assert result["margin"] == .125 and result["decision"] == "oncall"
+    assert result["margin"] == .125 and result["decision"] == "engineer"
     catalog["thresholds"]["auto_min_margin"] = .125
-    assert decide(symptoms(), catalog)["decision"] == "auto"
+    assert decide(symptoms(), catalog)["decision"] == "engineer"
+
+
+@pytest.mark.parametrize('top,margin,expected', [
+    (.79, .20, 'engineer'), (.80, .15, 'oncall'), (.80, .149, 'engineer'),
+    (1., .50, 'oncall'), (.50, .50, 'engineer'),
+])
+def test_approval_threshold_boundaries_never_auto(catalog, monkeypatch, top, margin, expected):
+    monkeypatch.setattr(matching, 'rank', lambda *args: [
+        {'id': catalog['entries'][0]['id'], 'score': top},
+        {'id': catalog['entries'][1]['id'], 'score': top - margin}])
+    result = decide(symptoms(), catalog)
+    assert result['decision'] == expected
+    assert result['decision'] != 'auto'
+
+
+def test_lower_catalog_thresholds_cannot_restore_automatic_or_weak_match(catalog):
+    catalog['thresholds'].update(auto_min_score=.50, auto_min_margin=0.)
+    assert decide(symptoms(onset='gradual', db_lock=True), catalog)['decision'] == 'engineer'
 
 
 def test_weighted_score_required_gates_and_type_sensitive_equality(catalog):

@@ -18,6 +18,7 @@ import math
 import os
 from pathlib import Path
 import re
+import shlex
 import time
 from urllib.parse import parse_qs, urlsplit
 
@@ -28,6 +29,7 @@ from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.kubernetes import LocalKubernetes
 from sentinelops.remediation.reader import ActionReader
 from sentinelops.remediation.registry import KnownGoodRegistry
+from sentinelops.remediation.approvals import PROPOSAL_VERSION, record_approval
 from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.telemetry.deployment_changes import DeploymentChangeReview
 from sentinelops.telemetry.store import ArtifactStore
@@ -49,9 +51,11 @@ async def wait_for(read, accept, *, timeout, poll, clock, sleep):
         await sleep(min(poll, remaining))
 
 
-def auto_decision(card):
+def proposal_decision(card):
     return (card.get('decision_version') == 'runbook-decision/v1'
-        and card.get('decision') == 'auto' and card.get('runbook_id') == RUNBOOK_ID
+        and card.get('proposal_version') == PROPOSAL_VERSION
+        and isinstance(card.get('proposal_id'), str) and re.fullmatch(r'[0-9a-f]{64}', card['proposal_id'])
+        and card.get('decision') == 'oncall' and card.get('runbook_id') == RUNBOOK_ID
         and card.get('executor_runbook') == 'payment-rollback-known-good/v1'
         and type(card.get('score')) in (int, float) and math.isfinite(card['score'])
         and .80 <= card['score'] <= 1 and type(card.get('margin')) in (int, float)
@@ -59,7 +63,14 @@ def auto_decision(card):
         and card.get('symptoms', {}).get('severity') == 'low')
 
 
-async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_switch_run=False,
+def approval_command(proposal, store, approved_by='<oncall-name>'):
+    return shlex.join(['kubectl', '-n', 'sentinelops-b-actions', 'exec', 'deploy/remediation-controller',
+        '--', 'python', 'scripts/approve_runbook.py', '--store', str(store),
+        '--proposal-id', proposal['proposal_id'], '--approved-by', approved_by,
+        '--decision', 'approve', '--reason', 'on-call reviewed proposal', '--confirm-oncall-approval'])
+
+
+async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_switch_run=False, approve_as=None,
                    cooldown=COOLDOWN, timeout=1200., poll=10., clock=time.monotonic,
                    sleep=asyncio.sleep, now=lambda: datetime.now(timezone.utc)):
     """All external operations are injectable; receipts require observed evidence."""
@@ -67,6 +78,8 @@ async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_swit
         or not math.isfinite(timeout) or timeout <= 0 or not math.isfinite(poll) or not 0 < poll <= 10):
         raise ValueError('invalid demo cooldown/deadline/poll bounds')
     output = Path(output)
+    if approve_as is not None and (not isinstance(approve_as, str) or not approve_as.strip()):
+        raise ValueError('approve-as must name the on-call operator')
     count = 3
     output.mkdir(parents=True, exist_ok=True)
     # Refuse reuse before doing anything that could mutate Payment.
@@ -114,7 +127,7 @@ async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_swit
                     if (card.get('decision') == 'engineer'
                         and 'runbook-disabled-or-kill-switch' in card.get('reasons', [])):
                         return ref, card
-                elif auto_decision(card):
+                elif proposal_decision(card):
                     return ref, card
             return None
 
@@ -138,12 +151,20 @@ async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_swit
                 resource_version_before=before.resource_version,
                 resource_version_after=(await backend.deployment()).resource_version)
         else:
+            print('On-call approval required: ' + approval_command(decision,
+                getattr(backend, 'controller_store', '/artifacts/remediation')), flush=True)
+            if approve_as is not None:
+                # Explicit rehearsal opt-in only; the controller still checks
+                # this same immutable approval and all executor guards.
+                record_approval(backend.store, proposal_id=decision['proposal_id'], approved_by=approve_as,
+                    decision='approve', reason='explicit demo rehearsal --approve-as',
+                    confirm_oncall_approval=True, now=now())
             async def action_read():
                 state = await backend.action(decision)
                 if state is None:
                     return None
                 if state['phase'] in ('blocked', 'escalated'):
-                    raise ValueError('auto action did not recover: ' + state['phase'])
+                    raise ValueError('approved action did not recover: ' + state['phase'])
                 if state['phase'] != 'recovered':
                     return None
                 intent, facts = state['intent'], state['facts']
@@ -182,6 +203,7 @@ class Backend:
         self.args, self.pool, self.kube, self.registry = args, pool, kube, registry
         self.regression_image = args.regression_image
         self.store = ArtifactStore(args.store)
+        self.controller_store = getattr(args, 'controller_store', Path('/artifacts/remediation'))
         self.journal = ActionJournal(pool)
         self.observer, self.source = observer, source
 
@@ -215,7 +237,8 @@ class Backend:
                 continue
             ref = f'artifact://manifests/{path.name}'
             card = self.store.read(ref)
-            if card.get('decision_version') == 'runbook-decision/v1':
+            if (card.get('proposal_version') == PROPOSAL_VERSION
+                or card.get('decision_version') == 'runbook-decision/v1' and card.get('decision') == 'engineer'):
                 records.append((ref, card))
         return records
 
@@ -270,7 +293,7 @@ async def run(args):
         observer = LocalKubernetes(args.server, target, token_file=args.observer_token_file,
             ca_file=args.observer_ca_file)
         return await run_demo(Backend(args, pool, kube, registry, observer=observer, source=source), output=args.output,
-            kill_switch_run=args.kill_switch_run, timeout=args.timeout, poll=args.poll_seconds)
+            kill_switch_run=args.kill_switch_run, approve_as=args.approve_as, timeout=args.timeout, poll=args.poll_seconds)
     finally:
         try:
             if kube is not None:
@@ -296,6 +319,9 @@ def main():
     parser.add_argument('--timeout', type=float, default=1200.)
     parser.add_argument('--poll-seconds', type=float, default=10.)
     parser.add_argument('--kill-switch-run', action='store_true')
+    parser.add_argument('--approve-as', help='explicit on-call identity for automated rehearsal approval')
+    parser.add_argument('--controller-store', type=Path, default=Path('/artifacts/remediation'),
+                        help='store path inside the controller pod for the printed approval command')
     args = parser.parse_args()
     try:
         print(json.dumps(asyncio.run(run(args)), ensure_ascii=False, default=str))
