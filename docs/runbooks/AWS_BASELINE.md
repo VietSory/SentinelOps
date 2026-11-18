@@ -234,7 +234,10 @@ echo "PV: $pv; EBS volume: $volume_id"
 # kubectl patch pv "$pv" -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
 kubectl delete pvc/<claim> -n sentinelops-b-actions
 
-#    With Delete, this command must fail with InvalidVolume.NotFound after the PVC is deleted.
+#    With Delete, wait for the PV and the EBS volume to go (a volume can stay in
+#    `deleting` briefly), then describe-volumes must fail with InvalidVolume.NotFound.
+kubectl wait --for=delete pv/"$pv" --timeout=5m
+aws ec2 wait volume-deleted --region ap-southeast-1 --volume-ids "$volume_id"
 aws ec2 describe-volumes --region ap-southeast-1 --volume-ids "$volume_id"
 
 #    Final cluster-wide sweep: no PVC or PV may use sentinelops-gp3-kms.

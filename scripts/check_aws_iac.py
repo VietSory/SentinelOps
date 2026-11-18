@@ -246,6 +246,14 @@ def assert_ebs_csi_scoped(blocks: dict[str, dict], documents: dict[str, dict]) -
         'aws_iam_role_policy.ebs_csi_kms',
         'aws_eks_addon.ebs_csi',
     }
+    indirect = sorted(key for key, block in blocks.items()
+                      if (block['kind'] or '').startswith(('aws_iam_', 'aws_eks_pod_identity'))
+                      and any(re.search(r'\b(?:local|var)\.', value)
+                              for field in ('role', 'role_name', 'roles', 'role_arn')
+                              for value in _direct_assignments(block['body']).get(field, [])))
+    if indirect:
+        raise ValueError('IAM role bindings must name their role directly, not through local./var.: '
+                         + ', '.join(indirect) + ' (keeps the EBS CSI role reference check sound)')
     all_blocks = {**data_blocks(), **blocks}
     all_blocks.update({f'aws_iam_policy_document.{name}': document
                        for name, document in documents.items()})

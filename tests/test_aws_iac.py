@@ -447,6 +447,19 @@ def test_ebs_csi_role_reference_escapes_are_rejected(key, kind, body):
         assert_ebs_csi_scoped(blocks, DOCUMENTS)
 
 
+@pytest.mark.parametrize(('kind', 'body'), [
+    ('aws_iam_role_policy_attachment',
+     'role = local.storage_role\npolicy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"'),
+    ('aws_iam_policy_attachment', 'roles = [var.extra_role]\npolicy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"'),
+    ('aws_iam_role_policies_exclusive', 'role_name = local.storage_role\npolicy_names = []'),
+    ('aws_eks_pod_identity_association', 'cluster_name = aws_eks_cluster.main.name\nrole_arn = local.role_arn'),
+])
+def test_iam_role_bindings_through_locals_or_variables_are_rejected(kind, body):
+    blocks = {**BLOCKS, kind + '.indirect': {'kind': kind, 'body': body, 'file': 'test.tf'}}
+    with pytest.raises(ValueError, match='name their role directly'):
+        assert_ebs_csi_scoped(blocks, DOCUMENTS)
+
+
 @pytest.mark.parametrize('addition', [
     'managed_policy_arns = ["arn:aws:iam::aws:policy/AdministratorAccess"]',
     'inline_policy {\n  name = "extra"\n  policy = "{}"\n}',
