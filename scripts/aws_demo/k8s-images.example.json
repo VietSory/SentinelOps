@@ -1,0 +1,9 @@
+{
+  "application": "123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/application@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "control-plane": "123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "postgres": "postgres@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "otel-collector": "otel/opentelemetry-collector-contrib@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "prometheus": "prom/prometheus@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "jaeger": "jaegertracing/jaeger@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "aws-collector": "otel/opentelemetry-collector-contrib@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6"
+}

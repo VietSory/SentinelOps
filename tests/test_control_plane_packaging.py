@@ -180,8 +180,9 @@ def test_control_plane_build_context_allowlist_cannot_include_user_data_or_crede
     includes = {line[1:] for line in ignore if line.startswith('!')}
     assert includes == {'pyproject.toml', 'README.md', 'setup.py', 'MANIFEST.in', 'src/', 'src/**',
         'contracts/', 'contracts/*.schema.json', 'scripts/', 'scripts/run_health_worker.py',
-        'scripts/run_incident_worker.py', 'configs/', 'configs/slo_health_policy.json',
-        'configs/rca_policy.json', 'configs/topology.yaml', 'docker/',
+        'scripts/run_incident_worker.py', 'scripts/run_remediation_controller.py', 'configs/',
+        'configs/slo_health_policy.json', 'configs/rca_policy.json', 'configs/topology.yaml',
+        'configs/severity_policy.json', 'configs/runbook_catalog.json', 'docker/',
         'docker/Dockerfile.control-plane', 'docker/Dockerfile.control-plane.dockerignore'}
     # In particular the separately delivered bundle under docs/ is excluded too.
     assert not any(path.startswith(('docs', 'artifacts', 'data', 'models', '.env', '.aws')) for path in includes)

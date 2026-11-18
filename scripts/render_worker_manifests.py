@@ -1,4 +1,4 @@
-"""Render offline EKS health/incident workers; no deployment or action authority.
+"""Render offline EKS workers and the opt-in Payment remediation controller.
 
 Operator prerequisites: control-runtime (credential-free database-url and password),
 an observer token/CA Secret, a public RDS CA bundle ConfigMap (ca-bundle.crt),
@@ -68,8 +68,17 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
            deployment_uids: dict, observer_secret: str,
            prometheus: str = PROMETHEUS, jaeger: str = JAEGER,
            prometheus_secret: str | None = None, prometheus_token_key: str | None = None,
-           model_claim: str | None = None, model_release_ref: str | None = None) -> list[dict]:
+           model_claim: str | None = None, model_release_ref: str | None = None,
+           remediation_store_claim: str = 'remediation-artifacts',
+           known_good_store_claim: str = 'review-artifacts',
+           deployment_change_store_claim: str = 'deployment-change-artifacts',
+           policy_enabled: bool = False) -> list[dict]:
     image_digest(image)
+    _label(remediation_store_claim, 'remediation artifact claim')
+    _label(known_good_store_claim, 'known-good artifact claim')
+    _label(deployment_change_store_claim, 'deployment-change artifact claim')
+    if type(policy_enabled) is not bool:
+        raise ValueError('policy_enabled must be an explicit boolean')
     _label(environment, 'environment')
     if environment in LOCAL_ENVIRONMENTS:
         raise ValueError('cloud workers require an explicit non-local environment')
@@ -110,7 +119,8 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
         _label(model_claim, 'model claim/release pair')
         if not isinstance(model_release_ref, str) or not MODEL_REF.fullmatch(model_release_ref):
             raise ValueError('model claim/release pair requires a checksummed artifact manifest reference')
-    claims = [health_store_claim, incident_store_claim] + ([model_claim] if model_claim else [])
+    claims = [health_store_claim, incident_store_claim, remediation_store_claim,
+              known_good_store_claim, deployment_change_store_claim] + ([model_claim] if model_claim else [])
     if len(set(claims)) != len(claims):
         raise ValueError('health, incident and read-only model stores require separate PVCs')
 
@@ -170,6 +180,7 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
             '--health-stream', '$(SENTINELOPS_HEALTH_STREAM)', '--source-store', HEALTH_ROOT,
             '--store', INCIDENT_ROOT, '--project', 'kubernetes-read-only',
             '--kubernetes-config', '/etc/sentinelops/kubernetes/kubernetes.json',
+            '--deployment-change-store', '/artifacts/deployment-changes',
             '--jaeger', '$(SENTINELOPS_JAEGER)', '--remote-jaeger', '$(SENTINELOPS_JAEGER)'])
         if prometheus_secret:
             sources.append('/secret-prometheus/prometheus-token')
@@ -185,10 +196,13 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                         {'key': 'token', 'path': 'observer-token'}, {'key': 'ca.crt', 'path': 'observer-ca.crt'}]}},
                 {'name': 'kubernetes-config', 'configMap': {'name': KUBE_CONFIG, 'optional': False}},
                 {'name': 'incident-artifacts', 'persistentVolumeClaim': {'claimName': incident_store_claim}},
+                {'name': 'deployment-changes', 'persistentVolumeClaim': {
+                    'claimName': deployment_change_store_claim, 'readOnly': True}},
             ]
             init_mounts.append({'name': 'observer-credentials', 'mountPath': '/secret-observer', 'readOnly': True})
             mounts += [{'name': 'kubernetes-config', 'mountPath': '/etc/sentinelops/kubernetes', 'readOnly': True},
-                       {'name': 'incident-artifacts', 'mountPath': INCIDENT_ROOT}]
+                       {'name': 'incident-artifacts', 'mountPath': INCIDENT_ROOT},
+                       {'name': 'deployment-changes', 'mountPath': '/artifacts/deployment-changes', 'readOnly': True}]
             if model_claim:
                 volumes.append({'name': 'models', 'persistentVolumeClaim': {'claimName': model_claim, 'readOnly': True}})
                 mounts.append({'name': 'models', 'mountPath': '/models', 'readOnly': True})
@@ -246,7 +260,116 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
             'roleRef': {'apiGroup': 'rbac.authorization.k8s.io', 'kind': 'ClusterRole', 'name': OBSERVER},
             'subjects': [{'kind': 'ServiceAccount', 'name': 'incident-worker', 'namespace': NAMESPACE}]},
     ]
+    documents += _controller(image, target, metadata, labels, hardening,
+        health_store_claim, incident_store_claim, remediation_store_claim,
+        known_good_store_claim, database_ca_config, health_stream, environment, policy_enabled,
+        model_claim, model_release_ref)
     return documents
+
+
+def _controller(image, target, metadata, labels, hardening, health_claim, incident_claim,
+                remediation_claim, known_good_claim, database_ca_config, health_stream, environment,
+                enabled, model_claim, model_release_ref):
+    """Use the same non-root private credential copy as PR #70.
+
+    remediation-runtime is provisioned separately by the operator: action-database-url
+    (dedicated action writer), known-good-ledger-ref and approved-by. The catalog is
+    part of the control-plane image. A KILL_SWITCH in the durable store disables it.
+    Projected tokens must be renewed by replacing the Pod before their 24h expiry;
+    LocalKubernetes deliberately snapshots the bearer token on construction.
+    """
+    name, config = 'remediation-controller', 'sentinelops-remediation-kubernetes'
+    server = 'https://kubernetes.default.svc'
+    data = {'target.json': json.dumps(asdict(target), sort_keys=True)}
+    args = ['--health-stream', health_stream, '--source-store', HEALTH_ROOT,
+        '--incident-store', INCIDENT_ROOT, '--store', '/artifacts/remediation',
+        '--known-good-store', '/artifacts/review',
+        '--known-good-ref', '$(SENTINELOPS_KNOWN_GOOD_LEDGER_REF)',
+        '--approved-by', '$(SENTINELOPS_KNOWN_GOOD_APPROVED_BY)',
+        '--target', '/etc/sentinelops/remediation/target.json', '--server', server,
+        '--token-file', '/credentials/token', '--ca-file', '/credentials/ca.crt',
+        '--catalog', 'configs/runbook_catalog.json', '--kill-switch', '/artifacts/remediation/KILL_SWITCH']
+    if enabled:
+        args.append('--policy-enabled')
+    if model_claim:
+        args += ['--model-store', '/models', '--model-release-ref', model_release_ref]
+    volumes = [
+        {'name': 'tmp', 'emptyDir': {'sizeLimit': '64Mi'}},
+        {'name': 'credentials', 'emptyDir': {'medium': 'Memory', 'sizeLimit': '128Ki'}},
+        {'name': 'service-account', 'projected': {'defaultMode': 0o440, 'sources': [
+            {'serviceAccountToken': {'path': 'token', 'expirationSeconds': 86400}},
+            {'configMap': {'name': 'kube-root-ca.crt', 'items': [{'key': 'ca.crt', 'path': 'ca.crt'}]}}]}},
+        {'name': 'target', 'configMap': {'name': config}},
+        {'name': 'database-ca', 'configMap': {'name': database_ca_config,
+            'items': [{'key': 'ca-bundle.crt', 'path': 'ca-bundle.crt'}]}},
+        *[{'name': name, 'persistentVolumeClaim': {'claimName': claim, 'readOnly': readonly}}
+          for name, claim, readonly in (('health-artifacts', health_claim, True),
+              ('incident-artifacts', incident_claim, True), ('remediation-artifacts', remediation_claim, False))]]
+    volumes.append({'name': 'review-artifacts', 'persistentVolumeClaim': {
+        'claimName': known_good_claim, 'readOnly': True}})
+    mounts = [{'name': 'tmp', 'mountPath': '/tmp'},
+        {'name': 'credentials', 'mountPath': '/credentials', 'readOnly': True},
+        {'name': 'target', 'mountPath': '/etc/sentinelops/remediation', 'readOnly': True},
+        {'name': 'database-ca', 'mountPath': '/etc/sentinelops/tls', 'readOnly': True},
+        {'name': 'health-artifacts', 'mountPath': HEALTH_ROOT, 'readOnly': True},
+        {'name': 'incident-artifacts', 'mountPath': INCIDENT_ROOT, 'readOnly': True},
+        {'name': 'remediation-artifacts', 'mountPath': '/artifacts/remediation'}]
+    mounts.append({'name': 'review-artifacts', 'mountPath': '/artifacts/review', 'readOnly': True})
+    if model_claim:
+        volumes.append({'name': 'models', 'persistentVolumeClaim': {'claimName': model_claim, 'readOnly': True}})
+        mounts.append({'name': 'models', 'mountPath': '/models', 'readOnly': True})
+    env = [{'name': 'SENTINELOPS_KUBERNETES_REMOTE_SERVER', 'value': server},
+        {'name': 'SENTINELOPS_ENV', 'value': environment},
+        {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
+        *[{'name': name, 'valueFrom': {'secretKeyRef': {'name': 'remediation-runtime', 'key': key}}}
+          for name, key in (('SENTINELOPS_ACTION_DATABASE_URL', 'action-database-url'),
+              ('SENTINELOPS_KNOWN_GOOD_LEDGER_REF', 'known-good-ledger-ref'),
+              ('SENTINELOPS_KNOWN_GOOD_APPROVED_BY', 'approved-by'))]]
+    return [
+        {'apiVersion': 'v1', 'kind': 'ServiceAccount', 'metadata': metadata('payment-rollback'),
+            'automountServiceAccountToken': False},
+        {'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': metadata(config), 'data': data},
+        {'apiVersion': 'apps/v1', 'kind': 'Deployment', 'metadata': metadata(name), 'spec': {
+            'replicas': 1, 'strategy': {'type': 'Recreate'}, 'selector': {'matchLabels': {'app': name}},
+            'template': {'metadata': {'labels': {**labels, 'app': name}, 'annotations': {
+                'sentinelops.io/config-sha256': hashlib.sha256(json.dumps(
+                    [data, args, env], sort_keys=True).encode()).hexdigest()}},
+                'spec': {'serviceAccountName': 'payment-rollback', 'automountServiceAccountToken': False,
+                    'securityContext': {'runAsNonRoot': True, 'runAsUser': 10001, 'runAsGroup': 10001,
+                        'fsGroup': 10001, 'seccompProfile': {'type': 'RuntimeDefault'}},
+                    'initContainers': [{'name': 'private-credentials', 'image': image,
+                        'command': ['python', '-c', COPY_CREDENTIALS],
+                        'args': ['/credentials', '/service-account/token', '/service-account/ca.crt'],
+                        'securityContext': dict(hardening), 'volumeMounts': [
+                            {'name': 'credentials', 'mountPath': '/credentials'},
+                            {'name': 'service-account', 'mountPath': '/service-account', 'readOnly': True}],
+                        'resources': {'requests': {'cpu': '10m', 'memory': '32Mi'},
+                            'limits': {'cpu': '100m', 'memory': '64Mi'}}}],
+                    'containers': [{'name': name, 'image': image,
+                        'command': ['python', 'scripts/run_remediation_controller.py'], 'args': args,
+                        'env': env, 'securityContext': dict(hardening), 'volumeMounts': mounts,
+                        'resources': {'requests': {'cpu': '100m', 'memory': '256Mi'},
+                            'limits': {'cpu': '1', 'memory': '1Gi'}}}], 'volumes': volumes}}}},
+        {'apiVersion': 'rbac.authorization.k8s.io/v1', 'kind': 'Role',
+            'metadata': metadata('payment-rollback'), 'rules': [
+                {'apiGroups': ['apps'], 'resources': ['deployments'],
+                    'resourceNames': ['payment-service'], 'verbs': ['get', 'patch']},
+                {'apiGroups': ['apps'], 'resources': ['replicasets'], 'verbs': ['get', 'list']},
+                {'apiGroups': [''], 'resources': ['pods'], 'verbs': ['get', 'list']},
+                {'apiGroups': ['autoscaling'], 'resources': ['horizontalpodautoscalers'], 'verbs': ['get', 'list']}]},
+        {'apiVersion': 'rbac.authorization.k8s.io/v1', 'kind': 'RoleBinding',
+            'metadata': metadata('payment-rollback'),
+            'roleRef': {'apiGroup': 'rbac.authorization.k8s.io', 'kind': 'Role', 'name': 'payment-rollback'},
+            'subjects': [{'kind': 'ServiceAccount', 'name': 'payment-rollback', 'namespace': NAMESPACE}]},
+        {'apiVersion': 'rbac.authorization.k8s.io/v1', 'kind': 'ClusterRole',
+            'metadata': {'name': 'sentinelops-b-action-identity', 'labels': dict(labels)}, 'rules': [
+                {'apiGroups': [''], 'resources': ['namespaces'],
+                    'resourceNames': ['kube-system', NAMESPACE], 'verbs': ['get']}]},
+        {'apiVersion': 'rbac.authorization.k8s.io/v1', 'kind': 'ClusterRoleBinding',
+            'metadata': {'name': 'sentinelops-b-action-identity', 'labels': dict(labels)},
+            'roleRef': {'apiGroup': 'rbac.authorization.k8s.io', 'kind': 'ClusterRole',
+                'name': 'sentinelops-b-action-identity'},
+            'subjects': [{'kind': 'ServiceAccount', 'name': 'payment-rollback', 'namespace': NAMESPACE}]}]
 
 
 def main():
@@ -264,6 +387,10 @@ def main():
     parser.add_argument('--prometheus-token-key')
     parser.add_argument('--model-claim')
     parser.add_argument('--model-release-ref')
+    parser.add_argument('--remediation-store-claim', default='remediation-artifacts')
+    parser.add_argument('--known-good-store-claim', default='review-artifacts')
+    parser.add_argument('--deployment-change-store-claim', default='deployment-change-artifacts')
+    parser.add_argument('--policy-enabled', action='store_true')
     parser.add_argument('--output', type=Path, required=True)
     args = vars(parser.parse_args())
     output = args.pop('output')

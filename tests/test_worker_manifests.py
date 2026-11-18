@@ -39,8 +39,106 @@ PARAMETERS = {'environment': 'aws-dev', 'control_database': DATABASE,
     'observer_secret': 'incident-observer-credentials'}
 
 
+def controller(documents):
+    return next(d for d in documents if d['kind'] == 'Deployment'
+                and d['metadata']['name'] == 'remediation-controller')
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_controller_private_sa_token_and_exact_payment_rbac(enabled):
+    documents = worker.render(IMAGE, **PARAMETERS, policy_enabled=enabled)
+    deployment = controller(documents)
+    assert deployment['spec']['replicas'] == 1
+    assert deployment['spec']['strategy'] == {'type': 'Recreate'}
+    pod = deployment['spec']['template']['spec']
+    assert pod['serviceAccountName'] == 'payment-rollback'
+    assert pod['automountServiceAccountToken'] is False
+    main, = pod['containers']
+    init, = pod['initContainers']
+    assert main['image'] == init['image'] == IMAGE
+    assert main['command'] == ['python', 'scripts/run_remediation_controller.py']
+    assert ('--policy-enabled' in main['args']) is enabled
+    assert {'name': 'SENTINELOPS_KUBERNETES_REMOTE_SERVER',
+            'value': 'https://kubernetes.default.svc'} in main['env']
+    volumes = {v['name']: v for v in pod['volumes']}
+    assert volumes['service-account']['projected']['sources'] == [
+        {'serviceAccountToken': {'path': 'token', 'expirationSeconds': 86400}},
+        {'configMap': {'name': 'kube-root-ca.crt', 'items': [{'key': 'ca.crt', 'path': 'ca.crt'}]}}]
+    assert init['command'] == ['python', '-c', worker.COPY_CREDENTIALS]
+    assert init['args'] == ['/credentials', '/service-account/token', '/service-account/ca.crt']
+    assert all(m['name'] != 'service-account' for m in main['volumeMounts'])
+    assert next(m for m in main['volumeMounts'] if m['name'] == 'credentials')['readOnly']
+    assert pod['securityContext']['runAsUser'] == 10001
+    assert volumes['credentials']['emptyDir']['medium'] == 'Memory'
+    for name in ('health-artifacts', 'incident-artifacts', 'review-artifacts'):
+        assert volumes[name]['persistentVolumeClaim']['readOnly'] is True
+    for role in (d for d in documents if d['kind'] in ('Role', 'ClusterRole')):
+        for rule in role['rules']:
+            if 'patch' in rule['verbs']:
+                assert rule == {'apiGroups': ['apps'], 'resources': ['deployments'],
+                    'resourceNames': ['payment-service'], 'verbs': ['get', 'patch']}
+            assert not set(rule['verbs']) & {'create', 'update', 'delete', '*'}
+    bindings = [d for d in documents if d['kind'].endswith('RoleBinding')
+                and d['metadata']['name'] != worker.OBSERVER]
+    assert all(d['subjects'] == [{'kind': 'ServiceAccount', 'name': 'payment-rollback',
+                                 'namespace': worker.NAMESPACE}] for d in bindings)
+
+
+def test_controller_projected_token_copy_passes_actual_adapter_validation(tmp_path, monkeypatch):
+    from sentinelops.remediation.kubernetes import LocalKubernetes
+    import ssl
+    source, private = tmp_path / 'projected', tmp_path / 'private'
+    source.mkdir(); private.mkdir()
+    token = source / '..token'; token.write_text('x' * 64)
+    (source / 'token').symlink_to(token)
+    ca = source / '..ca'; ca.write_text('test CA')
+    (source / 'ca.crt').symlink_to(ca)
+    pod = controller(worker.render(IMAGE, **PARAMETERS))['spec']['template']['spec']
+    init, = pod['initContainers']
+    subprocess.run([sys.executable, '-c', init['command'][2], str(private),
+                    str(source / 'token'), str(source / 'ca.crt')], check=True)
+    copied = private / 'token'
+    assert not copied.is_symlink() and copied.stat().st_uid == os.getuid()
+    assert stat.S_IMODE(copied.stat().st_mode) == 0o600
+    monkeypatch.setenv('SENTINELOPS_KUBERNETES_REMOTE_SERVER', 'https://kubernetes.default.svc')
+    real_context = ssl.create_default_context()
+    monkeypatch.setattr(ssl, 'create_default_context', lambda **kwargs: real_context)
+    async def verify():
+        with pytest.raises(ValueError, match='owned private regular file'):
+            LocalKubernetes('https://kubernetes.default.svc', TARGET,
+                token_file=source / 'token', ca_file=source / 'ca.crt')
+        adapter = LocalKubernetes('https://kubernetes.default.svc', TARGET,
+            token_file=copied, ca_file=private / 'ca.crt', transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+        assert adapter.client.headers['Authorization'] == 'Bearer ' + 'x' * 64
+        await adapter.close()
+    asyncio.run(verify())
+
+
+def test_controller_args_parse_in_controller_cli_and_preserve_model_wiring():
+    from scripts.run_remediation_controller import parser
+    pod = controller(worker.render(IMAGE, **PARAMETERS,
+        model_claim='models', model_release_ref=RELEASE))['spec']['template']['spec']
+    args = parser().parse_args(pod['containers'][0]['args'])
+    assert args.source_store == Path(worker.HEALTH_ROOT)
+    assert args.incident_store == Path(worker.INCIDENT_ROOT)
+    assert args.store == Path('/artifacts/remediation')
+    assert args.known_good_store == Path('/artifacts/review')
+    assert args.model_store == Path('/models') and args.model_release_ref == RELEASE
+    assert args.server == 'https://kubernetes.default.svc'
+    assert args.policy_enabled is False and args.kill_switch == args.store / 'KILL_SWITCH'
+
+
+@pytest.mark.parametrize('values', [
+    {'remediation_store_claim': 'health-artifacts'}, {'known_good_store_claim': 'incident-artifacts'},
+    {'remediation_store_claim': '../unsafe'}, {'known_good_store_claim': None}, {'policy_enabled': 'true'}])
+def test_controller_rejects_unsafe_store_aliases_and_implicit_enabling(values):
+    with pytest.raises(ValueError):
+        worker.render(IMAGE, **PARAMETERS, **values)
+
+
 def deployments(documents):
-    return [d for d in documents if d['kind'] == 'Deployment']
+    return [d for d in documents if d['kind'] == 'Deployment'
+            and d['metadata']['name'] != 'remediation-controller']
 
 
 def configs(documents):
@@ -49,8 +147,8 @@ def configs(documents):
 
 def test_resources_have_valid_references_and_separate_worker_entrypoints():
     documents = worker.render(IMAGE, **PARAMETERS)
-    assert len(documents) == 11
-    assert len({(d['kind'], d['metadata']['name']) for d in documents}) == 11
+    assert len(documents) == 18
+    assert len({(d['kind'], d['metadata']['name']) for d in documents}) == 18
     namespace = next(d for d in documents if d['kind'] == 'Namespace')
     assert namespace['metadata']['name'] == 'sentinelops-b-actions'
     assert namespace['metadata']['labels']['sentinelops.dev/lane'] == 'B'
@@ -88,19 +186,21 @@ def test_resources_have_valid_references_and_separate_worker_entrypoints():
 
 def test_observer_rbac_is_read_only_and_never_bound_to_health_worker():
     documents = worker.render(IMAGE, **PARAMETERS)
-    roles = [d for d in documents if d['kind'] in ('Role', 'ClusterRole')]
+    roles = [d for d in documents if d['kind'] in ('Role', 'ClusterRole')
+             and d['metadata']['name'] == worker.OBSERVER]
     for role in roles:
         for rule in role['rules']:
             assert set(rule['verbs']) <= {'get', 'list'}
             assert '*' not in rule['resources'] and 'secrets' not in rule['resources']
-    bindings = [d for d in documents if d['kind'].endswith('RoleBinding')]
+    bindings = [d for d in documents if d['kind'].endswith('RoleBinding')
+                and d['metadata']['name'] == worker.OBSERVER]
     for binding in bindings:
         assert binding['subjects'] == [{'kind': 'ServiceAccount', 'name': 'incident-worker',
                                         'namespace': worker.NAMESPACE}]
         assert any(r['kind'] == binding['roleRef']['kind'] and
                    r['metadata']['name'] == binding['roleRef']['name'] for r in roles)
     serialized = yaml.safe_dump_all(documents)
-    assert 'remediation' not in serialized and 'eks.amazonaws.com/role-arn' not in serialized
+    assert 'eks.amazonaws.com/role-arn' not in serialized
     assert 'hostPath' not in serialized and 'docker.sock' not in serialized
 
 

@@ -1,0 +1,39 @@
+{
+  "apiVersion": "batch/v1",
+  "kind": "Job",
+  "metadata": {"name": "control-bootstrap", "namespace": "sentinelops-b-actions"},
+  "spec": {
+    "backoffLimit": 0,
+    "activeDeadlineSeconds": 600,
+    "ttlSecondsAfterFinished": 3600,
+    "template": {
+      "metadata": {"labels": {"app.kubernetes.io/name": "control-bootstrap", "app.kubernetes.io/part-of": "sentinelops"}},
+      "spec": {
+        "automountServiceAccountToken": false,
+        "restartPolicy": "Never",
+        "securityContext": {"runAsNonRoot": true, "runAsUser": 10001, "runAsGroup": 10001, "fsGroup": 10001, "seccompProfile": {"type": "RuntimeDefault"}},
+        "containers": [{
+          "name": "control",
+          "image": "REPLACE_CONTROL_PLANE_IMAGE_BY_DIGEST",
+          "imagePullPolicy": "IfNotPresent",
+          "command": ["python", "/bootstrap/control_job.py", "bootstrap"],
+          "env": [{"name": "CONTROL_HOST", "value": "REPLACE_CONTROL_DATABASE_ENDPOINT"}, {"name": "AWS_EC2_METADATA_DISABLED", "value": "true"}],
+          "securityContext": {"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true, "capabilities": {"drop": ["ALL"]}},
+          "resources": {"requests": {"cpu": "100m", "memory": "128Mi"}, "limits": {"cpu": "1", "memory": "512Mi"}},
+          "volumeMounts": [
+            {"name": "bootstrap", "mountPath": "/bootstrap", "readOnly": true},
+            {"name": "master", "mountPath": "/run/control", "readOnly": true},
+            {"name": "ca", "mountPath": "/etc/sentinelops/tls", "readOnly": true},
+            {"name": "tmp", "mountPath": "/tmp"}
+          ]
+        }],
+        "volumes": [
+          {"name": "bootstrap", "configMap": {"name": "control-bootstrap-sql", "defaultMode": 292}},
+          {"name": "master", "secret": {"secretName": "control-bootstrap-master", "defaultMode": 288}},
+          {"name": "ca", "configMap": {"name": "control-rds-ca", "items": [{"key": "ca-bundle.crt", "path": "ca-bundle.crt"}]}},
+          {"name": "tmp", "emptyDir": {"medium": "Memory", "sizeLimit": "16Mi"}}
+        ]
+      }
+    }
+  }
+}

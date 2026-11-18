@@ -1,0 +1,24 @@
+{
+  "cluster_uid": "replace-with-kube-system-namespace-uid",
+  "namespace_uid": "replace-with-sentinelops-b-actions-namespace-uid",
+  "deployment_uids": {
+    "checkout-service": "replace-with-checkout-deployment-uid",
+    "payment-service": "replace-with-payment-deployment-uid",
+    "inventory-service": "replace-with-inventory-deployment-uid"
+  },
+  "health_stream": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "database_ca_config": "control-rds-ca",
+  "health_store_claim": "health-artifacts",
+  "incident_store_claim": "incident-artifacts",
+  "remediation_store_claim": "remediation-artifacts",
+  "known_good_store_claim": "review-artifacts",
+  "observer_secret": "incident-observer-credentials",
+  "api_control_secret": "control-runtime",
+  "api_action_read_secret": "control-action-reader",
+  "oidc": {
+    "issuer": "https://issuer.example.invalid",
+    "audience": "sentinelops-api",
+    "jwks_url": "https://issuer.example.invalid/.well-known/jwks.json",
+    "audience_claim": "aud"
+  }
+}
