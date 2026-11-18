@@ -13,7 +13,7 @@ import pytest
 from scripts.check_aws_iac import (
     ROOT, assert_bounded_retention, assert_grants_no_authority, assert_no_overbroad_identity,
     assert_ebs_csi_scoped, assert_no_static_credentials, assert_operator_identity, assert_private_by_default,
-    normalize, policy_documents, resources)
+    _assignments, _direct_assignments, normalize, policy_documents, resources)
 
 BLOCKS = resources()
 DOCUMENTS = policy_documents()
@@ -416,3 +416,66 @@ def test_ebs_csi_requires_the_controller_pod_identity_association():
     blocks = mutate('aws_eks_addon.ebs_csi', 'pod_identity_association {', 'association {')
     with pytest.raises(ValueError, match='pod identity association'):
         assert_ebs_csi_scoped(blocks, DOCUMENTS)
+
+
+def test_assignment_parsers_preserve_comment_markers_inside_urls():
+    body = 'endpoint = "https://example.test/a//b#fragment" # an actual comment\n'
+    expected = {'endpoint': ['"https://example.test/a//b#fragment"']}
+    assert _assignments(body) == expected
+    assert _direct_assignments(body) == expected
+
+
+@pytest.mark.parametrize(('key', 'kind', 'body'), [
+    ('aws_iam_role_policy_attachment.ebs_csi_by_id', 'aws_iam_role_policy_attachment',
+     'role = aws_iam_role.ebs_csi.id\npolicy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"'),
+    ('aws_iam_role_policy_attachment.ebs_csi_by_literal_name', 'aws_iam_role_policy_attachment',
+     'role = "sentinelops-ebs-csi"\npolicy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"'),
+    ('aws_iam_policy_attachment.ebs_csi', 'aws_iam_policy_attachment',
+     'roles = [aws_iam_role.ebs_csi.name]\npolicy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"'),
+    ('aws_iam_role_policy.ebs_csi_by_name', 'aws_iam_role_policy',
+     'name = "extra"\nrole = aws_iam_role.ebs_csi.name\npolicy = "{}"'),
+    ('aws_iam_role_policy_attachments_exclusive.ebs_csi', 'aws_iam_role_policy_attachments_exclusive',
+     'role_name = aws_iam_role.ebs_csi.name\npolicy_arns = []'),
+    ('aws_iam_role_policies_exclusive.ebs_csi', 'aws_iam_role_policies_exclusive',
+     'role_name = aws_iam_role.ebs_csi.unique_id\npolicy_names = []'),
+    ('aws_eks_pod_identity_association.ebs_csi', 'aws_eks_pod_identity_association',
+     'cluster_name = aws_eks_cluster.main.name\nrole_arn = aws_iam_role.ebs_csi.arn'),
+])
+def test_ebs_csi_role_reference_escapes_are_rejected(key, kind, body):
+    blocks = {**BLOCKS, key: {'kind': kind, 'body': body, 'file': 'test.tf'}}
+    with pytest.raises(ValueError, match='EBS CSI role'):
+        assert_ebs_csi_scoped(blocks, DOCUMENTS)
+
+
+@pytest.mark.parametrize('addition', [
+    'managed_policy_arns = ["arn:aws:iam::aws:policy/AdministratorAccess"]',
+    'inline_policy {\n  name = "extra"\n  policy = "{}"\n}',
+])
+def test_ebs_csi_role_rejects_extra_identity_bindings(addition):
+    role = BLOCKS['aws_iam_role.ebs_csi']
+    blocks = {**BLOCKS, 'aws_iam_role.ebs_csi': {**role, 'body': role['body']+'\n'+addition}}
+    with pytest.raises(ValueError, match='role definition'):
+        assert_ebs_csi_scoped(blocks, DOCUMENTS)
+
+
+@pytest.mark.parametrize(('name', 'assignment'), [
+    ('ebs_csi_kms', 'source_policy_documents = []'),
+    ('ebs_csi_kms', 'override_policy_documents = []'),
+    ('ebs_csi_pod_identity', 'version = "2012-10-17"'),
+    ('ebs_csi_pod_identity', 'policy_id = "ebs-csi-trust"'),
+])
+def test_ebs_csi_policy_documents_reject_top_level_assignments(name, assignment):
+    documents = dict(DOCUMENTS)
+    document = documents[name]
+    documents[name] = {**document, 'body': assignment+'\n'+document['body']}
+    with pytest.raises(ValueError, match='top-level assignments'):
+        assert_ebs_csi_scoped(BLOCKS, documents)
+
+
+@pytest.mark.parametrize('name', ['ebs_csi_kms', 'ebs_csi_pod_identity'])
+def test_ebs_csi_policy_documents_reject_dynamic_blocks(name):
+    documents = dict(DOCUMENTS)
+    document = documents[name]
+    documents[name] = {**document, 'body': document['body']+'\ndynamic "statement" {}'}
+    with pytest.raises(ValueError, match='dynamic'):
+        assert_ebs_csi_scoped(BLOCKS, documents)

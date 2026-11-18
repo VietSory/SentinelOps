@@ -80,11 +80,29 @@ def _blocks(pattern: re.Pattern) -> dict[str, dict]:
     return found
 
 
+def _strip_line_comments(line: str) -> str:
+    """Remove HCL `#` and `//` comments without changing quoted string values."""
+    in_string = escaped = False
+    for index, character in enumerate(line):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == '\\':
+                escaped = True
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+        elif character == '#' or (character == '/' and line[index:index + 2] == '//'):
+            return line[:index]
+    return line
+
+
 def _assignments(body: str) -> dict[str, list[str]]:
     """`name = value` lines with comments removed; every assignment of a name is kept, so a duplicate is visible."""
     found: dict[str, list[str]] = {}
     for line in body.splitlines():
-        line = line.split('#', 1)[0].split('//', 1)[0].strip()
+        line = _strip_line_comments(line).strip()
         match = re.fullmatch(r'([A-Za-z_][A-Za-z0-9_]*) = (.+?),?', line)
         if match:
             found.setdefault(match.group(1), []).append(match.group(2).strip())
@@ -96,7 +114,7 @@ def _direct_assignments(body: str) -> dict[str, list[str]]:
     found: dict[str, list[str]] = {}
     depth = 0
     for line in body.splitlines():
-        line = line.split('#', 1)[0].split('//', 1)[0].strip()
+        line = _strip_line_comments(line).strip()
         if depth == 0:
             match = re.fullmatch(r'([A-Za-z_][A-Za-z0-9_]*) = (.+?),?', line)
             if match:
@@ -130,6 +148,23 @@ def resources() -> dict[str, dict]:
 
 def policy_documents() -> dict[str, dict]:
     return _blocks(re.compile(r'^data\s+"aws_iam_policy_document"\s+"([^"]+)"\s*\{', re.MULTILINE))
+
+
+def data_blocks() -> dict[str, dict]:
+    """Extract all data blocks so role bindings cannot hide in another data source."""
+    return _blocks(re.compile(r'^data\s+"([^"]+)"\s+"([^"]+)"\s*\{', re.MULTILINE))
+
+
+def _has_child_blocks(body: str) -> bool:
+    """Whether a block body contains any direct child block, rather than an object assignment."""
+    return bool(re.search(r'^\s*[A-Za-z_][A-Za-z0-9_]*(?:\s+"[^"\\]*")*\s*\{', body, re.MULTILINE))
+
+
+def _references_ebs_csi_role(body: str) -> bool:
+    """Identify a real EBS CSI role reference, including its literal generated name."""
+    uncommented = '\n'.join(_strip_line_comments(line) for line in body.splitlines())
+    return bool(re.search(r'\baws_iam_role\.ebs_csi(?:\.[A-Za-z_][A-Za-z0-9_]*)?\b', uncommented)
+                or '-ebs-csi"' in uncommented)
 
 
 def assert_private_by_default(blocks: dict[str, dict]) -> list[str]:
@@ -205,6 +240,46 @@ def assert_private_by_default(blocks: dict[str, dict]) -> list[str]:
 
 def assert_ebs_csi_scoped(blocks: dict[str, dict], documents: dict[str, dict]) -> list[str]:
     """Accept only the EBS CSI role, policy, trust, and add-on bindings described here."""
+    expected_role_references = {
+        'aws_iam_role.ebs_csi',
+        'aws_iam_role_policy_attachment.ebs_csi',
+        'aws_iam_role_policy.ebs_csi_kms',
+        'aws_eks_addon.ebs_csi',
+    }
+    all_blocks = {**data_blocks(), **blocks}
+    all_blocks.update({f'aws_iam_policy_document.{name}': document
+                       for name, document in documents.items()})
+    role_references = {key for key, block in all_blocks.items()
+                       if _references_ebs_csi_role(block['body'])}
+    forbidden_bindings = {
+        block['kind'] for key, block in blocks.items()
+        if key in role_references and block['kind'] in (
+            'aws_iam_policy_attachment', 'aws_iam_role_policy_attachments_exclusive',
+            'aws_iam_role_policies_exclusive', 'aws_eks_pod_identity_association',
+        )
+    }
+    if forbidden_bindings:
+        raise ValueError('the EBS CSI role must not be bound by '+', '.join(sorted(forbidden_bindings)))
+    if role_references != expected_role_references:
+        raise ValueError('the EBS CSI role must have exactly one inline policy, one reviewed managed attachment, and one add-on association')
+
+    role = blocks.get('aws_iam_role.ebs_csi')
+    expected_role = {
+        'name': ['"${var.name_prefix}-ebs-csi"'],
+        'assume_role_policy': ['data.aws_iam_policy_document.ebs_csi_pod_identity.json'],
+        'tags': ['{ Workload = "ebs-csi-driver" }'],
+    }
+    if (role is None or _direct_assignments(role['body']) != expected_role
+            or _has_child_blocks(role['body'])):
+        raise ValueError('the EBS CSI role definition may contain only its name, scoped trust policy, and tags')
+
+    for name in ('ebs_csi_kms', 'ebs_csi_pod_identity'):
+        document = documents.get(name)
+        if document is None or _direct_assignments(document['body']) != {}:
+            raise ValueError('the EBS CSI policy documents may not have top-level assignments')
+        if re.search(r'\bdynamic\b', document['body']):
+            raise ValueError('the EBS CSI policy documents may not use dynamic blocks')
+
     managed = [(key, block) for key, block in blocks.items()
                if block['kind'] == 'aws_iam_role_policy_attachment'
                and _direct_assignments(block['body']).get('role') == ['aws_iam_role.ebs_csi.name']]
@@ -216,11 +291,6 @@ def assert_ebs_csi_scoped(blocks: dict[str, dict], documents: dict[str, dict]) -
         raise ValueError('the EBS CSI role must have exactly one managed policy attachment')
     if _direct_assignments(managed[0][1]['body']) != expected_managed:
         raise ValueError('the EBS CSI role must use AmazonEBSCSIDriverPolicyV2, not the legacy account-wide policy')
-
-    role = blocks.get('aws_iam_role.ebs_csi')
-    if role is None or _direct_assignments(role['body']).get('assume_role_policy') != [
-            'data.aws_iam_policy_document.ebs_csi_pod_identity.json']:
-        raise ValueError('the EBS CSI role must use the scoped pod identity trust policy')
 
     inline = [(key, block) for key, block in blocks.items()
               if block['kind'] == 'aws_iam_role_policy'
