@@ -162,6 +162,18 @@ resource "aws_vpc_security_group_ingress_rule" "database_from_nodes" {
   ip_protocol                  = "tcp"
 }
 
+# Managed node groups without a launch template carry only the EKS cluster security
+# group, so the database must also admit it; the nodes group above is never attached.
+resource "aws_vpc_security_group_ingress_rule" "database_from_cluster" {
+  security_group_id = aws_security_group.database.id
+  description       = "PostgreSQL from EKS cluster security group (managed nodes)"
+
+  referenced_security_group_id = aws_eks_cluster.main.vpc_config[0].cluster_security_group_id
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+}
+
 resource "aws_security_group" "nodes" {
   name        = "${var.name_prefix}-nodes"
   description = "EKS worker nodes"
