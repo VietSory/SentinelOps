@@ -182,6 +182,7 @@ def test_control_plane_build_context_allowlist_cannot_include_user_data_or_crede
         'contracts/', 'contracts/*.schema.json', 'scripts/', 'scripts/run_health_worker.py',
         'scripts/run_incident_worker.py', 'scripts/run_remediation_controller.py', 'configs/',
         'configs/slo_health_policy.json', 'configs/rca_policy.json', 'configs/topology.yaml',
+        'configs/alibaba_relative_features.json',
         'configs/severity_policy.json', 'configs/runbook_catalog.json', 'docker/',
         'docker/Dockerfile.control-plane', 'docker/Dockerfile.control-plane.dockerignore'}
     # In particular the separately delivered bundle under docs/ is excluded too.

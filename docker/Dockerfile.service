@@ -9,6 +9,7 @@ WORKDIR /app
 COPY pyproject.toml README.md setup.py MANIFEST.in ./
 COPY src ./src
 COPY contracts ./contracts
+COPY configs/alibaba_relative_features.json ./configs/
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir .
 

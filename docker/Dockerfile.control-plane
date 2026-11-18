@@ -13,6 +13,7 @@ WORKDIR /build
 COPY pyproject.toml README.md setup.py MANIFEST.in ./
 COPY src ./src
 COPY contracts ./contracts
+COPY configs/alibaba_relative_features.json ./configs/
 RUN python -m pip wheel --no-cache-dir --wheel-dir /wheels '.[ml]' \
     && python -m venv /opt/venv \
     && /opt/venv/bin/python -m pip install --no-cache-dir --no-index --find-links /wheels 'sentinelops[ml]'

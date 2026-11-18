@@ -110,7 +110,8 @@ def render(images, tf, runtime):
         health_stream=runtime['health_stream'], kubernetes_server=endpoint_with_port(tf['cluster_endpoint']),
         cluster_uid=runtime['cluster_uid'], namespace_uid=runtime['namespace_uid'],
         deployment_uids=runtime['deployment_uids'], observer_secret=runtime['observer_secret'],
-        **{key: runtime[key] for key in ('remediation_store_claim', 'known_good_store_claim') if key in runtime})
+        **{key: runtime[key] for key in ('remediation_store_claim', 'known_good_store_claim',
+            'model_claim', 'model_release_ref') if key in runtime})
     groups = {'10-testbed.yaml': business, '20-collector.yaml': aws,
               '30-api.yaml': api_docs, '40-workers.yaml': worker_docs, '50-traffic.yaml': traffic(images['application'])}
     # One Namespace definition per namespace; keep dependencies in numbered files.

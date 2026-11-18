@@ -1,2 +1,3 @@
 include contracts/*.schema.json
+include configs/alibaba_relative_features.json
 recursive-include src/sentinelops/ui/assets *.html *.css *.js

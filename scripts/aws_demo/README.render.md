@@ -1,5 +1,7 @@
 # Render manifest EKS (offline)
 
+Payment image evidence Job `review`: see [README.review.md](README.review.md).
+
 Chạy trong bản sao repo đã `chown`, bằng `python:3.11-slim-bookworm`; cài package
 repo và kubeconform v0.7.0 trước. Không cần AWS CLI, Terraform, kubectl hoặc Docker
 socket trong container. Script không gọi các công cụ đó, không đọc credential.

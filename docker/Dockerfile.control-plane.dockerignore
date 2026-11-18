@@ -12,6 +12,7 @@
 !scripts/run_incident_worker.py
 !scripts/run_remediation_controller.py
 !configs/
+!configs/alibaba_relative_features.json
 !configs/slo_health_policy.json
 !configs/rca_policy.json
 !configs/topology.yaml

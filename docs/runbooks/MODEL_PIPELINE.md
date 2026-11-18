@@ -47,6 +47,11 @@ The Alibaba bundle runs in the incident worker on accepted Prometheus v2 history
 Consumers read its available detection and risk signals from the pinned incident
 revision. Missing history leaves the corresponding signal unavailable.
 
+For EKS delivery of `de38fc6b`, see the
+[modelwire runbook](../../scripts/aws_demo/MODELWIRE.md): exact release-store
+layout, checksum-verified local/S3-to-PVC Jobs, worker/controller selection and
+the fresh health-stream requirement when an existing consumer changes models.
+
 The existing `/v1/detect` and `/v1/risk` routes still accept the legacy
 `FeatureWindow` shape. With an Alibaba release loaded, they return
 `409 model_requires_stream_history` for that shape because it cannot provide accepted
