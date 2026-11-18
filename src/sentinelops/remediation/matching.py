@@ -217,7 +217,7 @@ def fingerprint(symptoms: dict, runbook_id: str | None) -> str:
 def decide(symptoms: dict, catalog: dict) -> dict:
     """Apply §1; the caller owns the kill switch and extraction-error fallback.
 
-    This decision is a suggestion. Even 'auto' requires every executor guard.
+    An oncall suggestion requires explicit approval and every executor guard.
     """
     _validate_catalog(catalog)
     decision, reasons, ranking, entry = "engineer", [], [], None
@@ -237,18 +237,15 @@ def decide(symptoms: dict, catalog: dict) -> dict:
             reasons = ["rca-abstained"]
         elif symptoms["severity"] != "low":
             reasons = ["severity-not-supported"]
-        elif entry is None or top < thresholds["oncall_min_score"]:
+        elif entry is None or top < max(.80, thresholds["auto_min_score"]):
             reasons = ["insufficient-match"]
-        elif (top >= thresholds["auto_min_score"] and margin >= thresholds["auto_min_margin"]
+        elif (margin >= max(.15, thresholds["auto_min_margin"])
               and entry["executable"] and "low" in entry["allowed_severities"]):
-            decision, reasons = "auto", ["auto-match"]
+            decision, reasons = "oncall", ["oncall-approval-required"]
         else:
-            decision = "oncall"
             if not entry["executable"]:
                 reasons.append("manual-runbook")
-            if top < thresholds["auto_min_score"]:
-                reasons.append("insufficient-auto-score")
-            if margin < thresholds["auto_min_margin"]:
+            if margin < max(.15, thresholds["auto_min_margin"]):
                 reasons.append("insufficient-margin")
             if "low" not in entry["allowed_severities"]:
                 reasons.append("runbook-severity-not-supported")

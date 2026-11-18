@@ -9,6 +9,7 @@ import pytest
 
 from scripts import run_runbook_demo as demo
 from sentinelops.remediation.domain import Target
+from sentinelops.telemetry.core import stable_id
 
 TARGET = Target('cluster', 'sentinelops-b-actions', 'namespace', 'payment-service', 'deployment', 'payment')
 GOOD = 'registry.invalid/sentinelops/application@sha256:' + 'a' * 64
@@ -69,14 +70,17 @@ class Backend:
         if not self.round and (not self.kill or self.reads == 1):
             return []
         number = max(1, self.round)
-        card = {'decision_version': 'runbook-decision/v1', 'decision': 'auto',
+        card = {'decision_version': 'runbook-decision/v1', 'decision': 'oncall',
+            'proposal_version': 'runbook-proposal/v1', 'proposal_id': stable_id(['proposal', number]),
+            'created_at': '2026-11-18T00:00:00Z', 'expires_at': '2026-11-18T01:00:00Z',
             'controller_version': 'auto-runbook-controller/v1',
             'runbook_id': demo.RUNBOOK_ID, 'executor_runbook': 'payment-rollback-known-good/v1',
             'score': 1., 'margin': 1., 'symptoms': {'severity': 'low'},
             'incident_id': f'incident-{number}', 'incident_revision': 1, 'reasons': []}
         if self.kill:
             card.update(decision='engineer', reasons=['runbook-disabled-or-kill-switch'])
-        return [(f'artifact://manifests/{number:064x}.json', self.change(card))]
+        ref = self.store.write('manifests', card)
+        return [(ref, self.change(card))]
 
     async def incident_after(self, card, started):
         return self.fresh
@@ -100,6 +104,7 @@ class Backend:
 
 def execute(tmp_path, backend=None, **kwargs):
     backend = backend or Backend()
+    backend.store = demo.ArtifactStore(tmp_path / 'store')
     clock = Clock()
     result = asyncio.run(demo.run_demo(backend, output=tmp_path, timeout=20., poll=10.,
         clock=clock, sleep=clock.sleep, now=clock.now, **kwargs))
@@ -121,7 +126,7 @@ def test_three_rounds_require_ledger_before_deploy_and_observed_recovery(tmp_pat
 
 @pytest.mark.parametrize('change', [
     {'score': .79}, {'margin': .14}, {'score': float('nan')}, {'score': float('inf')},
-    {'score': True}, {'decision': 'oncall'}, {'runbook_id': 'manual'},
+    {'score': True}, {'decision': 'auto'}, {'runbook_id': 'manual'},
     {'executor_runbook': 'other'}, {'symptoms': {'severity': 'medium'}},
     {'incident_revision': '1'}, {'incident_id': None}])
 def test_unqualified_decisions_never_produce_success_receipts(tmp_path, change):
@@ -233,3 +238,27 @@ def test_backend_decision_store_verifies_hashes(tmp_path):
     (tmp_path / 'manifests' / ref.rsplit('/', 1)[1]).write_text('{}')
     with pytest.raises(ValueError, match='checksum mismatch'):
         asyncio.run(backend.decisions())
+
+
+def test_default_demo_prints_pod_approval_command_without_writing_approvals(tmp_path, capsys):
+    _, backend, _ = execute(tmp_path)
+    output = capsys.readouterr().out
+    assert output.count('On-call approval required:') == 3
+    assert 'exec deploy/remediation-controller -- python scripts/approve_runbook.py' in output
+    assert '--store /artifacts/remediation' in output and '--confirm-oncall-approval' in output
+    assert not (backend.store.root / 'runbook-approvals').exists()
+
+
+def test_explicit_approve_as_records_rehearsal_identity(tmp_path):
+    _, backend, _ = execute(tmp_path, approve_as='named-oncall')
+    from sentinelops.remediation.approvals import read_slot
+    for number in range(1, 4):
+        receipt = read_slot(backend.store, 'approval', stable_id(['proposal', number]))
+        assert receipt['approved_by'] == 'named-oncall' and receipt['decision'] == 'approve'
+
+
+@pytest.mark.parametrize('name', ['', ' \t'])
+def test_empty_approve_as_fails_before_regression(tmp_path, name):
+    backend = Backend()
+    with pytest.raises(ValueError): execute(tmp_path, backend, approve_as=name)
+    assert backend.deployed == []

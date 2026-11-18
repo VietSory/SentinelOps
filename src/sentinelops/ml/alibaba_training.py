@@ -21,7 +21,11 @@ BASE_FEATURES = ('rt_log_level_rel', 'rt_slope_rel_per_min', 'rate_log_level_rel
 BREACH_FEATURE = 'rt_log_baseline_to_breach'
 
 
-def load_config(path=CONFIG):
+def load_config(path=None):
+    if path is None:
+        # Source checkout keeps the authoritative config at the repository root;
+        # wheels carry the same bytes next to this module for offline serving.
+        path = CONFIG if CONFIG.is_file() else Path(__file__).with_name('configs') / CONFIG.name
     config = json.loads(Path(path).read_text())
     if config.get('feature_set_version') != 'http-relative-5m/v2' or config.get('frozen_before_fit') is not True:
         raise ValueError('unsupported or unfrozen ADR-019 feature config')
