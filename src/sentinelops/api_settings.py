@@ -17,6 +17,7 @@ class Settings:
     action_database_url: str | None = field(default=None,repr=False)
     operator_token: str | None = field(default=None,repr=False)
     oidc: OidcConfig | None = None
+    runbook_proposal_store: str | None = None
 
     def __post_init__(self):
         if self.oidc is not None and (self.api_token or self.operator_token):
@@ -44,12 +45,14 @@ class Settings:
                    demo_mode=os.getenv("SENTINELOPS_ENABLE_DEMO","false").lower()=="true",
                    model_store=os.getenv("SENTINELOPS_MODEL_STORE"),
                    model_release_ref=os.getenv("SENTINELOPS_MODEL_RELEASE_REF"),
+                   runbook_proposal_store=os.getenv("SENTINELOPS_RUNBOOK_PROPOSAL_STORE"),
                    oidc=oidc_from_env())
 
 
 OIDC_ENV = {"issuer":"SENTINELOPS_OIDC_ISSUER","audience":"SENTINELOPS_OIDC_AUDIENCE",
             "jwks_url":"SENTINELOPS_OIDC_JWKS_URL","audience_claim":"SENTINELOPS_OIDC_AUDIENCE_CLAIM",
-            "producer_scope":"SENTINELOPS_OIDC_PRODUCER_SCOPE","operator_scope":"SENTINELOPS_OIDC_OPERATOR_SCOPE"}
+            "producer_scope":"SENTINELOPS_OIDC_PRODUCER_SCOPE","operator_scope":"SENTINELOPS_OIDC_OPERATOR_SCOPE",
+            "approval_scope":"SENTINELOPS_OIDC_APPROVAL_SCOPE","login_domain":"SENTINELOPS_OIDC_LOGIN_DOMAIN"}
 
 
 def oidc_from_env():

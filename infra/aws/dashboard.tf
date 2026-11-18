@@ -51,7 +51,9 @@ locals {
           stacked = false
           period  = 60
           stat    = metric.stat
-          metrics = [["AWS/RDS", metric.name, "DBInstanceIdentifier", aws_db_instance.control.identifier, { unit = metric.unit }]]
+          # RDS publishes the native unit; keep it in the title rather than
+          # adding an unsupported unit rendering option to the metric tuple.
+          metrics = [["AWS/RDS", metric.name, "DBInstanceIdentifier", aws_db_instance.control.identifier]]
         }
       }],
       [{

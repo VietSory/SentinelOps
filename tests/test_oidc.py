@@ -56,6 +56,54 @@ def test_scopes_map_to_the_existing_roles_with_rsa_and_ec_keys():
         identify(v, token('openid profile'))
 
 
+def test_approval_is_a_separate_verified_scope_and_does_not_depend_on_role_priority():
+    v = verifier()
+    read, write, approve = v.config.operator_scope, v.config.producer_scope, v.config.approval_scope
+    for scopes in (read, write, read+' '+write, approve):
+        with pytest.raises(ScopeMissing):
+            asyncio.run(v.identify(token(scopes), required_scope=approve))
+    assert asyncio.run(v.identify(token(read+' '+approve), required_scope=approve)) == ('approver', 'svc-producer')
+    both = token(read+' '+write+' '+approve)
+    assert asyncio.run(v.identify(both, required_scope=read))[0] == 'operator'
+    assert asyncio.run(v.identify(both, required_scope=approve))[0] == 'approver'
+    assert identify(v, both)[0] == 'producer'  # Existing producer behavior stays compatible.
+
+
+def test_public_login_configuration_and_callback_only_expose_public_oidc_values():
+    config = OidcConfig(ISSUER, AUDIENCE, ISSUER+'/.well-known/jwks.json', audience_claim='client_id',
+                        login_domain='https://login.example')
+    with TestClient(create_app(Settings(environment='aws-dev', oidc=config,
+        control_database_url='postgresql://PRIVATE-DATABASE-CREDENTIAL', runbook_proposal_store='/PRIVATE-STORE'))) as api:
+        result = api.get('/ui/auth-config')
+        assert result.status_code == 200 and result.headers['cache-control'] == 'no-store'
+        assert result.json() == {'mode': 'oidc', 'issuer': ISSUER, 'client_id': AUDIENCE,
+            'domain': 'https://login.example', 'jwks_url': config.jwks_url,
+            'scopes': ['openid', config.operator_scope, config.approval_scope],
+            'read_scope': config.operator_scope, 'approval_scope': config.approval_scope, 'callback_path': '/ui/callback'}
+        assert 'PRIVATE' not in result.text
+        page = api.get('/ui/callback?code=PRIVATE-CODE&state=PRIVATE-STATE')
+        assert page.status_code == 200 and 'text/html' in page.headers['content-type']
+        assert 'PRIVATE' not in page.text
+        policy = page.headers['content-security-policy']
+        assert "connect-src 'self' https://login.example https://idp.example" in policy
+        assert 'unsafe-inline' not in policy and "frame-ancestors 'none'" in policy
+        assert api.head('/ui/callback').status_code == 200
+        assert '/ui/callback' not in api.get('/openapi.json').json()['paths']
+    for settings, mode in [(Settings(), 'manual'), (Settings(environment='aws'), 'unavailable')]:
+        with TestClient(create_app(settings)) as api:
+            assert api.get('/ui/auth-config').json() == {'mode': mode}
+
+
+@pytest.mark.parametrize('change', [{'approval_scope':'sentinelops/incidents.read'},
+    {'login_domain':'http://login.example'}, {'login_domain':'https://login.example/'},
+    {'login_domain':'https://login.example?secret=x'}, {'login_domain':'https://u:p@login.example'},
+    {'login_domain':'https://login.example:443'}, {'audience_claim':'aud'}, {'jwks_url':'https://other.example/keys'}])
+def test_hosted_login_configuration_rejects_unsafe_or_mismatched_binding(change):
+    base = dict(issuer=ISSUER,audience=AUDIENCE,jwks_url=ISSUER+'/.well-known/jwks.json',
+                audience_claim='client_id', login_domain='https://login.example')
+    with pytest.raises(ValueError): OidcConfig(**{**base,**change})
+
+
 @pytest.mark.parametrize('case', ['expired', 'issuer', 'audience', 'foreign-key', 'unknown-kid', 'hs256',
                                   'none', 'id-token', 'no-sub', 'bad-sub', 'garbage', 'alg-mismatch'])
 def test_invalid_tokens_are_rejected(case):

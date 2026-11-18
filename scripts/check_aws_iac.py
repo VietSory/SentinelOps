@@ -42,7 +42,7 @@ FORBIDDEN_ACTIONS = (
 
 
 def terraform(*arguments: str) -> str:
-    executable = shutil.which('terraform')
+    executable = shutil.which('terraform') or shutil.which('terraform.exe')
     if executable is None:
         raise SystemExit('terraform is required to validate the AWS baseline')
     completed = subprocess.run([executable, *arguments], cwd=ROOT, capture_output=True, text=True)
@@ -462,24 +462,57 @@ def assert_operator_identity(blocks: dict[str, dict]) -> list[str]:
     expected = {
         'aws_cognito_user_pool.operators', 'aws_cognito_resource_server.operator_api',
         'aws_cognito_user_pool_client.operator', 'aws_cognito_user_pool_domain.operator',
+        'aws_cognito_user_pool_client.grafana',
     }
     if {key for key in blocks if key.startswith('aws_cognito_')} != expected:
-        raise ValueError('operator identity permits only the declared pool, read scope, client and domain; no producer client or enrolled user')
+        raise ValueError('operator identity permits only the declared pool, read/proposal-approval scopes, clients and domain; no producer client or enrolled user')
     variables = _blocks(re.compile(r'^variable\s+"([^"]+)"\s*\{', re.MULTILINE))
     if _assignments(variables['operator_identity_enabled']['body']).get('default') != ['false']:
         raise ValueError('operator identity must be disabled by default')
     for key in expected:
-        if _assignments(blocks[key]['body']).get('count') != ['var.operator_identity_enabled ? 1 : 0']:
+        gate = ('var.operator_identity_enabled && var.edge_enabled ? 1 : 0'
+                if key == 'aws_cognito_user_pool_client.grafana' else 'var.operator_identity_enabled ? 1 : 0')
+        if _assignments(blocks[key]['body']).get('count') != [gate]:
             raise ValueError('every operator identity resource must be gated by operator_identity_enabled')
+    pool = _assignments(blocks['aws_cognito_user_pool.operators']['body'])
+    if (pool.get('mfa_configuration') != ['"ON"']
+            or pool.get('allow_admin_create_user_only') != ['true']
+            or pool.get('enabled') != ['true']):
+        raise ValueError('operator identity must retain mandatory software-token MFA and admin-only enrollment')
+    resource = blocks['aws_cognito_resource_server.operator_api']['body']
+    expected_scopes = [
+        {'scope_name': ['"incidents.read"'],
+         'scope_description': ['"Read incident, explanation and action observations; no writes or dispatch"']},
+        {'scope_name': ['"remediation.approve"'],
+         'scope_description': ['"Approve an already proposed runbook proposal; no arbitrary dispatch; all executor guards still apply"']},
+    ]
+    scopes = [_assignments(scope) for scope in _child_blocks(resource, 'scope')]
+    if (_direct_assignments(resource).get('identifier') != ['"sentinelops"']
+            or len(scopes) != len(expected_scopes)
+            or any(scope not in scopes for scope in expected_scopes)
+            or re.search(r'\bdynamic\s+"scope"', resource)):
+        raise ValueError('operator resource server must define exactly incidents.read and remediation.approve; no arbitrary dispatch, all executor guards still apply')
     client = _assignments(blocks['aws_cognito_user_pool_client.operator']['body'])
     for name, value in (
         ('generate_secret', 'false'),
         ('allowed_oauth_flows', '["code"]'),
-        ('allowed_oauth_scopes', '["openid", "sentinelops/incidents.read"]'),
+        ('allowed_oauth_scopes', '["openid", "sentinelops/incidents.read", "sentinelops/remediation.approve"]'),
         ('explicit_auth_flows', '["ALLOW_REFRESH_TOKEN_AUTH"]'),
     ):
         if client.get(name) != [value]:
-            raise ValueError('operator client must use code flow/read scope only, with no client secret or producer flow')
+            raise ValueError('operator client must use code flow with exactly openid/read/proposal-approval scopes, with no client secret or producer flow')
+
+    grafana = _assignments(blocks['aws_cognito_user_pool_client.grafana']['body'])
+    for name, value in (
+        ('generate_secret', 'true'), ('allowed_oauth_flows', '["code"]'),
+        ('allowed_oauth_scopes', '["openid", "email", "profile"]'),
+        ('explicit_auth_flows', '["ALLOW_REFRESH_TOKEN_AUTH"]'),
+        ('callback_urls', '["https://${aws_cloudfront_distribution.edge[0].domain_name}/grafana/login/generic_oauth"]'),
+    ):
+        if grafana.get(name) != [value]:
+            raise ValueError('Grafana must use a separate confidential code/PKCE client with only identity scopes and its exact edge callback')
+    if client.get('callback_urls') != ['var.edge_enabled ? ["https://${aws_cloudfront_distribution.edge[0].domain_name}/ui/callback"] : var.operator_callback_urls']:
+        raise ValueError('edge UI callback must bind exactly to its CloudFront domain')
 
     # Exact public expressions also reject exporting a whole resource object or
     # a newly added field under an innocuous name. No secret-value evaluation.
@@ -490,8 +523,10 @@ def assert_operator_identity(blocks: dict[str, dict]) -> list[str]:
           jwks_url = "https://${aws_cognito_user_pool.operators[0].endpoint}/.well-known/jwks.json"
           audience_claim = "client_id"
           operator_scope = "sentinelops/incidents.read"
+          approval_scope = "sentinelops/remediation.approve"
         } : null''',
         'operator_login_domain': 'var.operator_identity_enabled ? "https://${aws_cognito_user_pool_domain.operator[0].domain}.auth.${var.region}.amazoncognito.com" : null',
+        'edge_grafana_client_id': 'var.operator_identity_enabled && var.edge_enabled ? aws_cognito_user_pool_client.grafana[0].id : null',
     }
     outputs = _blocks(re.compile(r'^output\s+"([^"]+)"\s*\{', re.MULTILINE))
     identity_outputs = {name: block for name, block in outputs.items()
@@ -503,7 +538,138 @@ def assert_operator_identity(blocks: dict[str, dict]) -> list[str]:
         value = re.search(r'^\s*value = (.+)\Z', identity_outputs[name]['body'], re.MULTILINE | re.DOTALL)
         if value is None or re.sub(r'\s+', '', value.group(1)) != re.sub(r'\s+', '', expected_value):
             raise ValueError('operator outputs must contain only public identifiers and URLs, null when disabled; no credentials')
-    return ['operator identity default-off, gated, operator-only, no enrolled users/client secret; public-only outputs']
+    return ['operator identity default-off, gated, operator-only, no enrolled users; UI public with read/proposal-approval scopes, Grafana confidential with only identity scopes, public-only outputs']
+
+
+def assert_edge(blocks: dict[str, dict]) -> list[str]:
+    """Fail closed on the opt-in CloudFront -> private ALB -> two NodePorts edge."""
+    def require(key: str, field: str, value: str) -> None:
+        if _assignments(blocks[key]['body']).get(field) != [value]:
+            raise ValueError(f'edge invariant: {key} requires {field} = {value}')
+
+    variables = _blocks(re.compile(r'^variable\s+"([^"]+)"\s*\{', re.MULTILINE))
+    for name in ('edge_enabled', 'edge_vpc_origin_bootstrap', 'edge_waf_enabled'):
+        if _assignments(variables[name]['body']).get('default') != ['false']:
+            raise ValueError('edge, bootstrap and WAF must be disabled by default')
+    require('aws_lb.edge', 'internal', 'true')
+    require('aws_lb.edge', 'subnets', 'aws_subnet.private[*].id')
+    require('aws_lb.edge', 'security_groups', '[aws_security_group.edge_alb[0].id]')
+    require('aws_lb.edge', 'count', 'var.edge_enabled ? 1 : 0')
+    require('aws_lb.edge', 'condition', 'var.operator_identity_enabled')
+    for kind, expected in (
+        ('aws_cloudfront_distribution.', {'aws_cloudfront_distribution.edge'}),
+        ('aws_cloudfront_vpc_origin.', {'aws_cloudfront_vpc_origin.edge'}),
+        ('aws_cloudfront_function.', {'aws_cloudfront_function.edge_paths'}),
+        ('aws_lb_target_group.', {'aws_lb_target_group.edge'}),
+    ):
+        if {key for key in blocks if key.startswith(kind)} != expected:
+            raise ValueError('edge permits only its declared private origin and filtered distribution')
+    require('aws_lb_target_group.edge', 'target_type', '"instance"')
+    require('aws_lb_target_group.edge', 'for_each', 'var.edge_enabled ? local.edge_backends : {}')
+    require('aws_lb_target_group.edge', 'port', 'each.value.port')
+    require('aws_lb_target_group.edge', 'path', 'each.value.health')
+    require('aws_autoscaling_attachment.edge', 'autoscaling_group_name',
+            'one(aws_eks_node_group.main.resources[0].autoscaling_groups).name')
+    require('aws_autoscaling_attachment.edge', 'lb_target_group_arn', 'aws_lb_target_group.edge[each.key].arn')
+    for key, block in blocks.items():
+        body = block['body']
+        if key.startswith('aws_lb.') and key != 'aws_lb.edge':
+            raise ValueError('edge permits only the declared internal ALB')
+        if key.startswith(('aws_lb_listener.', 'aws_lb_listener_rule.')) and key not in {
+                'aws_lb_listener.edge', 'aws_lb_listener_rule.edge_deny', 'aws_lb_listener_rule.edge_allow'}:
+            raise ValueError('edge permits only the declared deny/default and allow path rules')
+        if key.startswith(('aws_vpc_security_group_ingress_rule.', 'aws_security_group_rule.')):
+            assignments = _assignments(body)
+            target = assignments.get('security_group_id', [])
+            if 'aws_security_group.edge_alb[0].id' in target:
+                if key not in {'aws_vpc_security_group_ingress_rule.edge_from_cloudfront',
+                               'aws_vpc_security_group_ingress_rule.edge_bootstrap'}:
+                    raise ValueError('edge ALB ingress must come only from the CloudFront VPC origin')
+                if any(name in assignments for name in ('cidr_ipv4', 'cidr_ipv6', 'cidr_blocks', 'ipv6_cidr_blocks')):
+                    raise ValueError('edge ALB must not admit any CIDR (including 0.0.0.0/0)')
+        if key == 'aws_security_group.edge_alb' and _child_blocks(body, 'ingress'):
+            raise ValueError('edge ALB ingress must use only the reviewed standalone rules')
+    for key in ('aws_vpc_security_group_ingress_rule.edge_from_cloudfront',
+                'aws_vpc_security_group_ingress_rule.edge_bootstrap'):
+        require(key, 'security_group_id', 'aws_security_group.edge_alb[0].id')
+        for field, value in (('ip_protocol', '"tcp"'), ('from_port', '80'), ('to_port', '80')):
+            require(key, field, value)
+    require('aws_vpc_security_group_ingress_rule.edge_from_cloudfront', 'referenced_security_group_id',
+            'data.aws_security_group.edge_cloudfront[0].id')
+    require('aws_vpc_security_group_ingress_rule.edge_from_cloudfront', 'count',
+            'var.edge_enabled && !var.edge_vpc_origin_bootstrap ? 1 : 0')
+    require('aws_vpc_security_group_ingress_rule.edge_bootstrap', 'prefix_list_id',
+            'data.aws_ec2_managed_prefix_list.edge_cloudfront[0].id')
+    require('aws_vpc_security_group_ingress_rule.edge_bootstrap', 'count',
+            'var.edge_enabled && var.edge_vpc_origin_bootstrap ? 1 : 0')
+    data = data_blocks()
+    if _assignments(data['aws_ec2_managed_prefix_list.edge_cloudfront']['body']).get('name') != ['"com.amazonaws.global.cloudfront.origin-facing"']:
+        raise ValueError('edge bootstrap must use only the AWS managed CloudFront prefix list')
+    filters = [_assignments(body) for body in _child_blocks(data['aws_security_group.edge_cloudfront']['body'], 'filter')]
+    if filters != [{'name': ['"group-name"'], 'values': ['["CloudFront-VPCOrigins-Service-SG"]']},
+                   {'name': ['"vpc-id"'], 'values': ['[aws_vpc.main.id]']}]:
+        raise ValueError('edge ingress must name the service-managed VPC origin SG in this VPC')
+    listener = blocks['aws_lb_listener.edge']['body']
+    require('aws_lb_listener.edge', 'type', '"fixed-response"')
+    require('aws_lb_listener.edge', 'status_code', '"403"')
+    require('aws_lb_listener_rule.edge_deny', 'priority', '1')
+    require('aws_lb_listener_rule.edge_deny', 'type', '"fixed-response"')
+    require('aws_lb_listener_rule.edge_deny', 'status_code', '"403"')
+    require('aws_lb_listener_rule.edge_deny', 'regex_values',
+            '["^/(.*/)?(internal|docs|redoc|openapi[.]json|metrics|prometheus|jaeger)(/.*)?$"]')
+    require('aws_lb_listener_rule.edge_allow', 'for_each', 'var.edge_enabled ? local.edge_paths : {}')
+    require('aws_lb_listener_rule.edge_allow', 'type', '"forward"')
+    require('aws_lb_listener_rule.edge_allow', 'values', 'each.value')
+    require('aws_lb_listener_rule.edge_allow', 'target_group_arn', 'aws_lb_target_group.edge[each.key].arn')
+    edge = normalize((ROOT/'edge.tf').read_text())
+    paths = re.search(r'edge_paths = \{([^}]+)\}', edge)
+    if paths is None or _assignments(paths.group(1)) != {
+            'api': ['["/ui", "/ui/*", "/v1/*"]'], 'grafana': ['["/grafana", "/grafana/*"]']}:
+        raise ValueError('edge allow paths must be exactly UI, v1 API and Grafana')
+    backends = re.search(r'edge_backends = \{(.*?)\n\s*\}', edge, re.DOTALL)
+    if backends is None or _assignments(backends.group(1)) != {
+            'api': ['{ port = var.edge_api_node_port, health = "/health" }'],
+            'grafana': ['{ port = var.edge_grafana_node_port, health = "/grafana/api/health" }']}:
+        raise ValueError('edge must bind only its dedicated API/UI and Grafana NodePorts')
+    distribution = blocks['aws_cloudfront_distribution.edge']['body']
+    require('aws_cloudfront_distribution.edge', 'enabled', '!var.edge_vpc_origin_bootstrap')
+    origins = _child_blocks(distribution, 'origin')
+    if len(origins) != 1 or any(kind in origins[0] for kind in ('custom_origin_config', 's3_origin_config', 'origin_path')):
+        raise ValueError('edge CloudFront must use only its private VPC origin')
+    origin_config = _child_blocks(origins[0], 'vpc_origin_config')
+    if len(origin_config) != 1 or _assignments(origin_config[0]).get('vpc_origin_id') != ['aws_cloudfront_vpc_origin.edge[0].id']:
+        raise ValueError('edge CloudFront must bind its internal ALB VPC origin')
+    for field, expected in (
+        ('viewer_protocol_policy', ['"https-only"', '"https-only"']),
+        ('cache_policy_id', ['local.edge_cache_policy_id', 'local.edge_cache_policy_id']),
+        ('origin_request_policy_id', ['local.edge_origin_request_policy_id', 'local.edge_origin_request_policy_id']),
+        ('function_arn', ['aws_cloudfront_function.edge_paths[0].arn', 'aws_cloudfront_function.edge_paths[0].arn']),
+        ('for_each', ['["/v1/*", "/ui/*", "/grafana/*"]', '[400, 403, 404, 405, 414, 416, 500, 501, 502, 503, 504]']),
+    ):
+        if _assignments(distribution).get(field) != expected:
+            raise ValueError('edge CloudFront requires HTTPS-only, disabled caching and path filtering on every behavior')
+    require('aws_cloudfront_distribution.edge', 'error_caching_min_ttl', '0')
+    require('aws_cloudfront_distribution.edge', 'error_code', 'custom_error_response.value')
+    require('aws_cloudfront_response_headers_policy.edge', 'header', '"Cache-Control"')
+    require('aws_cloudfront_response_headers_policy.edge', 'value', '"no-store"')
+    if _locals().get('edge_cache_policy_id') != ['"413f1600-8ff0-4b7d-9f5a-2f0e013a5a6a"']:
+        raise ValueError('edge must use the AWS managed CachingDisabled policy')
+    if _locals().get('edge_origin_request_policy_id') != ['"216adef6-5c7f-47e4-b989-5492eafa07d3"']:
+        raise ValueError('edge must forward viewer Host, Authorization, cookies and OAuth query parameters')
+    # Function source is tested with real JS too; keep its security boundary
+    # exact so an inserted early return cannot bypass its rejection conditions.
+    function = blocks['aws_cloudfront_function.edge_paths']['body']
+    code = re.search(r'code = <<-JS\n(.*?)\n\s*JS', function, re.DOTALL)
+    import hashlib
+    if code is None or hashlib.sha256(''.join(
+            _strip_line_comments(line).strip() for line in code.group(1).splitlines()).encode()).hexdigest() != EDGE_FUNCTION_SHA256:
+        raise ValueError('edge path function must reject traversal, encoded paths and all non-allowlisted routes')
+    if 'default_action' not in listener:
+        raise ValueError('edge listener must deny by default')
+    return ['edge default-off; private ALB, VPC-origin-only ingress, HTTPS-only uncached allowlisted routes; NodePort/ASG binding']
+
+
+EDGE_FUNCTION_SHA256 = '4553e790c83fd5f7c4d86108fde9abe3f2eb2968d69ebd4c225eb618b461b05b'
 
 
 def assert_grants_no_authority(root: Path = ROOT) -> list[str]:
@@ -535,6 +701,7 @@ def exercise(output: Path | None) -> dict:
     checks += assert_ebs_csi_scoped(blocks, documents)
     checks += assert_no_static_credentials()
     checks += assert_operator_identity(blocks)
+    checks += assert_edge(blocks)
     checks += assert_grants_no_authority()
 
     result = {'status': 'PASS', 'scope': 'aws-configuration-description-only',

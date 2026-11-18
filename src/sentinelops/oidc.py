@@ -24,6 +24,7 @@ JWKS_MAX_BYTES = 64 * 1024
 REFRESH_INTERVAL_SECONDS = 30
 SUBJECT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@|+-]{0,199}")
 PRODUCER, OPERATOR = "producer", "operator"
+APPROVER = "approver"
 
 
 class TokenRejected(Exception):
@@ -54,6 +55,8 @@ class OidcConfig:
     audience_claim: str = "aud"
     leeway_seconds: int = 60
     jwks_ttl_seconds: int = 300
+    approval_scope: str = "sentinelops/remediation.approve"
+    login_domain: str | None = None
 
     def __post_init__(self):
         _https(self.issuer, "OIDC issuer")
@@ -63,9 +66,23 @@ class OidcConfig:
         # Cognito access tokens carry the app client in client_id instead of aud.
         if self.audience_claim not in ("aud", "client_id"):
             raise ValueError("OIDC audience claim must be aud or client_id")
-        scopes = (self.producer_scope, self.operator_scope)
-        if any(not isinstance(s, str) or not s or any(c.isspace() for c in s) for s in scopes) or len(set(scopes)) != 2:
-            raise ValueError("OIDC producer and operator scopes must be distinct single tokens")
+        scopes = (self.producer_scope, self.operator_scope, self.approval_scope)
+        if any(not isinstance(s, str) or not s or any(c.isspace() for c in s) for s in scopes) or len(set(scopes)) != 3:
+            raise ValueError("OIDC producer, operator and approval scopes must be distinct single tokens")
+        if self.login_domain is not None:
+            if not isinstance(self.login_domain, str):
+                raise ValueError('Cognito login domain must be an HTTPS origin')
+            parts = urlsplit(self.login_domain)
+            if (parts.scheme != 'https' or not parts.hostname or parts.username is not None
+                or parts.password is not None or parts.path or parts.query or parts.fragment
+                or parts.port is not None or not re.fullmatch(r'[A-Za-z0-9.-]+', parts.hostname)
+                or self.login_domain != 'https://' + parts.hostname
+                or any(c.isspace() for c in self.issuer)
+                or urlsplit(self.issuer).query or urlsplit(self.issuer).fragment
+                or self.jwks_url != self.issuer.rstrip('/') + '/.well-known/jwks.json'
+                or self.audience_claim != 'client_id'
+                or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', self.audience)):
+                raise ValueError('Cognito login requires an HTTPS domain origin and client_id audience binding')
         if not 0 <= self.leeway_seconds <= 300 or not 30 <= self.jwks_ttl_seconds <= 86400:
             raise ValueError("OIDC leeway or JWKS cache lifetime is out of bounds")
 
@@ -130,7 +147,7 @@ class OidcVerifier:
                 return  # keep the last good key set; an unknown kid still fails closed
             self._keys, self._loaded_at, self._retry_after = keys, now, None
 
-    async def identify(self, token: str) -> tuple[str, str]:
+    async def identify(self, token: str, *, required_scope: str | None = None) -> tuple[str, str]:
         """Return (role, subject) for a verified token; role is producer or operator."""
         if not token or len(token) > 8192:
             raise TokenRejected("bearer token is missing or too long")
@@ -180,6 +197,13 @@ class OidcVerifier:
             scopes = set(raw)
         else:
             raise TokenRejected("token scope claim has an invalid shape")
+        if required_scope is not None:
+            roles = {config.producer_scope: PRODUCER, config.operator_scope: OPERATOR, config.approval_scope: APPROVER}
+            if required_scope not in roles:
+                raise ValueError('unsupported server-required scope')
+            if required_scope not in scopes or (required_scope == config.approval_scope and config.operator_scope not in scopes):
+                raise ScopeMissing('token does not carry the required scope')
+            return roles[required_scope], subject
         if config.producer_scope in scopes:
             return PRODUCER, subject
         if config.operator_scope in scopes:

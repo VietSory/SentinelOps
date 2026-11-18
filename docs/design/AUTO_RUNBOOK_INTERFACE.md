@@ -1,4 +1,4 @@
-# Runbook có on-call duyệt (LOW, match ≥ 0.80)
+# Runbook có operator duyệt (mọi severity, match ≥ 0.80)
 
 Quy tắc chủ repo cập nhật ngày **2026-11-18**. Đây là hợp đồng giữa các lane `sev`, `match`, `ctl`, `eksctl`.
 
@@ -7,11 +7,11 @@ Quy tắc chủ repo cập nhật ngày **2026-11-18**. Đây là hợp đồng 
 | Điều kiện (xét theo thứ tự) | `decision` |
 |---|---|
 | Kill switch bật, RCA abstain, thiếu dữ liệu (UNKNOWN), hoặc lỗi bất kỳ khi trích triệu chứng | `engineer` |
-| `severity != "low"` | `engineer` (lý do `severity-not-supported`) |
-| Top entry có `score >= max(0.80, thresholds.auto_min_score)`, `margin >= max(0.15, thresholds.auto_min_margin)`, `executable == true`, `"low" in allowed_severities` | `oncall` (đề xuất; phải được on-call duyệt trước khi chạy) |
+| Top entry có `score >= max(0.80, thresholds.auto_min_score)`, `margin >= max(0.15, thresholds.auto_min_margin)`, `executable == true` | `oncall` (proposal chờ operator duyệt từng incident, áp dụng cho `low/medium/high/critical`) |
 | Còn lại | `engineer` |
 
 - Score là điểm khớp **deterministic**, không phải xác suất. Không dùng LLM.
+- Mọi incident ở mọi severity đều phải được operator duyệt trước khi chạy runbook. Severity dùng để hiển thị và xếp ưu tiên; không chặn proposal, không cộng điểm hay mở quyền thực thi. Khớp thấp hoặc runbook không chạy được chỉ hiển thị bước làm tay cho engineer.
 - `decide()` không bao giờ trả `auto`. Điểm dưới 0.80, margin dưới 0.15 hoặc runbook thủ công đều đi `engineer`.
 - Tên khóa catalog `auto_min_score/auto_min_margin` được giữ để tương thích; chỉ có thể siết ngưỡng, không hạ sàn 0.80/0.15. `oncall_min_score` là khóa tương thích cũ, không mở đường chạy.
 - Approval không bỏ qua guard nào: executor vẫn kiểm H4, known-good, dry-run, 1 attempt, cooldown, kill switch và RCA ≤ 180 giây.
@@ -61,7 +61,7 @@ Ngưỡng 750 ms và 5% đọc từ `configs/slo_health_policy.json`, không har
       "title": "Payment chậm sau deploy image mới → rollback về image known-good",
       "executable": true,
       "executor_runbook": "payment-rollback-known-good/v1",
-      "allowed_severities": ["low"],
+      "allowed_severities": ["low", "medium", "high", "critical"],
       "required": {"root_service": "payment-service", "deployment_change": true, "rca_abstained": false},
       "features": [
         {"field": "modality", "equals": "latency", "weight": 0.30},
@@ -78,6 +78,7 @@ Ngưỡng 750 ms và 5% đọc từ `configs/slo_health_policy.json`, không har
 
 - Có đúng 5 entry. 1 entry `executable: true` là entry ở trên. 4 entry thủ công (`executable: false`, `executor_runbook: null`): `inventory-bad-deploy`, `payment-errors-no-change`, `db-lock-contention`, `checkout-latency-downstream`. Mỗi entry có `manual_steps` tiếng Việt cho engineer.
 - Schema strict: `additionalProperties: false`, trọng số > 0, `field` thuộc tập khóa ở §2. Entry executable phải có `executor_runbook` nằm trong allow-list `{"payment-rollback-known-good/v1"}`.
+- Mọi entry phải khai báo đủ bốn `allowed_severities`. Schema không cho `severity` trong `required` hoặc `features`, để catalog không biến severity thành điều kiện khớp.
 
 ```python
 def load_catalog(path) -> dict              # validate schema + semantic, raise ValueError
@@ -99,13 +100,13 @@ def fingerprint(symptoms: dict, runbook_id: str|None) -> str
 
 ## 4. Severity (lane `sev`)
 
-`configs/severity_policy.json` (`severity/v2`), cùng một implementation cho live và replay:
+`configs/severity_policy.json` mã hóa policy gốc `severity/v1` theo `docs/architecture/CONSTRAINTS_AND_GATES.md` §4 và `group_severity` trên main trước commit `d1eee79`. Live và replay dùng chung `src/sentinelops/incidents/severity.py`:
 
-- **critical:** Checkout `error_rate >= 0.20` hai bucket eligible liên tiếp (giữ nguyên).
-- **high:** Checkout `error_rate >= 0.05` **hoặc** Checkout `p95 > 1500` hai bucket liên tiếp, **hoặc** ≥ 2 structural root độc lập.
-- **low:** mọi service non-Checkout bị ảnh hưởng có max p95 ∈ (750, 1250] **và** error_rate ≤ 0.05, và Checkout dưới ngưỡng high.
-- **medium:** phần còn lại.
-- `group_severity(...)` giữ chữ ký, trả về một trong 4 giá trị; policy load một lần, hash ghi vào kết quả (`severity_policy_sha256`) nếu chỗ đó không phá contract strict. Nếu phá contract thì chỉ log.
+- **critical:** hai bucket Checkout mới nhất đều eligible, cách nhau 60 giây, và mỗi bucket có `error_rate >= 0.20`.
+- **high:** group có Checkout bị ảnh hưởng **hoặc** có ít nhất hai service bị ảnh hưởng, khi chưa đạt critical. Đếm affected services, không đếm structural roots.
+- **medium:** phần còn lại. `low` vẫn là severity hợp lệ cho watch-level record nếu được mở theo policy; hàm này không tạo band LOW theo latency.
+- Không dùng ngưỡng p95 để phân severity, không chọn ngưỡng theo lỗi demo. Payment p95 khoảng 981 ms kéo theo Checkout là **high**, vẫn được đề xuất runbook nếu đủ điểm và RCA không abstain.
+- `group_severity(...)` giữ chữ ký. Policy load một lần, hash `stable_id(policy)` ghi vào kết quả `severity_policy_sha256` và log. SLO health policy vẫn xác định suy giảm; các band latency ở §2 chỉ phục vụ khớp runbook.
 
 ## 5. Executor hook + controller (lane `ctl`)
 
@@ -127,12 +128,12 @@ class AutoRunbookController:
         # 1. incident RCA_READY chưa có decision
         # 2. extract_symptoms → decide
         # 3. ghi decision bất biến: store.write('manifests', decision) + log JSON
-        # 4. oncall → proposal bất biến + event runbook_proposal, chưa gọi executor
+        # 4. oncall ở mọi severity → proposal bất biến + event runbook_proposal, chưa gọi executor
         # 5. tick sau: approval hợp lệ → Request + executor.execute()
         #    rồi executor.reconcile() tới terminal ở các tick sau
     def authorize(self, request) -> Awaitable[None]:
         # kiểm lại approval + revision + severity + toàn bộ decision hiện tại;
-        # phải còn oncall và khớp proposal; sai thì raise Blocked trước PATCH
+        # phải còn oncall và khớp proposal; severity tăng giữa chừng thì Blocked trước PATCH
 ```
 
 `scripts/run_remediation_controller.py`:
@@ -144,6 +145,16 @@ class AutoRunbookController:
 ## 5b. Proposal và approval bất biến
 
 - Proposal là decision `oncall` trong `manifests`, thêm `proposal_version=runbook-proposal/v1`, `proposal_id=stable_id([incident_id, incident_revision, runbook_id])`, `created_at`, `expires_at=created_at+15 phút`. Giữ nguyên `runbook_id`, `executor_runbook`, `score`, `margin` và toàn bộ quyết định làm bằng chứng.
+- Proposal ghim bốn trường dưới đây từ nguồn server, trước khi ghi artifact. Tên trường giữ ổn định cho lane UI; không lấy target/image từ payload operator hay LLM.
+
+| Trường | Kiểu và nội dung | Nguồn |
+| --- | --- | --- |
+| `target` | Object gồm `cluster_uid`, `namespace`, `namespace_uid`, `deployment`, `deployment_uid`, `container` | Target của policy, đối chiếu với Deployment quan sát được và known-good ledger |
+| `current_image` | Chuỗi image URI đầy đủ, bắt buộc `repository@sha256:<64 hex>` | Image của Deployment hiện tại |
+| `rollback_image` | Chuỗi image URI đầy đủ, bắt buộc `repository@sha256:<64 hex>` | Image approved trong known-good ledger, được resolve theo thời điểm onset của incident |
+| `known_good_ledger_ref` | Chuỗi `artifact://manifests/<sha256>.json` | Reference của đúng ledger đã resolve cho `rollback_image` |
+
+- Không đọc/verify được target hoặc ledger khi tạo proposal thì ghi decision `engineer`, lý do `proposal-target-unavailable`, không phát hành proposal thiếu các trường này.
 - Log JSON `event=runbook_proposal` chứa proposal cùng `decision_ref`. Tick tạo proposal không dispatch, kể cả có receipt sẵn.
 - On-call đọc proposal rồi chạy lệnh trong pod controller (đường dẫn store là đường dẫn **trong pod**, mặc định triển khai `/artifacts/remediation`):
 
@@ -157,8 +168,10 @@ kubectl -n sentinelops-b-actions exec deploy/remediation-controller -- \
 
 - Có thể thay `approve` bằng `reject`. Danh tính bắt buộc, không rỗng; cờ xác nhận bắt buộc. CLI chỉ ghi artifact, không gọi Kubernetes/AWS hay executor.
 - Approval `runbook-approval/v1` ghi `proposal_id`, `proposal_sha256` của toàn proposal, `approved_by`, `approved_at`, `decision`, `reason`. Một proposal chỉ nhận một receipt, không ghi đè hoặc đổi từ reject sang approve. Quyền ghi volume/controller exec phải giới hạn cho on-call; `approved_by` là audit identity do người vận hành nhập.
+- `proposal_sha256` bao gồm cả `target`, `current_image`, `rollback_image`, `known_good_ledger_ref`; receipt không cần lặp lại các trường này hay đổi version. Proposal cũ thiếu bất kỳ trường ghim nào không được dispatch, kể cả đã có approval.
 - Artifact được kiểm hash; slot create-only trong `runbook-approvals/{approval,used,outcome}` được công bố bằng hard link nguyên tử. Claim `used` được ghi bền trước `execute`, chỉ execution hiện tại mới dùng claim đó trong hook; khởi động lại không tái sử dụng approval. Crash có thể mất một lượt chạy và cần engineer xử lý; không tự retry mutation.
-- Chỉ approval `approve` đúng ID/hash, thời điểm hợp lệ, chưa dùng mới được xét. Hook kiểm lại ngay trước PATCH thật: incident revision không đổi, severity vẫn LOW và quyết định tính lại vẫn khớp toàn bộ proposal; kill switch và các guard executor vẫn áp dụng.
+- Chỉ approval `approve` đúng ID/hash, thời điểm hợp lệ, chưa dùng mới được xét. Hook kiểm lại ngay trước PATCH thật: incident revision không đổi và quyết định tính lại vẫn khớp toàn bộ proposal, bao gồm severity. Controller lấy severity cao nhất giữa kết quả đã verify, incident hiện tại và health snapshot mới nhất; severity tăng làm proposal cũ không còn khớp và bị chặn trước PATCH. Kill switch và các guard executor vẫn áp dụng ở mọi severity.
+- Trước dispatch và trong hook ngay trước PATCH thật, controller đọc lại Deployment và resolve lại known-good ledger. Target/UID, `current_image`, `rollback_image` hoặc ledger reference khác proposal, hay ledger không còn verify được, đều chặn và ghi escalation `approval-target-changed`. Ledger mới có cùng rollback digest vẫn làm approval cũ hết hiệu lực. Hook còn đối chiếu các trường này với `intent.evidence.before` và `intent.evidence.known_good` của executor: ledger đổi rồi trở về giá trị cũ vẫn bị chặn nếu executor đã chuẩn bị theo ledger khác. Không sửa proposal/receipt để khớp target mới.
 - Reject ghi escalation `approval-rejected`; quá hạn ghi `phase=escalated`, `reason=approval-expired`. Revision/severity/decision thay đổi đều bị chặn. Outcome/log escalation được ghi riêng, không sửa proposal/approval hay lịch sử action terminal.
 - TTL proposal 15 phút không kéo dài độ mới RCA. Executor vẫn chặn bằng chứng quá 180 giây; controller ghi escalation `approval-after-evidence-freshness` liên kết action bị chặn, giữ nguyên reason gốc trong action journal.
 

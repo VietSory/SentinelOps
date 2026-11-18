@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import json
 import logging
@@ -17,12 +18,13 @@ from pathlib import Path
 from sentinelops.contracts import utc_time
 from sentinelops.incidents.rca_replay import group_severity
 from sentinelops.remediation.approvals import APPROVAL_VERSION, PROPOSAL_VERSION, create_slot, read_slot
-from sentinelops.remediation.domain import Blocked, Request, RUNBOOK
+from sentinelops.remediation.domain import Blocked, Request, RUNBOOK, image_digest
 from sentinelops.telemetry.core import stable_id, timestamp
 
 logger = logging.getLogger('sentinelops-remediation-controller')
 TERMINAL = {'blocked', 'recovered', 'escalated'}
 SEVERITIES = ('low', 'medium', 'high', 'critical')
+TARGET_BINDING = ('target', 'current_image', 'rollback_image', 'known_good_ledger_ref')
 
 
 class AutoRunbookController:
@@ -121,11 +123,50 @@ class AutoRunbookController:
         # Defense in depth: only the single executable runbook may dispatch.
         if decision['decision'] not in ('oncall', 'engineer'):
             raise Blocked('unsupported-runbook-decision')
-        if decision['decision'] == 'oncall' and (derived['severity'] != 'low' or rca['abstained']
+        if decision['decision'] == 'oncall' and (rca['abstained']
                                                or decision['executor_runbook'] != RUNBOOK
                                                or decision['score'] < .80 or decision['margin'] < .15):
             raise Blocked('oncall-decision-not-qualified')
+        if decision['decision'] == 'oncall':
+            decision.update(await self._target_binding(group))
         return deepcopy(decision)
+
+    async def _target_binding(self, group):
+        """Read server-owned target/ledger evidence before publishing a proposal."""
+        try:
+            target = self.executor.policy.target
+            good = await self.executor.registry.resolve(target, incident_at=utc_time(group['first_onset_at']))
+            before = await self.executor.kube.observe()
+            before.validate(self.executor.policy)
+            if good.target != before.target or before.target != target:
+                raise Blocked('target-identity-mismatch')
+            return {'target': asdict(before.target), 'current_image': image_digest(before.image),
+                    'rollback_image': image_digest(good.image), 'known_good_ledger_ref': good.ledger_ref}
+        except Exception as exc:
+            raise Blocked('proposal-target-unavailable') from exc
+
+    @staticmethod
+    def _check_target_binding(proposal, current):
+        if any(field not in proposal or field not in current or proposal[field] != current[field]
+               for field in TARGET_BINDING):
+            raise Blocked('approval-target-changed')
+
+    async def _prepared_target(self, request, proposal):
+        # The executor may have read a different ledger between hook calls.
+        # Bind the actual prepared PATCH inputs too, even if the live ledger
+        # has since returned to the proposal's original value.
+        state = await self.executor.journal.find(request, self.executor.policy.target)
+        if state is None or state['phase'] not in ('prepared', 'dispatching'):
+            return
+        try:
+            evidence = state['intent']['evidence']
+            before, good = evidence['before'], evidence['known_good']
+            if before['target'] != good['target']:
+                raise Blocked('approval-target-changed')
+            self._check_target_binding(proposal, {'target': before['target'], 'current_image': before['image'],
+                'rollback_image': good['image'], 'known_good_ledger_ref': good['ledger_ref']})
+        except (KeyError, TypeError) as exc:
+            raise Blocked('approval-target-changed') from exc
 
     def _engineer(self, reason):
         return {'decision_version': 'runbook-decision/v1', 'decision': 'engineer',
@@ -144,6 +185,7 @@ class AutoRunbookController:
             if (self._active_approval != (pinned['proposal_id'], stable_id(approval))
                 or used is None or used['approval_sha256'] != stable_id(approval)):
                 raise Blocked('approval-already-used-or-not-active')
+            await self._prepared_target(request, pinned)
             if self.kill_switch.exists():
                 raise Blocked('runbook-disabled-or-kill-switch')
         except Blocked:
@@ -157,10 +199,14 @@ class AutoRunbookController:
             if snapshot['revision'] != proposal['incident_revision']:
                 raise Blocked('incident-revision-changed')
             decision = await self._decide(snapshot)
-            if (decision['decision'] != 'oncall'
-                or any(decision.get(k) != proposal.get(k) for k in decision)):
+            if decision['decision'] != 'oncall':
                 raise Blocked('current-runbook-decision-changed')
-        except Blocked:
+            self._check_target_binding(proposal, decision)
+            if any(decision.get(k) != proposal.get(k) for k in decision):
+                raise Blocked('current-runbook-decision-changed')
+        except Blocked as exc:
+            if str(exc) == 'proposal-target-unavailable':
+                raise Blocked('approval-target-changed') from exc
             raise
         except Exception as exc:
             raise Blocked('controller-authorization-evidence-unavailable') from exc

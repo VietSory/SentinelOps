@@ -44,6 +44,73 @@ def controller(documents):
                 and d['metadata']['name'] == 'remediation-controller')
 
 
+def test_oidc_ui_sidecar_shares_controller_rwo_store_without_public_service_or_action_credentials():
+    documents = worker.render(IMAGE, **PARAMETERS, demo_ui=True)
+    assert not any(d['kind'] in ('Service', 'Ingress') for d in documents)
+    pod = controller(documents)['spec']['template']['spec']
+    main, ui = pod['containers']
+    assert ui['name'] == 'operator-ui' and ui['image'] == main['image'] == IMAGE
+    assert pod['automountServiceAccountToken'] is False
+    assert ui['ports'] == [{'name': 'http', 'containerPort': 8000}]
+    assert ui['envFrom'] == [{'configMapRef': {'name': 'sentinelops-api-runtime', 'optional': False}}]
+    mounts = {m['name']: m for m in ui['volumeMounts']}
+    assert set(mounts) == {'tmp', 'database-ca', 'remediation-artifacts'}
+    shared = next(m for m in main['volumeMounts'] if m['name'] == 'remediation-artifacts')
+    assert mounts['remediation-artifacts'] == shared == {'name': 'remediation-artifacts', 'mountPath': '/artifacts/remediation'}
+    volume = next(v for v in pod['volumes'] if v['name'] == 'remediation-artifacts')
+    assert volume['persistentVolumeClaim']['claimName'] == 'remediation-artifacts'
+    env = {e['name']: e for e in ui['env']}
+    assert env['SENTINELOPS_ENV']['value'] == 'aws-dev'
+    assert env['SENTINELOPS_ENABLE_DEMO']['value'] == 'false'
+    assert not any('ACTION' in name or 'TOKEN' in name for name in env)
+    assert '0.0.0.0' in ui['command'][2] and 'access_log=False' in ui['command'][2]
+    assert ui['securityContext']['readOnlyRootFilesystem']
+    assert len(controller(worker.render(IMAGE, **PARAMETERS))['spec']['template']['spec']['containers']) == 1
+    assert controller(documents)['spec']['template']['metadata']['annotations'] != controller(
+        worker.render(IMAGE, **PARAMETERS))['spec']['template']['metadata']['annotations']
+
+
+def test_ui_bootstrap_uses_nonlocal_oidc_and_urlencodes_database_password(monkeypatch):
+    import sentinelops.api
+    import uvicorn
+    from sentinelops.api_settings import Settings
+    pod = controller(worker.render(IMAGE, **PARAMETERS, demo_ui=True))['spec']['template']['spec']
+    ui = pod['containers'][1]
+    for name in ('SENTINELOPS_API_TOKEN', 'SENTINELOPS_ACTION_READ_DATABASE_URL',
+                 'SENTINELOPS_OIDC_ISSUER', 'SENTINELOPS_OIDC_AUDIENCE', 'SENTINELOPS_OIDC_JWKS_URL'):
+        monkeypatch.delenv(name, raising=False)
+    secret_values = {('control-runtime', 'database-url'): DATABASE,
+                     ('control-runtime', 'password'): 'space @:/?#%'}
+    for item in ui['env']:
+        ref = item.get('valueFrom', {}).get('secretKeyRef')
+        monkeypatch.setenv(item['name'], item['value'] if ref is None else secret_values[ref['name'], ref['key']])
+    seen = []
+    for name, value in {'SENTINELOPS_OIDC_ISSUER': 'https://identity.invalid/pool',
+        'SENTINELOPS_OIDC_AUDIENCE': 'public-client', 'SENTINELOPS_OIDC_AUDIENCE_CLAIM': 'client_id',
+        'SENTINELOPS_OIDC_JWKS_URL': 'https://identity.invalid/pool/.well-known/jwks.json',
+        'SENTINELOPS_OIDC_LOGIN_DOMAIN': 'https://login.invalid'}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv('SENTINELOPS_OPERATOR_TOKEN', raising=False)
+    monkeypatch.setattr(sentinelops.api, 'create_app', lambda settings: settings)
+    monkeypatch.setattr(uvicorn, 'run', lambda settings, **kwargs: seen.append((settings, kwargs)))
+    exec(ui['command'][2], {})
+    settings, options = seen[0]
+    assert settings.environment == 'aws-dev' and settings.api_token is None and settings.oidc is not None
+    assert settings.operator_token is None and settings.demo_mode is False
+    assert settings.runbook_proposal_store == '/artifacts/remediation'
+    assert settings.control_database_url.startswith('postgresql://control_writer:space%20%40%3A%2F%3F%23%25@')
+    assert options == {'host': '0.0.0.0', 'port': 8000, 'access_log': False}
+    monkeypatch.setenv('UI_DATABASE_PASSWORD', 'space @:/?#%')
+    monkeypatch.setenv('SENTINELOPS_OPERATOR_TOKEN', 'x' * 40)
+    with pytest.raises(ValueError, match='OIDC or static'):
+        exec(ui['command'][2], {})
+
+
+def test_trial_ui_requires_explicit_boolean():
+    with pytest.raises(ValueError, match='demo_ui'):
+        worker.render(IMAGE, **PARAMETERS, demo_ui='true')
+
+
 @pytest.mark.parametrize('enabled', [False, True])
 def test_controller_private_sa_token_and_exact_payment_rbac(enabled):
     documents = worker.render(IMAGE, **PARAMETERS, policy_enabled=enabled)

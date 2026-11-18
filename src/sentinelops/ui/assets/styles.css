@@ -1322,3 +1322,12 @@ h1{
 }
 .badge {flex-wrap:wrap;}
 .status-gloss {font-size:9px;font-weight:400;color:var(--secondary);}
+.runbook-proposals { border-block: 1px solid var(--border, #cbd5e1); padding: 1rem; margin-block: 1rem; }
+.proposal-card { padding: 1rem 0; }
+.proposal-card .fact-value, .proposal-card code { overflow-wrap: anywhere; }
+.proposal-decision { display: flex; flex-wrap: wrap; gap: .75rem; }
+.proposal-decision label, .proposal-decision textarea { flex-basis: 100%; }
+.proposal-decision textarea { width: 100%; font: inherit; padding: .75rem; border: 1px solid #94a3b8; border-radius: .5rem; }
+.proposal-countdown { font-variant-numeric: tabular-nums; font-weight: 600; }
+.ier-record { margin: 1rem; }
+.ier-record pre { overflow-x: auto; max-height: 28rem; font-size: .8rem; }

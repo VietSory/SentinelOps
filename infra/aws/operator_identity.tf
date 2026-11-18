@@ -1,5 +1,7 @@
 # Optional operator-only provider. Configuration validation is not cloud authority.
-# No user/password, producer client, client secret or application AWS role.
+# No user/password, producer client or application AWS role.
+# UI is public code/PKCE; Grafana alone is confidential code/PKCE. Protect local
+# state containing the sensitive generated Grafana client secret; never output it.
 # Teardown: ACTIVE blocks pool deletion. A must first review/apply a separate
 # change to INACTIVE while this provider remains enabled, then review destroy.
 variable "operator_identity_enabled" {
@@ -48,7 +50,7 @@ resource "aws_cognito_user_pool" "operators" {
   }
   lifecycle {
     precondition {
-      condition     = length(var.operator_callback_urls) > 0
+      condition     = var.edge_enabled || length(var.operator_callback_urls) > 0
       error_message = "An enabled operator provider requires an explicitly selected OAuth callback client."
     }
   }
@@ -57,11 +59,15 @@ resource "aws_cognito_user_pool" "operators" {
 resource "aws_cognito_resource_server" "operator_api" {
   count        = var.operator_identity_enabled ? 1 : 0
   identifier   = "sentinelops"
-  name         = "SentinelOps operator reads"
+  name         = "SentinelOps operator API"
   user_pool_id = aws_cognito_user_pool.operators[0].id
   scope {
     scope_name        = "incidents.read"
     scope_description = "Read incident, explanation and action observations; no writes or dispatch"
+  }
+  scope {
+    scope_name        = "remediation.approve"
+    scope_description = "Approve an already proposed runbook proposal; no arbitrary dispatch; all executor guards still apply"
   }
 }
 
@@ -74,11 +80,11 @@ resource "aws_cognito_user_pool_client" "operator" {
   enable_token_revocation              = true
   allowed_oauth_flows_user_pool_client = true
   allowed_oauth_flows                  = ["code"]
-  allowed_oauth_scopes                 = ["openid", "sentinelops/incidents.read"]
+  allowed_oauth_scopes                 = ["openid", "sentinelops/incidents.read", "sentinelops/remediation.approve"]
   supported_identity_providers         = ["COGNITO"]
   explicit_auth_flows                  = ["ALLOW_REFRESH_TOKEN_AUTH"]
-  callback_urls                        = var.operator_callback_urls
-  default_redirect_uri                 = try(var.operator_callback_urls[0], null)
+  callback_urls                        = var.edge_enabled ? ["https://${aws_cloudfront_distribution.edge[0].domain_name}/ui/callback"] : var.operator_callback_urls
+  default_redirect_uri                 = var.edge_enabled ? "https://${aws_cloudfront_distribution.edge[0].domain_name}/ui/callback" : try(var.operator_callback_urls[0], null)
   access_token_validity                = 15
   id_token_validity                    = 15
   refresh_token_validity               = 8
@@ -89,6 +95,30 @@ resource "aws_cognito_user_pool_client" "operator" {
     refresh_token = "hours"
   }
   depends_on = [aws_cognito_resource_server.operator_api]
+}
+
+resource "aws_cognito_user_pool_client" "grafana" {
+  count                                = var.operator_identity_enabled && var.edge_enabled ? 1 : 0
+  name                                 = "${var.name_prefix}-${var.environment}-grafana"
+  user_pool_id                         = aws_cognito_user_pool.operators[0].id
+  generate_secret                      = true
+  prevent_user_existence_errors        = "ENABLED"
+  enable_token_revocation              = true
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  supported_identity_providers         = ["COGNITO"]
+  explicit_auth_flows                  = ["ALLOW_REFRESH_TOKEN_AUTH"]
+  callback_urls                        = ["https://${aws_cloudfront_distribution.edge[0].domain_name}/grafana/login/generic_oauth"]
+  default_redirect_uri                 = "https://${aws_cloudfront_distribution.edge[0].domain_name}/grafana/login/generic_oauth"
+  access_token_validity                = 15
+  id_token_validity                    = 15
+  refresh_token_validity               = 8
+  token_validity_units {
+    access_token  = "minutes"
+    id_token      = "minutes"
+    refresh_token = "hours"
+  }
 }
 
 resource "aws_cognito_user_pool_domain" "operator" {
@@ -105,6 +135,7 @@ output "operator_oidc_binding" {
     jwks_url       = "https://${aws_cognito_user_pool.operators[0].endpoint}/.well-known/jwks.json"
     audience_claim = "client_id"
     operator_scope = "sentinelops/incidents.read"
+    approval_scope = "sentinelops/remediation.approve"
   } : null
 }
 

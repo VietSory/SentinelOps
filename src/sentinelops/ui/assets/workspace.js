@@ -1,10 +1,13 @@
 import {ApiFailure, IncidentClient} from './client.js';
 
-const blank = () => ({session:false, filters:{state:'',service:''}, rows:[], nextCursor:null, listLoading:false,
+export const proposalRemaining = (row, now = Date.now()) => Math.max(0,Math.ceil((Date.parse(row.proposal.expires_at)-now)/1000));
+
+const blank = () => ({session:false, canApprove:true, filters:{state:'',service:''}, rows:[], nextCursor:null, listLoading:false,
   listError:null, detail:null, detailLoading:false, detailError:null, historyLoading:false, historyError:null,
   readiness:null, readinessError:null, selected:null, selectedRevision:null, updatedAt:null, notice:null,
   actions:null, actionsLoading:false, actionsError:null, quarantines:{},
-  explanation:null, explanationLoading:false, explanationError:null});
+  explanation:null, explanationLoading:false, explanationError:null,
+  proposals:null, proposalsLoading:false, proposalsError:null, decisionLoading:false});
 
 /** Generation guards also reject responses from transports that ignore AbortSignal. */
 export class Workspace {
@@ -31,8 +34,8 @@ export class Workspace {
       failure(error instanceof ApiFailure ? error : new ApiFailure(0,'invalid_response'));
     } finally { if (current()) { this.#tasks.delete(key); end(); this.emit(); } }
   }
-  async connect(token) {
-    this.disconnect(); this.#client = this.#factory(token); this.state.session = true; this.emit();
+  async connect(token, {canApprove = true} = {}) {
+    this.disconnect(); this.#client = this.#factory(token); this.state.session = true; this.state.canApprove = canApprove; this.emit();
     await Promise.all([this.loadList(),this.checkReadiness()]);
   }
   disconnect(notice = null) {
@@ -57,11 +60,13 @@ export class Workspace {
     },error => { this.state.listError = error; },() => { this.state.listLoading = false; });
   }
   async filter(filters) {
+    this.#cancel('proposals'); this.#cancel('decision');
     this.#cancel('detail'); this.#cancel('history'); this.#cancel('actions'); this.#cancel('explanation');
     this.#clearQuarantines();
     Object.assign(this.state,{filters:{...filters},rows:[],nextCursor:null,detail:null,selected:null,selectedRevision:null,
       detailError:null,detailLoading:false,historyLoading:false,historyError:null,actions:null,actionsLoading:false,actionsError:null,
-      explanation:null,explanationLoading:false,explanationError:null});
+      explanation:null,explanationLoading:false,explanationError:null,
+      proposals:null,proposalsLoading:false,proposalsError:null,decisionLoading:false});
     return this.loadList();
   }
   async select(id, revision = null) {
@@ -70,14 +75,35 @@ export class Workspace {
       this.state.detailError = new ApiFailure(0,'invalid_response'); this.emit(); return;
     }
     this.#cancel('history'); this.#cancel('actions'); this.#cancel('explanation');
+    this.#cancel('proposals'); this.#cancel('decision');
     this.#clearQuarantines();
     const client = this.#client;
     Object.assign(this.state,{selected:id,selectedRevision:revision,detail:null,detailLoading:true,detailError:null,historyError:null,
       historyLoading:false,actions:null,actionsLoading:false,actionsError:null,
-      explanation:null,explanationLoading:false,explanationError:null});
+      explanation:null,explanationLoading:false,explanationError:null,
+      proposals:null,proposalsLoading:false,proposalsError:null,decisionLoading:false});
     this.emit();
     return this.#run('detail',s => client.context(id,revision,0,s),value => { this.state.detail = value; },
       error => { this.state.detailError = error; },() => { this.state.detailLoading = false; });
+  }
+  async loadProposals() {
+    const detail = this.state.detail, client = this.#client;
+    if (!client || !detail || this.state.proposalsLoading || this.state.decisionLoading) return;
+    Object.assign(this.state,{proposals:null,proposalsLoading:true,proposalsError:null}); this.emit();
+    return this.#run('proposals',s => client.proposals(detail.incident_id,detail.revision,s),
+      value => { this.state.proposals = value; },error => { this.state.proposalsError = error; },
+      () => { this.state.proposalsLoading = false; });
+  }
+  async decideProposal(id, decision, reason) {
+    const row = this.state.proposals?.find(item => item.proposal.proposal_id === id), client = this.#client;
+    if (!client || !row || !this.state.canApprove || row.status !== 'pending' || !proposalRemaining(row) || this.state.decisionLoading) return;
+    this.state.decisionLoading = true; this.state.proposalsError = null; this.emit();
+    return this.#run('decision',s => client.decideProposal(row,decision,reason,s),value => {
+      this.state.proposals = this.state.proposals.map(item => item === row ? {...item,...value} : item);
+    },error => {
+      // A lost response may have persisted a receipt: require a read before any retry.
+      this.state.proposals = null; this.state.proposalsError = error;
+    },() => { this.state.decisionLoading = false; });
   }
   async loadHistory() {
     const detail = this.state.detail;

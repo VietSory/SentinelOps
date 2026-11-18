@@ -72,13 +72,15 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
            remediation_store_claim: str = 'remediation-artifacts',
            known_good_store_claim: str = 'review-artifacts',
            deployment_change_store_claim: str = 'deployment-change-artifacts',
-           policy_enabled: bool = False) -> list[dict]:
+           policy_enabled: bool = False, demo_ui: bool = False) -> list[dict]:
     image_digest(image)
     _label(remediation_store_claim, 'remediation artifact claim')
     _label(known_good_store_claim, 'known-good artifact claim')
     _label(deployment_change_store_claim, 'deployment-change artifact claim')
     if type(policy_enabled) is not bool:
         raise ValueError('policy_enabled must be an explicit boolean')
+    if type(demo_ui) is not bool:
+        raise ValueError('demo_ui must be an explicit boolean')
     _label(environment, 'environment')
     if environment in LOCAL_ENVIRONMENTS:
         raise ValueError('cloud workers require an explicit non-local environment')
@@ -263,13 +265,13 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
     documents += _controller(image, target, metadata, labels, hardening,
         health_store_claim, incident_store_claim, remediation_store_claim,
         known_good_store_claim, database_ca_config, health_stream, environment, policy_enabled,
-        model_claim, model_release_ref)
+        model_claim, model_release_ref, demo_ui)
     return documents
 
 
 def _controller(image, target, metadata, labels, hardening, health_claim, incident_claim,
                 remediation_claim, known_good_claim, database_ca_config, health_stream, environment,
-                enabled, model_claim, model_release_ref):
+                enabled, model_claim, model_release_ref, demo_ui):
     """Use the same non-root private credential copy as PR #70.
 
     remediation-runtime is provisioned separately by the operator: action-database-url
@@ -325,6 +327,47 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
           for name, key in (('SENTINELOPS_ACTION_DATABASE_URL', 'action-database-url'),
               ('SENTINELOPS_KNOWN_GOOD_LEDGER_REF', 'known-good-ledger-ref'),
               ('SENTINELOPS_KNOWN_GOOD_APPROVED_BY', 'approved-by'))]]
+    # Same Pod/PVC as the controller (RWO cannot be attached independently on
+    # another node). The API renderer supplies OIDC config and the ALB Service.
+    ui = []
+    if demo_ui:
+        ui_bootstrap = (
+            'import os\nfrom urllib.parse import urlsplit, urlunsplit, quote\n'
+            'from sentinelops.api import create_app\nimport uvicorn\n'
+            'from sentinelops.api_settings import Settings, LOCAL_ENVIRONMENTS\n'
+            'p=urlsplit(os.environ["CONTROL_DATABASE_URL"])\n'
+            'password=os.environ.pop("UI_DATABASE_PASSWORD")\n'
+            'os.environ["CONTROL_DATABASE_URL"]=urlunsplit(p._replace(netloc='
+            '"control_writer:"+quote(password,safe="")+"@"+p.netloc.rsplit("@",1)[-1]))\n'
+            'settings=Settings.from_env()\n'
+            'if settings.environment in LOCAL_ENVIRONMENTS or settings.oidc is None or not settings.oidc.login_domain: '
+            'raise ValueError("exposed UI requires non-local OIDC hosted login")\n'
+            'uvicorn.run(create_app(settings),host="0.0.0.0",port=8000,access_log=False)'
+        )
+        ui_env = [{'name': 'SENTINELOPS_ENV', 'value': environment},
+            {'name': 'SENTINELOPS_ENABLE_DEMO', 'value': 'false'},
+            {'name': 'SENTINELOPS_RUNBOOK_PROPOSAL_STORE', 'value': '/artifacts/remediation'},
+            {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
+            *[{'name': variable, 'valueFrom': {'secretKeyRef': {'name': secret, 'key': key,
+                                                            'optional': False}}}
+              for variable, secret, key in (
+                ('CONTROL_DATABASE_URL', 'control-runtime', 'database-url'),
+                ('UI_DATABASE_PASSWORD', 'control-runtime', 'password'))]]
+        probe = {'exec': {'command': ['python', '-c',
+            'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health",timeout=2).read()']},
+            'periodSeconds': 10, 'timeoutSeconds': 3}
+        ui = [{'name': 'operator-ui', 'image': image, 'imagePullPolicy': 'IfNotPresent',
+            'command': ['python', '-c', ui_bootstrap], 'env': ui_env,
+            'envFrom': [{'configMapRef': {'name': 'sentinelops-api-runtime', 'optional': False}}],
+            'ports': [{'name': 'http', 'containerPort': 8000}],
+            'securityContext': dict(hardening),
+            'volumeMounts': [{'name': 'tmp', 'mountPath': '/tmp'},
+                {'name': 'database-ca', 'mountPath': '/etc/sentinelops/tls', 'readOnly': True},
+                {'name': 'remediation-artifacts', 'mountPath': '/artifacts/remediation'}],
+            'startupProbe': {**probe, 'failureThreshold': 30},
+            'readinessProbe': probe, 'livenessProbe': probe,
+            'resources': {'requests': {'cpu': '50m', 'memory': '128Mi'},
+                          'limits': {'cpu': '500m', 'memory': '512Mi'}}}]
     return [
         {'apiVersion': 'v1', 'kind': 'ServiceAccount', 'metadata': metadata('payment-rollback'),
             'automountServiceAccountToken': False},
@@ -333,7 +376,7 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
             'replicas': 1, 'strategy': {'type': 'Recreate'}, 'selector': {'matchLabels': {'app': name}},
             'template': {'metadata': {'labels': {**labels, 'app': name}, 'annotations': {
                 'sentinelops.io/config-sha256': hashlib.sha256(json.dumps(
-                    [data, args, env], sort_keys=True).encode()).hexdigest()}},
+                    [data, args, env, ui], sort_keys=True).encode()).hexdigest()}},
                 'spec': {'serviceAccountName': 'payment-rollback', 'automountServiceAccountToken': False,
                     'securityContext': {'runAsNonRoot': True, 'runAsUser': 10001, 'runAsGroup': 10001,
                         'fsGroup': 10001, 'seccompProfile': {'type': 'RuntimeDefault'}},
@@ -349,7 +392,7 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
                         'command': ['python', 'scripts/run_remediation_controller.py'], 'args': args,
                         'env': env, 'securityContext': dict(hardening), 'volumeMounts': mounts,
                         'resources': {'requests': {'cpu': '100m', 'memory': '256Mi'},
-                            'limits': {'cpu': '1', 'memory': '1Gi'}}}], 'volumes': volumes}}}},
+                            'limits': {'cpu': '1', 'memory': '1Gi'}}}, *ui], 'volumes': volumes}}}},
         {'apiVersion': 'rbac.authorization.k8s.io/v1', 'kind': 'Role',
             'metadata': metadata('payment-rollback'), 'rules': [
                 {'apiGroups': ['apps'], 'resources': ['deployments'],
@@ -391,6 +434,7 @@ def main():
     parser.add_argument('--known-good-store-claim', default='review-artifacts')
     parser.add_argument('--deployment-change-store-claim', default='deployment-change-artifacts')
     parser.add_argument('--policy-enabled', action='store_true')
+    parser.add_argument('--demo-ui', action='store_true', help='OIDC UI sidecar sharing controller PVC; API renderer supplies config/Service')
     parser.add_argument('--output', type=Path, required=True)
     args = vars(parser.parse_args())
     output = args.pop('output')

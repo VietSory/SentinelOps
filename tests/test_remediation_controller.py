@@ -1,23 +1,28 @@
 """Controller contract tests use a matching stub with the interface signatures."""
 import asyncio
 from copy import deepcopy
+from dataclasses import asdict, replace
 from datetime import timedelta
 import json
+from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from sentinelops.remediation import controller as module
+from sentinelops.remediation import matching as real_matching
+from sentinelops.incidents.rca_replay import group_severity as original_group_severity
 from sentinelops.remediation.controller import AutoRunbookController
 from sentinelops.remediation.domain import Blocked, RUNBOOK
 from sentinelops.remediation.approvals import record_approval, read_slot, create_slot
 from sentinelops.telemetry.core import stable_id
 from sentinelops.telemetry.store import ArtifactStore
 from test_remediation_executor import setup as executor_fixture
+from test_remediation_kubernetes import BAD, GOOD, TARGET
 
 
-def fixture(tmp_path, monkeypatch, *, verdict='oncall'):
+def fixture(tmp_path, monkeypatch, *, verdict='oncall', latency=1000.):
     f = executor_fixture()
     store = ArtifactStore(tmp_path / 'evidence')
     decision_store = ArtifactStore(tmp_path / 'decisions')
@@ -28,7 +33,7 @@ def fixture(tmp_path, monkeypatch, *, verdict='oncall'):
     latest = {}
     for index, identifier in enumerate(group['signal_ids']):
         service = services[index % len(services)]
-        refs = [store.write('observations', {'bucket_end': end, 'payload': {'p95_latency_ms': 1000., 'error_rate': .01},
+        refs = [store.write('observations', {'bucket_end': end, 'payload': {'p95_latency_ms': latency, 'error_rate': .01},
                                              'quality': {'eligible_for_inference': True}})
                 for end in ('2026-01-01T00:02:00Z', '2026-01-01T00:01:00Z')]
         signal = {'signal_id': identifier, 'service': service, 'availability': 'ELIGIBLE', 'evidence_refs': refs}
@@ -79,7 +84,7 @@ def fixture(tmp_path, monkeypatch, *, verdict='oncall'):
         return {'severity': derived['severity']}
     def decide(symptoms, catalog):
         assert catalog == {'catalog_version': 'fixture'}
-        decision = verdict if symptoms['severity'] == 'low' else 'engineer'
+        decision = verdict
         return {'decision_version': 'runbook-decision/v1', 'decision': decision,
             'runbook_id': 'payment-bad-deploy-rollback', 'executor_runbook': RUNBOOK,
             'score': .95, 'margin': .9, 'reasons': [], 'ranking': [], 'symptoms': deepcopy(symptoms),
@@ -105,13 +110,20 @@ def approve(c, decision='approve'):
 
 
 @pytest.mark.parametrize('verdict', ['oncall', 'engineer'])
-def test_proposals_never_dispatch_without_approval_and_survive_restart(tmp_path, monkeypatch, verdict):
+@pytest.mark.parametrize('severity', ['low', 'medium', 'high', 'critical'])
+def test_proposals_never_dispatch_without_approval_and_survive_restart(tmp_path, monkeypatch, verdict, severity):
     async def run():
         c = fixture(tmp_path, monkeypatch, verdict=verdict)
+        c.severity[0] = c.snapshot['payload']['severity'] = severity
+        executed = []
+        async def unexpected_execute(request):
+            executed.append(request)
+            raise AssertionError('executor called without approval')
+        monkeypatch.setattr(c.f.executor, 'execute', unexpected_execute)
         results = await c.controller.tick()
         decision = results[0]
         assert decision['decision'] == verdict
-        assert c.f.kube.calls == []
+        assert c.f.kube.calls == [] and executed == []
         assert c.f.executor.authorize == c.controller.authorize
         if verdict == 'oncall':
             assert decision['proposal_id'] == stable_id([c.f.request.incident_id, 2, decision['runbook_id']])
@@ -127,7 +139,198 @@ def test_proposals_never_dispatch_without_approval_and_survive_restart(tmp_path,
         await restarted.tick()
         assert artifacts[0].read_bytes() == before
         assert len(list((c.store.root / 'manifests').glob('*.json'))) == 1
-        assert c.f.kube.calls == []
+        assert c.f.kube.calls == [] and executed == []
+    asyncio.run(run())
+
+
+def use_real_matching(c, monkeypatch):
+    import sentinelops.remediation as package
+    monkeypatch.setitem(sys.modules, real_matching.__name__, real_matching)
+    monkeypatch.setattr(package, 'matching', real_matching)
+    c.controller.catalog = real_matching.load_catalog(
+        Path(__file__).resolve().parents[1] / 'configs/runbook_catalog.json')
+
+
+def test_proposal_pins_server_target_images_and_ledger_in_approval_hash(tmp_path, monkeypatch):
+    async def run():
+        c = fixture(tmp_path, monkeypatch)
+        use_real_matching(c, monkeypatch)
+        proposal = (await c.controller.tick())[0]
+        good = await c.f.executor.registry.resolve(TARGET, incident_at=c.f.clock())
+        assert proposal['target'] == asdict(TARGET)
+        assert proposal['current_image'] == BAD
+        assert proposal['rollback_image'] == GOOD
+        assert proposal['known_good_ledger_ref'] == good.ledger_ref
+        assert c.f.kube.calls == [] and c.f.journal.state is None
+        approve(c)
+        receipt = read_slot(c.store, 'approval', proposal['proposal_id'])
+        assert receipt['proposal_sha256'] == stable_id(proposal)
+        assert (await c.controller.tick())[-1]['phase'] == 'verifying'
+        intent = c.f.journal.state['intent']['evidence']
+        assert intent['before']['target'] == proposal['target']
+        assert intent['before']['image'] == proposal['current_image']
+        assert intent['known_good']['image'] == proposal['rollback_image']
+        assert intent['known_good']['ledger_ref'] == proposal['known_good_ledger_ref']
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('timing', ['before-execute', 'before-patch'])
+@pytest.mark.parametrize('change', ['revision', 'digest', 'ledger', 'rollback-image', 'ledger-content',
+                                  'deployment_uid', 'namespace_uid', 'cluster_uid', 'expired'])
+def test_approval_invalidates_revision_target_ledger_and_expiry(tmp_path, monkeypatch, timing, change):
+    async def run():
+        c = fixture(tmp_path, monkeypatch)
+        use_real_matching(c, monkeypatch)
+        proposal = (await c.controller.tick())[0]
+        approve(c)
+        receipt = read_slot(c.store, 'approval', proposal['proposal_id'])
+        changed = [False]
+        original_observe, original_resolve = c.f.kube.observe, c.f.executor.registry.resolve
+        async def observe():
+            value = await original_observe()
+            if changed[0] and change == 'digest':
+                return replace(value, image=BAD.split('@')[0] + '@sha256:' + 'e' * 64)
+            if changed[0] and change in ('deployment_uid', 'namespace_uid', 'cluster_uid'):
+                return replace(value, target=replace(value.target, **{change: 'recreated-target'}))
+            return value
+        async def resolve(*args, **kwargs):
+            value = await original_resolve(*args, **kwargs)
+            if changed[0]:
+                if change == 'ledger':
+                    return replace(value, ledger_ref='artifact://manifests/' + 'e' * 64 + '.json')
+                if change == 'rollback-image':
+                    return replace(value, image=GOOD.split('@')[0] + '@sha256:' + 'e' * 64)
+                if change == 'ledger-content':
+                    raise Blocked('known-good-ledger-changed')
+            return value
+        monkeypatch.setattr(c.f.kube, 'observe', observe)
+        monkeypatch.setattr(c.f.executor.registry, 'resolve', resolve)
+        def invalidate():
+            changed[0] = True
+            if change == 'revision': c.snapshot['revision'] += 1
+            if change == 'expired': c.f.time[0] += timedelta(minutes=15)
+        if timing == 'before-execute':
+            invalidate()
+        else:
+            c.f.journal.after_arm = invalidate
+        results = await c.controller.tick()
+        expected = ('incident-revision-changed' if change == 'revision' else
+                    'approval-expired' if change == 'expired' else 'approval-target-changed')
+        outcome = read_slot(c.store, 'outcome', proposal['proposal_id'])
+        assert outcome['phase'] == 'escalated' and outcome['reason'] == expected
+        expected_calls = [] if timing == 'before-execute' else [True]
+        assert c.f.kube.calls == expected_calls
+        if timing == 'before-patch':
+            # RCA freshness may reject first when the clock advances by TTL;
+            # the controller's durable approval outcome still reports expiry.
+            assert results[-1]['facts']['reason'] == ('evidence-stale-or-future' if change == 'expired' else expected)
+            assert results[-1]['facts']['dispatch_cancelled_before_send'] is True
+        assert read_slot(c.store, 'approval', proposal['proposal_id']) == receipt
+        assert c.store.read('artifact://manifests/' + stable_id(proposal) + '.json') == proposal
+        await AutoRunbookController(**c.kwargs).tick()
+        assert c.f.kube.calls == expected_calls
+    asyncio.run(run())
+
+
+def test_prepared_ledger_must_match_even_if_live_ledger_returns_to_original(tmp_path, monkeypatch):
+    async def run():
+        c = fixture(tmp_path, monkeypatch)
+        await c.controller.tick()
+        approve(c)
+        original_resolve, original_authorize = c.f.executor.registry.resolve, c.f.executor.authorize
+        alternate = [False]
+        async def resolve(*args, **kwargs):
+            good = await original_resolve(*args, **kwargs)
+            return replace(good, ledger_ref='artifact://manifests/' + 'e' * 64 + '.json') if alternate[0] else good
+        async def authorize(request):
+            # The live ledger changes after prepare's hook, then returns before
+            # the final hook. The actual prepared inputs still used a new ledger.
+            alternate[0] = False
+            await original_authorize(request)
+            if c.f.journal.state is None:
+                alternate[0] = True
+        monkeypatch.setattr(c.f.executor.registry, 'resolve', resolve)
+        monkeypatch.setattr(c.f.executor, 'authorize', authorize)
+        result = (await c.controller.tick())[-1]
+        assert result['phase'] == 'escalated' and result['facts']['reason'] == 'approval-target-changed'
+        assert result['facts']['dispatch_cancelled_before_send'] is True
+        assert c.f.kube.calls == [True]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('missing', module.TARGET_BINDING)
+def test_legacy_proposal_missing_any_target_binding_cannot_dispatch(tmp_path, monkeypatch, missing):
+    async def run():
+        c = fixture(tmp_path, monkeypatch)
+        proposal = (await c.controller.tick())[0]
+        del proposal[missing]
+        legacy = ArtifactStore(tmp_path / 'unbound-proposal')
+        legacy.write('manifests', proposal)
+        record_approval(legacy, proposal_id=proposal['proposal_id'], approved_by='oncall-test',
+            decision='approve', confirm_oncall_approval=True, now=c.f.clock())
+        restarted = AutoRunbookController(**{**c.kwargs, 'store': legacy})
+        result = (await restarted.tick())[0]
+        assert result['phase'] == 'escalated' and result['reason'] == 'approval-target-changed'
+        assert c.f.kube.calls == [] and c.f.journal.state is None
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('severity', ['low', 'medium', 'high', 'critical'])
+def test_real_matching_requires_approval_then_dispatches_at_every_severity(tmp_path, monkeypatch, severity):
+    async def run():
+        c = fixture(tmp_path, monkeypatch, latency=981.)
+        c.severity[0] = c.snapshot['payload']['severity'] = severity
+        use_real_matching(c, monkeypatch)
+        executed = []
+        original_execute = c.f.executor.execute
+        async def execute(request):
+            executed.append(request)
+            return await original_execute(request)
+        monkeypatch.setattr(c.f.executor, 'execute', execute)
+        proposal = (await c.controller.tick())[0]
+        assert proposal['decision'] == 'oncall' and proposal['symptoms']['severity'] == severity
+        assert proposal['score'] >= .80 and proposal['margin'] >= .15
+        await c.controller.tick()
+        assert executed == [] and c.f.kube.calls == []
+        approve(c)
+        assert (await c.controller.tick())[-1]['phase'] == 'verifying'
+        assert len(executed) == 1 and c.f.kube.calls == [True, False]
+        await c.controller.tick()
+        assert len(executed) == 1 and c.f.kube.calls == [True, False]
+    asyncio.run(run())
+
+
+def test_payment_981ms_with_checkout_is_high_and_still_proposes_approval(tmp_path, monkeypatch):
+    async def run():
+        c = fixture(tmp_path, monkeypatch, latency=981.)
+        use_real_matching(c, monkeypatch)
+        monkeypatch.setattr(module, 'group_severity', original_group_severity)
+        proposal = (await c.controller.tick())[0]
+        assert proposal['symptoms']['severity'] == 'high'
+        assert proposal['symptoms']['root_p95_ms'] == 981.
+        assert proposal['symptoms']['checkout_impacted'] is True
+        assert proposal['symptoms']['rca_abstained'] is False
+        assert proposal['decision'] == 'oncall' and proposal['score'] >= .80 and proposal['margin'] >= .15
+        assert c.f.kube.calls == [] and c.f.journal.state is None
+        approve(c)
+        assert (await c.controller.tick())[-1]['phase'] == 'verifying'
+        assert c.f.kube.calls == [True, False]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('before,after', [('low', 'medium'), ('medium', 'high'), ('high', 'critical')])
+def test_real_matching_blocks_severity_increase_after_approval_before_patch(tmp_path, monkeypatch, before, after):
+    async def run():
+        c = fixture(tmp_path, monkeypatch)
+        c.severity[0] = c.snapshot['payload']['severity'] = before
+        use_real_matching(c, monkeypatch)
+        assert (await c.controller.tick())[0]['decision'] == 'oncall'
+        approve(c)
+        c.f.journal.after_arm = lambda: c.severity.__setitem__(0, after)
+        result = (await c.controller.tick())[-1]
+        assert result['phase'] == 'escalated'
+        assert result['facts']['dispatch_cancelled_before_send'] is True
+        assert c.f.kube.calls == [True]
     asyncio.run(run())
 
 
@@ -252,6 +455,8 @@ def test_action_budget_defers_second_incident_and_paginates_past_non_ready_rows(
         monkeypatch.setattr(c.kwargs['incidents'], 'get', get)
         verdict = c.controller._engineer('fixture')
         verdict.update(decision='oncall', executor_runbook=RUNBOOK, runbook_id='fixture')
+        verdict.update(target=asdict(TARGET), current_image=BAD, rollback_image=GOOD,
+                       known_good_ledger_ref='artifact://manifests/' + '1' * 64 + '.json')
         async def decide(snapshot): return deepcopy(verdict)
         monkeypatch.setattr(c.controller, '_decide', decide)
         requests = []

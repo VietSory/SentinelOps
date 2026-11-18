@@ -1,4 +1,9 @@
-import {Workspace} from './workspace.js';
+import {Workspace, proposalRemaining} from './workspace.js';
+import {CognitoLogin} from './client.js';
+
+const loginCallback = location.pathname === '/ui/callback' ? location.href : null;
+if (loginCallback) history.replaceState(null,'','/ui/');
+let cognito = null, manualAllowed = false;
 
 let language = new URLSearchParams(location.hash.slice(1)).get('lang') === 'vi' ? 'vi' : 'en';
 const vi = {
@@ -31,11 +36,11 @@ const vi = {
   "Evidence first.": "Bằng chứng trước tiên.",
   "Observe what happened.": "Quan sát điều đã xảy ra.",
   "Keep uncertainty visible.": "Luôn hiển thị điều chưa biết.",
-  "READ-ONLY CONSOLE": "GIAO DIỆN CHỈ ĐỌC",
+  "OPERATOR CONSOLE": "GIAO DIỆN VẬN HÀNH",
   "Operator workspace": "Không gian vận hành",
   "Not connected": "Chưa kết nối",
   "Disconnect": "Ngắt kết nối",
-  "Connected · read-only console": "Đã kết nối · giao diện chỉ đọc",
+  "Connected · operator console": "Đã kết nối · giao diện vận hành",
   "EVIDENCE → DECISION → VERIFICATION": "BẰNG CHỨNG → QUYẾT ĐỊNH → XÁC MINH",
   "The recovery story": "Hành trình hồi phục",
   "Follow the incident from the first signal to verified recovery. Uncertainty stays visible.": "Theo dõi incident từ tín hiệu đầu tiên đến xác minh hồi phục. Luôn phân biệt điều chưa biết.",
@@ -51,7 +56,7 @@ const vi = {
   "Explain": "Giải thích",
   "Provider identified": "Nêu rõ bộ giải thích",
   "Review rollback": "Duyệt rollback",
-  "Operator · CLI": "Người vận hành · CLI",
+  "Operator · UI": "Người vận hành · UI",
   "Restore image": "Khôi phục image",
   "Action journal": "Nhật ký hành động",
   "Verify recovery": "Xác minh hồi phục",
@@ -78,7 +83,7 @@ const vi = {
   "Load more": "Tải thêm",
   "A live current-state view. Filters can change as records are revised.": "Danh sách trạng thái hiện tại. Kết quả lọc có thể thay đổi khi bản ghi được cập nhật revision.",
   "Evidence-driven reliability": "Độ tin cậy dựa trên bằng chứng",
-  "Read only · Approval happens through CLI": "Chỉ đọc · Duyệt qua CLI",
+  "Review proposals · Approve or reject": "Xem đề xuất · Duyệt hoặc từ chối",
   "Your incident feed starts here": "Bắt đầu từ danh sách incident",
   "Connect to read the incidents persisted by your health and incident workers.": "Kết nối để đọc incident do health worker và incident worker ghi lại.",
   "Loading incidents…": "Đang tải incident…",
@@ -106,7 +111,7 @@ const vi = {
   "Model signals": "Tín hiệu mô hình",
   "Recorded in this revision": "Được ghi trong revision này",
   "No model signals were recorded in this revision. Missing scores are unavailable, not zero.": "Revision này chưa ghi nhận tín hiệu mô hình. Điểm thiếu là không có dữ liệu, không phải bằng 0.",
-  "Open Explanation for a summary of this revision’s recorded evidence. This console does not authorize remediation.": "Mở Giải thích để xem tóm tắt bằng chứng của revision này. Giao diện này không cấp quyền khắc phục.",
+  "Open Explanation for a summary of this revision’s recorded evidence. Controller guards still apply after approval.": "Mở Giải thích để xem tóm tắt bằng chứng của revision này. Controller vẫn kiểm tra guard sau khi duyệt.",
   "Source references are identifiers, not automatically downloadable links. Facts are shown exactly as recorded.": "Tham chiếu nguồn là định danh, không phải liên kết tải tự động. Sự kiện được hiển thị nguyên văn như đã ghi.",
   "No evidence was recorded in this revision.": "Revision này chưa ghi nhận bằng chứng.",
   "No service": "Chưa có dịch vụ",
@@ -170,7 +175,7 @@ const vi = {
   "Evidence level · lifecycle context": "Mức bằng chứng · ngữ cảnh vòng đời",
   "The fault scenario is external to this console. Trigger references below show what was recorded; they do not prove the fault injection itself.": "Kịch bản gây lỗi nằm ngoài giao diện. Tham chiếu kích hoạt cho biết nội dung đã ghi; không tự chứng minh thao tác gây lỗi.",
   "IER is the persisted incident evidence record; revision identifies the exact version being read.": "IER là bản ghi bằng chứng incident đã lưu; revision xác định chính xác phiên bản đang đọc.",
-  "Operator approval happens through CLI. Inspect Actions for the recorded runbook, image digests and phases. No approval or execution is available here.": "Người vận hành duyệt qua CLI. Mở Hành động để xem runbook, image digest và phase đã ghi. Giao diện không có chức năng duyệt hay thực thi.",
+  "Review the runbook proposal above to approve or reject. Inspect Actions for the recorded execution and verification.": "Xem đề xuất runbook ở trên để duyệt hoặc từ chối. Mở Hành động để xem thực thi và xác minh đã ghi.",
   "Lifecycle and recovery_source are recorded context. A released quarantine lock alone is not recovery evidence.": "Lifecycle và recovery_source là ngữ cảnh đã ghi. Chỉ giải phóng khóa quarantine không phải bằng chứng hồi phục.",
   "UNKNOWN (unknown) · abstained (no decision) · ineligible (not qualified). These values never mean healthy.": "UNKNOWN (chưa biết) · abstained (không đưa ra quyết định) · ineligible (không đủ điều kiện). Các giá trị này không có nghĩa khỏe mạnh.",
   "Technical states stay unchanged: degrading → incident → recovering → recovered; escalated requires operator review.": "Giữ nguyên trạng thái kỹ thuật: degrading (suy giảm) → incident (sự cố) → recovering (đang hồi phục) → recovered (đã hồi phục); escalated (chuyển cấp) cần người vận hành rà soát.",
@@ -191,7 +196,7 @@ function t(value) {
     [/^Last loaded (.+)$/,m => `Tải lần cuối ${m[1]}`],
     [/^Recorded lifecycle events through revision (\d+)\. Recorded times are not inferred detection or recovery latencies\.$/,m => `Sự kiện vòng đời đã ghi đến revision ${m[1]}. Thời điểm ghi không phải độ trễ phát hiện hay hồi phục được suy ra.`],
     [/^Evidence summary for incident revision (\d+)\. Recorded evidence and ranked hypotheses do not establish a confirmed cause or action permission\.$/,m => `Tóm tắt bằng chứng cho incident revision ${m[1]}. Bằng chứng và giả thuyết xếp hạng không xác nhận nguyên nhân hay quyền hành động.`],
-    [/^Action journal through incident revision (\d+)\. Action phases do not change the incident lifecycle\. This view cannot execute or approve a rollback\.$/,m => `Nhật ký hành động đến incident revision ${m[1]}. Action phase không thay đổi vòng đời incident. Giao diện không thể thực thi hay duyệt rollback.`],
+    [/^Action journal through incident revision (\d+)\. Action phases do not change the incident lifecycle\. This view cannot execute or approve a rollback\.$/,m => `Nhật ký hành động đến incident revision ${m[1]}. Action phase không thay đổi vòng đời incident. Xem panel đề xuất để quyết định duyệt.`],
     [/^Provider (.+) · generated (.+)$/,m => `Provider ${m[1]} · tạo lúc ${m[2]}`],
     [/^Recorded (.+) · updated (.+)$/,m => `Ghi lúc ${m[1]} · cập nhật ${m[2]}`],
     [/^Operator (.+) · recorded (.+)$/,m => `Người vận hành ${m[1]} · ghi lúc ${m[2]}`],
@@ -252,7 +257,7 @@ function render(state) {
   }
   $('#connection').hidden = state.session;
   $('#disconnect').hidden = !state.session;
-  $('#session-label').textContent = t(state.session ? 'Connected · read-only console' : 'Not connected');
+  $('#session-label').textContent = t(state.session ? 'Connected · operator console' : 'Not connected');
   $('#refresh').disabled = !state.session || state.listLoading;
   $('#state-filter').disabled = $('#service-filter').disabled = !state.session;
   $('#filter-form button').disabled = !state.session;
@@ -275,7 +280,9 @@ function render(state) {
       previous.historyError !== state.historyError || previous.session !== state.session || previous.actions !== state.actions ||
       previous.actionsLoading !== state.actionsLoading || previous.actionsError !== state.actionsError ||
       previous.quarantines !== state.quarantines || previous.explanation !== state.explanation ||
-      previous.explanationLoading !== state.explanationLoading || previous.explanationError !== state.explanationError) renderDetail(state);
+      previous.explanationLoading !== state.explanationLoading || previous.explanationError !== state.explanationError ||
+      previous.proposals !== state.proposals || previous.proposalsLoading !== state.proposalsLoading ||
+      previous.proposalsError !== state.proposalsError || previous.decisionLoading !== state.decisionLoading) renderDetail(state);
   previous = {...state};
 }
 
@@ -319,6 +326,7 @@ async function openIncident(id, revision = null) {
     if (language === 'vi') query.set('lang','vi');
     history.replaceState(null,'',`#${query}`);
     $('#detail-title')?.focus({preventScroll:!matchMedia('(max-width: 1250px)').matches});
+    await workspace.loadProposals();
   }
 }
 
@@ -383,14 +391,14 @@ function overview(detail) {
   target.append(story('05 · Explain the evidence','Evidence level · generated summary',
     'Fallback uses deterministic facts, not an LLM. Provider output is a separate explanation, not source evidence.'));
   target.append(story('06–07 · Review & restore','Evidence level · action audit',
-    'Operator approval happens through CLI. Inspect Actions for the recorded runbook, image digests and phases. No approval or execution is available here.'));
+    'Review the runbook proposal above to approve or reject. Inspect Actions for the recorded execution and verification.'));
   target.append(story('08 · Verify recovery','Evidence level · lifecycle context',
     'Lifecycle and recovery_source are recorded context. A released quarantine lock alone is not recovery evidence.'));
   const recovery=node('div',null,'facts-grid');
   recovery.append(fact('Lifecycle',context.lifecycle_stage),fact('Recovery source',context.recovery_source || 'Not recorded'));
   target.append(recovery);
   target.append(node('p','Technical states stay unchanged: degrading → incident → recovering → recovered; escalated requires operator review.','subtle'));
-  target.append(node('p','Open Explanation for a summary of this revision’s recorded evidence. This console does not authorize remediation.','subtle'));
+  target.append(node('p','Open Explanation for a summary of this revision’s recorded evidence. Controller guards still apply after approval.','subtle'));
   return target;
 }
 
@@ -480,8 +488,8 @@ function explanation(state) {
 function actionHistory(state,opened) {
   const target = node('div');
   target.append(story('06–07 · Review & restore','Evidence level · action audit',
-    'Operator approval happens through CLI. Inspect Actions for the recorded runbook, image digests and phases. No approval or execution is available here.'));
-  target.append(node('p',`Action journal through incident revision ${state.detail.revision}. Action phases do not change the incident lifecycle. This view cannot execute or approve a rollback.`,'subtle'));
+    'Review the runbook proposal above to approve or reject. Inspect Actions for the recorded execution and verification.'));
+  target.append(node('p',`Action journal through incident revision ${state.detail.revision}. Action phases do not change the incident lifecycle. Review the proposal panel for its approval decision.`,'subtle'));
   if (state.actionsError) {
     const error = node('div',null,'inline-error'); error.setAttribute('role','alert'); showError(error,state.actionsError); target.append(error);
   }
@@ -539,6 +547,71 @@ function actionHistory(state,opened) {
   return target;
 }
 
+function runbookProposals(state, drafts) {
+  const panel = node('section',null,'runbook-proposals');
+  panel.setAttribute('aria-label','Đề xuất runbook'); panel.dataset.testid = 'runbook-proposals';
+  panel.append(node('h3','Đề xuất runbook'),node('p',
+    'Duyệt chỉ ghi quyết định cho proposal này. Controller kiểm lại mọi guard trước khi chạy. Từ chối → engineer.','subtle'));
+  if (!state.canApprove) panel.append(node('p','Phiên này chỉ có quyền đọc. Cần scope remediation.approve để duyệt hoặc từ chối.','callout uncertain'));
+  const reload = button('Tải lại đề xuất',() => workspace.loadProposals(),'button secondary');
+  reload.disabled = state.proposalsLoading || state.decisionLoading; panel.append(reload);
+  if (state.proposalsLoading) panel.append(node('p','Đang tải đề xuất…'));
+  if (state.proposalsError) {
+    const error = node('p',null,'inline-error'); error.setAttribute('role','alert'); showError(error,state.proposalsError); panel.append(error);
+    panel.append(node('p','Chưa xác nhận kết quả. Tải lại trạng thái trước khi quyết định tiếp.','subtle'));
+  }
+  if (state.proposals?.length === 0) panel.append(node('p','Không có đề xuất cho revision này.'));
+  for (const row of state.proposals || []) {
+    const p = row.proposal, card = node('article',null,'proposal-card');
+    const grid = node('div',null,'facts-grid');
+    const currentImage = row.review_images?.current_image;
+    const targetImage = row.review_images?.rollback_image;
+    grid.append(fact('Incident / revision',`${p.incident_id} / r${p.incident_revision}`),
+      fact('Severity',p.symptoms?.severity || row.incident.severity),fact('Runbook đề xuất',p.runbook_id),
+      fact('Score',score(p.score)),fact('Margin',score(p.margin)),
+      fact('Image hiện tại',currentImage || 'Chưa có bằng chứng image'),
+      fact('Image sẽ rollback về',targetImage || 'Chưa có bằng chứng image'),
+      fact('Hạn duyệt',date(p.expires_at)),fact('Trạng thái',row.status));
+    card.append(grid,node('h4','RCA top-3'));
+    if (!currentImage || !targetImage) card.append(node('p','Proposal chưa ghim đủ hai image digest. Chỉ có thể từ chối/chuyển engineer.','callout uncertain'));
+    const ranking = node('ol');
+    for (const item of row.incident.root_cause_ranking.slice(0,3)) ranking.append(raw('li',`${item.service} · ${score(item.score)}`));
+    if (!ranking.childNodes.length) ranking.append(node('li','Chưa ghi nhận RCA'));
+    card.append(ranking,raw('code',`SHA-256: ${row.proposal_sha256}`,'source'));
+    const countdown = node('p',null,'proposal-countdown');
+    countdown.dataset.expires = p.expires_at; countdown.dataset.status = row.status; card.append(countdown);
+    if (row.approval) card.append(raw('p',`${row.approval.decision} · ${row.approval.approved_by} · ${date(row.approval.approved_at)} · ${row.approval.reason}`));
+    if (row.status === 'engineer') card.append(node('p',row.approval?.decision === 'reject' ?
+      'Đã chuyển engineer; không thực thi từ proposal bị từ chối.' : 'Controller đã chuyển engineer; xem lý do outcome.'));
+    if (row.outcome) card.append(raw('p',`${row.outcome.phase}: ${row.outcome.reason}`));
+    const form = node('form',null,'proposal-decision'), label = node('label','Lý do quyết định'), reason = node('textarea');
+    reason.id = `reason-${p.proposal_id}`; reason.required = true; reason.maxLength = 2000; reason.rows = 2;
+    reason.value = drafts.get(reason.id) || '';
+    label.htmlFor = reason.id; form.append(label,reason);
+    for (const [decision,labelText] of [['approve','Duyệt'],['reject','Từ chối']]) {
+      const item = button(labelText,() => {
+        if (form.reportValidity() && reason.value.trim()) workspace.decideProposal(p.proposal_id,decision,reason.value);
+      },`button ${decision === 'approve' ? 'primary' : 'secondary'}`);
+      item.dataset.decision = decision;
+      const locked = !state.canApprove || state.decisionLoading || row.status !== 'pending' || decision === 'approve' && (!currentImage || !targetImage);
+      item.disabled = locked || !proposalRemaining(row);
+      item.dataset.locked = String(locked); form.append(item);
+    }
+    form.addEventListener('submit',event => event.preventDefault());
+    card.append(form); panel.append(card);
+  }
+  return panel;
+}
+
+function updateProposalClocks() {
+  for (const clock of document.querySelectorAll('[data-expires]')) {
+    const seconds = Math.max(0,Math.ceil((Date.parse(clock.dataset.expires)-Date.now())/1000));
+    clock.textContent = clock.dataset.status === 'pending' ? seconds ?
+      `Còn ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')} để duyệt` : 'Đã hết hạn duyệt' : 'Đã dừng chờ duyệt';
+    for (const item of clock.closest('article').querySelectorAll('[data-decision]')) item.disabled = item.dataset.locked === 'true' || seconds === 0;
+  }
+}
+
 function renderDetail(state) {
   for (const [id,key] of [['nav-incidents','overview'],['nav-explanation','explanation'],['nav-actions','actions']]) {
     const active = (state.detail ? tab : 'overview') === key ||
@@ -547,6 +620,7 @@ function renderDetail(state) {
     if (active) item.setAttribute('aria-current','page'); else item.removeAttribute('aria-current');
   }
   const target = $('#detail-pane');
+  const drafts = new Map([...target.querySelectorAll('.proposal-decision textarea')].map(item => [item.id,item.value]));
   const opened=new Set([...target.querySelectorAll('details[data-action-id][open]')].map(item => item.dataset.actionId));
   target.replaceChildren(); target.setAttribute('aria-busy',String(state.detailLoading));
   if (state.detailError) {
@@ -578,7 +652,8 @@ function renderDetail(state) {
     item.dataset.tab = key; item.setAttribute('aria-pressed',String(tab === key)); tabs.append(item);
   }
   const content = node('div',null,'detail-content'); content.append(tab === 'evidence' ? evidence(detail) : tab === 'timeline' ? timeline(detail,state) : tab === 'explanation' ? explanation(state) : tab === 'actions' ? actionHistory(state,opened) : overview(detail));
-  target.append(tabs,content);
+  const ier = node('details',null,'ier-record'); ier.append(node('summary','IER · JSON bản ghi revision này'),raw('pre',JSON.stringify(payload,null,2)));
+  target.append(runbookProposals(state,drafts),tabs,content,ier); updateProposalClocks();
 }
 
 async function openSection(key) {
@@ -602,7 +677,8 @@ $('#nav-actions').addEventListener('click',() => openSection('actions'));
 $('#nav-incidents').addEventListener('click',() => { tab = 'overview'; renderDetail(workspace.state); });
 
 $('#connect-form').addEventListener('submit',async event => {
-  event.preventDefault(); const token = $('#api-token').value.trim(); $('#api-token').value = '';
+  event.preventDefault(); if (!manualAllowed) return;
+  const token = $('#api-token').value.trim(); $('#api-token').value = '';
   if (token.length < 32) { $('#notice').textContent = t('Enter an access token of at least 32 characters.'); $('#notice').hidden = false; return; }
   await workspace.connect(token);
   if (workspace.state.session && !workspace.state.listError) {
@@ -610,14 +686,28 @@ $('#connect-form').addEventListener('submit',async event => {
     if (id && rev && /^[1-9][0-9]*$/.test(rev)) await openIncident(id,Number(rev));
   }
 });
-$('#disconnect').addEventListener('click',() => { workspace.disconnect(); history.replaceState(null,'',location.pathname+(language === 'vi' ? '#lang=vi' : '')); $('#api-token').value = ''; $('#api-token').focus(); });
-$('#refresh').addEventListener('click',() => Promise.all([workspace.loadList(),workspace.checkReadiness()]));
+$('#disconnect').addEventListener('click',() => {
+  cognito?.clear(); workspace.disconnect();
+  history.replaceState(null,'',location.pathname+(language === 'vi' ? '#lang=vi' : ''));
+  $('#api-token').value = ''; $(manualAllowed ? '#api-token' : '#cognito-login').focus();
+});
+$('#cognito-login').addEventListener('click',async () => {
+  if (!cognito) return;
+  $('#cognito-login').disabled = true;
+  try { workspace.disconnect(); location.assign(await cognito.begin()); }
+  catch { $('#auth-status').textContent = 'Không mở được đăng nhập. Kiểm tra sessionStorage và thử lại.'; $('#cognito-login').disabled = false; }
+});
+$('#refresh').addEventListener('click',() => Promise.all([workspace.loadList(),workspace.checkReadiness(),workspace.loadProposals()]));
 $('#load-more').addEventListener('click',() => workspace.loadList(true));
 $('#filter-form').addEventListener('submit',event => { event.preventDefault(); tab = 'overview'; workspace.filter({state:$('#state-filter').value,service:$('#service-filter').value}); });
-const checkVisibleSession = () => { if (!document.hidden) workspace.checkReadiness(); };
+const checkVisibleSession = () => { if (!document.hidden) {
+  workspace.checkReadiness();
+  if (!document.activeElement?.closest('.proposal-decision')) workspace.loadProposals();
+} };
+setInterval(updateProposalClocks,1000);
 setInterval(checkVisibleSession,30000);
 document.addEventListener('visibilitychange',checkVisibleSession);
-window.addEventListener('pagehide',() => workspace.disconnect());
+window.addEventListener('pagehide',() => { cognito?.suspend(); workspace.disconnect(); });
 const staticCopy = [];
 const walker = document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
 while (walker.nextNode()) {
@@ -646,3 +736,28 @@ window.addEventListener('hashchange',() => {
 });
 localizeStatic();
 workspace.emit();
+
+async function initializeLogin() {
+  try {
+    const response = await fetch('/ui/auth-config',{cache:'no-store',credentials:'omit',redirect:'error',signal:AbortSignal.timeout(10000)});
+    if (!response.ok) throw new Error('unavailable');
+    const config = await response.json();
+    if (config.mode === 'manual' && !loginCallback) {
+      manualAllowed = true; $('#connect-form').hidden = false;
+      $('#auth-status').textContent = 'Chế độ local/test · token chỉ giữ trong tab này.'; return;
+    }
+    if (config.mode !== 'oidc') throw new Error('unavailable');
+    cognito = new CognitoLogin(config); $('#cognito-login').hidden = false;
+    $('#auth-status').textContent = 'Đăng nhập bằng tài khoản operator. Token chỉ giữ trong bộ nhớ của tab.';
+    if (loginCallback) {
+      const session = await cognito.complete(loginCallback);
+      cognito.expireAt(session.expiresAt,() => {
+        workspace.disconnect('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      });
+      await workspace.connect(session.accessToken,{canApprove:session.canApprove});
+    }
+  } catch {
+    $('#auth-status').textContent = 'Không hoàn tất đăng nhập. Kiểm tra cấu hình hoặc đăng nhập lại.';
+  }
+}
+initializeLogin();

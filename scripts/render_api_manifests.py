@@ -39,7 +39,9 @@ def public_url(value: str) -> str:
 def render(image: str, *, environment: str, control_secret: str, issuer: str,
            audience: str, jwks_url: str, audience_claim: str = 'aud',
            action_read_secret: str | None = None,
-           model_claim: str | None = None, model_release_ref: str | None = None) -> list[dict]:
+           model_claim: str | None = None, model_release_ref: str | None = None,
+           login_domain: str | None = None, approval_scope: str = 'sentinelops/remediation.approve',
+           controller_sidecar: bool = False, service_type: str = 'ClusterIP', node_port: int | None = None) -> list[dict]:
     image_digest(image)
     _label(environment, 'environment')
     _label(control_secret, 'control secret reference')
@@ -50,7 +52,17 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
     if environment in LOCAL_ENVIRONMENTS:
         raise ValueError('this deployment requires a non-local environment and OIDC')
     oidc = OidcConfig(issuer=public_url(issuer), audience=audience,
-                      jwks_url=public_url(jwks_url), audience_claim=audience_claim)
+                      jwks_url=public_url(jwks_url), audience_claim=audience_claim,
+                      login_domain=login_domain, approval_scope=approval_scope)
+    if type(controller_sidecar) is not bool or service_type not in ('ClusterIP', 'NodePort'):
+        raise ValueError('explicit sidecar boolean and ClusterIP/NodePort Service required')
+    if (service_type == 'NodePort' and (type(node_port) is not int or not 30000 <= node_port <= 32767)
+        or service_type == 'ClusterIP' and node_port is not None):
+        raise ValueError('NodePort requires an explicit port in 30000..32767; ClusterIP has no node port')
+    if service_type == 'NodePort' and login_domain is None:
+        raise ValueError('edge exposure requires Cognito hosted-login configuration')
+    if controller_sidecar and (model_claim is not None or action_read_secret is not None or login_domain is None):
+        raise ValueError('controller sidecar requires hosted login and owns its mounts/credentials in worker renderer')
     if model_claim is not None or model_release_ref is not None:
         _label(model_claim, 'model claim reference')
         if not isinstance(model_release_ref, str) or not MODEL_REF.fullmatch(model_release_ref):
@@ -62,7 +74,18 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
             'SENTINELOPS_OIDC_JWKS_URL': oidc.jwks_url,
             'SENTINELOPS_OIDC_AUDIENCE_CLAIM': oidc.audience_claim,
             'SENTINELOPS_OIDC_PRODUCER_SCOPE': oidc.producer_scope,
-            'SENTINELOPS_OIDC_OPERATOR_SCOPE': oidc.operator_scope}
+            'SENTINELOPS_OIDC_OPERATOR_SCOPE': oidc.operator_scope,
+            'SENTINELOPS_OIDC_APPROVAL_SCOPE': oidc.approval_scope}
+    if login_domain is not None:
+        data['SENTINELOPS_OIDC_LOGIN_DOMAIN'] = login_domain
+    service = {'apiVersion': 'v1', 'kind': 'Service', 'metadata': metadata(NAME), 'spec': {
+        'type': service_type, 'selector': {'app': 'remediation-controller' if controller_sidecar else NAME},
+        'ports': [{'name': 'http', 'port': 8000, 'targetPort': 'http',
+                   **({'nodePort': node_port} if node_port is not None else {})}]}}
+    if controller_sidecar:
+        # Do not attach the controller's RWO PVC to another Deployment. This
+        # ConfigMap and Service select its OIDC sidecar on the same shared store.
+        return [{'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': metadata(CONFIG), 'data': data}, service]
     volumes = [{'name': 'tmp', 'emptyDir': {'sizeLimit': '64Mi'}}]
     mounts = [{'name': 'tmp', 'mountPath': '/tmp'}]
     if model_claim is not None:
@@ -81,6 +104,8 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
         environment_variables.append({'name': 'SENTINELOPS_ACTION_READ_DATABASE_URL', 'valueFrom': {
             'secretKeyRef': {'name': action_read_secret, 'key': 'database-url', 'optional': False}}})
     container = {'name': 'api', 'image': image, 'imagePullPolicy': 'IfNotPresent',
+        'command': ['python', '-m', 'uvicorn', 'sentinelops.main:app', '--host', '0.0.0.0',
+                    '--port', '8000', '--no-access-log'],
         'ports': [{'name': 'http', 'containerPort': 8000}],
         'envFrom': [{'configMapRef': {'name': CONFIG}}],
         'env': environment_variables,
@@ -104,9 +129,7 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
                     'securityContext': {'runAsNonRoot': True, 'runAsUser': 10001,
                                         'seccompProfile': {'type': 'RuntimeDefault'}},
                     'containers': [container], 'volumes': volumes}}}},
-        {'apiVersion': 'v1', 'kind': 'Service', 'metadata': metadata(NAME), 'spec': {
-            'type': 'ClusterIP', 'selector': {'app': NAME},
-            'ports': [{'name': 'http', 'port': 8000, 'targetPort': 'http'}]}},
+        service,
     ]
 
 
@@ -122,6 +145,11 @@ def main():
     parser.add_argument('--audience-claim', choices=('aud', 'client_id'), default='aud')
     parser.add_argument('--model-claim')
     parser.add_argument('--model-release-ref')
+    parser.add_argument('--login-domain')
+    parser.add_argument('--approval-scope', default='sentinelops/remediation.approve')
+    parser.add_argument('--controller-sidecar', action='store_true')
+    parser.add_argument('--service-type', choices=('ClusterIP', 'NodePort'), default='ClusterIP')
+    parser.add_argument('--node-port', type=int)
     parser.add_argument('--output', type=Path, required=True)
     args = vars(parser.parse_args())
     output = args.pop('output')

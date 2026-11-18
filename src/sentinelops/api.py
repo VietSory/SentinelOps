@@ -24,8 +24,9 @@ from sentinelops.incidents.repository import IncidentRepository,RepositoryIntegr
 from sentinelops.telemetry.core import stable_id
 from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, IncompatibleFeatures
 from sentinelops.telemetry.store import ArtifactStore
-from sentinelops.ui.routes import router as ui_router
+from sentinelops.ui.routes import router as ui_router, ui_index, HEADERS as UI_HEADERS
 from sentinelops.remediation.reader import ActionReader, decode_cursor as decode_action_cursor
+from sentinelops.remediation.proposal_api import install_routes as install_proposal_routes
 from sentinelops.explanations.service import ExplanationProvider, explain_incident
 
 logger = logging.getLogger("sentinelops-api")
@@ -148,6 +149,34 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
     app.add_middleware(RequestSafetyMiddleware)
     app.include_router(ui_router)
 
+    @app.middleware('http')
+    async def ui_auth_headers(request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith('/ui') and settings.oidc and settings.oidc.login_domain:
+            from urllib.parse import urlsplit
+            issuer = urlsplit(settings.oidc.issuer)
+            origin = f'{issuer.scheme}://{issuer.netloc}'
+            response.headers['Content-Security-Policy'] = UI_HEADERS['Content-Security-Policy'].replace(
+                "connect-src 'self'", f"connect-src 'self' {settings.oidc.login_domain} {origin}")
+        return response
+
+    @app.api_route('/ui/callback', methods=['GET', 'HEAD'], include_in_schema=False)
+    async def oauth_callback():
+        # The browser consumes and immediately removes the authorization code;
+        # the backend never exchanges, logs or persists browser tokens.
+        return await ui_index()
+
+    @app.get('/ui/auth-config', include_in_schema=False)
+    async def ui_auth_config():
+        oidc = settings.oidc
+        if oidc and oidc.login_domain:
+            return {'mode': 'oidc', 'issuer': oidc.issuer, 'client_id': oidc.audience,
+                    'domain': oidc.login_domain, 'jwks_url': oidc.jwks_url,
+                    'scopes': ['openid', oidc.operator_scope, oidc.approval_scope],
+                    'read_scope': oidc.operator_scope, 'approval_scope': oidc.approval_scope,
+                    'callback_path': '/ui/callback'}
+        return {'mode': 'manual' if settings.environment in LOCAL_ENVIRONMENTS and oidc is None else 'unavailable'}
+
     @app.exception_handler(ApiError)
     async def api_error(request,exc):
         headers = {"WWW-Authenticate":"Bearer"} if exc.status==401 else None
@@ -162,17 +191,21 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
         return JSONResponse({"code":"http_error","message":"Resource or HTTP operation is unavailable",
                              "request_id":request.state.request_id},status_code=exc.status_code)
 
-    async def authorize(request: Request) -> str:
+    async def authenticate(request: Request, *, required_scope=None) -> str:
         if verifier is not None:
             scheme,_,token = request.headers.get("authorization","").partition(" ")
             if scheme.lower()!="bearer":
                 raise ApiError(401,"unauthorized","A valid bearer token is required")
             try:
-                role,subject = await verifier.identify(token.strip())
+                if required_scope is None:
+                    role,subject = await verifier.identify(token.strip())
+                else:
+                    role,subject = await verifier.identify(token.strip(), required_scope=required_scope)
             except TokenRejected:
                 raise ApiError(401,"unauthorized","A valid bearer token is required") from None
             except ScopeMissing:
-                raise ApiError(403,"insufficient_scope","The token carries no SentinelOps scope") from None
+                code = 'approval_scope_required' if settings.oidc and required_scope == settings.oidc.approval_scope else 'insufficient_scope'
+                raise ApiError(403,code,"The token does not carry the required SentinelOps scope") from None
             except VerifierUnavailable:
                 raise ApiError(503,"authentication_unavailable","The identity provider keys are unavailable") from None
             return f"oidc-{role}:{subject}"
@@ -188,11 +221,27 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
             raise ApiError(401,"unauthorized","A valid bearer token is required")
         return "local-trusted-producer" if producer else "local-read-only-operator"
 
+    async def authorize(request: Request) -> str:
+        return await authenticate(request)
+
     async def authorize_producer(request: Request) -> str:
         identity = await authorize(request)
         if identity != "local-trusted-producer" and not identity.startswith("oidc-producer:"):
             raise ApiError(403,"read_only_credential","Operator credentials cannot import or revise incidents")
         return identity
+
+    async def authorize_operator(request: Request) -> str:
+        identity = await authenticate(request, required_scope=settings.oidc.operator_scope if verifier else None)
+        if identity == "local-read-only-operator":
+            return "local-operator:" + stable_id(settings.operator_token)[:24]
+        if not identity.startswith("oidc-operator:"):
+            raise ApiError(403,"operator_required","An operator token is required to review runbook proposals")
+        return identity
+
+    async def authorize_approver(request: Request) -> str:
+        if verifier is None:
+            return await authorize_operator(request)
+        return await authenticate(request, required_scope=settings.oidc.approval_scope)
 
     async def require_repository(request: Request):
         repo = request.app.state.incident_repository
@@ -463,4 +512,6 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
         validate_payload("incident-envelope.schema.json",result)
         return result
 
+    install_proposal_routes(app, settings, authorize_operator=authorize_operator,
+                           authorize_decider=authorize_approver, require_repository=require_repository, call=call)
     return app

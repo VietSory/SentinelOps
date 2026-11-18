@@ -279,3 +279,41 @@ variable "budget_notification_emails" {
   type        = list(string)
   default     = []
 }
+
+variable "edge_enabled" {
+  description = "Opt-in demo CloudFront VPC origin and internal ALB; requires operator identity."
+  type        = bool
+  default     = false
+}
+
+variable "edge_vpc_origin_bootstrap" {
+  description = "Temporary first-origin phase: permit only CloudFront's managed prefix list; distribution stays disabled. Restore false after VPC origin creates its service SG."
+  type        = bool
+  default     = false
+}
+
+variable "edge_waf_enabled" {
+  description = "Optional regional WAF on the internal ALB, with an origin-IP rate bound."
+  type        = bool
+  default     = false
+}
+
+variable "edge_api_node_port" {
+  description = "Dedicated NodePort Service for the authenticated control API/UI, never a commerce service."
+  type        = number
+  default     = 30080
+  validation {
+    condition     = floor(var.edge_api_node_port) == var.edge_api_node_port && var.edge_api_node_port >= 30000 && var.edge_api_node_port <= 32767
+    error_message = "API NodePort must be an integer in 30000-32767."
+  }
+}
+
+variable "edge_grafana_node_port" {
+  description = "Dedicated NodePort Service for Grafana, serving /grafana without stripping the prefix."
+  type        = number
+  default     = 30300
+  validation {
+    condition     = floor(var.edge_grafana_node_port) == var.edge_grafana_node_port && var.edge_grafana_node_port >= 30000 && var.edge_grafana_node_port <= 32767 && var.edge_grafana_node_port != var.edge_api_node_port
+    error_message = "Grafana NodePort must be an integer in 30000-32767, different from the API NodePort."
+  }
+}

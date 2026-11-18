@@ -235,20 +235,16 @@ def decide(symptoms: dict, catalog: dict) -> dict:
         thresholds = catalog["thresholds"]
         if symptoms["rca_abstained"]:
             reasons = ["rca-abstained"]
-        elif symptoms["severity"] != "low":
-            reasons = ["severity-not-supported"]
         elif entry is None or top < max(.80, thresholds["auto_min_score"]):
             reasons = ["insufficient-match"]
         elif (margin >= max(.15, thresholds["auto_min_margin"])
-              and entry["executable"] and "low" in entry["allowed_severities"]):
+              and entry["executable"]):
             decision, reasons = "oncall", ["oncall-approval-required"]
         else:
             if not entry["executable"]:
                 reasons.append("manual-runbook")
             if margin < max(.15, thresholds["auto_min_margin"]):
                 reasons.append("insufficient-margin")
-            if "low" not in entry["allowed_severities"]:
-                reasons.append("runbook-severity-not-supported")
     selected = entry if top and top > 0 else None
     runbook_id = selected["id"] if selected else None
     return {"decision_version": DECISION_VERSION, "decision": decision,
