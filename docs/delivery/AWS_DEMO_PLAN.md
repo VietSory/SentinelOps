@@ -49,6 +49,8 @@ Hoàn thành khi kịch bản demo chạy **3 lượt liên tiếp** trên EKS m
 
 ### 3.1. Di chuyển hoặc rollout health worker (EBS RWO)
 
+Tạo và áp dụng các PVC bằng `scripts/render_worker_storage.py` trước khi áp dụng manifest worker. Mỗi store là EBS `ReadWriteOnce`. Claim deployment-change (`--deployment-change-claim`) là tùy chọn, demo không dùng: rollback chạy trong pod trial với store riêng ([EKS_G6_TRIAL](../runbooks/EKS_G6_TRIAL.md)). Nếu sau này có writer của store này thì writer phải chạy cùng node với health/incident worker.
+
 PVC artifact của health là EBS `ReadWriteOnce`, nên không được rollout hai Deployment worker
 đồng thời. Khi cần di chuyển node hoặc rollout health trên EKS, operator thực hiện tuần tự:
 

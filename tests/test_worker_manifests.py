@@ -206,6 +206,30 @@ def test_artifacts_preserve_source_path_and_models_are_read_only_on_a_separate_c
     assert not any(v['name'] == 'models' for d in deployments(baseline) for v in d['spec']['template']['spec']['volumes'])
 
 
+def test_optional_deployment_change_store_is_read_only_and_keeps_default_output_unchanged():
+    baseline = worker.render(IMAGE, **PARAMETERS)
+    assert baseline == worker.render(IMAGE, **PARAMETERS, deployment_change_claim=None)
+    documents = worker.render(IMAGE, **PARAMETERS, deployment_change_claim='deployment-changes')
+    health, incident = [d['spec']['template']['spec'] for d in deployments(documents)]
+    assert not any(v['name'] == 'deployment-changes' for v in health['volumes'])
+    volume = next(v for v in incident['volumes'] if v['name'] == 'deployment-changes')
+    mount = next(m for m in incident['containers'][0]['volumeMounts'] if m['name'] == 'deployment-changes')
+    assert volume['persistentVolumeClaim'] == {'claimName': 'deployment-changes', 'readOnly': True}
+    assert mount == {'name': 'deployment-changes', 'mountPath': worker.DEPLOYMENT_CHANGE_ROOT,
+                     'readOnly': True}
+    assert incident['containers'][0]['args'][-2:] == [
+        '--deployment-change-store', worker.DEPLOYMENT_CHANGE_ROOT]
+
+
+@pytest.mark.parametrize('claim', ['health-artifacts', 'incident-artifacts', 'models'])
+def test_deployment_change_claim_must_be_distinct_from_other_worker_stores(claim):
+    options = {'deployment_change_claim': claim}
+    if claim == 'models':
+        options.update(model_claim='models', model_release_ref=RELEASE)
+    with pytest.raises(ValueError, match='separate PVCs'):
+        worker.render(IMAGE, **PARAMETERS, **options)
+
+
 @pytest.mark.parametrize('prometheus_auth', [False, True])
 def test_credentials_are_file_references_with_private_copy_and_read_only_runtime_mount(prometheus_auth):
     extra = {'prometheus_secret': 'prometheus-auth', 'prometheus_token_key': 'token'} if prometheus_auth else {}

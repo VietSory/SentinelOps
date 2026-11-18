@@ -36,6 +36,7 @@ KUBE_CONFIG = 'sentinelops-worker-kubernetes'
 OBSERVER = 'sentinelops-incident-observer'
 HEALTH_ROOT = '/artifacts/health'
 INCIDENT_ROOT = '/artifacts/incidents'
+DEPLOYMENT_CHANGE_ROOT = '/artifacts/deployment-changes'
 CREDENTIAL_ROOT = '/credentials'
 COPY_CREDENTIALS = (
     'import os, shutil, sys; from pathlib import Path; os.umask(0o077); '
@@ -68,7 +69,8 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
            deployment_uids: dict, observer_secret: str,
            prometheus: str = PROMETHEUS, jaeger: str = JAEGER,
            prometheus_secret: str | None = None, prometheus_token_key: str | None = None,
-           model_claim: str | None = None, model_release_ref: str | None = None) -> list[dict]:
+           model_claim: str | None = None, model_release_ref: str | None = None,
+           deployment_change_claim: str | None = None) -> list[dict]:
     image_digest(image)
     _label(environment, 'environment')
     if environment in LOCAL_ENVIRONMENTS:
@@ -110,9 +112,12 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
         _label(model_claim, 'model claim/release pair')
         if not isinstance(model_release_ref, str) or not MODEL_REF.fullmatch(model_release_ref):
             raise ValueError('model claim/release pair requires a checksummed artifact manifest reference')
-    claims = [health_store_claim, incident_store_claim] + ([model_claim] if model_claim else [])
+    if deployment_change_claim is not None:
+        _label(deployment_change_claim, 'deployment change claim')
+    claims = [health_store_claim, incident_store_claim] + ([model_claim] if model_claim else []) + (
+        [deployment_change_claim] if deployment_change_claim else [])
     if len(set(claims)) != len(claims):
-        raise ValueError('health, incident and read-only model stores require separate PVCs')
+        raise ValueError('health, incident, model and deployment change stores require separate PVCs')
 
     labels = {'app.kubernetes.io/part-of': 'sentinelops'}
     def metadata(name):
@@ -193,6 +198,12 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                 volumes.append({'name': 'models', 'persistentVolumeClaim': {'claimName': model_claim, 'readOnly': True}})
                 mounts.append({'name': 'models', 'mountPath': '/models', 'readOnly': True})
                 args += ['--model-store', '$(SENTINELOPS_MODEL_STORE)', '--model-release-ref', '$(SENTINELOPS_MODEL_RELEASE_REF)']
+            if deployment_change_claim:
+                volumes.append({'name': 'deployment-changes', 'persistentVolumeClaim': {
+                    'claimName': deployment_change_claim, 'readOnly': True}})
+                mounts.append({'name': 'deployment-changes', 'mountPath': DEPLOYMENT_CHANGE_ROOT,
+                               'readOnly': True})
+                args += ['--deployment-change-store', DEPLOYMENT_CHANGE_ROOT]
         status_command = ['python', '-c', STATUS_EXEC, f'scripts/run_{worker}_worker.py', *args, '--status']
         documents.append({'apiVersion': 'apps/v1', 'kind': 'Deployment', 'metadata': metadata(name), 'spec': {
             'replicas': 1, 'strategy': {'type': 'Recreate'}, 'selector': {'matchLabels': {'app': name}},
@@ -270,6 +281,7 @@ def main():
     parser.add_argument('--prometheus-token-key')
     parser.add_argument('--model-claim')
     parser.add_argument('--model-release-ref')
+    parser.add_argument('--deployment-change-claim')
     parser.add_argument('--output', type=Path, required=True)
     args = vars(parser.parse_args())
     output = args.pop('output')
