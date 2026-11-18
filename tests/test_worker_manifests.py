@@ -206,6 +206,30 @@ def test_artifacts_preserve_source_path_and_models_are_read_only_on_a_separate_c
     assert not any(v['name'] == 'models' for d in deployments(baseline) for v in d['spec']['template']['spec']['volumes'])
 
 
+def test_optional_deployment_change_store_is_read_only_and_keeps_default_output_unchanged():
+    baseline = worker.render(IMAGE, **PARAMETERS)
+    assert baseline == worker.render(IMAGE, **PARAMETERS, deployment_change_claim=None)
+    documents = worker.render(IMAGE, **PARAMETERS, deployment_change_claim='deployment-changes')
+    health, incident = [d['spec']['template']['spec'] for d in deployments(documents)]
+    assert not any(v['name'] == 'deployment-changes' for v in health['volumes'])
+    volume = next(v for v in incident['volumes'] if v['name'] == 'deployment-changes')
+    mount = next(m for m in incident['containers'][0]['volumeMounts'] if m['name'] == 'deployment-changes')
+    assert volume['persistentVolumeClaim'] == {'claimName': 'deployment-changes', 'readOnly': True}
+    assert mount == {'name': 'deployment-changes', 'mountPath': worker.DEPLOYMENT_CHANGE_ROOT,
+                     'readOnly': True}
+    assert incident['containers'][0]['args'][-2:] == [
+        '--deployment-change-store', worker.DEPLOYMENT_CHANGE_ROOT]
+
+
+@pytest.mark.parametrize('claim', ['health-artifacts', 'incident-artifacts', 'models'])
+def test_deployment_change_claim_must_be_distinct_from_other_worker_stores(claim):
+    options = {'deployment_change_claim': claim}
+    if claim == 'models':
+        options.update(model_claim='models', model_release_ref=RELEASE)
+    with pytest.raises(ValueError, match='separate PVCs'):
+        worker.render(IMAGE, **PARAMETERS, **options)
+
+
 @pytest.mark.parametrize('prometheus_auth', [False, True])
 def test_credentials_are_file_references_with_private_copy_and_read_only_runtime_mount(prometheus_auth):
     extra = {'prometheus_secret': 'prometheus-auth', 'prometheus_token_key': 'token'} if prometheus_auth else {}
@@ -538,3 +562,26 @@ def test_nonlocal_v2_kubernetes_capture_and_replay_bind_environment_and_original
         finally:
             await source.close()
     asyncio.run(run())
+
+
+def test_incident_worker_runs_on_the_node_holding_the_read_write_once_health_volume():
+    documents = worker.render(IMAGE, **PARAMETERS)
+    pods = {d['metadata']['name']: d['spec']['template']['spec'] for d in deployments(documents)}
+    incident = pods['sentinelops-incident-worker']
+    term, = incident['affinity']['podAffinity']['requiredDuringSchedulingIgnoredDuringExecution']
+    assert term == {'labelSelector': {'matchLabels': {'app': 'sentinelops-health-worker'}},
+                    'topologyKey': 'kubernetes.io/hostname'}
+    health_labels = next(d for d in deployments(documents)
+                         if d['metadata']['name'] == 'sentinelops-health-worker')['spec']['template']['metadata']['labels']
+    assert health_labels['app'] == 'sentinelops-health-worker'
+    assert 'affinity' not in pods['sentinelops-health-worker']
+    assert all(d['spec']['strategy'] == {'type': 'Recreate'} for d in deployments(documents))
+
+
+def test_eks_rwo_runbook_serializes_incident_and_health_worker_rollouts():
+    plan = (Path(__file__).resolve().parents[1] / 'docs/delivery/AWS_DEMO_PLAN.md').read_text()
+    stop = plan.index('Scale `sentinelops-incident-worker` về `0`')
+    health_ready = plan.index('`sentinelops-health-worker`, rồi chờ pod health `Ready`')
+    restart = plan.index('Scale `sentinelops-incident-worker` lại `1`')
+    assert stop < health_ready < restart
+    assert 'cùng node với\n   health worker' in plan

@@ -36,13 +36,14 @@ def _credential(reference: Path | None) -> str:
     return value
 
 
-def _remote_url(value: str, expected: str | None, *, database: bool = False):
+def _remote_url(value: str, expected: str | None, *, database: bool = False,
+                database_schemes: tuple[str, ...] = ("postgresql",)):
     parsed = urlsplit(value)
     if (expected is None or value.rstrip("/") != expected.rstrip("/") or not parsed.hostname or not parsed.port
         or parsed.username is not None or parsed.password is not None or "#" in value
         or any(char.isspace() or ord(char) < 32 for char in value)
         or not re.fullmatch(r"[A-Za-z0-9.-]+", parsed.hostname)
-        or parsed.scheme != ("postgresql" if database else "https")
+        or (parsed.scheme not in database_schemes if database else parsed.scheme != "https")
         or parsed.path not in (("/sentinelops_control",) if database else ("", "/"))
         or (parsed.query != "sslmode=verify-full" if database else "?" in value)):
         raise ValueError("remote source requires the pinned credential-free TLS endpoint, path and explicit port")
