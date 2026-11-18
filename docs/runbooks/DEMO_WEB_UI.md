@@ -1,36 +1,38 @@
 # Demo qua trang web operator
 
-> **Máy biên soạn KHÔNG có AWS credential hợp lệ và KHÔNG có kube context `sentinelops-demo`; không có xác minh live nào.**
-> **Tại commit đối chiếu (`0afb06d`), UI KHÔNG có bằng chứng đã deploy và không có URL public được bàn giao.**
-> Runbook gồm dựng UI rồi mới demo; không được hiểu UI/Cognito/CloudFront đang sẵn sàng.
-> Căn cứ về trạng thái UI/edge: `scripts/aws_demo/README.ui.md:156`, `scripts/aws_demo/EDGE.md:5`, `docs/delivery/AWS_DEMO_ACCESS_AND_FLOWS.md:15`.
+> **[LIVE] UI đã deploy và phục vụ qua port-forward:** xác minh live ngày **18/11/2026**, `GET /ui/` trả 200, `GET /health` trả `status=ok`, `GET /ui/auth-config` trả `mode=oidc`; `GET /v1/incidents` không token trả 401.
+> **Đăng nhập UI CHƯA hoàn tất:** còn phải đặt mật khẩu permanent và enroll MFA TOTP theo mục 4. **CHƯA có URL public dùng được:** CloudFront vẫn `Enabled=false` (xác minh live ngày 18/11/2026 qua Cognito `admin-get-user`/`describe-user-pool` và CloudFront `get-distribution`).
+> **Policy đang tắt, bấm Duyệt chưa chạy rollback; hiện chưa có incident để hiển thị.** Xác minh live ngày 18/11/2026: `kubectl get deployment remediation-controller` (kiểm args) và `kubectl logs deployment/remediation-controller -c remediation-controller` (poll trả `[]`) với context `sentinelops-demo`, namespace `sentinelops-b-actions`; lệnh đầy đủ ở mục 2 và 5.
 
 ## 1. Phạm vi bằng chứng
 
-Tài liệu được tổng hợp từ đối chiếu source và báo cáo trong `docs/delivery`.
+Tài liệu được tổng hợp từ đối chiếu source, báo cáo trong `docs/delivery` và kết quả xác minh live ngày 18/11/2026. Các ghi chú [LIVE] chép lại kết quả phiên đó kèm lệnh/endpoint đối chiếu; lần sửa tài liệu này không chạy lại triển khai.
 
 | Mức | Ý nghĩa và giới hạn |
 | --- | --- |
 | [A] | Có bằng chứng lịch sử đã apply/chạy AWS; không xác nhận trạng thái hôm nay. Hạ tầng và demo phát hiện Payment được báo cáo tại `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:10`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:91`. |
-| [B] | Có IaC/manifest, không có bằng chứng apply: controller, sidecar/API/UI, Cognito, CloudFront/ALB, Grafana. `scripts/aws_demo/README.ui.md:3`, `scripts/aws_demo/EDGE.md:5`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:166`. |
+| [B] | Có IaC/manifest nhưng chưa có bằng chứng apply cho cấu hình cụ thể; renderer/plan riêng không chứng minh đã triển khai. Không còn xếp controller, sidecar/API/UI, Cognito, edge hay Grafana vào [B] sau xác minh [LIVE] bên dưới. `scripts/aws_demo/README.ui.md:5`, `scripts/aws_demo/README.ui.md:156`, `scripts/aws_demo/EDGE.md:149`. |
 | [C] | Tooling/mã/local: renderer, driver, CLI duyệt; không chứng minh vòng AWS thành công. `scripts/run_runbook_demo.py:76`, `scripts/approve_runbook.py:23`. |
+| [LIVE] | Đã xác minh trực tiếp trên cluster/AWS ngày 18/11/2026, kèm lệnh/endpoint tại từng mục. **Mạnh hơn [A] vì [A] chỉ là báo cáo lịch sử**; chỉ xác nhận điều đã kiểm tra, không suy ra đăng nhập hay rollback thành công từ việc pod chạy. |
 
 **Cạm bẫy tên:** Terraform mặc định `environment=prod`, nhưng đợt triển khai được báo cáo là `dev`, cluster `sentinelops-dev`, RDS `sentinelops-control-dev`.
 Không lấy tên suy từ mặc định IaC làm tên live; runtime demo dùng `aws-dev`, fault API dùng `DEPLOYMENT_ENVIRONMENT=dev`.
 Căn cứ: `infra/aws/variables.tf:32`, `docs/delivery/AWS_DEMO_ACCESS_AND_FLOWS.md:9`, `scripts/aws_demo/README.ui.md:99`, `services/common/faults.py:17`.
 
-Mọi lệnh dưới đây dành cho operator ở môi trường đã chuẩn bị, **chưa chạy trong phiên biên soạn**. Không thay placeholder bằng giá trị đoán.
+Các khối lệnh dưới đây dành cho operator kiểm tra/chạy tiếp ở môi trường đã chuẩn bị; kết quả đã xác minh ngày 18/11/2026 được ghi riêng bằng [LIVE]. Không thay placeholder bằng giá trị đoán.
 
 ## 2. Checklist ĐIỀU KIỆN TIÊN QUYẾT
 
-- [ ] [B] Deploy `remediation-controller`, có action-runtime/control_action_writer và worker image phù hợp; báo cáo còn ghi đây là việc chưa hoàn tất. `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:163`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:164`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:166`.
+- [x] [LIVE] `remediation-controller` cùng sidecar `operator-ui` đã deploy trong `sentinelops-b-actions`, pod 2/2 Running, 0 restart, cùng PVC `remediation-artifacts`. Xác minh live ngày 18/11/2026: `kubectl --context sentinelops-demo -n sentinelops-b-actions get deployment remediation-controller` và `kubectl --context sentinelops-demo -n sentinelops-b-actions get pods -l app=remediation-controller`.
+- [ ] [C] Trước demo rollback, kiểm lại action-runtime/control_action_writer, known-good và policy. [LIVE] Policy hiện **tắt**: args Deployment không có `--policy-enabled`; không dispatch dù có receipt duyệt. Xác minh live ngày 18/11/2026: `kubectl --context sentinelops-demo -n sentinelops-b-actions get deployment remediation-controller -o jsonpath='{.spec.template.spec.containers[?(@.name=="remediation-controller")].args}'`; yêu cầu runtime: `scripts/render_worker_manifests.py:277`, `scripts/run_remediation_controller.py:59`, `scripts/run_remediation_controller.py:51`.
 - [ ] [B/C] Nạp model/release được review, thỏa H4; không dùng bundle local làm chứng cứ AWS đã sẵn sàng. `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:162`, `src/sentinelops/remediation/authority.py:65`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:17`.
 - [ ] [C] Health stream, environment, policy và artifact-root binding đúng; health/review/change/remediation stores đọc đúng dữ liệu controller, target chứa đúng cluster/namespace/deployment UID. `scripts/run_runbook_demo.py:426`, `scripts/run_runbook_demo.py:433`, `scripts/run_runbook_demo.py:436`.
 - [ ] [C] Payment đang healthy ở known-good; review open/complete đạt `AWAITING_OPERATOR_REVIEW`, owner duyệt known-good **TRƯỚC khi tiêm lỗi**. Không tự gán PASS. `docs/runbooks/CONTROLLED_REMEDIATION.md:76`, `docs/runbooks/CONTROLLED_REMEDIATION.md:118`, `scripts/aws_demo/README.review.md:36`.
 - [ ] [C] Credential tách biệt: deploy PATCH, observer đọc, fault-token riêng cho verify lỗi; action reader SELECT-only, DB `sentinelops_control`, TLS `sslmode=verify-full`. `scripts/run_runbook_demo.py:420`, `scripts/run_runbook_demo.py:442`, `scripts/run_runbook_demo.py:445`.
 - [ ] [C] Kill switch dùng chung với controller; đường normal phải không kích hoạt, người vận hành biết cách bật để dừng. `scripts/run_runbook_demo.py:296`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:17`.
 - [ ] [C] Nếu dùng fault API, cấu hình `ENABLE_FAULT_INJECTION=true`, `DEPLOYMENT_ENVIRONMENT=dev`, `ALLOW_DEV_FAULT_INJECTION=true`; local/test chỉ cần bật cờ đầu, ngoài allowlist trả 404. `services/common/faults.py:15`.
-- [ ] [B] Sidecar OIDC cùng PVC controller, có public client/scopes/callback hợp lệ và operator đã enroll TOTP; không dùng token tĩnh trên EKS. `scripts/aws_demo/README.ui.md:10`, `scripts/aws_demo/README.ui.md:17`, `scripts/aws_demo/README.ui.md:99`.
+- [x] [LIVE] Sidecar dùng OIDC; client Cognito đã có callback `http://localhost:8000/ui/callback`. Xác minh live ngày 18/11/2026: `GET /ui/auth-config`, `aws --profile console --region ap-southeast-1 cognito-idp describe-user-pool-client --user-pool-id "$USER_POOL_ID" --client-id "$UI_CLIENT_ID"`.
+- [ ] [C] Operator đặt mật khẩu permanent, enroll TOTP và đăng nhập thật theo mục 4; chưa hoàn tất trong phiên live. Không dùng token tĩnh trên EKS. `scripts/aws_demo/EDGE.md:167`, `scripts/aws_demo/README.ui.md:99`.
 
 Duyệt known-good sau khi đã đọc evidence, tại nơi nhìn thấy đúng review store [C]:
 
@@ -42,25 +44,22 @@ python -m scripts.approve_known_good --review-store "$REVIEW_STORE" \
 
 Căn cứ: `docs/runbooks/CONTROLLED_REMEDIATION.md:118`; ledger kết quả được truyền vào `LEDGER_REF`, không lấy ref minh họa.
 
-## 3. Dựng UI trước khi mở demo
+## 3. Dùng UI đã deploy; chỉ render lại khi cần
 
-### Cấu hình chung cho cả hai đường [B/C]
+### Cấu hình chung cho cả hai đường [LIVE/B/C]
 
-Các biến bên dưới lấy từ binding/manifest đã review. Giá trị thật của domain, pool ID, client ID: **Không có bằng chứng**.
-Operator lấy các output trên đúng state `dev` (output không chứng minh endpoint đang sống):
+[LIVE] Không cần build/render từ đầu để mở UI: ECR `sentinelops/control-plane` đã có image `git-b4b416f`, digest `sha256:bb40c73ad3c17e585e36f6e49d99f491371e971b3f730ee9d0d341de949a4859`; Deployment `remediation-controller`, ConfigMap `sentinelops-api-runtime` và Service `sentinelops-api` đã tồn tại. Xác minh live ngày 18/11/2026: `aws --profile console --region ap-southeast-1 ecr describe-images --repository-name sentinelops/control-plane --image-ids imageTag=git-b4b416f` và `kubectl --context sentinelops-demo -n sentinelops-b-actions get deployment/remediation-controller configmap/sentinelops-api-runtime service/sentinelops-api`.
+
+Kiểm Deployment hiện có, rồi đi thẳng tới đường A để port-forward:
 
 ```sh
-terraform -chdir=infra/aws output -raw edge_domain
-terraform -chdir=infra/aws output -json operator_oidc_binding
-terraform -chdir=infra/aws output -raw operator_login_domain
-terraform -chdir=infra/aws output -raw artifact_bucket
+kubectl --context sentinelops-demo -n sentinelops-b-actions get deployment remediation-controller
+kubectl --context sentinelops-demo -n sentinelops-b-actions rollout status deployment/remediation-controller --timeout=180s
 ```
 
-`ISSUER`, `JWKS_URL`, `UI_CLIENT_ID` lấy lần lượt từ `.issuer`, `.jwks_url`, `.audience`; `LOGIN_DOMAIN` từ `operator_login_domain`.
-Pool ID là segment cuối issuer; tên bucket thật: **Không có bằng chứng**, lấy `artifact_bucket` ở trên.
-Căn cứ: `infra/aws/operator_identity.tf:130`, `infra/aws/operator_identity.tf:142`, `infra/aws/outputs.tf:102`, `scripts/aws_demo/EDGE.md:93`.
+Nếu cần render lại, lấy binding đã review từ ConfigMap hiện có hoặc `GET /ui/auth-config` sau port-forward: `ISSUER`, `JWKS_URL`, `UI_CLIENT_ID`, `LOGIN_DOMAIN` lần lượt là `.issuer`, `.jwks_url`, `.client_id`, `.domain`; pool ID là segment cuối issuer. Không cần in Secret để lấy cấu hình login. Căn cứ: `src/sentinelops/api.py:169`, `scripts/render_api_manifests.py:72`.
 
-Render API ConfigMap/Service và worker sidecar bằng image digest cùng các binding đã kiểm:
+Phần render/apply sau **chỉ dùng khi cần triển khai lại** [B/C], dùng `CONTROL_IMAGE` ghim digest đã kiểm ở trên và các binding hiện hành. Giữ policy tắt như bản live; chỉ thêm `--policy-enabled` sau khi review đủ điều kiện demo rollback ở mục 2 (`scripts/render_worker_manifests.py:294`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:142`):
 
 ```sh
 python scripts/render_api_manifests.py --image "$CONTROL_IMAGE" \
@@ -80,7 +79,7 @@ python scripts/render_worker_manifests.py --image "$CONTROL_IMAGE" \
   --model-claim "$MODEL_CLAIM" --model-release-ref "$MODEL_RELEASE_REF" \
   --remediation-store-claim "$REMEDIATION_CLAIM" --known-good-store-claim "$REVIEW_CLAIM" \
   --deployment-change-store-claim "$CHANGE_CLAIM" \
-  --policy-enabled --demo-ui --output "$WORKER_UI_MANIFEST"
+  --demo-ui --output "$WORKER_UI_MANIFEST"
 ```
 
 Căn cứ flags: `scripts/render_worker_manifests.py:437`, `scripts/aws_demo/README.ui.md:37`.
@@ -88,7 +87,17 @@ Căn cứ flags: `scripts/render_worker_manifests.py:437`, `scripts/aws_demo/REA
 Không coi hai renderer tự nối end-to-end; `render_all` cũng không tự bật sidecar/policy.
 Căn cứ: `scripts/render_api_manifests.py:71`, `scripts/render_worker_manifests.py:31`, `scripts/aws_demo/render_all.py:107`.
 
-Chỉ sau review binding/namespace, operator triển khai ConfigMap trước worker rồi kiểm sidecar:
+**Bắt buộc khi render lại:** thêm vào `env` của container **`remediation-controller`** trong manifest vừa render (giữ nguyên các env khác):
+
+```yaml
+- name: PGSSLROOTCERT
+  value: /etc/sentinelops/tls/ca-bundle.crt
+```
+
+[LIVE] Ngày 18/11/2026, log controller đã gặp `asyncpg.exceptions.ClientConfigurationError` với `sslmode=verify-full`; thêm `PGSSLROOTCERT` ở trên mới chạy được. `SSL_CERT_FILE` đơn thuần không đủ với nhánh này của asyncpg; không thêm query `sslrootcert` vào DSN vì validator chỉ nhận đúng `sslmode=verify-full`. Đối chiếu live: `kubectl --context sentinelops-demo -n sentinelops-b-actions logs deployment/remediation-controller -c remediation-controller` và env Deployment sau sửa; đối chiếu source: `scripts/run_remediation_controller.py:59`, `scripts/render_worker_manifests.py:315`, `scripts/render_worker_manifests.py:323` (renderer hiện chỉ thêm `SSL_CERT_FILE`).
+Giữ tham chiếu Secret `remediation-runtime` với các key `action-database-url`, `known-good-ledger-ref`, `approved-by`; không chép giá trị ra tài liệu. Thiếu ledger/approver sẽ chặn khởi động (`scripts/render_worker_manifests.py:326`, `scripts/run_remediation_controller.py:68`).
+
+Chỉ sau review binding/namespace, env CA và policy, operator triển khai ConfigMap trước worker rồi kiểm sidecar:
 
 ```sh
 kubectl --context sentinelops-demo apply -f "$API_UI_MANIFEST"
@@ -107,14 +116,14 @@ kubectl --context sentinelops-demo -n sentinelops-b-actions port-forward \
   deployment/remediation-controller --address 127.0.0.1 8000:8000
 ```
 
-Mở `http://127.0.0.1:8000/ui/`; debug qua `http://127.0.0.1:8000/health`.
-**Cạm bẫy:** client Cognito mặc định chỉ đăng ký callback CloudFront; port-forward đơn thuần **không đăng nhập được**.
-Ba lựa chọn: dùng đường B; hoặc đăng ký thêm callback chính xác `http://127.0.0.1:8000/ui/callback` qua cấu hình identity được review; hoặc duyệt CLI trong pod ở mục 8.
-Không dùng token từ Secret để bypass OIDC. Căn cứ: `scripts/aws_demo/README.ui.md:143`, `scripts/aws_demo/README.ui.md:149`.
+Mở **`http://localhost:8000/ui/`**; debug qua `http://localhost:8000/health`. `--address 127.0.0.1` ở lệnh trên chỉ là địa chỉ bind của port-forward.
+**Cạm bẫy [LIVE]:** Cognito chỉ chấp nhận callback HTTP với hostname **`localhost`**, không chấp nhận **`127.0.0.1`**. Callback `http://localhost:8000/ui/callback` đã được owner thêm, giữ callback CloudFront; không cần đăng ký lại để dùng đường A. Xác minh live ngày 18/11/2026: Cognito `update-user-pool-client`/`describe-user-pool-client`; trước khi sửa, hosted login trả `redirect_mismatch`. Mở UI bằng `localhost` để browser tạo đúng callback; vẫn phải hoàn tất mật khẩu và TOTP ở mục 4.
+Thay đổi callback bằng CLI tạo drift: Terraform hiện chỉ nhận HTTPS và khi bật edge chỉ khai báo callback CloudFront; lần apply sau có thể hoàn nguyên callback localhost. Review trước khi apply (`infra/aws/operator_identity.tf:19`, `infra/aws/operator_identity.tf:86`).
+Không dùng token từ Secret để bypass OIDC; dự phòng CLI ở mục 8 vẫn chỉ ghi receipt và chịu guard. Căn cứ: `scripts/aws_demo/README.ui.md:149`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:169`.
 
 ### Đường B — CloudFront edge
 
-Phải triển khai edge theo [EDGE.md](../../scripts/aws_demo/EDGE.md), giữ đúng baseline/state `dev`, cấu hình:
+[LIVE] Edge **đã apply**, nhưng distribution `dr76usfhbe2w8.cloudfront.net` có `Status=Deployed`, **`Enabled=false`**, nên chưa có URL public dùng được. ALB internal và VPC origin đã tồn tại; state ghi cấu hình bootstrap bên dưới. Xác minh live ngày 18/11/2026: AWS CloudFront `get-distribution`, `list-vpc-origins`, ELBv2 `describe-load-balancers` và đối chiếu Terraform state. Chỉ mở edge theo [EDGE.md](../../scripts/aws_demo/EDGE.md), giữ đúng baseline/state `dev`:
 
 ```hcl
 edge_enabled              = true
@@ -122,22 +131,36 @@ operator_identity_enabled = true
 edge_vpc_origin_bootstrap = true # bootstrap; distribution disabled
 ```
 
-Khi sidecar/NodePort/auth đã kiểm, đổi `edge_vpc_origin_bootstrap=false`, review/publish theo EDGE rồi lấy `edge_domain` bằng output trên.
+[LIVE] Không apply từ bản backup state chưa đồng bộ: `terraform plan` ngày 18/11/2026 với `operator_identity_enabled=true`, `edge_enabled=false` đã đề xuất xóa edge. Phải đồng bộ state và review plan trước khi chạy tiếp.
+Khi sidecar/NodePort/auth đã kiểm, đổi `edge_vpc_origin_bootstrap=false`, review/publish theo EDGE rồi lấy `edge_domain` từ `terraform -chdir=infra/aws output -raw edge_domain` trên state đã đồng bộ (`scripts/aws_demo/EDGE.md:149`, `infra/aws/outputs.tf:107`).
 Mở `https://<edge_domain>/ui/` (mẫu ghép, **không phải URL live**); callback là `https://<edge_domain>/ui/callback`.
 `edge_enabled=false` mặc định làm output null; bootstrap=true làm distribution disabled ngay cả khi có domain.
 Đường dự kiến: CloudFront → VPC origin → ALB internal → NodePort 30080 → sidecar:8000.
 Căn cứ: `infra/aws/variables.tf:283`, `infra/aws/edge.tf:242`, `infra/aws/outputs.tf:107`, `scripts/aws_demo/EDGE.md:58`, `scripts/aws_demo/EDGE.md:149`.
 
-## 4. Đăng nhập [B/C]
+## 4. Đăng nhập [LIVE/C] — còn bước con người
 
-1. Bấm **Đăng nhập Cognito**; operator được admin tạo user, đổi mật khẩu tạm và enroll MFA TOTP theo quy trình identity.
-2. Browser chạy Authorization Code + PKCE S256: lấy `/ui/auth-config`, tạo verifier/state/nonce, authorize, callback kiểm state rồi đổi code/verifier lấy token.
-3. Cần `openid`, `sentinelops/incidents.read` và `sentinelops/remediation.approve`; API kiểm access JWT, issuer, `client_id`, expiry, `token_use=access`, scope.
-4. Token chỉ trong RAM, refresh tab mất phiên và cần login lại; chỉ transaction PKCE ở sessionStorage tối đa 10 phút. Disconnect không revoke toàn bộ Cognito SSO.
+1. **Admin/owner tạo operator nếu chưa có.** [LIVE] Pool `sentinelops-dev-operators` đã tồn tại, MFA `ON`; owner đã tạo user `nvtank` ngày 18/11/2026 nhưng chưa hoàn tất đăng nhập. Đối chiếu live: Cognito `describe-user-pool`/`admin-get-user`. Không tạo lại user này. Với operator mới, admin chọn đúng pool trong Cognito console, **Create user**, dùng email được owner xác nhận; hoặc chạy `aws --profile console --region ap-southeast-1 cognito-idp admin-create-user --cli-input-json "file://$OPERATOR_ENROLLMENT_INPUT"` với file quyền 0600 cấp qua kênh riêng, xóa sau dùng. Không đưa nội dung file hay mật khẩu lên command line/tài liệu (`scripts/aws_demo/EDGE.md:169`).
+2. **Con người đặt mật khẩu permanent.** Operator mở `http://localhost:8000/ui/`, bấm **Đăng nhập Cognito** và đổi mật khẩu tạm theo hosted login; nếu cần đặt lại, admin xử lý trong Cognito theo kênh bảo mật. Đây là việc còn lại, chưa có bằng chứng đăng nhập thành công. Mật khẩu phải tối thiểu 16 ký tự, đủ hoa/thường/số/ký hiệu (`infra/aws/operator_identity.tf:37`, `scripts/aws_demo/EDGE.md:176`; xác minh live ngày 18/11/2026: Cognito `describe-user-pool`/`admin-get-user`).
+3. **Con người enroll MFA TOTP:** quét QR bằng authenticator, nhập mã 6 số để xác minh, rồi thử đăng nhập lại với TOTP. IAM admin không thể hoàn tất thay bước quét QR/nhập mã của operator; không tắt MFA để demo. Bước này **chưa hoàn tất** trong phiên live ngày 18/11/2026 (đối chiếu Cognito `admin-get-user`); quy trình: `scripts/aws_demo/EDGE.md:176`, MFA bắt buộc: `infra/aws/operator_identity.tf:29`.
+4. **Khi login lỗi, tra trạng thái user:** [LIVE] `PreventUserExistenceErrors=ENABLED` khiến các nguyên nhân đăng nhập hỏng hiện cùng thông báo “Incorrect username or password”; không suy ra user đã tồn tại hay mật khẩu sai từ thông báo đó. Xác minh live ngày 18/11/2026: Cognito `describe-user-pool-client`/`admin-get-user`; cấu hình source: `infra/aws/operator_identity.tf:79`. Lấy `USER_POOL_ID` từ issuer, chọn đúng `OPERATOR_USER`, rồi chỉ đọc các trường trạng thái:
+
+   ```sh
+   aws --profile console --region ap-southeast-1 cognito-idp admin-get-user \
+     --user-pool-id "$USER_POOL_ID" --username "$OPERATOR_USER" \
+     --query '{Username:Username,Enabled:Enabled,UserStatus:UserStatus,UserMFASettingList:UserMFASettingList}'
+   ```
+
+5. Browser chạy Authorization Code + PKCE S256: lấy `/ui/auth-config`, tạo verifier/state/nonce, authorize, callback kiểm state rồi đổi code/verifier lấy token.
+6. Cần `openid`, `sentinelops/incidents.read` và `sentinelops/remediation.approve`; API kiểm access JWT, issuer, `client_id`, expiry, `token_use=access`, scope.
+7. Token chỉ trong RAM, refresh tab mất phiên và cần login lại; chỉ transaction PKCE ở sessionStorage tối đa 10 phút. Disconnect không revoke toàn bộ Cognito SSO.
 
 Căn cứ: `scripts/aws_demo/EDGE.md:167`, `scripts/aws_demo/README.ui.md:68`, `scripts/aws_demo/README.ui.md:71`, `scripts/aws_demo/README.ui.md:77`, `scripts/aws_demo/README.ui.md:91`.
 
 ## 5. Kịch bản chính — traffic → lỗi → proposal → Duyệt → xác nhận
+
+**Trạng thái hiện tại [LIVE]:** UI chưa có incident để hiển thị; log controller poll trả `[]` (xác minh live ngày 18/11/2026: `kubectl --context sentinelops-demo -n sentinelops-b-actions logs deployment/remediation-controller -c remediation-controller`). Sau khi đăng nhập, danh sách sẽ rỗng cho tới khi có incident thật; chưa thể chọn incident/proposal để demo. `GET /v1/incidents` không token chỉ trả 401, không phải bằng chứng đã đọc danh sách (live cùng ngày; endpoint đọc: `src/sentinelops/api.py:447`).
+**Chặn rollback [LIVE]:** policy vẫn tắt như mục 2; bấm **Duyệt** chỉ có thể ghi receipt, **chưa chạy rollback**. Kịch bản thực thi và hai kịch bản phụ chỉ chạy sau khi review đủ prerequisite và bật policy tường minh; không coi hướng dẫn dưới đây là kết quả live (`scripts/run_remediation_controller.py:51`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:142`, `scripts/aws_demo/README.ui.md:14`).
 
 **Luật hiện hành [C]:** mọi `low/medium/high/critical` đều cần operator duyệt. Proposal oncall cần executable, đủ evidence, score ≥ `max(0.80,catalog)` và margin ≥ `max(0.15,catalog)`; còn lại engineer, không auto.
 Không dùng mô tả LOW tự chạy/v2 cũ trong báo cáo triển khai. Căn cứ: `docs/design/AUTO_RUNBOOK_INTERFACE.md:9`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:14`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:23`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:33`.
@@ -189,7 +212,7 @@ Driver mở baseline deployment-change, dry-run PATCH rồi PATCH image regressi
 Căn cứ nhãn/hành vi: `src/sentinelops/ui/assets/app.js:550`, `src/sentinelops/ui/assets/app.js:569`, `src/sentinelops/ui/assets/app.js:587`, `src/sentinelops/ui/assets/app.js:606`.
 **Điểm chặn đã biết:** nếu producer chưa xuất đủ image digest, UI có thể chỉ đọc/từ chối, approve trả `409 proposal_review_incomplete`. Phải xác minh proposal đủ digest; không điền từ browser (`scripts/aws_demo/README.ui.md:114`).
 
-4. Nhập **Lý do quyết định**, bấm **Duyệt** một lần. API chỉ ghi receipt; tick controller sau mới claim approval một lần, kiểm guard và PATCH rollback known-good.
+4. Nhập **Lý do quyết định**, bấm **Duyệt** một lần. API chỉ ghi receipt; **chỉ khi policy đã bật và đủ guard**, tick controller sau mới claim approval một lần, kiểm guard và PATCH rollback known-good. Bản live hiện tắt policy như mục 2.
 5. Chỉ xác nhận thành công sau `recovered` + `telemetry_verified`, Payment ready ở known-good, dispatch tăng đúng 1 và 3 bucket Payment eligible/clear sau action; deadline verify 600 giây.
 Căn cứ: `docs/design/AUTO_RUNBOOK_INTERFACE.md:131`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:172`, `scripts/run_runbook_demo.py:236`, `docs/runbooks/CONTROLLED_REMEDIATION.md:215`.
 
@@ -251,15 +274,15 @@ kubectl --context sentinelops-demo -n sentinelops-b-actions exec deploy/remediat
   --reason 'Đã kiểm tra bằng chứng và runbook' --confirm-oncall-approval
 ```
 
-Đổi `approve` thành `reject` nếu từ chối. CLI chỉ ghi receipt, không bỏ qua thiếu image/H4/guard; nếu controller chưa deploy thì đường dự phòng cũng chưa dùng được.
+Đổi `approve` thành `reject` nếu từ chối. CLI chỉ ghi receipt, không bỏ qua thiếu image/H4/guard hay policy đang tắt của bản live (mục 2).
 Căn cứ: `scripts/run_runbook_demo.py:69`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:169`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:171`.
 
 ## 9. Xác nhận và dọn sau demo
 
 Đọc UI outcome/receipt, controller log và `output/<n>.json` ở thư mục đã chọn: action_id, action_revision, last_event_hash, telemetry, dispatches_before/after; đối chiếu image readiness bằng Deployment thực tế. Approval thành công chưa phải rollback thành công (`scripts/run_runbook_demo.py:245`, `scripts/run_runbook_demo.py:251`).
-Prometheus/Jaeger có bằng chứng triển khai lịch sử [A]; Grafana [B] chưa có bằng chứng deploy, CloudWatch dashboard apply lỗi [B], không lấy chúng làm màn hình có sẵn (`docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:12`, `scripts/aws_demo/README.grafana.md:3`, `scripts/aws_demo/render_grafana.py:227`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:136`).
+Prometheus [LIVE] đã trả `GET /-/ready` thành công, target `otel-collector` up qua `GET /api/v1/targets`; Grafana [LIVE] đã deploy, rollout 1/1, `GET /grafana/api/health` trả `database=ok`, `GET /grafana/login` trả 200 (xác minh live ngày 18/11/2026). Grafana hiện dùng login quản trị local qua port-forward, **OAuth Cognito chưa bật**, dữ liệu ở `emptyDir` sẽ mất khi thay pod (live cùng ngày: `kubectl --context sentinelops-demo -n sentinelops-b-actions get deployment grafana`, kiểm env/storage). Jaeger có bằng chứng triển khai lịch sử [A]; CloudWatch dashboard apply lỗi [B], chưa có bằng chứng đã sửa (`docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:12`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:136`).
 Sau lượt cuối: kiểm fault đã healthy, nhất là `fault_cleanup` của failed-verify; nhánh reject cần khôi phục image qua quy trình review. Dừng traffic/port-forward, lưu receipt đã lọc bí mật, thu hồi enrollment/client/runtime credentials và teardown edge theo runbook (`scripts/run_runbook_demo.py:257`, `scripts/aws_demo/README.ui.md:149`, `scripts/aws_demo/EDGE.md:203`).
 Không tự xóa PVC/state trước khi lưu bằng chứng; làm checklist [AWS_DEMO_PLAN.md](../delivery/AWS_DEMO_PLAN.md#8-checklist-dọn-dẹp-sau-demo). Teardown hoàn tất: **Không có bằng chứng** tại commit (`docs/delivery/AWS_DEMO_PLAN.md:114`).
 Mọi receipt driver mang `demo_mode=true`, `G6_accepted=false`, `q09_eligible=false`; không nâng demo/local thành acceptance AWS (`scripts/run_runbook_demo.py:144`).
 
-Đối chiếu phạm vi triển khai ở [AWS_DEPLOYED_SUMMARY.md](../delivery/AWS_DEPLOYED_SUMMARY.md); liên kết này không thay thế các bằng chứng path:line và không chứng minh UI đang chạy.
+Đối chiếu phạm vi triển khai ở [AWS_DEPLOYED_SUMMARY.md](../delivery/AWS_DEPLOYED_SUMMARY.md); bằng chứng cho runbook là các tham chiếu path:line và ghi nhận [LIVE] ngày 18/11/2026 nêu trên.
