@@ -159,6 +159,16 @@ allow_assign_grafana_admin = false
 skip_org_role_sync = false
 tls_skip_verify_insecure = false
 
+[snapshots]
+# Snapshots (local or snapshots.raintank.io) are readable by anyone with the link,
+# which would bypass Cognito; the demo shares dashboards only behind login.
+enabled = false
+external_enabled = false
+
+[public_dashboards]
+# Shared (public) dashboards are also readable without login.
+enabled = false
+
 [analytics]
 reporting_enabled = false
 check_for_updates = false
