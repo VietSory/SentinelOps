@@ -80,13 +80,14 @@ def fixture_quarantine(action_id):
 
 def exercise_fixtures(page, base, output, expect):
     token = 'fixture-browser-token-not-a-real-secret'*2
-    outage = {'active':False,'actions':False,'quarantine':False,'explanation':False,
+    outage = {'active':False,'actions':False,'quarantine':False,'explanation':False,'proposals':False,
               'read_scope':False,'expired':False,'identity_provider':False,'model_available':False}
     records = [{'incident_id':'INC-FIXTURE-A','revision':3,'state':'escalated','severity':'high','detected_at':'2026-01-01T00:00:00Z',
         'affected_services':['payment-service','checkout-service']},
         {'incident_id':'INC-FIXTURE-B','revision':1,'state':'incident','severity':'medium','detected_at':'2026-01-01T01:00:00Z',
         'affected_services':['inventory-service']}]
     def reply(route):
+        assert route.request.method == 'GET', 'browser fixtures must not write to the API'
         url = urlsplit(route.request.url); query = parse_qs(url.query)
         if url.path == '/ready':
             ready = outage['model_available'] and not outage['active']
@@ -106,6 +107,10 @@ def exercise_fixtures(page, base, output, expect):
             route.fulfill(status=503,json={'code':'incident_store_unavailable','message':'Unavailable','request_id':'fixture-outage'}); return
         if url.path == '/ready/incidents':
             route.fulfill(json={'status':'ready','component':'incident-store'}); return
+        if url.path == '/v1/runbook-proposals':
+            if outage['proposals']:
+                route.fulfill(status=503,json={'code':'proposal_store_unavailable','request_id':'fixture-proposal-outage'});return
+            route.fulfill(json={'items':[],'has_more':False});return
         if url.path == '/v1/incidents':
             filtered = [row for row in records if (not query.get('state') or row['state']==query['state'][0]) and
                         (not query.get('service') or query['service'][0] in row['affected_services'])]
@@ -132,6 +137,7 @@ def exercise_fixtures(page, base, output, expect):
         route.fulfill(status=404,json={'code':'not_found','message':'Not found','request_id':'fixture-request'})
     page.route('**/ready',reply);page.route('**/ready/incidents',reply)
     page.route('**/v1/incidents**',reply);page.route('**/v1/actions/**',reply)
+    page.route('**/v1/runbook-proposals**',reply)
     page.goto(base+'/ui/',wait_until='networkidle')
     page.locator('#nav-explanation').click()
     expect(page.locator('#notice')).to_contain_text('Connect to your workspace, then choose an incident')
@@ -155,6 +161,9 @@ def exercise_fixtures(page, base, output, expect):
     page.locator('#state-filter').select_option(''); page.get_by_role('button',name='Apply filters').click()
     page.get_by_role('button',name='Open INC-FIXTURE-A, revision 3',exact=True).click()
     expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
+    proposals = page.get_by_test_id('runbook-proposals')
+    expect(proposals).to_contain_text('Không có đề xuất cho revision này.')
+    expect(proposals.get_by_role('alert')).to_have_count(0)
     expect(page.get_by_text('Diagnostic qualification not exposed',exact=True)).to_be_visible()
     page.locator('.reference').click()
     expect(page.locator('.evidence-body p')).to_have_text('<img src=x onerror="window.__evidence_xss=true">')
@@ -172,7 +181,15 @@ def exercise_fixtures(page, base, output, expect):
     expect(page.locator('details[data-evidence-id="fixture-evidence-1"]')).to_have_attribute('open','')
     page.get_by_role('button',name='Explanation',exact=True).click()
     outage['explanation']=True;page.get_by_role('button',name='Reload explanation',exact=True).click()
-    expect(page.locator('#detail-pane [role=alert]')).to_contain_text('Explanation is unavailable')
+    expect(page.locator('#detail-pane .detail-content [role=alert]')).to_contain_text('Explanation is unavailable')
+    # Independent sections can fail together; each assertion must read its own alert.
+    outage['proposals']=True;proposals.get_by_role('button',name='Tải lại đề xuất',exact=True).click()
+    expect(proposals.get_by_role('alert')).to_contain_text('Không đọc được store proposal')
+    expect(page.locator('#detail-pane [role=alert]')).to_have_count(2)
+    expect(page.locator('#detail-pane .detail-content [role=alert]')).to_contain_text('Explanation is unavailable')
+    outage['proposals']=False;proposals.get_by_role('button',name='Tải lại đề xuất',exact=True).click()
+    expect(proposals.get_by_role('alert')).to_have_count(0)
+    expect(proposals).to_contain_text('Không có đề xuất cho revision này.')
     expect(page.locator('.explanation-summary')).to_have_count(0)
     expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
     outage['explanation']=False;page.get_by_role('button',name='Load explanation',exact=True).click()
@@ -193,7 +210,7 @@ def exercise_fixtures(page, base, output, expect):
     expect(page.get_by_text('A released lock does not establish recovery or authorize another dispatch.',exact=False)).to_be_visible()
     assert page.evaluate('window.__quarantine_xss') is None and page.locator('#detail-pane img').count()==0
     outage['quarantine']=True;page.get_by_role('button',name='Reload quarantine status',exact=True).click()
-    expect(page.locator('#detail-pane [role=alert]')).to_contain_text('could not be verified')
+    expect(page.locator('#detail-pane .detail-content [role=alert]')).to_contain_text('could not be verified')
     expect(page.get_by_text('Quarantine released by operator',exact=True)).to_have_count(0)
     outage['quarantine']=False;page.get_by_role('button',name='View quarantine status',exact=True).click()
     expect(page.get_by_text('Quarantine released by operator',exact=True)).to_be_visible()
@@ -201,7 +218,7 @@ def exercise_fixtures(page, base, output, expect):
     expect(page.locator('.evidence-card')).to_have_count(2)
     page.screenshot(path=str(output/'fixture-actions-desktop.png'),full_page=True)
     outage['actions']=True;page.get_by_role('button',name='Reload action history',exact=True).click()
-    expect(page.locator('#detail-pane [role=alert]')).to_contain_text('Action history is unavailable')
+    expect(page.locator('#detail-pane .detail-content [role=alert]')).to_contain_text('Action history is unavailable')
     expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
     outage['actions']=False
     page.locator('#revision-input').fill('1'); page.get_by_role('button',name='View',exact=True).click()
@@ -271,6 +288,7 @@ def exercise_fixtures(page, base, output, expect):
                   'manual-quarantine-receipt-not-recovery','quarantine-outage','quarantine-keyboard-focus','XSS-safe-operator-identity',
                   'explanation-revision-pinning','explanation-fallback','explanation-outage-clears-text',
                   'explanation-reference-navigation','XSS-safe-explanation','explanation-keyboard-focus',
+                  'empty-runbook-proposals','independent-proposal-and-explanation-outages',
                   'protected-session-heartbeat','permission-loss-clears-private-data','expired-token-clears-private-data',
                   'identity-provider-outage-keeps-records-unknown-readiness','configured-model-availability']}
 

@@ -6,11 +6,14 @@ rejects it, so a guard cannot silently stop guarding.
 from __future__ import annotations
 
 import copy
+from io import BytesIO
 import json
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import yaml
 
+from scripts import check_grafana_dashboards as checker
 from scripts.check_grafana_dashboards import (
     DASHBOARDS, GRAFANA, PROJECT, assert_console_is_not_production_auth, assert_legend_present,
     assert_missing_data_is_not_healthy, assert_provisioned_read_only, assert_queries_resolve,
@@ -202,3 +205,42 @@ def test_dashboard_file_is_valid_json_and_uniquely_identified():
         assert document['title']
     datasource = yaml.safe_load((GRAFANA/'provisioning/datasources/prometheus.yaml').read_text())
     assert len(datasource['datasources']) == 1
+
+
+def running_grafana(monkeypatch, query_response=None):
+    boards, evaluated = dashboards(), []
+    by_uid = {board['uid']: board for board in boards.values()}
+    def urlopen(url, timeout):
+        assert timeout == 10
+        parsed = urlsplit(url)
+        if parsed.path == '/api/health':
+            body = {'database': 'ok', 'version': 'fixture'}
+        elif parsed.path.startswith('/api/dashboards/uid/'):
+            body = {'dashboard': by_uid[parsed.path.rsplit('/', 1)[1]], 'meta': {'provisioned': True}}
+        elif parsed.path == '/api/datasources':
+            body = [{'uid': checker.DATASOURCE_UID}]
+        else:
+            assert parsed.path == '/api/datasources/proxy/uid/sentinelops-prometheus/api/v1/query'
+            expression, = parse_qs(parsed.query)['query']
+            assert '$' not in expression, 'the datasource proxy requires interpolated PromQL'
+            evaluated.append(expression)
+            body = query_response or {'status': 'success', 'data': {'resultType': 'vector', 'result': []}}
+        return BytesIO(json.dumps(body).encode())
+    monkeypatch.setattr(checker.urllib.request, 'urlopen', urlopen)
+    return boards, evaluated
+
+
+def test_runtime_verification_interpolates_every_dashboard_query_without_mutating_it(monkeypatch):
+    boards, evaluated = running_grafana(monkeypatch)
+    original = copy.deepcopy(boards)
+    result = checker.verify_running('http://grafana.invalid', boards)
+    assert result['expressions_evaluated_on_prometheus'] == len(evaluated) == 51
+    for metric in ('sentinelops_incident_groups_total', 'sentinelops_rca_abstentions_total'):
+        assert f'sum by (environment) (increase({metric}[3h]))' in evaluated
+    assert boards == original
+
+
+def test_runtime_verification_still_rejects_a_failed_prometheus_evaluation(monkeypatch):
+    boards, _ = running_grafana(monkeypatch, {'status': 'error', 'error': 'invalid PromQL'})
+    with pytest.raises(ValueError, match='failed evaluation'):
+        checker.verify_running('http://grafana.invalid', boards)
