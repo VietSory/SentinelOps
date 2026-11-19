@@ -2,7 +2,7 @@
 
 > **[LIVE] UI đã deploy và phục vụ qua port-forward:** xác minh live ngày **18/11/2026**, `GET /ui/` trả 200, `GET /health` trả `status=ok`, `GET /ui/auth-config` trả `mode=oidc`; `GET /v1/incidents` không token trả 401.
 > **Đăng nhập UI CHƯA hoàn tất:** còn phải đặt mật khẩu permanent và enroll MFA TOTP theo mục 4. **CHƯA có URL public dùng được:** CloudFront vẫn `Enabled=false` (xác minh live ngày 18/11/2026 qua Cognito `admin-get-user`/`describe-user-pool` và CloudFront `get-distribution`).
-> **Policy đang tắt, bấm Duyệt chưa chạy rollback; hiện chưa có incident để hiển thị.** Xác minh live ngày 18/11/2026: `kubectl get deployment remediation-controller` (kiểm args) và `kubectl logs deployment/remediation-controller -c remediation-controller` (poll trả `[]`) với context `sentinelops-demo`, namespace `sentinelops-b-actions`; lệnh đầy đủ ở mục 2 và 5.
+> **Snapshot 18/11, đã lỗi thời: nay policy đang BẬT, xem [mục 2a](#2a-trạng-thái-live-hiện-hành-kiểm-19112026-tối-và-thứ-tự-chạy-trên-dev-833925774773).** 18/11: policy tắt, bấm Duyệt chưa chạy rollback; chưa có incident để hiển thị. Xác minh live ngày 18/11/2026: `kubectl get deployment remediation-controller` (kiểm args) và `kubectl logs deployment/remediation-controller -c remediation-controller` (poll trả `[]`) với context `sentinelops-demo`, namespace `sentinelops-b-actions`; lệnh đầy đủ ở mục 2 và 5.
 
 ## 1. Phạm vi bằng chứng
 
@@ -24,7 +24,7 @@ Các khối lệnh dưới đây dành cho operator kiểm tra/chạy tiếp ở
 ## 2. Checklist ĐIỀU KIỆN TIÊN QUYẾT
 
 - [x] [LIVE] `remediation-controller` cùng sidecar `operator-ui` đã deploy trong `sentinelops-b-actions`, pod 2/2 Running, 0 restart, cùng PVC `remediation-artifacts`. Xác minh live ngày 18/11/2026: `kubectl --context sentinelops-demo -n sentinelops-b-actions get deployment remediation-controller` và `kubectl --context sentinelops-demo -n sentinelops-b-actions get pods -l app=remediation-controller`.
-- [ ] [C] Trước demo rollback, kiểm lại action-runtime/control_action_writer, known-good và policy. [LIVE] Policy hiện **tắt**: args Deployment không có `--policy-enabled`; không dispatch dù có receipt duyệt. Xác minh live ngày 18/11/2026: `kubectl --context sentinelops-demo -n sentinelops-b-actions get deployment remediation-controller -o jsonpath='{.spec.template.spec.containers[?(@.name=="remediation-controller")].args}'`; yêu cầu runtime: `scripts/render_worker_manifests.py:277`, `scripts/run_remediation_controller.py:59`, `scripts/run_remediation_controller.py:51`.
+- [ ] [C] Trước demo rollback, kiểm lại action-runtime/control_action_writer, known-good và policy. [LIVE 18/11, đã lỗi thời; nay policy BẬT, xem mục 2a] Policy khi đó **tắt**: args Deployment không có `--policy-enabled`; không dispatch dù có receipt duyệt. Xác minh live ngày 18/11/2026: `kubectl --context sentinelops-demo -n sentinelops-b-actions get deployment remediation-controller -o jsonpath='{.spec.template.spec.containers[?(@.name=="remediation-controller")].args}'`; yêu cầu runtime: `scripts/render_worker_manifests.py:277`, `scripts/run_remediation_controller.py:59`, `scripts/run_remediation_controller.py:51`.
 - [ ] [B/C] Nạp model/release được review, thỏa H4; không dùng bundle local làm chứng cứ AWS đã sẵn sàng. `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:162`, `src/sentinelops/remediation/authority.py:65`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:17`.
 - [ ] [C] Health stream, environment, policy và artifact-root binding đúng; health/review/change/remediation stores đọc đúng dữ liệu controller, target chứa đúng cluster/namespace/deployment UID. `scripts/run_runbook_demo.py:426`, `scripts/run_runbook_demo.py:433`, `scripts/run_runbook_demo.py:436`.
 - [ ] [C] Payment đang healthy ở known-good; review open/complete đạt `AWAITING_OPERATOR_REVIEW`, owner duyệt known-good **TRƯỚC khi tiêm lỗi**. Không tự gán PASS. `docs/runbooks/CONTROLLED_REMEDIATION.md:76`, `docs/runbooks/CONTROLLED_REMEDIATION.md:118`, `scripts/aws_demo/README.review.md:36`.
@@ -44,26 +44,26 @@ python -m scripts.approve_known_good --review-store "$REVIEW_STORE" \
 
 Căn cứ: `docs/runbooks/CONTROLLED_REMEDIATION.md:118`; ledger kết quả được truyền vào `LEDGER_REF`, không lấy ref minh họa.
 
-## 2a. Trạng thái live 19/11/2026 và thứ tự chạy trên dev 833925774773
+## 2a. Trạng thái live hiện hành (kiểm 19/11/2026 tối) và thứ tự chạy trên dev 833925774773
+
+> **Policy đang BẬT.** Controller live có `--policy-enabled --model-store /models --model-release-ref artifact://manifests/092290ce….json`. Bấm **Duyệt** trên một proposal hợp lệ sẽ để controller **PATCH Payment thật** sau khi kiểm guard. Các ghi chú "policy tắt" ở mục 2 và các mục sau là snapshot 18/11, đã lỗi thời.
 
 Đã có [LIVE 19/11]:
-- Operator `nvtank` đã enroll TOTP: hosted login hỏi mã 6 số. `admin-get-user` vẫn trả `UserMFASettingList` rỗng sau khi enroll qua hosted UI; đó là hành vi của Cognito, không phải lỗi.
-- Secret `remediation-read` (key `action-read-database-url`) do `control.py action-read` tạo. Role `control_action_reader` chỉ SELECT; `ActionReader.check_ready` PASS trong runner.
-- `job/demo-runner` (`scripts/aws_demo/demo-runner.yaml`) Running trên node chứa các PVC RWO. Runner đọc được Deployment Payment bằng cả token payment và observer. Payment ở known-good `application@sha256:e520e702…`.
-- Incident worker tạo incident thật trên luồng health `6028fde7…`, nên UI có dữ liệu để xem.
+- Operator `nvtank` đã enroll TOTP (hosted login hỏi mã 6 số; `admin-get-user` vẫn trả `UserMFASettingList` rỗng sau khi enroll qua hosted UI, đó là hành vi của Cognito).
+- Model `de38fc6b` (release `092290ce…`) trên PVC `model-de38fc6b` (gp2 RWO); incident worker và controller đã chọn release; health epoch mới root `/artifacts/health/e1-model-de38fc6b-20261119`, stream `806d288a…` ([EPOCH_MIGRATION_2026-11-19.md](../delivery/EPOCH_MIGRATION_2026-11-19.md)).
+- Secret `remediation-read` (key `action-read-database-url`) do `control.py action-read` tạo; role `control_action_reader` chỉ SELECT.
+- Incident worker tạo incident thật; 8 incident đều `recovered` lúc kiểm. Hai proposal B7 đã **hết hạn** (`approval-expired` → `escalated`) vì không ai duyệt trong 15 phút; bảng `sentinel_remediation.dispatches` có 0 dòng, tức **chưa có rollback nào chạy trên EKS**.
 - Grafana chỉ đăng nhập qua Cognito OAuth, đi qua CloudFront.
 
 Còn thiếu:
-- **Model release** (B giữ store `alibaba-de38fc6b-20261114`): chưa có thì controller không tạo proposal dispatch được.
-- **RBAC `demo-fault`** cho lượt failed-verify: cần quyền ClusterAdmin. Namespace AdminPolicy bị RBAC escalation check chặn. Xem `scripts/aws_demo/demo-fault-rbac.yaml`.
+- **Một lượt duyệt trọn vòng:** tạo regression có receipt, operator canh UI và **Approve trong 15 phút** kể từ lúc proposal được tạo; freshness evidence 900 giây.
+- **RBAC `demo-fault`** cho lượt failed-verify: cần ClusterAdmin; namespace AdminPolicy bị RBAC escalation check chặn. Xem `scripts/aws_demo/demo-fault-rbac.yaml`.
 
-Thứ tự sau khi có release, mỗi bước ghi AWS/kubectl đều qua hai lượt review:
-1. `scripts/aws_demo/MODELWIRE.md`, đường A local với `--storage-class gp2 --access-mode ReadWriteOnce --colocate-with remediation-controller`, đẩy archive bằng `kubectl exec -i`. Chờ đến khi có `MODELWIRE_PVC_VERIFIED`.
-2. Tạo health epoch mới (`modelwire epoch --health-only`), lấy stream `COMMITTED` mới.
-3. Render workers với `--model-claim model-de38fc6b --model-release-ref <ref> --policy-enabled --demo-ui` và stream mới. Chạy `kubectl diff`, rồi apply bản đã review.
-4. Cập nhật `HEALTH_STREAM` của runner theo stream mới: tạo lại Job, tạo lại RBAC `demo-fault` theo UID Job mới.
-5. Tập dượt bằng `kubectl exec job/demo-runner` theo lệnh ở đầu `demo-runner.yaml`: 3 lượt duyệt trên UI, `--reject-run`, `--kill-switch-run`, `--failed-verify-run --fault-token-file /tmp/fault-token`.
-6. Xoá `job/demo-runner` và `configmap/demo-runner-script`; RBAC `demo-fault` tự xoá theo owner.
+Thứ tự một buổi tập dượt bằng runner, mỗi bước ghi AWS/kubectl đều qua hai lượt review:
+1. Tạo runner theo lệnh ở đầu `scripts/aws_demo/demo-runner.yaml`: stream lấy từ ConfigMap `sentinelops-workers-runtime`, root lấy từ `--source-store` của controller, nên runner luôn khớp epoch hiện hành.
+2. Nếu chạy failed-verify: người có ClusterAdmin tạo RBAC `demo-fault` theo UID của Job vừa tạo.
+3. Tập dượt bằng `kubectl exec job/demo-runner`: 3 lượt duyệt trên UI, `--reject-run`, `--kill-switch-run`, `--failed-verify-run --fault-token-file /tmp/fault-token`. Driver PATCH image regression trước khi chờ proposal và không tự khôi phục khi hết thời gian: nếu một lượt dừng giữa chừng, khôi phục image known-good theo quy trình review trước lượt kế.
+4. Dọn: xoá `job/demo-runner` và `configmap/demo-runner-script` (RBAC `demo-fault` tự xoá theo owner), chạy `control.py disable-read` rồi xoá `secret/remediation-read`.
 
 ## 3. Dùng UI đã deploy; chỉ render lại khi cần
 
@@ -80,7 +80,7 @@ kubectl --context sentinelops-demo -n sentinelops-b-actions rollout status deplo
 
 Nếu cần render lại, lấy binding đã review từ ConfigMap hiện có hoặc `GET /ui/auth-config` sau port-forward: `ISSUER`, `JWKS_URL`, `UI_CLIENT_ID`, `LOGIN_DOMAIN` lần lượt là `.issuer`, `.jwks_url`, `.client_id`, `.domain`; pool ID là segment cuối issuer. Không cần in Secret để lấy cấu hình login. Căn cứ: `src/sentinelops/api.py:169`, `scripts/render_api_manifests.py:72`.
 
-Phần render/apply sau **chỉ dùng khi cần triển khai lại** [B/C], dùng `CONTROL_IMAGE` ghim digest đã kiểm ở trên và các binding hiện hành. Giữ policy tắt như bản live; chỉ thêm `--policy-enabled` sau khi review đủ điều kiện demo rollback ở mục 2 (`scripts/render_worker_manifests.py:294`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:142`):
+Phần render/apply sau **chỉ dùng khi cần triển khai lại** [B/C], dùng `CONTROL_IMAGE` ghim digest đã kiểm ở trên và các binding hiện hành. Bản live hiện đã bật policy (mục 2a); khi render lại phải giữ `--policy-enabled` cùng model claim/release, nếu bỏ sẽ tắt policy trên live. Chỉ bỏ cờ khi chủ đích dừng rollback (`scripts/render_worker_manifests.py:294`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:142`):
 
 ```sh
 python scripts/render_api_manifests.py --image "$CONTROL_IMAGE" \
@@ -181,7 +181,7 @@ Căn cứ: `scripts/aws_demo/EDGE.md:167`, `scripts/aws_demo/README.ui.md:68`, `
 ## 5. Kịch bản chính — traffic → lỗi → proposal → Duyệt → xác nhận
 
 **Trạng thái hiện tại [LIVE]:** UI chưa có incident để hiển thị; log controller poll trả `[]` (xác minh live ngày 18/11/2026: `kubectl --context sentinelops-demo -n sentinelops-b-actions logs deployment/remediation-controller -c remediation-controller`). Sau khi đăng nhập, danh sách sẽ rỗng cho tới khi có incident thật; chưa thể chọn incident/proposal để demo. `GET /v1/incidents` không token chỉ trả 401, không phải bằng chứng đã đọc danh sách (live cùng ngày; endpoint đọc: `src/sentinelops/api.py:447`).
-**Chặn rollback [LIVE]:** policy vẫn tắt như mục 2; bấm **Duyệt** chỉ có thể ghi receipt, **chưa chạy rollback**. Kịch bản thực thi và hai kịch bản phụ chỉ chạy sau khi review đủ prerequisite và bật policy tường minh; không coi hướng dẫn dưới đây là kết quả live (`scripts/run_remediation_controller.py:51`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:142`, `scripts/aws_demo/README.ui.md:14`).
+**Rollback [LIVE 19/11]:** policy đang **bật** (mục 2a); bấm **Duyệt** trên proposal hợp lệ sẽ để controller PATCH Payment thật sau khi kiểm guard. Chưa có lượt nào chạy trọn trên EKS. Kịch bản thực thi và hai kịch bản phụ chỉ chạy sau khi review đủ prerequisite và bật policy tường minh; không coi hướng dẫn dưới đây là kết quả live (`scripts/run_remediation_controller.py:51`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:142`, `scripts/aws_demo/README.ui.md:14`).
 
 **Luật hiện hành [C]:** mọi `low/medium/high/critical` đều cần operator duyệt. Proposal oncall cần executable, đủ evidence, score ≥ `max(0.80,catalog)` và margin ≥ `max(0.15,catalog)`; còn lại engineer, không auto.
 Không dùng mô tả LOW tự chạy/v2 cũ trong báo cáo triển khai. Căn cứ: `docs/design/AUTO_RUNBOOK_INTERFACE.md:9`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:14`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:23`, `docs/delivery/AWS_DEPLOY_REPORT_2026-11-18.md:33`.
@@ -233,7 +233,7 @@ Driver mở baseline deployment-change, dry-run PATCH rồi PATCH image regressi
 Căn cứ nhãn/hành vi: `src/sentinelops/ui/assets/app.js:550`, `src/sentinelops/ui/assets/app.js:569`, `src/sentinelops/ui/assets/app.js:587`, `src/sentinelops/ui/assets/app.js:606`.
 **Điểm chặn đã biết:** nếu producer chưa xuất đủ image digest, UI có thể chỉ đọc/từ chối, approve trả `409 proposal_review_incomplete`. Phải xác minh proposal đủ digest; không điền từ browser (`scripts/aws_demo/README.ui.md:114`).
 
-4. Nhập **Lý do quyết định**, bấm **Duyệt** một lần. API chỉ ghi receipt; **chỉ khi policy đã bật và đủ guard**, tick controller sau mới claim approval một lần, kiểm guard và PATCH rollback known-good. Bản live hiện tắt policy như mục 2.
+4. Nhập **Lý do quyết định**, bấm **Duyệt** một lần. API chỉ ghi receipt; **chỉ khi policy đã bật và đủ guard**, tick controller sau mới claim approval một lần, kiểm guard và PATCH rollback known-good. Bản live hiện **bật** policy (mục 2a), nên Duyệt là thao tác có hiệu lực thật.
 5. Chỉ xác nhận thành công sau `recovered` + `telemetry_verified`, Payment ready ở known-good, dispatch tăng đúng 1 và 3 bucket Payment eligible/clear sau action; deadline verify 600 giây.
 Căn cứ: `docs/design/AUTO_RUNBOOK_INTERFACE.md:131`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:172`, `scripts/run_runbook_demo.py:236`, `docs/runbooks/CONTROLLED_REMEDIATION.md:215`.
 
@@ -295,7 +295,7 @@ kubectl --context sentinelops-demo -n sentinelops-b-actions exec deploy/remediat
   --reason 'Đã kiểm tra bằng chứng và runbook' --confirm-oncall-approval
 ```
 
-Đổi `approve` thành `reject` nếu từ chối. CLI chỉ ghi receipt, không bỏ qua thiếu image/H4/guard hay policy đang tắt của bản live (mục 2).
+Đổi `approve` thành `reject` nếu từ chối. CLI chỉ ghi receipt, không bỏ qua thiếu image/H4/guard. Bản live đang bật policy (mục 2a), nên receipt approve hợp lệ sẽ dẫn tới PATCH thật.
 Căn cứ: `scripts/run_runbook_demo.py:69`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:169`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:171`.
 
 ## 9. Xác nhận và dọn sau demo

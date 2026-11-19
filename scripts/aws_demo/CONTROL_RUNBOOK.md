@@ -338,13 +338,16 @@ metrics trong phạm vi observability/budget đã review; không tự bật bằ
 ## 7. Thu hồi và cleanup — chạy cả khi destroy bị chặn
 
 Dừng các consumer trước (chỉ các Deployment đã triển khai), gồm action/trial nếu
-đang chạy, sau đó revoke cả hai login:
+đang chạy, sau đó revoke cả ba login (`control_writer`, `control_action_writer`, `control_action_reader`):
 
 ```bash
 kubectl --context "$CONTEXT" -n "$NS" scale deployment/sentinelops-health-worker deployment/sentinelops-incident-worker --replicas=0
 python3.11 scripts/aws_demo/control.py disable "${COMMON[@]}" \
   --master-secret-arn "$MASTER_ARN" --execute
-kubectl --context "$CONTEXT" -n "$NS" delete secret control-runtime remediation-runtime --ignore-not-found
+kubectl --context "$CONTEXT" -n "$NS" delete secret control-runtime remediation-runtime remediation-read --ignore-not-found
+# Chỉ thu hồi reader sau một buổi demo (giữ worker/controller chạy):
+#   control.py disable-read "${COMMON[@]}" --master-secret-arn "$MASTER_ARN" --execute
+#   kubectl --context "$CONTEXT" -n "$NS" delete secret remediation-read
 # Nếu đã tạo bản cho API ở §5, dừng trial/API rồi xóa bản đó:
 kubectl --context "$CONTEXT" -n sentinelops delete secret control-runtime --ignore-not-found
 
@@ -354,8 +357,9 @@ kubectl --context "$CONTEXT" -n sentinelops delete secret control-runtime --igno
 aws --region "$REGION" secretsmanager delete-secret --secret-id "$RUNTIME_ARN" --recovery-window-in-days 7
 ```
 
-Job `disable` chạy `ALTER ROLE ... NOLOGIN PASSWORD NULL` cho **control_writer và
-control_action_writer**, rồi `pg_terminate_backend` cho mọi session của cả hai.
+Job `disable` chạy `ALTER ROLE ... NOLOGIN PASSWORD NULL` cho **control_writer,
+control_action_writer và control_action_reader**, rồi `pg_terminate_backend` cho mọi
+session của cả ba. `disable-read` chỉ làm việc đó cho `control_action_reader`.
 Các bước NOLOGIN/PASSWORD NULL được commit trước bước terminate, để lỗi ngắt
 session không rollback việc khóa login. Nếu master không có quyền
 ngắt một session, Job fail: operator có quyền RDS phù hợp phải xác nhận không còn

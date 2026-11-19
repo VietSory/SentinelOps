@@ -9,20 +9,33 @@
 #   $K create configmap demo-runner-script \
 #     --from-file=run_runbook_demo.py=scripts/run_runbook_demo.py   # the image ships no driver
 #
-#   $K create -f scripts/aws_demo/demo-runner.yaml     # create, never apply: refuse a stale runner
+#   # Bind the runner to the controller's CURRENT health epoch: the stream comes from the
+#   # workers' runtime ConfigMap and the artifact root from the controller's --source-store.
+#   # A stale epoch would PATCH the regression image while the incident worker ignores its
+#   # receipts (the join requires the same health_stream_id).
+#   arg() { $K get deploy remediation-controller -o json | python3 -c 'import json, sys
+#   a = json.load(sys.stdin)["spec"]["template"]["spec"]["containers"][0]["args"]; print(a[a.index(sys.argv[1]) + 1])' "$1"; }
+#   ROOT=$(arg --source-store); case "$ROOT" in /artifacts/health*) ;; *) echo "bad root"; false;; esac
+#   STREAM=$(arg --health-stream)
+#   test "$STREAM" = "$($K get configmap sentinelops-workers-runtime -o jsonpath='{.data.SENTINELOPS_HEALTH_STREAM}')"
+#   sed "s#__HEALTH_ROOT__#$ROOT#" scripts/aws_demo/demo-runner.yaml |
+#     $K create -f -     # create, never apply: refuse a stale runner
 #   $K wait --for=condition=Ready pod -l job-name=demo-runner --timeout=300s
 #   $K exec -it job/demo-runner -- sh -c '
+#     case "$HEALTH_ROOT" in /artifacts/health*) ;; *) echo "runner not bound to a health root"; exit 1;; esac
 #     python /opt/demo/run_runbook_demo.py \
 #       --regression-image 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/application@sha256:766dd5f5a32eba9950c4854451f6f6891483d82df735ac93c7046597af7584e0 \
 #       --server https://kubernetes.default.svc --environment dev \
 #       --health-stream "$HEALTH_STREAM" --ledger-ref "$SENTINELOPS_KNOWN_GOOD_LEDGER_REF" \
 #       --approved-by "$SENTINELOPS_KNOWN_GOOD_APPROVED_BY" \
-#       --source-store /artifacts/health --review-store /artifacts/review --store /artifacts/remediation \
+#       --source-store "$HEALTH_ROOT" --review-store /artifacts/review --store /artifacts/remediation \
 #       --deployment-change-store /artifacts/deployment-changes --target /etc/sentinelops/remediation/target.json \
 #       --token-file /credentials/payment/token --ca-file /credentials/payment/ca.crt \
 #       --observer-token-file /credentials/observer/token --observer-ca-file /credentials/observer/ca.crt \
 #       --kill-switch /artifacts/remediation/KILL_SWITCH --output /tmp/runs'
 #   $K delete job/demo-runner configmap/demo-runner-script   # right after the demo
+#   python scripts/aws_demo/control.py disable-read --context <reviewed> ...   # revoke the reader login
+#   $K delete secret/remediation-read                                          # and its DSN
 #
 # Demo-only limits:
 # - --failed-verify-run also needs --fault-token-file; see demo-fault-rbac.yaml.
@@ -121,7 +134,10 @@ spec:
             memory: 512Mi
         env:
         - name: HEALTH_STREAM
-          value: 6028fde726c16b94bd0d5df07e4ae5cc2baa69cc5aec763a08359750f01aecaf
+          valueFrom:
+            configMapKeyRef: {name: sentinelops-workers-runtime, key: SENTINELOPS_HEALTH_STREAM}
+        - name: HEALTH_ROOT
+          value: __HEALTH_ROOT__
         - name: SENTINELOPS_ENV
           value: dev
         - name: SENTINELOPS_KUBERNETES_REMOTE_SERVER
