@@ -18,7 +18,17 @@ MIGRATIONS = (
     "004-incident-consumer.sql", "005-remediation.sql", "006-quarantine-review.sql",
 )
 EXPIRES = datetime(2026, 11, 25, tzinfo=timezone.utc)
-RUNTIME_ROLES = {"runtime": "control_writer", "action-runtime": "control_action_writer"}
+RUNTIME_ROLES = {"runtime": "control_writer", "action-runtime": "control_action_writer",
+                 "action-read": "control_action_reader"}
+# The AWS demo driver (scripts/run_runbook_demo.py) reads incidents and the health ledger with a
+# SELECT-only login; 005 granted the reader only sentinel_remediation. Idempotent, owner-scoped.
+READER_GRANTS = (
+    "GRANT USAGE ON SCHEMA sentinel_control TO control_action_reader",
+    "GRANT SELECT ON sentinel_control.incidents, sentinel_control.incident_versions, "
+    "sentinel_control.health_streams, sentinel_control.health_batches, sentinel_control.health_signals "
+    "TO control_action_reader",
+)
+DEMO_LOGINS = tuple(RUNTIME_ROLES.values())
 
 
 def role_attributes_sql(role):
@@ -38,6 +48,31 @@ def runtime_privileges_sql(role):
             AND NOT pg_has_role(current_user,'control_owner','MEMBER')
             AND NOT pg_has_role(current_user,'control_action_writer','MEMBER')
             AND NOT pg_has_role(current_user,'control_action_resolver','MEMBER')
+            AND NOT has_database_privilege(current_user,current_database(),'CREATE')"""
+    if role == "control_action_reader":
+        # Mirrors ActionReader.check_ready: no write, owner or quarantine-release capability.
+        return """SELECT current_user='control_action_reader'
+            AND NOT EXISTS (
+                SELECT FROM (VALUES ('sentinel_control.incidents'),('sentinel_control.incident_versions'),
+                    ('sentinel_control.health_streams'),('sentinel_control.health_batches'),
+                    ('sentinel_control.health_signals'),('sentinel_remediation.intents'),
+                    ('sentinel_remediation.states'),('sentinel_remediation.events'),
+                    ('sentinel_remediation.targets'),('sentinel_remediation.dispatches')) AS t(name)
+                WHERE NOT has_table_privilege(current_user,name,'SELECT'))
+            AND NOT EXISTS (
+                SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname IN ('sentinel_control','sentinel_remediation') AND c.relkind IN ('r','p','v')
+                  AND (has_table_privilege(current_user,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES')
+                       OR has_any_column_privilege(current_user,c.oid,'INSERT,UPDATE,REFERENCES')))
+            AND NOT EXISTS (
+                SELECT FROM pg_namespace WHERE has_schema_privilege(current_user,oid,'CREATE'))
+            AND NOT pg_has_role(current_user,'control_owner','MEMBER')
+            AND NOT pg_has_role(current_user,'control_writer','MEMBER')
+            AND NOT pg_has_role(current_user,'control_action_writer','MEMBER')
+            AND NOT pg_has_role(current_user,'control_action_resolver','MEMBER')
+            AND NOT coalesce(has_function_privilege(current_user,
+                to_regprocedure('sentinel_remediation.release_quarantine(text,integer,text,text,text,jsonb)'),
+                'EXECUTE'),false)
             AND NOT has_database_privilege(current_user,current_database(),'CREATE')"""
     if role != "control_action_writer":
         raise ValueError("unsupported runtime role")
@@ -85,12 +120,14 @@ def runtime_login_sql(role, password):
             "VALID UNTIL '2026-11-25 00:00:00+00'")
 
 
-def disable_statements():
-    # Revoke BOTH logins before terminating sessions, including failure recovery.
-    return ("ALTER ROLE control_writer NOLOGIN PASSWORD NULL",
-            "ALTER ROLE control_action_writer NOLOGIN PASSWORD NULL",
+def disable_statements(roles=DEMO_LOGINS):
+    # Revoke every selected login before terminating sessions, including failure recovery.
+    if not roles or not set(roles) <= set(DEMO_LOGINS):
+        raise ValueError("unsupported runtime role")
+    names = ",".join(f"'{role}'" for role in roles)
+    return (*(f"ALTER ROLE {role} NOLOGIN PASSWORD NULL" for role in roles),
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE usename IN ('control_writer','control_action_writer') AND pid<>pg_backend_pid()")
+            f"WHERE usename IN ({names}) AND pid<>pg_backend_pid()")
 
 
 def scram_verifier(password: str, salt: bytes | None = None) -> str:
@@ -142,7 +179,7 @@ async def verify_schema(conn):
 async def run(action: str):
     import asyncpg
 
-    if action not in ("bootstrap", *RUNTIME_ROLES, "disable"):
+    if action not in ("bootstrap", *RUNTIME_ROLES, "disable", "disable-read"):
         raise ValueError("unsupported action")
     master = json.loads(Path("/run/control/master.json").read_text())
     if master["username"] != "control_bootstrap" or not master["password"]:
@@ -178,6 +215,14 @@ async def run(action: str):
             # role with those defaults off; verify them instead of re-asserting them.
             if not await conn.fetchval(role_attributes_sql(role)):
                 raise RuntimeError("runtime role carries an elevated attribute")
+            if role == "control_action_reader":
+                # 001 leaves the master with SET-only owner membership; grants run as the owner.
+                await conn.execute("SET ROLE control_owner")
+                try:
+                    for statement in READER_GRANTS:
+                        await conn.execute(statement)
+                finally:
+                    await conn.execute("RESET ROLE")
             await conn.execute(runtime_login_sql(role, password))
             # Authenticate using the new password, verify the real TLS session and privilege boundary.
             runtime = await asyncpg.connect(user=role, password=password, **options)
@@ -187,11 +232,17 @@ async def run(action: str):
                     raise RuntimeError("runtime privilege verification failed")
             finally:
                 await runtime.close()
+        elif action == "disable-read":
+            # A failed action-read must not revoke the live worker/controller logins.
+            for statement in disable_statements(("control_action_reader",)):
+                await conn.execute(statement)
+            if await conn.fetchval("SELECT count(*) FROM pg_stat_activity WHERE usename='control_action_reader'"):
+                raise RuntimeError("reader sessions remain; operator must verify termination")
         else:
             for statement in disable_statements():
                 await conn.execute(statement)
-            if await conn.fetchval("SELECT count(*) FROM pg_stat_activity "
-                                   "WHERE usename IN ('control_writer','control_action_writer')"):
+            if await conn.fetchval("SELECT count(*) FROM pg_stat_activity WHERE usename = ANY($1::text[])",
+                                   list(DEMO_LOGINS)):
                 raise RuntimeError("runtime sessions remain; operator must verify termination")
         print(json.dumps({"action": action, "status": "PASS"}), flush=True)
     finally:
