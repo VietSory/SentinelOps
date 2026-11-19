@@ -148,7 +148,9 @@ printf '%s  %s\n' "$BUNDLE_SHA" "$BUNDLE" | sha256sum --check --strict
 python -m scripts.aws_demo.modelwire render --source local \
   --image "$IMAGE" --expected-sha256 "$BUNDLE_SHA" --release-ref "$REF" \
   --claim "$CLAIM" --name "$JOB" --storage-class "$MODEL_STORAGE_CLASS" \
+  --access-mode ReadWriteOnce --colocate-with remediation-controller \
   --output artifacts/aws-demo/modelwire-local.yaml
+# Bỏ hai cờ RWO chỉ khi MODEL_STORAGE_CLASS là EFS/RWX đã review; dev 833 dùng gp2.
 kubectl -n "$NS" apply -f artifacts/aws-demo/modelwire-local.yaml
 kubectl -n "$NS" get pods -l "job-name=$JOB"
 # Khi Job controller đã tạo pod, lấy tên và chờ Ready:
