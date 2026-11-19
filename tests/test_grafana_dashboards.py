@@ -236,7 +236,7 @@ def test_runtime_verification_interpolates_every_dashboard_query_without_mutatin
     result = checker.verify_running('http://grafana.invalid', boards)
     assert result['expressions_evaluated_on_prometheus'] == len(evaluated) == 51
     for metric in ('sentinelops_incident_groups_total', 'sentinelops_rca_abstentions_total'):
-        assert f'sum by (environment) (increase({metric}[3h]))' in evaluated
+        assert f'sum by (environment) (increase({metric}[1h]))' in evaluated
     assert boards == original
 
 

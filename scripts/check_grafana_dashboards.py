@@ -251,10 +251,11 @@ def verify_running(base_url: str, all_dashboards: dict[str, dict]) -> dict:
     evaluated = 0
     for name, dashboard in all_dashboards.items():
         for panel, expression in queries(dashboard):
-            # The datasource proxy bypasses Grafana's frontend interpolation.
-            # Use a representative 3h window to validate range-dependent queries.
-            concrete = (expression.replace('$environment', 'local').replace('$job', '.*')
-                        .replace('$__range', '3h'))
+            concrete = expression.replace('$environment', 'local').replace('$job', '.*')
+            # Grafana substitutes its built-in range variables before querying; use
+            # fixed stand-ins so the expression itself is what gets validated.
+            for variable, value in (('$__rate_interval', '1m'), ('$__interval', '1m'), ('$__range', '1h')):
+                concrete = concrete.replace(variable, value)
             encoded = urllib.parse.quote(concrete, safe='')
             path = '/api/datasources/proxy/uid/'+DATASOURCE_UID+'/api/v1/query?query='+encoded
             try:

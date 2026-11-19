@@ -107,10 +107,6 @@ def exercise_fixtures(page, base, output, expect):
             route.fulfill(status=503,json={'code':'incident_store_unavailable','message':'Unavailable','request_id':'fixture-outage'}); return
         if url.path == '/ready/incidents':
             route.fulfill(json={'status':'ready','component':'incident-store'}); return
-        if url.path == '/v1/runbook-proposals':
-            if outage['proposals']:
-                route.fulfill(status=503,json={'code':'proposal_store_unavailable','request_id':'fixture-proposal-outage'});return
-            route.fulfill(json={'items':[],'has_more':False});return
         if url.path == '/v1/incidents':
             filtered = [row for row in records if (not query.get('state') or row['state']==query['state'][0]) and
                         (not query.get('service') or query['service'][0] in row['affected_services'])]
@@ -129,6 +125,13 @@ def exercise_fixtures(page, base, output, expect):
             if outage['actions']:
                 route.fulfill(status=503,json={'code':'action_store_unavailable','request_id':'fixture-action-outage'}); return
             route.fulfill(json=fixture_actions(url.path.split('/')[-2],int(query['revision'][0]),query.get('cursor',[None])[0])); return
+        if url.path == '/v1/runbook-proposals':
+            # Without this the proposals panel reached the real test server and,
+            # depending on timing, added a second alert inside #detail-pane.
+            assert route.request.method == 'GET' and query.get('incident_id')
+            if outage['proposals']:
+                route.fulfill(status=503,json={'code':'proposal_store_unavailable','request_id':'fixture-proposal-outage'});return
+            route.fulfill(json={'items':[],'has_more':False});return
         if url.path.endswith('/quarantine'):
             assert route.request.method=='GET'
             if outage['quarantine']:
