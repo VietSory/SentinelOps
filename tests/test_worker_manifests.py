@@ -705,3 +705,16 @@ def test_nonlocal_v2_kubernetes_capture_and_replay_bind_environment_and_original
         finally:
             await source.close()
     asyncio.run(run())
+
+
+def test_every_database_container_trusts_the_rds_ca_for_asyncpg():
+    # asyncpg verify-full reads PGSSLROOTCERT, not SSL_CERT_FILE; live workers,
+    # controller and UI sidecar all needed it, so a re-render must not drop it.
+    for documents in (worker.render(IMAGE, **PARAMETERS), worker.render(IMAGE, **PARAMETERS, demo_ui=True)):
+        for doc in documents:
+            if doc['kind'] != 'Deployment':
+                continue
+            for container in doc['spec']['template']['spec']['containers']:
+                env = {e['name']: e.get('value') for e in container.get('env', [])}
+                if 'SSL_CERT_FILE' in env:
+                    assert env.get('PGSSLROOTCERT') == env['SSL_CERT_FILE'], (doc['metadata']['name'], container['name'])

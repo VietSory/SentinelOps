@@ -236,7 +236,9 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                         'envFrom': [{'configMapRef': {'name': CONFIG}}], 'env': [
                             {'name': 'CONTROL_DATABASE_URL', 'valueFrom': {'secretKeyRef': {
                                 'name': 'control-runtime', 'key': 'database-url', 'optional': False}}},
-                            {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'}],
+                            {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
+                            # asyncpg verify-full reads the root CA from here, not SSL_CERT_FILE.
+                            {'name': 'PGSSLROOTCERT', 'value': '/etc/sentinelops/tls/ca-bundle.crt'}],
                         'securityContext': dict(hardening), 'volumeMounts': mounts,
                         'resources': {'requests': {'cpu': '100m', 'memory': '256Mi'},
                                       'limits': {'cpu': '1', 'memory': '1Gi'}}}], 'volumes': volumes}}}})
@@ -350,6 +352,7 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
             {'name': 'SENTINELOPS_ENABLE_DEMO', 'value': 'false'},
             {'name': 'SENTINELOPS_RUNBOOK_PROPOSAL_STORE', 'value': '/artifacts/remediation'},
             {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
+            {'name': 'PGSSLROOTCERT', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
             *[{'name': variable, 'valueFrom': {'secretKeyRef': {'name': secret, 'key': key,
                                                             'optional': False}}}
               for variable, secret, key in (
