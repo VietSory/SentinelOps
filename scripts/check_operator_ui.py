@@ -124,6 +124,11 @@ def exercise_fixtures(page, base, output, expect):
             if outage['actions']:
                 route.fulfill(status=503,json={'code':'action_store_unavailable','request_id':'fixture-action-outage'}); return
             route.fulfill(json=fixture_actions(url.path.split('/')[-2],int(query['revision'][0]),query.get('cursor',[None])[0])); return
+        if url.path == '/v1/runbook-proposals':
+            # Without this the proposals panel reached the real test server and,
+            # depending on timing, added a second alert inside #detail-pane.
+            assert route.request.method == 'GET' and query.get('incident_id')
+            route.fulfill(json={'items':[],'has_more':False});return
         if url.path.endswith('/quarantine'):
             assert route.request.method=='GET'
             if outage['quarantine']:
@@ -131,7 +136,7 @@ def exercise_fixtures(page, base, output, expect):
             route.fulfill(json=fixture_quarantine(url.path.split('/')[-2]));return
         route.fulfill(status=404,json={'code':'not_found','message':'Not found','request_id':'fixture-request'})
     page.route('**/ready',reply);page.route('**/ready/incidents',reply)
-    page.route('**/v1/incidents**',reply);page.route('**/v1/actions/**',reply)
+    page.route('**/v1/incidents**',reply);page.route('**/v1/actions/**',reply);page.route('**/v1/runbook-proposals**',reply)
     page.goto(base+'/ui/',wait_until='networkidle')
     page.locator('#nav-explanation').click()
     expect(page.locator('#notice')).to_contain_text('Connect to your workspace, then choose an incident')
