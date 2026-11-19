@@ -3,9 +3,9 @@
 Áp dụng cho branch `feat/grafana-incident-dashboard`, EKS `sentinelops-dev`, context `sentinelops-demo`, namespace `sentinelops-b-actions`. Mốc lịch sử bên dưới là **UTC ngày 19/11/2026**; giờ Việt Nam = UTC + 7. Các lệnh dành cho người vận hành chạy trong buổi demo; việc viết runbook không phải một lượt kiểm chứng live mới.
 
 > **QUAN TRỌNG NHẤT — NGƯỜI BẤM DUYỆT PHẢI ĐỨNG SẴN.**
-> RCA freshness cố định **180 giây, tính từ `RCA.as_of`**, và được kiểm lại **lúc executor thực thi**. Cửa sổ thao tác chỉ khoảng 180 giây, thường **còn ít hơn khi proposal hiện ra**. **TTL proposal 15 phút KHÔNG phải cửa sổ thực thi 15 phút.** Đăng nhập/MFA, đọc quy trình và chuẩn bị CLI trước khi bơm lỗi; khi proposal mới xuất hiện, kiểm đúng bằng chứng rồi duyệt ngay. Không dành thời gian này để thuyết trình Jaeger hoặc thiết lập MFA.
+> Owner chọn freshness **900 giây cho policy mới để operator có đủ thời gian phản ứng**; RCA freshness tính từ `RCA.as_of` và được kiểm lại **lúc executor thực thi**. Policy 180 giây giữ để đọc action lịch sử. Cửa sổ thao tác thường **còn ít hơn 900 giây khi proposal hiện ra**. **TTL proposal 15 phút không bảo đảm đủ 15 phút để thực thi từ lúc UI xuất hiện.** Đăng nhập/MFA, đọc quy trình và chuẩn bị CLI trước khi bơm lỗi; khi proposal mới xuất hiện, kiểm đúng bằng chứng rồi duyệt ngay. Không dành thời gian này để thuyết trình Jaeger hoặc thiết lập MFA.
 >
-> Hạn thực tế bị chặn bởi cả `RCA.as_of + 180 giây` và `proposal.expires_at`; phải chừa thời gian cho controller poll/execute. Countdown proposal hoặc thời gian giữ lỗi của B9 không kéo dài freshness. Quá hạn có thể nhận `approval-after-evidence-freshness` dù UI vừa ghi nhận approval thành công. Không sửa timestamp/receipt để thử lại.
+> Với policy mới, hạn thực tế bị chặn bởi `RCA.as_of + 900 giây`, tuổi health/Deployment observation và `proposal.expires_at`; phải chừa thời gian cho controller poll/execute. Countdown proposal hoặc thời gian giữ lỗi của B9 không kéo dài freshness. Quá hạn có thể nhận `approval-after-evidence-freshness` dù UI vừa ghi nhận approval thành công. Không sửa timestamp/receipt để thử lại.
 
 ## 1. Chuẩn bị trước khi khán giả vào
 
@@ -211,7 +211,7 @@ Theo nhịp mục 2; B7 đã đo latency breach sau PATCH khoảng 2 phút 47 gi
 3. Kiểm tuổi RCA như dưới; nhập **Lý do quyết định**: “Đã kiểm tra incident/revision, bằng chứng triển khai và hai image; đồng ý rollback về known-good”. Bấm **Duyệt một lần ngay khi kiểm xong**. Nếu nút khóa hoặc guard chặn, đọc lý do; không chỉnh evidence để mở nút.
 4. Theo dõi controller/action. Nếu trình duyệt mất phản hồi sau click, kiểm receipt/action trước khi chuyển sang CLI để tránh ghi quyết định lần hai.
 
-Đọc `as_of` từ **`result_ref`** do runner vừa in (ref thuộc store incident). Chép ref vào biến, không lấy `created_at` của proposal làm thay thế:
+Với controller chạy policy mới 900 giây, đọc `as_of` từ **`result_ref`** do runner vừa in (ref thuộc store incident). Chép ref vào biến, không lấy `created_at` của proposal làm thay thế:
 
 ```bash
 printf 'result_ref RCA cua luot moi: '
@@ -222,14 +222,14 @@ from datetime import datetime, timezone, timedelta
 from sentinelops.telemetry.store import ArtifactStore
 rca = ArtifactStore("/artifacts/incidents").read(sys.argv[1])
 as_of = datetime.fromisoformat(rca["as_of"].replace("Z", "+00:00"))
-deadline = as_of + timedelta(seconds=180)
+deadline = as_of + timedelta(seconds=900)
 print("RCA.as_of:", rca["as_of"])
 print("Han freshness UTC:", deadline.isoformat())
 print("Con lai (giay):", round((deadline - datetime.now(timezone.utc)).total_seconds(), 1))
 ' "$RCA_REF"
 ```
 
-**Không đợi gần hết 180 giây mới bấm**: controller còn cần poll và kiểm lại lúc execute. Nếu đã hết hạn, không duyệt proposal cũ dù còn TTL; kết thúc lượt, khôi phục rồi tạo incident/evidence/proposal mới bằng lượt mới. Tải lại UI không tự làm RCA mới hơn.
+**Không đợi gần hết 900 giây mới bấm**: controller còn cần poll và kiểm lại lúc execute. Nếu đã hết hạn, không duyệt proposal cũ dù còn TTL; kết thúc lượt, khôi phục rồi tạo incident/evidence/proposal mới bằng lượt mới. Tải lại UI không tự làm RCA mới hơn.
 
 Nếu sau khoảng 8 phút chưa có incident/proposal, giữ nguyên hiện trạng để đọc log thay vì bơm thêm lỗi:
 
@@ -291,7 +291,7 @@ Response v3 có thể là NDJSON/OTLP (`result.resourceSpans`), không phải c�
 
 ## 5. Dự phòng: không đăng nhập được thì on-call duyệt bằng CLI
 
-Chọn CLI **trước T0** nếu login/MFA không hoạt động, để không mất cửa sổ 180 giây. CLI cần quyền `kubectl exec` của operator, ghi receipt vào **đúng store controller**; không cần lấy bearer token Cognito. Người duyệt vẫn phải đọc proposal/bằng chứng và nhận trách nhiệm quyết định.
+Chọn CLI **trước T0** nếu login/MFA không hoạt động, để không mất cửa sổ freshness 900 giây của policy mới. CLI cần quyền `kubectl exec` của operator, ghi receipt vào **đúng store controller**; không cần lấy bearer token Cognito. Người duyệt vẫn phải đọc proposal/bằng chứng và nhận trách nhiệm quyết định.
 
 Chuẩn bị danh tính trước lượt:
 
@@ -301,7 +301,7 @@ read -r ONCALL
 test -n "$ONCALL"
 ```
 
-Khi runner in proposal mới, nhập ID, đọc proposal và hạn TTL; dùng `result_ref`/lệnh mục 3 để kiểm **RCA.as_of + 180 giây**:
+Khi runner in proposal mới, nhập ID, đọc proposal và hạn TTL; dùng `result_ref`/lệnh mục 3 để kiểm **RCA.as_of + 900 giây** với policy mới:
 
 ```bash
 printf 'Proposal ID cua luot moi: '
@@ -324,7 +324,7 @@ k exec deployment/remediation-controller -c remediation-controller -- \
   --confirm-oncall-approval
 ```
 
-Kết quả `runbook_approval`/`approval_ref` chứng minh đã ghi quyết định, **chưa chứng minh rollback**. CLI không bỏ qua policy, H4, target/revision hay freshness. Nếu quá 180 giây, có thể vẫn ghi receipt trong TTL 15 phút nhưng execute bị chặn. Không chạy lệnh lần hai khi mất reply; kiểm các slot đã ghi:
+Kết quả `runbook_approval`/`approval_ref` chứng minh đã ghi quyết định, **chưa chứng minh rollback**. CLI không bỏ qua policy, H4, target/revision hay freshness. Nếu RCA/health/Deployment observation quá 900 giây với policy mới, có thể vẫn ghi receipt trong TTL 15 phút nhưng execute bị chặn. Không chạy lệnh lần hai khi mất reply; kiểm các slot đã ghi:
 
 ```bash
 k exec deployment/remediation-controller -c remediation-controller -- python -c '

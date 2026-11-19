@@ -288,7 +288,7 @@ sequenceDiagram
     C->>S: Claim used bền vững trước execute
     C->>E: Request đúng incident và revision
     E->>E: Policy enabled, kill switch off, authorize approval
-    E->>H: H4: model, physical change, current health, RCA mới không quá 180 giây
+    E->>H: H4: model, physical change, current health, RCA không quá 900 giây với policy mới
     H-->>E: Authority và approved known-good trước bad change
     E->>K: Observe UID, image digest, generation, scope
     E->>K: PATCH dry-run
@@ -323,7 +323,7 @@ kubectl --context sentinelops-demo -n sentinelops-b-actions exec deployment/reme
   --confirm-oncall-approval
 ```
 
-Đổi `approve` thành `reject` để từ chối. Receipt create-only gắn ID/hash toàn proposal, chỉ dùng một lần; không sửa reject thành approve. TTL proposal **15 phút không gia hạn RCA 180 giây**: duyệt muộn vẫn bị chặn (`approval-after-evidence-freshness`). Restart không tái sử dụng claim approval; có thể mất lượt chạy nếu crash giữa claim và execute, cần engineer. Bật kill switch sau PATCH không đảo mutation đã gửi; verifier tiếp tục reconcile bằng policy gốc.
+Đổi `approve` thành `reject` để từ chối. Receipt create-only gắn ID/hash toàn proposal, chỉ dùng một lần; không sửa reject thành approve. TTL proposal **15 phút tính từ lúc tạo proposal**, còn freshness **900 giây với policy mới tính từ RCA/health/Deployment observation**: duyệt muộn vẫn bị chặn (`approval-after-evidence-freshness`). Policy 180 giây giữ để đọc action lịch sử. Restart không tái sử dụng claim approval; có thể mất lượt chạy nếu crash giữa claim và execute, cần engineer. Bật kill switch sau PATCH không đảo mutation đã gửi; verifier tiếp tục reconcile bằng policy gốc.
 
 ## 8. Known-good: review Job → evidence → approve Job → ledger
 

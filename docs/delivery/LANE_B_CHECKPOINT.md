@@ -306,7 +306,7 @@ thay đổi xấu. Vì vậy G6 cần một trình tự riêng trên target bề
 2. Ghi ít nhất ba bucket healthy gắn nguồn.
 3. Lập hồ sơ image tốt bằng `review_payment_image.py`, operator duyệt known-good.
 4. Bật policy, sau đó mới deploy image xấu và ghi change (`open-change` / `complete-change`).
-5. Executor dùng `NativeH4Authority` trên đúng incident đó, trong thời hạn freshness 180 giây.
+5. Executor dùng `NativeH4Authority` trên đúng incident đó, trong thời hạn freshness 900 giây với policy mới; 180 giây được giữ để đọc action lịch sử.
 6. Rollback, verify bằng telemetry, hoặc escalate.
 
 `scripts/run_g6_trial.py` chạy đúng trình tự này trên **một** sandbox được giữ sống

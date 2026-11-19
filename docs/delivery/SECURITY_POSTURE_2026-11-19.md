@@ -96,6 +96,8 @@ Những phát hiện bổ sung của s5 cần giữ trong kế hoạch xử lý:
 
 Controller còn giới hạn một replica Payment, `maxSurge=0`, không HPA; dữ liệu RCA/health phải tươi tối đa 180 giây, change window 600 giây, cooldown 600 giây, xác minh tối đa 600 giây và quarantine khi không rõ kết quả. Có khóa target và giới hạn một dispatch/incident-target. Đây là kiểm soát thực thi, không bảo đảm không gián đoạn: thay pod Payment duy nhất có thể ảnh hưởng Payment/Checkout. Các giới hạn cố định đối chiếu tại `src/sentinelops/remediation/domain.py:72`.
 
+Cập nhật source sau đánh giá này: owner chọn freshness mặc định 900 giây cho policy mới để operator có đủ thời gian phản ứng; giữ 180 giây để đọc action lịch sử. Khoảng bất định receipt deployment change vẫn 180 giây. Thay đổi source này chưa được apply lên cụm; mô tả 180 giây phía trên là mốc của đánh giá.
+
 ## 6. Khuyến nghị theo thứ tự ưu tiên
 
 Các mục dưới đây là việc cần làm, không phải thay đổi đã triển khai.

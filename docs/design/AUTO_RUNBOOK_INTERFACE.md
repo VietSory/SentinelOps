@@ -14,7 +14,7 @@ Quy tắc chủ repo cập nhật ngày **2026-11-18**. Đây là hợp đồng 
 - Mọi incident ở mọi severity đều phải được operator duyệt trước khi chạy runbook. Severity dùng để hiển thị và xếp ưu tiên; không chặn proposal, không cộng điểm hay mở quyền thực thi. Khớp thấp hoặc runbook không chạy được chỉ hiển thị bước làm tay cho engineer.
 - `decide()` không bao giờ trả `auto`. Điểm dưới 0.80, margin dưới 0.15 hoặc runbook thủ công đều đi `engineer`.
 - Tên khóa catalog `auto_min_score/auto_min_margin` được giữ để tương thích; chỉ có thể siết ngưỡng, không hạ sàn 0.80/0.15. `oncall_min_score` là khóa tương thích cũ, không mở đường chạy.
-- Approval không bỏ qua guard nào: executor vẫn kiểm H4, known-good, dry-run, 1 attempt, cooldown, kill switch và RCA ≤ 180 giây.
+- Approval không bỏ qua guard nào: executor vẫn kiểm H4, known-good, dry-run, 1 attempt, cooldown, kill switch và RCA ≤ 900 giây với policy mới (180 giây vẫn hợp lệ khi đọc action lịch sử).
 
 ## 2. Triệu chứng — `incident-symptoms/v1` (lane `match` sở hữu)
 
@@ -173,7 +173,7 @@ kubectl -n sentinelops-b-actions exec deploy/remediation-controller -- \
 - Chỉ approval `approve` đúng ID/hash, thời điểm hợp lệ, chưa dùng mới được xét. Hook kiểm lại ngay trước PATCH thật: incident revision không đổi và quyết định tính lại vẫn khớp toàn bộ proposal, bao gồm severity. Controller lấy severity cao nhất giữa kết quả đã verify, incident hiện tại và health snapshot mới nhất; severity tăng làm proposal cũ không còn khớp và bị chặn trước PATCH. Kill switch và các guard executor vẫn áp dụng ở mọi severity.
 - Trước dispatch và trong hook ngay trước PATCH thật, controller đọc lại Deployment và resolve lại known-good ledger. Target/UID, `current_image`, `rollback_image` hoặc ledger reference khác proposal, hay ledger không còn verify được, đều chặn và ghi escalation `approval-target-changed`. Ledger mới có cùng rollback digest vẫn làm approval cũ hết hiệu lực. Hook còn đối chiếu các trường này với `intent.evidence.before` và `intent.evidence.known_good` của executor: ledger đổi rồi trở về giá trị cũ vẫn bị chặn nếu executor đã chuẩn bị theo ledger khác. Không sửa proposal/receipt để khớp target mới.
 - Reject ghi escalation `approval-rejected`; quá hạn ghi `phase=escalated`, `reason=approval-expired`. Revision/severity/decision thay đổi đều bị chặn. Outcome/log escalation được ghi riêng, không sửa proposal/approval hay lịch sử action terminal.
-- TTL proposal 15 phút không kéo dài độ mới RCA. Executor vẫn chặn bằng chứng quá 180 giây; controller ghi escalation `approval-after-evidence-freshness` liên kết action bị chặn, giữ nguyên reason gốc trong action journal.
+- Owner chọn freshness 900 giây cho policy mới để operator có đủ thời gian phản ứng; validator giữ 180 giây để đọc action lịch sử với policy/hash gốc. TTL proposal 15 phút tính từ lúc tạo proposal, còn freshness tính từ RCA/health/Deployment observation; vì vậy TTL chưa hết vẫn có thể bị chặn. Executor chặn bằng chứng quá ngưỡng policy; controller ghi escalation `approval-after-evidence-freshness` liên kết action bị chặn, giữ nguyên reason gốc trong action journal. Khoảng bất định receipt deployment change vẫn tối đa 180 giây.
 
 ## 6. EKS (lane `eksctl`)
 
