@@ -1,0 +1,60 @@
+# Fault credential for run_runbook_demo.py --failed-verify-run on AWS dev.
+# The driver reads Payment pods and toggles /internal/faults through the pods/proxy
+# subresource; nothing else. pods/proxy cannot be narrowed by resourceNames because the
+# known-good pod name changes on every rollout, so the grant is namespace-wide and the
+# credential is short-lived and deleted after the demo.
+#
+# All three objects are owned by job/demo-runner (demo-runner.yaml), so they are garbage-
+# collected with it: on delete, or when the Job hits its 4h deadline and its TTL expires.
+# That deletes the ServiceAccount, which invalidates every token minted for it.
+#
+# Needs an identity allowed to create Roles/RoleBindings (the Edit access policy is not);
+# create the runner Job first, then substitute its UID:
+#   UID=$($K get job/demo-runner -o jsonpath='{.metadata.uid}'); test -n "$UID"
+#   $K get sa/demo-fault role/demo-fault rolebinding/demo-fault --ignore-not-found  # must print nothing
+#   sed "s/__RUNNER_JOB_UID__/$UID/" scripts/aws_demo/demo-fault-rbac.yaml | kubectl --context <admin> -n sentinelops-b-actions create -f -
+# Then a namespace editor mints a token at demo time and streams it into the runner
+# (regular 0600 file owned by UID 10001, never on disk locally):
+#   kubectl --context <reviewed> -n sentinelops-b-actions create token demo-fault --duration=4h |
+#     kubectl --context <reviewed> -n sentinelops-b-actions exec -i job/demo-runner -- \
+#       python -c 'import os,sys; os.umask(0o077); open("/tmp/fault-token","w").write(sys.stdin.read().strip())'
+#   ... run_runbook_demo.py ... --failed-verify-run --fault-token-file /tmp/fault-token
+# Remove right after the demo (cascades to these objects):
+#   $K delete job/demo-runner
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: demo-fault
+  namespace: sentinelops-b-actions
+  labels: {app.kubernetes.io/part-of: sentinelops, sentinelops.io/demo-only: "true"}
+  ownerReferences:
+  - {apiVersion: batch/v1, kind: Job, name: demo-runner, uid: __RUNNER_JOB_UID__}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: demo-fault
+  namespace: sentinelops-b-actions
+  labels: {app.kubernetes.io/part-of: sentinelops, sentinelops.io/demo-only: "true"}
+  ownerReferences:
+  - {apiVersion: batch/v1, kind: Job, name: demo-runner, uid: __RUNNER_JOB_UID__}
+rules:
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [list]
+- apiGroups: [""]
+  resources: [pods/proxy]
+  verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: demo-fault
+  namespace: sentinelops-b-actions
+  labels: {app.kubernetes.io/part-of: sentinelops, sentinelops.io/demo-only: "true"}
+  ownerReferences:
+  - {apiVersion: batch/v1, kind: Job, name: demo-runner, uid: __RUNNER_JOB_UID__}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: demo-fault}
+subjects:
+- {kind: ServiceAccount, name: demo-fault, namespace: sentinelops-b-actions}

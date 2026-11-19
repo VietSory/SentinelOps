@@ -1,16 +1,17 @@
-# Idle pod for scripts/run_runbook_demo.py on AWS dev (namespace sentinelops-b-actions).
+# Idle Job pod for scripts/run_runbook_demo.py on AWS dev (namespace sentinelops-b-actions).
 # The driver needs the controller's stores, which live on RWO volumes on one node, so the
 # pod is pinned there and every round is a `kubectl exec`. Nothing runs until exec'd.
 #
 # Every command names the reviewed context; K="kubectl --context <reviewed> -n sentinelops-b-actions".
 # Prerequisites (once):
 #   python scripts/aws_demo/control.py action-read --context <reviewed> ...   # Secret remediation-read
-#   $K get configmap demo-runner-script pod/demo-runner --ignore-not-found   # must print nothing
+#   $K get configmap/demo-runner-script job/demo-runner --ignore-not-found   # must print nothing
 #   $K create configmap demo-runner-script \
 #     --from-file=run_runbook_demo.py=scripts/run_runbook_demo.py   # the image ships no driver
 #
 #   $K create -f scripts/aws_demo/demo-runner.yaml     # create, never apply: refuse a stale runner
-#   $K exec -it pod/demo-runner -- sh -c '
+#   $K wait --for=condition=Ready pod -l job-name=demo-runner --timeout=300s
+#   $K exec -it job/demo-runner -- sh -c '
 #     python /opt/demo/run_runbook_demo.py \
 #       --regression-image 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/application@sha256:766dd5f5a32eba9950c4854451f6f6891483d82df735ac93c7046597af7584e0 \
 #       --server https://kubernetes.default.svc --environment dev \
@@ -21,110 +22,202 @@
 #       --token-file /credentials/payment/token --ca-file /credentials/payment/ca.crt \
 #       --observer-token-file /credentials/observer/token --observer-ca-file /credentials/observer/ca.crt \
 #       --kill-switch /artifacts/remediation/KILL_SWITCH --output /tmp/runs'
-#   $K delete pod/demo-runner configmap/demo-runner-script   # right after the demo
+#   $K delete job/demo-runner configmap/demo-runner-script   # right after the demo
 #
 # Demo-only limits:
-# - --failed-verify-run also needs --fault-token-file (GET pods, GET/POST pods/proxy).
-#   No such credential exists yet; creating its Role needs RBAC rights the edit policy lacks.
+# - --failed-verify-run also needs --fault-token-file; see demo-fault-rbac.yaml.
+# - A Job, not a bare Pod: it fails at the 4h deadline and the TTL controller deletes it,
+#   cascading to its pod and to the demo-fault RBAC that names it as owner.
 # - The Payment PATCH credential is the controller's payment-rollback service account
-#   (get/patch on deployment payment-service only). The pod exits after 4 hours; delete it
+#   (get/patch on deployment payment-service only). The Job ends after 4 hours; delete it
 #   as soon as the demo ends, since anyone allowed to exec can use both tokens.
-apiVersion: v1
-kind: Pod
+apiVersion: batch/v1
+kind: Job
 metadata:
   name: demo-runner
   namespace: sentinelops-b-actions
-  labels: {app: demo-runner, app.kubernetes.io/part-of: sentinelops}
+  labels:
+    app: demo-runner
+    app.kubernetes.io/part-of: sentinelops
 spec:
-  serviceAccountName: payment-rollback
-  automountServiceAccountToken: false
-  restartPolicy: Never
+  backoffLimit: 0
   activeDeadlineSeconds: 14400
-  # The artifact volumes are RWO EBS in ap-southeast-1b, attached to the controller's node.
-  affinity:
-    podAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-      - labelSelector: {matchLabels: {app: remediation-controller}}
-        topologyKey: kubernetes.io/hostname
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 10001
-    runAsGroup: 10001
-    fsGroup: 10001
-    seccompProfile: {type: RuntimeDefault}
-  # The Kubernetes client requires regular, UID-owned 0600 token files (no projected symlinks),
-  # so copy them into a memory emptyDir exactly like the controller does.
-  initContainers:
-  - name: private-credentials
-    image: 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:bb40c73ad3c17e585e36f6e49d99f491371e971b3f730ee9d0d341de949a4859
-    command: [python, -c, "import os, shutil, sys; from pathlib import Path; os.umask(0o077); [(Path(sys.argv[1], d).mkdir(exist_ok=True), shutil.copyfile(Path(sys.argv[2], d, f), Path(sys.argv[1], d, f))) for d in ('payment', 'observer') for f in ('token', 'ca.crt')]"]
-    args: [/credentials, /source]
-    securityContext:
-      allowPrivilegeEscalation: false
-      capabilities: {drop: [ALL]}
-      readOnlyRootFilesystem: true
-    resources:
-      requests: {cpu: 10m, memory: 32Mi}
-      limits: {cpu: 100m, memory: 64Mi}
-    volumeMounts:
-    - {name: credentials, mountPath: /credentials}
-    - {name: payment-token, mountPath: /source/payment, readOnly: true}
-    - {name: observer-token, mountPath: /source/observer, readOnly: true}
-  containers:
-  - name: runner
-    image: 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:bb40c73ad3c17e585e36f6e49d99f491371e971b3f730ee9d0d341de949a4859
-    command: [sleep, '14400']
-    securityContext:
-      allowPrivilegeEscalation: false
-      capabilities: {drop: [ALL]}
-      readOnlyRootFilesystem: true
-    resources:
-      requests: {cpu: 50m, memory: 128Mi}
-      limits: {cpu: 500m, memory: 512Mi}
-    env:
-    - {name: HEALTH_STREAM, value: 6028fde726c16b94bd0d5df07e4ae5cc2baa69cc5aec763a08359750f01aecaf}
-    - {name: SENTINELOPS_ENV, value: dev}
-    - {name: SENTINELOPS_KUBERNETES_REMOTE_SERVER, value: 'https://kubernetes.default.svc'}
-    - {name: SSL_CERT_FILE, value: /etc/sentinelops/tls/ca-bundle.crt}
-    - {name: PGSSLROOTCERT, value: /etc/sentinelops/tls/ca-bundle.crt}
-    - name: SENTINELOPS_ACTION_READ_DATABASE_URL
-      valueFrom: {secretKeyRef: {name: remediation-read, key: action-read-database-url}}
-    - name: SENTINELOPS_KNOWN_GOOD_LEDGER_REF
-      valueFrom: {secretKeyRef: {name: remediation-runtime, key: known-good-ledger-ref}}
-    - name: SENTINELOPS_KNOWN_GOOD_APPROVED_BY
-      valueFrom: {secretKeyRef: {name: remediation-runtime, key: approved-by}}
-    volumeMounts:
-    - {name: tmp, mountPath: /tmp}
-    - {name: credentials, mountPath: /credentials, readOnly: true}
-    - {name: driver, mountPath: /opt/demo, readOnly: true}
-    - {name: target, mountPath: /etc/sentinelops/remediation, readOnly: true}
-    - {name: database-ca, mountPath: /etc/sentinelops/tls, readOnly: true}
-    - {name: health-artifacts, mountPath: /artifacts/health, readOnly: true}
-    - {name: review-artifacts, mountPath: /artifacts/review, readOnly: true}
-    # Read-write: the driver records the regression change evidence the incident worker reads,
-    # and --approve-as rehearsal approvals plus the shared kill switch live in remediation.
-    - {name: deployment-change-artifacts, mountPath: /artifacts/deployment-changes}
-    - {name: remediation-artifacts, mountPath: /artifacts/remediation}
-  volumes:
-  - name: tmp
-    emptyDir: {sizeLimit: 256Mi}
-  - name: credentials
-    emptyDir: {medium: Memory, sizeLimit: 128Ki}
-  - name: payment-token
-    projected:
-      defaultMode: 0440
-      sources:
-      - serviceAccountToken: {path: token, expirationSeconds: 14400}
-      - configMap: {name: kube-root-ca.crt, items: [{key: ca.crt, path: ca.crt}]}
-  - name: observer-token
-    secret: {secretName: incident-observer-credentials, defaultMode: 0440, items: [{key: token, path: token}, {key: ca.crt, path: ca.crt}]}
-  - name: driver
-    configMap: {name: demo-runner-script}
-  - name: target
-    configMap: {name: sentinelops-remediation-kubernetes}
-  - name: database-ca
-    configMap: {name: control-rds-ca}
-  - {name: health-artifacts, persistentVolumeClaim: {claimName: health-artifacts, readOnly: true}}
-  - {name: review-artifacts, persistentVolumeClaim: {claimName: review-artifacts, readOnly: true}}
-  - {name: deployment-change-artifacts, persistentVolumeClaim: {claimName: deployment-change-artifacts}}
-  - {name: remediation-artifacts, persistentVolumeClaim: {claimName: remediation-artifacts}}
+  ttlSecondsAfterFinished: 0
+  template:
+    metadata:
+      labels:
+        app: demo-runner
+        app.kubernetes.io/part-of: sentinelops
+    spec:
+      serviceAccountName: payment-rollback
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: remediation-controller
+            topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: private-credentials
+        image: 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:bb40c73ad3c17e585e36f6e49d99f491371e971b3f730ee9d0d341de949a4859
+        command:
+        - python
+        - -c
+        - import os, shutil, sys; from pathlib import Path; os.umask(0o077); [(Path(sys.argv[1], d).mkdir(exist_ok=True), shutil.copyfile(Path(sys.argv[2], d, f), Path(sys.argv[1], d, f))) for d in ('payment',
+          'observer') for f in ('token', 'ca.crt')]
+        args:
+        - /credentials
+        - /source
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        volumeMounts:
+        - name: credentials
+          mountPath: /credentials
+        - name: payment-token
+          mountPath: /source/payment
+          readOnly: true
+        - name: observer-token
+          mountPath: /source/observer
+          readOnly: true
+      containers:
+      - name: runner
+        image: 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:bb40c73ad3c17e585e36f6e49d99f491371e971b3f730ee9d0d341de949a4859
+        command:
+        - sleep
+        - '14400'
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        env:
+        - name: HEALTH_STREAM
+          value: 6028fde726c16b94bd0d5df07e4ae5cc2baa69cc5aec763a08359750f01aecaf
+        - name: SENTINELOPS_ENV
+          value: dev
+        - name: SENTINELOPS_KUBERNETES_REMOTE_SERVER
+          value: https://kubernetes.default.svc
+        - name: SSL_CERT_FILE
+          value: /etc/sentinelops/tls/ca-bundle.crt
+        - name: PGSSLROOTCERT
+          value: /etc/sentinelops/tls/ca-bundle.crt
+        - name: SENTINELOPS_ACTION_READ_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: remediation-read
+              key: action-read-database-url
+        - name: SENTINELOPS_KNOWN_GOOD_LEDGER_REF
+          valueFrom:
+            secretKeyRef:
+              name: remediation-runtime
+              key: known-good-ledger-ref
+        - name: SENTINELOPS_KNOWN_GOOD_APPROVED_BY
+          valueFrom:
+            secretKeyRef:
+              name: remediation-runtime
+              key: approved-by
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: credentials
+          mountPath: /credentials
+          readOnly: true
+        - name: driver
+          mountPath: /opt/demo
+          readOnly: true
+        - name: target
+          mountPath: /etc/sentinelops/remediation
+          readOnly: true
+        - name: database-ca
+          mountPath: /etc/sentinelops/tls
+          readOnly: true
+        - name: health-artifacts
+          mountPath: /artifacts/health
+          readOnly: true
+        - name: review-artifacts
+          mountPath: /artifacts/review
+          readOnly: true
+        - name: deployment-change-artifacts
+          mountPath: /artifacts/deployment-changes
+        - name: remediation-artifacts
+          mountPath: /artifacts/remediation
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 256Mi
+      - name: credentials
+        emptyDir:
+          medium: Memory
+          sizeLimit: 128Ki
+      - name: payment-token
+        projected:
+          defaultMode: 288
+          sources:
+          - serviceAccountToken:
+              path: token
+              expirationSeconds: 14400
+          - configMap:
+              name: kube-root-ca.crt
+              items:
+              - key: ca.crt
+                path: ca.crt
+      - name: observer-token
+        secret:
+          secretName: incident-observer-credentials
+          defaultMode: 288
+          items:
+          - key: token
+            path: token
+          - key: ca.crt
+            path: ca.crt
+      - name: driver
+        configMap:
+          name: demo-runner-script
+      - name: target
+        configMap:
+          name: sentinelops-remediation-kubernetes
+      - name: database-ca
+        configMap:
+          name: control-rds-ca
+      - name: health-artifacts
+        persistentVolumeClaim:
+          claimName: health-artifacts
+          readOnly: true
+      - name: review-artifacts
+        persistentVolumeClaim:
+          claimName: review-artifacts
+          readOnly: true
+      - name: deployment-change-artifacts
+        persistentVolumeClaim:
+          claimName: deployment-change-artifacts
+      - name: remediation-artifacts
+        persistentVolumeClaim:
+          claimName: remediation-artifacts
