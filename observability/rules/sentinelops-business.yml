@@ -114,3 +114,25 @@ groups:
 
       - record: sentinelops:slo_error_breach
         expr: (sentinelops:http_error_ratio:ratio5m >= 0) > bool 0.05
+
+      # Per-service status for dashboards: 1 = any known breach, 0 = both indicators
+      # observed and within threshold, 2 = under 0.5 req/s (about 30 requests/min,
+      # the health policy minimum). Absent = unknown: one indicator healthy and the
+      # other missing must not read as healthy. Freshness comes from the breach
+      # inputs (p95 and ratio5m require telemetry younger than 2m); the low-traffic
+      # branch requires fresh counters too, so stale data is absent, never 0 or 2.
+      - record: sentinelops:slo_status
+        expr: |
+          (
+            (
+              max by (service) ({__name__=~"sentinelops:slo_latency_breach|sentinelops:slo_error_breach"} == 1)
+              or on (service)
+              (sentinelops:slo_latency_breach == 0 and on (service) sentinelops:slo_error_breach == 0)
+            )
+            and on (service) (sentinelops:http_request_rate:rate1m >= 0.5)
+          )
+          or on (service)
+          (
+            2 + 0 * (sentinelops:http_request_rate:rate1m < 0.5)
+            and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)
+          )
