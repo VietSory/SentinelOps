@@ -25,7 +25,7 @@
       "id": 1,
       "type": "stat",
       "title": "checkout-service — trạng thái SLO",
-      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách.",
+      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách. Counter hoặc histogram không còn cập nhật trong 2 phút: CHƯA RÕ.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -39,7 +39,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(clamp_max(sentinelops:slo_latency_breach{service=\"checkout-service\"} + on (service) sentinelops:slo_error_breach{service=\"checkout-service\"}, 1) and on (service) (sentinelops:http_request_rate:rate1m{service=\"checkout-service\"} >= 0.5)) or on (service) (2 + 0 * (sentinelops:http_request_rate:rate1m{service=\"checkout-service\"} < 0.5))",
+          "expr": "((clamp_max(sentinelops:slo_latency_breach{service=\"checkout-service\"} + on (service) sentinelops:slo_error_breach{service=\"checkout-service\"}, 1) and on (service) (sentinelops:http_request_rate:rate1m{service=\"checkout-service\"} >= 0.5)) or on (service) (2 + 0 * (sentinelops:http_request_rate:rate1m{service=\"checkout-service\"} < 0.5))) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"checkout-service\"} < 120) and on (service) (sentinelops:http_latency_telemetry_age_seconds{service=\"checkout-service\"} < 120)",
           "instant": true,
           "range": false,
           "legendFormat": "checkout-service"
@@ -145,7 +145,7 @@
       "id": 2,
       "type": "stat",
       "title": "payment-service — trạng thái SLO",
-      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách.",
+      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách. Counter hoặc histogram không còn cập nhật trong 2 phút: CHƯA RÕ.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -159,7 +159,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(clamp_max(sentinelops:slo_latency_breach{service=\"payment-service\"} + on (service) sentinelops:slo_error_breach{service=\"payment-service\"}, 1) and on (service) (sentinelops:http_request_rate:rate1m{service=\"payment-service\"} >= 0.5)) or on (service) (2 + 0 * (sentinelops:http_request_rate:rate1m{service=\"payment-service\"} < 0.5))",
+          "expr": "((clamp_max(sentinelops:slo_latency_breach{service=\"payment-service\"} + on (service) sentinelops:slo_error_breach{service=\"payment-service\"}, 1) and on (service) (sentinelops:http_request_rate:rate1m{service=\"payment-service\"} >= 0.5)) or on (service) (2 + 0 * (sentinelops:http_request_rate:rate1m{service=\"payment-service\"} < 0.5))) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"payment-service\"} < 120) and on (service) (sentinelops:http_latency_telemetry_age_seconds{service=\"payment-service\"} < 120)",
           "instant": true,
           "range": false,
           "legendFormat": "payment-service"
@@ -265,7 +265,7 @@
       "id": 3,
       "type": "stat",
       "title": "inventory-service — trạng thái SLO",
-      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách.",
+      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách. Counter hoặc histogram không còn cập nhật trong 2 phút: CHƯA RÕ.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -279,7 +279,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "(clamp_max(sentinelops:slo_latency_breach{service=\"inventory-service\"} + on (service) sentinelops:slo_error_breach{service=\"inventory-service\"}, 1) and on (service) (sentinelops:http_request_rate:rate1m{service=\"inventory-service\"} >= 0.5)) or on (service) (2 + 0 * (sentinelops:http_request_rate:rate1m{service=\"inventory-service\"} < 0.5))",
+          "expr": "((clamp_max(sentinelops:slo_latency_breach{service=\"inventory-service\"} + on (service) sentinelops:slo_error_breach{service=\"inventory-service\"}, 1) and on (service) (sentinelops:http_request_rate:rate1m{service=\"inventory-service\"} >= 0.5)) or on (service) (2 + 0 * (sentinelops:http_request_rate:rate1m{service=\"inventory-service\"} < 0.5))) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"inventory-service\"} < 120) and on (service) (sentinelops:http_latency_telemetry_age_seconds{service=\"inventory-service\"} < 120)",
           "instant": true,
           "range": false,
           "legendFormat": "inventory-service"
@@ -385,7 +385,7 @@
       "id": 4,
       "type": "timeseries",
       "title": "Độ trễ p95 theo dịch vụ — ngưỡng 750 ms",
-      "description": "Recording rule đã có đơn vị mili giây, không nhân 1.000. P95 trên cửa sổ 5 phút; đường đỏ ở 750 ms. Khoảng trống là thiếu dữ liệu. Đọc cùng lưu lượng vì mẫu ít có thể làm p95 dao động.",
+      "description": "Recording rule đã có đơn vị mili giây, không nhân 1.000. P95 trên cửa sổ 5 phút; đường đỏ ở 750 ms. Khoảng trống là thiếu dữ liệu. Đọc cùng lưu lượng vì mẫu ít có thể làm p95 dao động. Telemetry không còn cập nhật trong 2 phút được để trống.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -399,7 +399,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sentinelops:http_latency_p95_ms{service=~\"checkout-service|payment-service|inventory-service\"}",
+          "expr": "sentinelops:http_latency_p95_ms{service=~\"checkout-service|payment-service|inventory-service\"} and on (service) (sentinelops:http_latency_telemetry_age_seconds < 120)",
           "range": true,
           "instant": false,
           "legendFormat": "{{service}}"
@@ -509,7 +509,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Tỷ lệ lỗi 5xx theo dịch vụ — ngưỡng 5%",
-      "description": "Tỷ lệ 5xx / tổng request trên cửa sổ 5 phút. Giá trị rule 0,05 hiển thị thành 5%; đường đỏ ở 5%. Không có request không được suy diễn thành 0% lỗi.",
+      "description": "Tỷ lệ 5xx / tổng request trên cửa sổ 5 phút. Giá trị rule 0,05 hiển thị thành 5%; đường đỏ ở 5%. Không có request không được suy diễn thành 0% lỗi. Telemetry không còn cập nhật trong 2 phút được để trống.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -523,7 +523,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sentinelops:http_error_ratio:ratio5m{service=~\"checkout-service|payment-service|inventory-service\"}",
+          "expr": "sentinelops:http_error_ratio:ratio5m{service=~\"checkout-service|payment-service|inventory-service\"} and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)",
           "range": true,
           "instant": false,
           "legendFormat": "{{service}}"

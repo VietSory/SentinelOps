@@ -55,7 +55,7 @@
       "id": 2,
       "type": "gauge",
       "title": "checkout-service — Success Rate · SLO ≥ 99,5%",
-      "description": "Tỷ lệ request không trả 5xx trong 5 phút, gộp các route và replica theo service. Đỏ < 99,5%; vàng từ 99,5% đến dưới 99,7% (gần ngưỡng); xanh ≥ 99,7%. 4xx được tính là thành công theo định nghĩa recording rule. Không có request hoặc thiếu series: CHƯA CÓ DỮ LIỆU.",
+      "description": "Tỷ lệ request không trả 5xx trong 5 phút, gộp các route và replica theo service. Đỏ < 99,5%; vàng từ 99,5% đến dưới 99,7% (gần ngưỡng); xanh ≥ 99,7%. 4xx được tính là thành công theo định nghĩa recording rule. Không có request hoặc thiếu series: CHƯA CÓ DỮ LIỆU. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -73,7 +73,7 @@
             "type": "prometheus",
             "uid": "sentinelops-prometheus"
           },
-          "expr": "sentinelops:http_success_ratio:ratio5m{service=\"checkout-service\"}",
+          "expr": "(sentinelops:http_success_ratio:ratio5m{service=\"checkout-service\"}) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"checkout-service\"} < 120)",
           "legendFormat": "checkout-service · success 5 phút",
           "instant": true,
           "range": false,
@@ -154,7 +154,7 @@
       "id": 3,
       "type": "gauge",
       "title": "checkout-service — p95 · SLO < 1000 ms",
-      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0.",
+      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -172,7 +172,7 @@
             "type": "prometheus",
             "uid": "sentinelops-prometheus"
           },
-          "expr": "(sentinelops:http_latency_p95_ms{service=\"checkout-service\"} >= 0)",
+          "expr": "((sentinelops:http_latency_p95_ms{service=\"checkout-service\"} >= 0)) and on (service) (sentinelops:http_latency_telemetry_age_seconds{service=\"checkout-service\"} < 120)",
           "legendFormat": "checkout-service · p95 5 phút",
           "instant": true,
           "range": false,
@@ -253,7 +253,7 @@
       "id": 4,
       "type": "gauge",
       "title": "payment-service — Success Rate · SLO ≥ 99,5%",
-      "description": "Tỷ lệ request không trả 5xx trong 5 phút, gộp các route và replica theo service. Đỏ < 99,5%; vàng từ 99,5% đến dưới 99,7% (gần ngưỡng); xanh ≥ 99,7%. 4xx được tính là thành công theo định nghĩa recording rule. Không có request hoặc thiếu series: CHƯA CÓ DỮ LIỆU.",
+      "description": "Tỷ lệ request không trả 5xx trong 5 phút, gộp các route và replica theo service. Đỏ < 99,5%; vàng từ 99,5% đến dưới 99,7% (gần ngưỡng); xanh ≥ 99,7%. 4xx được tính là thành công theo định nghĩa recording rule. Không có request hoặc thiếu series: CHƯA CÓ DỮ LIỆU. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -271,7 +271,7 @@
             "type": "prometheus",
             "uid": "sentinelops-prometheus"
           },
-          "expr": "sentinelops:http_success_ratio:ratio5m{service=\"payment-service\"}",
+          "expr": "(sentinelops:http_success_ratio:ratio5m{service=\"payment-service\"}) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"payment-service\"} < 120)",
           "legendFormat": "payment-service · success 5 phút",
           "instant": true,
           "range": false,
@@ -352,7 +352,7 @@
       "id": 5,
       "type": "gauge",
       "title": "payment-service — p95 · SLO < 1000 ms",
-      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0.",
+      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -370,7 +370,7 @@
             "type": "prometheus",
             "uid": "sentinelops-prometheus"
           },
-          "expr": "(sentinelops:http_latency_p95_ms{service=\"payment-service\"} >= 0)",
+          "expr": "((sentinelops:http_latency_p95_ms{service=\"payment-service\"} >= 0)) and on (service) (sentinelops:http_latency_telemetry_age_seconds{service=\"payment-service\"} < 120)",
           "legendFormat": "payment-service · p95 5 phút",
           "instant": true,
           "range": false,
@@ -451,7 +451,7 @@
       "id": 6,
       "type": "gauge",
       "title": "inventory-service — Success Rate · SLO ≥ 99,5%",
-      "description": "Tỷ lệ request không trả 5xx trong 5 phút, gộp các route và replica theo service. Đỏ < 99,5%; vàng từ 99,5% đến dưới 99,7% (gần ngưỡng); xanh ≥ 99,7%. 4xx được tính là thành công theo định nghĩa recording rule. Không có request hoặc thiếu series: CHƯA CÓ DỮ LIỆU.",
+      "description": "Tỷ lệ request không trả 5xx trong 5 phút, gộp các route và replica theo service. Đỏ < 99,5%; vàng từ 99,5% đến dưới 99,7% (gần ngưỡng); xanh ≥ 99,7%. 4xx được tính là thành công theo định nghĩa recording rule. Không có request hoặc thiếu series: CHƯA CÓ DỮ LIỆU. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -469,7 +469,7 @@
             "type": "prometheus",
             "uid": "sentinelops-prometheus"
           },
-          "expr": "sentinelops:http_success_ratio:ratio5m{service=\"inventory-service\"}",
+          "expr": "(sentinelops:http_success_ratio:ratio5m{service=\"inventory-service\"}) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"inventory-service\"} < 120)",
           "legendFormat": "inventory-service · success 5 phút",
           "instant": true,
           "range": false,
@@ -550,7 +550,7 @@
       "id": 7,
       "type": "gauge",
       "title": "inventory-service — p95 · SLO < 1000 ms",
-      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0.",
+      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -568,7 +568,7 @@
             "type": "prometheus",
             "uid": "sentinelops-prometheus"
           },
-          "expr": "(sentinelops:http_latency_p95_ms{service=\"inventory-service\"} >= 0)",
+          "expr": "((sentinelops:http_latency_p95_ms{service=\"inventory-service\"} >= 0)) and on (service) (sentinelops:http_latency_telemetry_age_seconds{service=\"inventory-service\"} < 120)",
           "legendFormat": "inventory-service · p95 5 phút",
           "instant": true,
           "range": false,
@@ -1666,7 +1666,7 @@
       "id": 21,
       "type": "gauge",
       "title": "checkout-service — Error Budget Remaining",
-      "description": "Ngân sách lỗi còn lại = clamp(1 − error_ratio_6h / 0,005, 0, 1). 100%: chưa dùng ngân sách; 0%: đã hết hoặc vượt ngân sách. Đỏ < 10%; vàng từ 10% đến dưới 25%; xanh ≥ 25%. Rule dùng cửa sổ 6 giờ nhưng Prometheus hiện chỉ giữ khoảng 3 giờ dữ liệu trên emptyDir và mất lịch sử khi restart. Kết quả chỉ phản ánh phần lịch sử còn lưu; thiếu request/series hiển thị CHƯA CÓ DỮ LIỆU.",
+      "description": "Ngân sách lỗi còn lại = clamp(1 − error_ratio_6h / 0,005, 0, 1). 100%: chưa dùng ngân sách; 0%: đã hết hoặc vượt ngân sách. Đỏ < 10%; vàng từ 10% đến dưới 25%; xanh ≥ 25%. Rule dùng cửa sổ 6 giờ nhưng Prometheus hiện chỉ giữ khoảng 3 giờ dữ liệu trên emptyDir và mất lịch sử khi restart. Kết quả chỉ phản ánh phần lịch sử còn lưu; thiếu request/series hiển thị CHƯA CÓ DỮ LIỆU. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -1684,7 +1684,7 @@
             "type": "prometheus",
             "uid": "sentinelops-prometheus"
           },
-          "expr": "sentinelops:error_budget_remaining:ratio6h{service=\"checkout-service\"}",
+          "expr": "(sentinelops:error_budget_remaining:ratio6h{service=\"checkout-service\"}) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"checkout-service\"} < 120)",
           "legendFormat": "checkout-service · budget còn lại (6 giờ, lịch sử hiện có)",
           "instant": true,
           "range": false,
@@ -1765,7 +1765,7 @@
       "id": 22,
       "type": "gauge",
       "title": "payment-service — Error Budget Remaining",
-      "description": "Ngân sách lỗi còn lại = clamp(1 − error_ratio_6h / 0,005, 0, 1). 100%: chưa dùng ngân sách; 0%: đã hết hoặc vượt ngân sách. Đỏ < 10%; vàng từ 10% đến dưới 25%; xanh ≥ 25%. Rule dùng cửa sổ 6 giờ nhưng Prometheus hiện chỉ giữ khoảng 3 giờ dữ liệu trên emptyDir và mất lịch sử khi restart. Kết quả chỉ phản ánh phần lịch sử còn lưu; thiếu request/series hiển thị CHƯA CÓ DỮ LIỆU.",
+      "description": "Ngân sách lỗi còn lại = clamp(1 − error_ratio_6h / 0,005, 0, 1). 100%: chưa dùng ngân sách; 0%: đã hết hoặc vượt ngân sách. Đỏ < 10%; vàng từ 10% đến dưới 25%; xanh ≥ 25%. Rule dùng cửa sổ 6 giờ nhưng Prometheus hiện chỉ giữ khoảng 3 giờ dữ liệu trên emptyDir và mất lịch sử khi restart. Kết quả chỉ phản ánh phần lịch sử còn lưu; thiếu request/series hiển thị CHƯA CÓ DỮ LIỆU. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -1783,7 +1783,7 @@
             "type": "prometheus",
             "uid": "sentinelops-prometheus"
           },
-          "expr": "sentinelops:error_budget_remaining:ratio6h{service=\"payment-service\"}",
+          "expr": "(sentinelops:error_budget_remaining:ratio6h{service=\"payment-service\"}) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"payment-service\"} < 120)",
           "legendFormat": "payment-service · budget còn lại (6 giờ, lịch sử hiện có)",
           "instant": true,
           "range": false,
@@ -1864,7 +1864,7 @@
       "id": 23,
       "type": "gauge",
       "title": "inventory-service — Error Budget Remaining",
-      "description": "Ngân sách lỗi còn lại = clamp(1 − error_ratio_6h / 0,005, 0, 1). 100%: chưa dùng ngân sách; 0%: đã hết hoặc vượt ngân sách. Đỏ < 10%; vàng từ 10% đến dưới 25%; xanh ≥ 25%. Rule dùng cửa sổ 6 giờ nhưng Prometheus hiện chỉ giữ khoảng 3 giờ dữ liệu trên emptyDir và mất lịch sử khi restart. Kết quả chỉ phản ánh phần lịch sử còn lưu; thiếu request/series hiển thị CHƯA CÓ DỮ LIỆU.",
+      "description": "Ngân sách lỗi còn lại = clamp(1 − error_ratio_6h / 0,005, 0, 1). 100%: chưa dùng ngân sách; 0%: đã hết hoặc vượt ngân sách. Đỏ < 10%; vàng từ 10% đến dưới 25%; xanh ≥ 25%. Rule dùng cửa sổ 6 giờ nhưng Prometheus hiện chỉ giữ khoảng 3 giờ dữ liệu trên emptyDir và mất lịch sử khi restart. Kết quả chỉ phản ánh phần lịch sử còn lưu; thiếu request/series hiển thị CHƯA CÓ DỮ LIỆU. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -1882,7 +1882,7 @@
             "type": "prometheus",
             "uid": "sentinelops-prometheus"
           },
-          "expr": "sentinelops:error_budget_remaining:ratio6h{service=\"inventory-service\"}",
+          "expr": "(sentinelops:error_budget_remaining:ratio6h{service=\"inventory-service\"}) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"inventory-service\"} < 120)",
           "legendFormat": "inventory-service · budget còn lại (6 giờ, lịch sử hiện có)",
           "instant": true,
           "range": false,

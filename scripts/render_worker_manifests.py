@@ -26,7 +26,7 @@ from sentinelops.remediation.domain import Target, image_digest
 from sentinelops.telemetry.core import BUSINESS_ROUTES
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
 from sentinelops.workers.kubernetes_evidence import remote_jaeger
-from sentinelops.workers.source_policy import SourcePolicy, _remote_url
+from sentinelops.workers.source_policy import SourcePolicy, _remote_url, local_endpoint
 
 NAMESPACE = 'sentinelops-b-actions'
 PROMETHEUS = f'http://prometheus.{NAMESPACE}.svc.cluster.local:9090'
@@ -62,6 +62,36 @@ def _server(value):
     return value.rstrip('/')
 
 
+def _validate_metrics(environment, endpoint, health_instance, incident_instance):
+    # Share the runtime guards without creating exporters or reading credentials.
+    # Import only for opt-in metrics so the default rendering path stays unchanged.
+    from sentinelops.workers.metrics import ENVIRONMENTS, IncidentWorkerMetrics, WorkerMetrics
+    if not isinstance(environment, str) or environment not in ENVIRONMENTS:
+        raise ValueError(f'worker metrics environment {environment!r} is invalid; '
+                         f'accepted runtime environments: {", ".join(sorted(ENVIRONMENTS))}; '
+                         'cloud workers require staging or production')
+    try:
+        if not isinstance(endpoint, str):
+            raise ValueError('endpoint must be a string')
+        local_endpoint(endpoint)
+    except ValueError:
+        raise ValueError(f'worker metrics endpoint {endpoint!r} is invalid; accepted: '
+                         'credential-free HTTP loopback URLs with host 127.0.0.1 or localhost '
+                         '(for example http://127.0.0.1:4317 or http://localhost:4317), '
+                         'optional port 1..65535, path empty or /, no query or fragment') from None
+    for metrics_type, instance, prefix in (
+        (WorkerMetrics, health_instance, 'health'),
+        (IncidentWorkerMetrics, incident_instance, 'incidents'),
+    ):
+        try:
+            if not isinstance(instance, str):
+                raise ValueError('instance must be a string')
+            metrics_type.validate_labels(environment, instance)
+        except ValueError:
+            raise ValueError(f'worker metrics instance {instance!r} requires a stable '
+                             f'{prefix}-0..{prefix}-15 slot') from None
+
+
 def render(image: str, *, environment: str, control_database: str, database_ca_config: str,
            health_store_claim: str, incident_store_claim: str, health_stream: str,
            kubernetes_server: str, cluster_uid: str, namespace_uid: str,
@@ -84,6 +114,8 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
         raise ValueError('policy_enabled must be an explicit boolean')
     if type(demo_ui) is not bool:
         raise ValueError('demo_ui must be an explicit boolean')
+    if metrics_otlp_endpoint is not None:
+        _validate_metrics(environment, metrics_otlp_endpoint, health_metrics_instance, incident_metrics_instance)
     _label(environment, 'environment')
     if environment in LOCAL_ENVIRONMENTS:
         raise ValueError('cloud workers require an explicit non-local environment')
@@ -213,11 +245,8 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                 mounts.append({'name': 'models', 'mountPath': '/models', 'readOnly': True})
                 args += ['--model-store', '$(SENTINELOPS_MODEL_STORE)', '--model-release-ref', '$(SENTINELOPS_MODEL_RELEASE_REF)']
         status_command = ['python', '-c', STATUS_EXEC, f'scripts/run_{worker}_worker.py', *args, '--status']
-        if metrics_otlp_endpoint:
+        if metrics_otlp_endpoint is not None:
             instance = incident_metrics_instance if incident else health_metrics_instance
-            prefix = 'incidents' if incident else 'health'
-            if not isinstance(instance, str) or not re.fullmatch(prefix + r'-(?:[0-9]|1[0-5])', instance):
-                raise ValueError(f'worker metrics require a stable {prefix}-0..{prefix}-15 slot')
             args += ['--metrics-otlp-endpoint', metrics_otlp_endpoint, '--metrics-instance', instance]
         documents.append({'apiVersion': 'apps/v1', 'kind': 'Deployment', 'metadata': metadata(name), 'spec': {
             'replicas': 1, 'strategy': {'type': 'Recreate'}, 'selector': {'matchLabels': {'app': name}},
@@ -444,7 +473,8 @@ def main():
     parser.add_argument('--deployment-change-store-claim', default='deployment-change-artifacts')
     parser.add_argument('--policy-enabled', action='store_true')
     parser.add_argument('--demo-ui', action='store_true', help='OIDC UI sidecar sharing controller PVC; API renderer supplies config/Service')
-    parser.add_argument('--metrics-otlp-endpoint', help='Opt-in OTLP metrics endpoint for both workers')
+    parser.add_argument('--metrics-otlp-endpoint',
+        help='Opt-in credential-free HTTP loopback OTLP endpoint; requires staging or production')
     parser.add_argument('--health-metrics-instance', default='health-0')
     parser.add_argument('--incident-metrics-instance', default='incidents-0')
     parser.add_argument('--output', type=Path, required=True)

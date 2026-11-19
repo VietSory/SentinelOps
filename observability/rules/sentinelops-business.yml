@@ -10,6 +10,15 @@ groups:
   - name: sentinelops-business-derived
     interval: 15s
     rules:
+      # Measure raw sample age, not the evaluation time of a derived rate. Long
+      # range functions can still return valid historical values after staleness.
+      # Keep counter and histogram freshness independent; either can disappear.
+      - record: sentinelops:http_request_telemetry_age_seconds
+        expr: time() - max by (service) (timestamp(sentinelops_http_requests_total))
+
+      - record: sentinelops:http_latency_telemetry_age_seconds
+        expr: time() - max by (service) (timestamp(sentinelops_http_request_duration_ms_milliseconds_bucket))
+
       - record: sentinelops:http_request_rate:rate1m
         expr: sum by (service) (rate(sentinelops_http_requests_total[1m]))
 
@@ -23,6 +32,7 @@ groups:
             (0 * sum by (service) (rate(sentinelops_http_requests_total[5m])))
           )
           / sum by (service) (rate(sentinelops_http_requests_total[5m]))
+          and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)
 
       - record: sentinelops:http_error_ratio:ratio1h
         # A positive denominator excludes idle services instead of recording NaN.
@@ -33,6 +43,7 @@ groups:
             (0 * sum by (service) (rate(sentinelops_http_requests_total[1h])))
           )
           / (sum by (service) (rate(sentinelops_http_requests_total[1h])) > 0)
+          and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)
 
       - record: sentinelops:http_error_ratio:ratio6h
         expr: |
@@ -42,9 +53,13 @@ groups:
             (0 * sum by (service) (rate(sentinelops_http_requests_total[6h])))
           )
           / (sum by (service) (rate(sentinelops_http_requests_total[6h])) > 0)
+          and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)
 
       # Ratios use 0..1 (Grafana percentunit). Filtering NaN in the legacy 5m
       # error ratio also excludes idle traffic; never fill missing data with 1.
+      # Error ratios above require raw samples younger than 2m, so success,
+      # budgets and breaches also disappear when counter telemetry is stale.
+      # Use a filtering comparison (no bool): stale data must be absent, not 0.
       - record: sentinelops:http_success_ratio:ratio5m
         expr: 1 - (sentinelops:http_error_ratio:ratio5m >= 0)
 
@@ -62,6 +77,7 @@ groups:
               rate(sentinelops_http_request_duration_ms_milliseconds_bucket[5m])
             )
           ) >= 0
+          and on (service) (sentinelops:http_latency_telemetry_age_seconds < 120)
 
       - record: sentinelops:http_latency_p95_ms
         # The exported histogram already uses milliseconds; do not scale by 1000.
@@ -71,6 +87,7 @@ groups:
               rate(sentinelops_http_request_duration_ms_milliseconds_bucket[5m])
             )
           )
+          and on (service) (sentinelops:http_latency_telemetry_age_seconds < 120)
 
       - record: sentinelops:http_latency_p99_ms:rate5m
         expr: |
@@ -79,6 +96,7 @@ groups:
               rate(sentinelops_http_request_duration_ms_milliseconds_bucket[5m])
             )
           ) >= 0
+          and on (service) (sentinelops:http_latency_telemetry_age_seconds < 120)
 
       - record: sentinelops:error_budget_remaining:ratio6h
         # Remaining fraction of the 0.5% request error budget, clamped to 0..1.

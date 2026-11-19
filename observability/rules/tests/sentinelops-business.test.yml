@@ -422,3 +422,220 @@ tests:
       exp_samples:
       - labels: sentinelops:http_success_ratio:ratio5m{service="checkout-service"}
         value: 0.9
+
+  # A valid historical rate must not outlive its source telemetry.
+  - name: reviewer regression healthy telemetry then stale must not retain green SLO or budget
+    interval: 15s
+    input_series:
+    - series: sentinelops_http_requests_total{service="checkout-service",status_code="200"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="checkout-service",le="100"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="checkout-service",le="1000"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="checkout-service",le="+Inf"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_requests_total{service="payment-service",status_code="200"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="100"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="1000"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="+Inf"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_requests_total{service="inventory-service",status_code="200"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="inventory-service",le="100"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="inventory-service",le="1000"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="inventory-service",le="+Inf"}
+      values: 0+100x20 stale
+    promql_expr_test:
+    - expr: sentinelops:http_success_ratio:ratio5m
+      eval_time: 5m
+      exp_samples:
+      - labels: sentinelops:http_success_ratio:ratio5m{service="checkout-service"}
+        value: 1
+      - labels: sentinelops:http_success_ratio:ratio5m{service="payment-service"}
+        value: 1
+      - labels: sentinelops:http_success_ratio:ratio5m{service="inventory-service"}
+        value: 1
+    - expr: sentinelops:http_success_ratio:ratio1h
+      eval_time: 5m
+      exp_samples:
+      - labels: sentinelops:http_success_ratio:ratio1h{service="checkout-service"}
+        value: 1
+      - labels: sentinelops:http_success_ratio:ratio1h{service="payment-service"}
+        value: 1
+      - labels: sentinelops:http_success_ratio:ratio1h{service="inventory-service"}
+        value: 1
+    - expr: sentinelops:http_success_ratio:ratio6h
+      eval_time: 5m
+      exp_samples:
+      - labels: sentinelops:http_success_ratio:ratio6h{service="checkout-service"}
+        value: 1
+      - labels: sentinelops:http_success_ratio:ratio6h{service="payment-service"}
+        value: 1
+      - labels: sentinelops:http_success_ratio:ratio6h{service="inventory-service"}
+        value: 1
+    - expr: sentinelops:http_latency_p95_ms
+      eval_time: 5m
+      exp_samples:
+      - labels: sentinelops:http_latency_p95_ms{service="checkout-service"}
+        value: 95
+      - labels: sentinelops:http_latency_p95_ms{service="payment-service"}
+        value: 95
+      - labels: sentinelops:http_latency_p95_ms{service="inventory-service"}
+        value: 95
+    - expr: sentinelops:error_budget_remaining:ratio6h
+      eval_time: 5m
+      exp_samples:
+      - labels: sentinelops:error_budget_remaining:ratio6h{service="checkout-service"}
+        value: 1
+      - labels: sentinelops:error_budget_remaining:ratio6h{service="payment-service"}
+        value: 1
+      - labels: sentinelops:error_budget_remaining:ratio6h{service="inventory-service"}
+        value: 1
+    - expr: sentinelops_http_requests_total
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:http_request_rate:rate1m
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:http_success_ratio:ratio5m
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:http_success_ratio:ratio1h
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:http_success_ratio:ratio6h
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:http_latency_p95_ms
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:http_latency_p50_ms:rate5m
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:http_latency_p99_ms:rate5m
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:http_error_ratio:ratio5m
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:slo_latency_breach
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:slo_error_breach
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:error_budget_remaining:ratio6h
+      eval_time: 2h
+      exp_samples: []
+    - expr: sentinelops:error_budget_burn_rate:ratio6h
+      eval_time: 2h
+      exp_samples: []
+  - name: two minute freshness expires without stale markers and tracks counter and histogram independently
+    interval: 15s
+    input_series:
+    - series: sentinelops_http_requests_total{service="checkout-service",status_code="200"}
+      values: 0+100x20
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="checkout-service",le="100"}
+      values: 0+100x20
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="checkout-service",le="1000"}
+      values: 0+100x20
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="checkout-service",le="+Inf"}
+      values: 0+100x20
+    - series: sentinelops_http_requests_total{service="payment-service",status_code="200"}
+      values: 0+100x40
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="100"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="1000"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="+Inf"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_requests_total{service="inventory-service",status_code="200"}
+      values: 0+100x20 stale
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="inventory-service",le="100"}
+      values: 0+100x40
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="inventory-service",le="1000"}
+      values: 0+100x40
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="inventory-service",le="+Inf"}
+      values: 0+100x40
+    promql_expr_test:
+    - expr: sentinelops:http_request_telemetry_age_seconds{service="checkout-service"}
+      eval_time: 6m45s
+      exp_samples:
+      - labels: sentinelops:http_request_telemetry_age_seconds{service="checkout-service"}
+        value: 105
+    - expr: sentinelops:http_latency_telemetry_age_seconds{service="checkout-service"}
+      eval_time: 7m
+      exp_samples:
+      - labels: sentinelops:http_latency_telemetry_age_seconds{service="checkout-service"}
+        value: 120
+    - expr: sentinelops:http_success_ratio:ratio5m
+      eval_time: 6m45s
+      exp_samples:
+      - labels: sentinelops:http_success_ratio:ratio5m{service="checkout-service"}
+        value: 1
+      - labels: sentinelops:http_success_ratio:ratio5m{service="payment-service"}
+        value: 1
+    - expr: sentinelops:http_latency_p95_ms
+      eval_time: 6m45s
+      exp_samples:
+      - labels: sentinelops:http_latency_p95_ms{service="checkout-service"}
+        value: 95
+      - labels: sentinelops:http_latency_p95_ms{service="inventory-service"}
+        value: 95
+    - expr: sentinelops:http_success_ratio:ratio5m
+      eval_time: 7m
+      exp_samples:
+      - labels: sentinelops:http_success_ratio:ratio5m{service="payment-service"}
+        value: 1
+    - expr: sentinelops:http_latency_p95_ms
+      eval_time: 7m
+      exp_samples:
+      - labels: sentinelops:http_latency_p95_ms{service="inventory-service"}
+        value: 95
+    - expr: sentinelops:error_budget_remaining:ratio6h
+      eval_time: 7m
+      exp_samples:
+      - labels: sentinelops:error_budget_remaining:ratio6h{service="payment-service"}
+        value: 1
+  - name: fresh samples restore SLO after a telemetry gap
+    interval: 15s
+    input_series:
+    - series: sentinelops_http_requests_total{service="checkout-service",status_code="200"}
+      values: 0+100x20 _x8 2900+100x11
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="checkout-service",le="100"}
+      values: 0+100x20 _x8 2900+100x11
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="checkout-service",le="1000"}
+      values: 0+100x20 _x8 2900+100x11
+    - series: sentinelops_http_request_duration_ms_milliseconds_bucket{service="checkout-service",le="+Inf"}
+      values: 0+100x20 _x8 2900+100x11
+    promql_expr_test:
+    - expr: sentinelops:http_success_ratio:ratio5m
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:http_latency_p95_ms
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:error_budget_remaining:ratio6h
+      eval_time: 7m
+      exp_samples: []
+    - expr: sentinelops:http_success_ratio:ratio5m
+      eval_time: 8m
+      exp_samples:
+      - labels: sentinelops:http_success_ratio:ratio5m{service="checkout-service"}
+        value: 1
+    - expr: sentinelops:http_latency_p95_ms
+      eval_time: 8m
+      exp_samples:
+      - labels: sentinelops:http_latency_p95_ms{service="checkout-service"}
+        value: 95
+    - expr: sentinelops:error_budget_remaining:ratio6h
+      eval_time: 8m
+      exp_samples:
+      - labels: sentinelops:error_budget_remaining:ratio6h{service="checkout-service"}
+        value: 1
