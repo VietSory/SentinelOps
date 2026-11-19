@@ -323,6 +323,8 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
     env = [{'name': 'SENTINELOPS_KUBERNETES_REMOTE_SERVER', 'value': server},
         {'name': 'SENTINELOPS_ENV', 'value': environment},
         {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
+        # asyncpg verify-full reads the root CA from here, not from SSL_CERT_FILE.
+        {'name': 'PGSSLROOTCERT', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
         *[{'name': name, 'valueFrom': {'secretKeyRef': {'name': 'remediation-runtime', 'key': key}}}
           for name, key in (('SENTINELOPS_ACTION_DATABASE_URL', 'action-database-url'),
               ('SENTINELOPS_KNOWN_GOOD_LEDGER_REF', 'known-good-ledger-ref'),

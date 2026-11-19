@@ -264,11 +264,24 @@ def render(args):
             'securityContext': hardening, 'volumeMounts': mounts,
             'resources': {'requests': {'cpu': '50m', 'memory': '128Mi'},
                           'limits': {'cpu': '500m', 'memory': '512Mi'}}}]
+    access_mode = getattr(args, 'access_mode', 'ReadWriteMany')
+    colocate = getattr(args, 'colocate_with', None)
+    if access_mode not in ('ReadWriteMany', 'ReadWriteOnce'):
+        raise ValueError('access mode must be ReadWriteMany or ReadWriteOnce')
+    if access_mode == 'ReadWriteOnce':
+        # EBS binds in the first consumer's AZ and attaches to one node, so the Job
+        # must land on the node that already holds the consumers' RWO volumes.
+        if not args.storage_class or not colocate or not re.fullmatch(r'[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?', colocate):
+            raise ValueError('ReadWriteOnce needs --storage-class and --colocate-with <consumer app label>')
+        pod['affinity'] = {'podAffinity': {'requiredDuringSchedulingIgnoredDuringExecution': [
+            {'labelSelector': {'matchLabels': {'app': colocate}}, 'topologyKey': 'kubernetes.io/hostname'}]}}
+    elif colocate:
+        raise ValueError('--colocate-with applies only to ReadWriteOnce')
     documents = []
     if args.storage_class:
         documents.append({'apiVersion': 'v1', 'kind': 'PersistentVolumeClaim',
             'metadata': {'name': args.claim, 'namespace': args.namespace},
-            'spec': {'accessModes': ['ReadWriteMany'], 'storageClassName': args.storage_class,
+            'spec': {'accessModes': [access_mode], 'storageClassName': args.storage_class,
                      'resources': {'requests': {'storage': '4Gi'}}}})
     documents += [{'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': metadata,
                    'data': {'modelwire.py': Path(__file__).read_text(encoding='utf-8')}},
@@ -341,7 +354,10 @@ def main():
     cli.add_argument('--namespace', default='sentinelops-b-actions')
     cli.add_argument('--claim', default='model-de38fc6b')
     cli.add_argument('--service-account', default='default', help='existing SA; S3 needs IRSA/Pod Identity')
-    cli.add_argument('--storage-class', help='optionally create a new RWX PVC with this reviewed class')
+    cli.add_argument('--storage-class', help='optionally create a new PVC with this reviewed class')
+    cli.add_argument('--access-mode', choices=('ReadWriteMany', 'ReadWriteOnce'), default='ReadWriteMany',
+                     help='ReadWriteOnce (EBS) requires --colocate-with')
+    cli.add_argument('--colocate-with', help='app label of the pod whose node holds the consumers RWO volumes')
     for name in ('bucket', 'key', 'version-id', 'account-id', 'aws-cli-image'):
         cli.add_argument('--' + name)
     cli.add_argument('--region', default='ap-southeast-1')

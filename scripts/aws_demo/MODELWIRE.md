@@ -137,6 +137,12 @@ docker build --file docker/Dockerfile.control-plane \
 
 ### A. Local archive → Job → PVC
 
+Dev 833925774773 không có EFS/RWX StorageClass và mọi PVC là gp2 trên một node
+(AZ 1b). Dùng `--storage-class gp2 --access-mode ReadWriteOnce --colocate-with
+remediation-controller`: Job bị ghim cùng node với controller, nên EBS mới tạo đúng
+AZ và incident worker/controller mount read-only trên cùng node. Đường local không
+cần IRSA/S3 cho pod; operator tải archive về máy rồi đẩy qua `kubectl exec -i`.
+
 ```bash
 printf '%s  %s\n' "$BUNDLE_SHA" "$BUNDLE" | sha256sum --check --strict
 python -m scripts.aws_demo.modelwire render --source local \
