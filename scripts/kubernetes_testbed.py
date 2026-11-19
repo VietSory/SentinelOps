@@ -53,10 +53,13 @@ def render(images, *, target='local'):
 
     config('commerce-init', {'001-init.sql': (PROJECT / 'infra/local/init.sql').read_text()})
     config('otel-config', {'config.yaml': (PROJECT / 'observability/otel-collector-config.yaml').read_text()})
-    config('prometheus-config', {'prometheus.yml': (PROJECT / 'observability/prometheus.yml').read_text()})
-    # prometheus.yml references this exact file; it must exist in the pod.
-    config('prometheus-rules', {'sentinelops-workers.yml':
-                               (PROJECT / 'observability/rules/sentinelops-workers.yml').read_text()})
+    prometheus_config = (PROJECT / 'observability/prometheus.yml').read_text()
+    config('prometheus-config', {'prometheus.yml': prometheus_config})
+    # Populate the mounted ConfigMap from the explicitly declared rule files.
+    config('prometheus-rules', {
+        Path(filename).name: (PROJECT / 'observability/rules' / Path(filename).name).read_text()
+        for filename in yaml.safe_load(prometheus_config)['rule_files']
+    })
     config_hash = hashlib.sha256(json.dumps(documents, sort_keys=True).encode()).hexdigest()
 
     def deployment(name, image, ports, *, command=None, env=(), mounts=(), volumes=(), ready=None, container=None):
