@@ -718,3 +718,19 @@ def test_every_database_container_trusts_the_rds_ca_for_asyncpg():
                 env = {e['name']: e.get('value') for e in container.get('env', [])}
                 if 'SSL_CERT_FILE' in env:
                     assert env.get('PGSSLROOTCERT') == env['SSL_CERT_FILE'], (doc['metadata']['name'], container['name'])
+
+
+def test_operator_ui_sees_the_controller_model_release():
+    # The API reports model availability; without the release the UI shows the
+    # model as unavailable while the controller is using it.
+    ref = 'artifact://manifests/' + 'c' * 64 + '.json'
+    pod = controller(worker.render(IMAGE, **PARAMETERS, demo_ui=True, model_claim='model-de38fc6b',
+                                   model_release_ref=ref))['spec']['template']['spec']
+    ui = next(c for c in pod['containers'] if c['name'] == 'operator-ui')
+    env = {e['name']: e.get('value') for e in ui['env']}
+    assert env['SENTINELOPS_MODEL_STORE'] == '/models' and env['SENTINELOPS_MODEL_RELEASE_REF'] == ref
+    assert {'name': 'models', 'mountPath': '/models', 'readOnly': True} in ui['volumeMounts']
+    assert any(v['name'] == 'models' for v in pod['volumes'])
+    plain = controller(worker.render(IMAGE, **PARAMETERS, demo_ui=True))['spec']['template']['spec']
+    ui = next(c for c in plain['containers'] if c['name'] == 'operator-ui')
+    assert not any('MODEL' in e['name'] for e in ui['env'])
