@@ -1,8 +1,8 @@
 # Kết quả demo SentinelOps — 19/11/2026
 
-**Cả bốn kịch bản KB1, KB2, KB3 và B7 đã chạy thật. B7 lúc 09:47–09:56 UTC đã sinh đề xuất runbook đầu tiên, chứng minh di trú epoch thành công.** Ba lượt trước đều đến `ESCALATED` và không có đề xuất. B7 có capture **v6**, **`model_evidence` với 3 signal `AVAILABLE`**, **1 receipt deployment-change trong capture**; RCA **không abstain**, Payment đứng đầu với coverage **0,80**, score **0,7974433166482036**, margin **0,39658798795773287**. Nguồn: **LIVE-19**, **xác minh live 19/11/2026**, **LIVE-19-FX3** và **LIVE-19-B7**, định nghĩa dưới đây.
+**Cả bốn kịch bản KB1, KB2, KB3 và B7 đã chạy thật. B7 đã LẶP LẠI ĐƯỢC kết quả 2/2 lần:** lần 1 lúc **09:47–09:56 UTC** sinh đề xuất runbook đầu tiên; lần 2 lúc **10:18:54–10:27:59 UTC** tiếp tục sinh đề xuất. Cả hai có capture **v6**, `model_evidence` và `deployment_changes` **không rỗng**, RCA **`abstained=false`**, coverage **0,80**. Score lần lượt **0,7974433166482036** và **0,7971380597718186**, chỉ lệch khoảng **0,038%**. Quy trình đáng tin cậy trong hai lượt đã kiểm chứng; đồng thời biên score trên ngưỡng chỉ khoảng **0,047**, **mỏng về mặt cấu trúc** do đóng góp gần như cố định của Isolation Forest, nên dữ liệu làm IF giảm đáng kể vẫn có thể khiến score trượt ngưỡng. Ba kịch bản KB1–KB3 trước đó đều đến `ESCALATED` và không có đề xuất. Nguồn: **LIVE-19**, **xác minh live 19/11/2026**, **LIVE-19-FX3**, **LIVE-19-B7** và **LIVE-19-B7-2**, định nghĩa dưới đây.
 
-**Đề xuất B7 CHƯA ĐƯỢC DUYỆT; rollback tự động CHƯA CHẠY.** Owner chưa có mã MFA nên chưa bấm **Duyệt** trên website. Proposal có TTL **15 phút**, hết hạn khoảng **2026-11-19T10:10:52Z**; phải chạy lại B7 để sinh đề xuất mới. **Policy đang BẬT**: owner thêm `--policy-enabled` lúc **09:58:23**, controller rollout xong **09:58:36 UTC**. Khôi phục image gốc lúc 09:55:59.088 là thao tác kết thúc lượt chạy, chưa phải executor rollback.
+**Các đề xuất B7 CHƯA ĐƯỢC DUYỆT; rollback tự động CHƯA CHẠY.** Owner chưa có mã MFA nên chưa bấm **Duyệt** trên website. Proposal có TTL **15 phút**; đề xuất **lần 1** hết hạn khoảng **2026-11-19T10:10:52Z**, còn **lần 2 đã sinh đề xuất mới** nhưng chưa có timestamp hết hạn được bàn giao. Phải kiểm tra hiệu lực proposal tại thời điểm duyệt. **Policy đang BẬT**: owner thêm `--policy-enabled` lúc **09:58:23**, controller rollout xong **09:58:36 UTC**. Khôi phục image gốc lúc **09:55:59.088** (lần 1) và **10:27:46.705580Z** (lần 2) là thao tác kết thúc lượt chạy, chưa phải executor rollback.
 
 ## 1. Phương pháp và nguồn bằng chứng
 
@@ -10,8 +10,9 @@
 - **Xác minh live 19/11/2026** là kết quả kiểm tra trực tiếp bổ sung của worker **`v2-store`**: readiness qua port-forward, kết nối Postgres, snapshot incident và phản hồi CloudFront. Dùng nhãn này để dẫn bằng chứng live; không đưa đường dẫn artifact bị gitignore vào tài liệu. Phân biệt trạng thái cuối đã xác minh với các lifecycle trung gian trong timeline ban đầu.
 - **LIVE-19-FX3** là kết quả đo thật bổ sung ngày **19/11/2026**, được bàn giao trong yêu cầu cập nhật tài liệu: timeline KB2/KB3, model đã nạp và readiness mới, coverage RCA, lưu trữ Prometheus và ba chốt còn lại. Nhãn này không có nghĩa người soạn đã chạy lại kịch bản. Snapshot cũ có 2 incident và `model=false` được giữ kèm bối cảnh lịch sử; chúng không mô tả trạng thái mới sau KB2/KB3 và nạp model.
 - **LIVE-19-B7** là số đo thật operator bàn giao cho lượt B7 **09:47–09:56 UTC**, các ID/artifact receipt, capture, RCA, proposal và cập nhật policy đến **09:58:36 UTC ngày 19/11/2026**. Đây là nguồn cho kết quả sau di trú; người soạn không chạy lại EKS. Bản cập nhật tài liệu dùng branch `feat/grafana-incident-dashboard`, commit nền `a16eeb9`.
+- **LIVE-19-B7-2** là số đo thật operator bàn giao cho lượt B7 thứ hai **10:18:54–10:27:59 UTC ngày 19/11/2026**, gồm score/coverage/margin, proposal, độ trễ receipt, capture v6, RCA không abstain, khôi phục image và kết quả `b7-exec2`. Nhãn này phân biệt lượt chạy thứ hai với lần 1; người soạn chỉ cập nhật tài liệu trên commit nền `36fb78d` của branch `feat/grafana-incident-dashboard`, không chạy lại EKS.
 - **`path:line`** là bằng chứng source/config trong workspace tại lúc soạn, dùng giải thích cách tính metric và điều kiện hệ thống; không thay thế bằng chứng một thao tác đã chạy trên EKS.
-- Tất cả mốc KB1/KB2/KB3/B7 và bật policy dùng **UTC ngày 19/11/2026**. Khoảng **02:11–02:12** của KB1 chỉ chính xác đến phút; không gán timestamp giây riêng cho từng event, lifecycle hoặc controller poll. Nguồn: **LIVE-19**, **LIVE-19-FX3**, **LIVE-19-B7**.
+- Tất cả mốc KB1/KB2/KB3/B7 và bật policy dùng **UTC ngày 19/11/2026**. Khoảng **02:11–02:12** của KB1 chỉ chính xác đến phút; không gán timestamp giây riêng cho từng event, lifecycle hoặc controller poll. Nguồn: **LIVE-19**, **LIVE-19-FX3**, **LIVE-19-B7**, **LIVE-19-B7-2**.
 - So sánh baseline với lúc fault đang bật theo cùng service và đơn vị ms; tách thời điểm POST fault, snapshot metric, xuất bản incident và gỡ fault. Không suy ra thời gian phát hiện chính xác từ snapshot metric hoặc khoảng log theo phút. Nguồn timeline: **LIVE-19**.
 
 ### Môi trường của lượt chạy
@@ -147,11 +148,11 @@ INC-eddd71f93589069d11c665a05c8ba08b367dc6c953c190d0b74eed2ce4bec2db
 
 **KB3 đã chạy đến incident và escalation, chưa chạy được rollback.** Việc khôi phục image gốc và rollout hoàn tất là kết quả đã ghi nhận; riêng lượt KB3 không có proposal, approval, action được executor thực thi hoặc xác minh hồi phục nhờ rollback. B7 đã có proposal; coverage và phần còn lại được cập nhật tại mục 7–8.
 
-## 5. B7 — Kịch bản thứ tư sau di trú epoch: ĐÃ CÓ ĐỀ XUẤT ĐẦU TIÊN
+## 5. B7 — Kịch bản thứ tư sau di trú epoch: LẶP LẠI ĐƯỢC 2/2 LẦN
 
-Lượt B7 chạy thật **09:47–09:56 UTC** dùng epoch mới có model và recorder deployment-change. Mọi số đo trong mục này lấy từ **LIVE-19-B7**; lịch sử tạo stream/consumer được ghi trong [tài liệu di trú epoch](EPOCH_MIGRATION_2026-11-19.md).
+Lượt B7 lần 1 chạy thật **09:47–09:56 UTC** dùng epoch mới có model và recorder deployment-change, nguồn **LIVE-19-B7**. Lần 2 chạy **10:18:54–10:27:59 UTC**, nguồn **LIVE-19-B7-2**, đã lặp lại kết quả tạo đề xuất. Lịch sử tạo stream/consumer được ghi trong [tài liệu di trú epoch](EPOCH_MIGRATION_2026-11-19.md).
 
-### Timeline và số đo
+### Lần 1 — Timeline và số đo
 
 | Thời điểm UTC ngày 19/11/2026 | Thao tác / quan sát | Kết quả thực tế |
 | --- | --- | --- |
@@ -172,7 +173,7 @@ Lượt B7 chạy thật **09:47–09:56 UTC** dùng epoch mới có model và r
 | **09:58:23** | Owner bật `--policy-enabled` cho controller | **Policy BẬT** |
 | **09:58:36** | Rollout controller xong | Chưa có phê duyệt hoặc executor rollback |
 
-### Incident và artifact B7
+### Lần 1 — Incident và artifact B7
 
 | Đối tượng | ID / ref đầy đủ |
 | --- | --- |
@@ -184,7 +185,33 @@ Lượt B7 chạy thật **09:47–09:56 UTC** dùng epoch mới có model và r
 | Proposal ID | `5b21bc47e39d4a94af9b965b4c3103cfc9e033a220edce2162995764f2b12931` |
 | Proposal artifact | `artifact://manifests/cf56840e8ab07932b99ccaa14085855048e4de1c6ca29b8d92c11bc6c6d9ec3b.json` |
 
-**Giới hạn kết quả:** đề xuất **CHƯA ĐƯỢC DUYỆT**, owner chưa có mã MFA nên chưa bấm **Duyệt** trên website; **rollback tự động CHƯA CHẠY**. TTL đề xuất là **15 phút**, hết hạn khoảng **10:10:52Z ngày 19/11/2026**. Phải chạy lại B7 để tạo đề xuất mới cho lượt duyệt/rollback; policy hiện **đang bật**. Ready 1/1 sau khôi phục image không chứng minh SLO đã hồi phục do một action của executor.
+### Lần 2 — Kết quả chạy lại đã kiểm chứng
+
+| Thời điểm UTC ngày 19/11/2026 | Thao tác / quan sát | Kết quả thực tế |
+| --- | --- | --- |
+| **10:18:54** | Bắt đầu B7 lần 2 | Lượt chạy lại theo **LIVE-19-B7-2** |
+| **Trong lượt chạy; chưa có mốc riêng từng bước được bàn giao** | Ghi receipt sau PATCH, tạo capture và RCA, sinh proposal mới | Receipt sau **0,079584 giây**; capture **v6**, `model_evidence` và `deployment_changes` không rỗng; RCA **`abstained=false`**; số đo và proposal ở bảng đối chiếu dưới |
+| **10:27:46.705580Z** | Khôi phục image gốc | Generation **7 → 8**, **Ready 1/1**; chưa phải executor rollback |
+| **10:27:59.731Z** | `b7-exec2` kết thúc | **Exit 0** |
+
+### Đánh giá độ lặp lại
+
+| Đại lượng / bằng chứng | B7 lần 1 — LIVE-19-B7 | B7 lần 2 — LIVE-19-B7-2 |
+| --- | --- | --- |
+| Score | **0,7974433166482036** | **0,7971380597718186** |
+| Coverage | **0,8** | **0,8** |
+| Margin giữa các candidate | **0,39658798795773287** | **0,39591617375268595** |
+| Receipt sau PATCH | **0,438842 giây** | **0,079584 giây** |
+| Capture | **v6**, `model_evidence` và `deployment_changes` không rỗng | **v6**, `model_evidence` và `deployment_changes` không rỗng |
+| RCA | **`abstained=false`** | **`abstained=false`** |
+| Proposal ID | `5b21bc47e39d4a94af9b965b4c3103cfc9e033a220edce2162995764f2b12931` | `0a6b61e32883ec48c769a5aea8c25885612f1b98d28a805ad54a495e1012b4a9` |
+| Phê duyệt / rollback tự động | **CHƯA ĐƯỢC DUYỆT / CHƯA CHẠY** | **CHƯA ĐƯỢC DUYỆT / CHƯA CHẠY** |
+
+**Kết quả LẶP LẠI ĐƯỢC 2 trên 2 lần, nên quy trình đáng tin cậy trong phạm vi đã kiểm chứng.** Chênh lệch score chỉ **0,0003052568763850**, tương đương khoảng **0,038% so với lần 1**; coverage giống hệt, cả hai giữ được chuỗi capture v6 → RCA không abstain → proposal mới. Kết luận này dựa trên hai lượt chạy thật, không chỉ dự đoán khả năng chạy lại.
+
+**Đồng thời, biên score trên ngưỡng 0,75 chỉ khoảng 0,047 là MỎNG VỀ MẶT CẤU TRÚC, không phải do ngẫu nhiên giữa các lượt chạy.** Isolation Forest (IF) đóng góp một lượng gần như cố định, nên score tổng ổn định nhưng dư địa vượt ngưỡng vẫn nhỏ. Nếu dữ liệu thay đổi khiến IF chấm thấp đi đáng kể, score có thể trượt ngưỡng dù coverage vẫn 0,8. Độ lặp lại 2/2 và hạn chế cấu trúc này cùng đúng; không dùng kết quả lặp lại để bỏ qua kiểm tra gate ở dữ liệu mới. Chi tiết khoảng vượt từng gate ở mục 7.
+
+**Giới hạn kết quả:** cả hai đề xuất **CHƯA ĐƯỢC DUYỆT**, owner chưa có mã MFA nên chưa bấm **Duyệt** trên website; **rollback tự động CHƯA CHẠY**. TTL đề xuất là **15 phút**; mốc hết hạn **10:10:52Z ngày 19/11/2026 chỉ thuộc lần 1**. Lần 2 đã có proposal mới nêu trên, chưa có timestamp hết hạn được bàn giao; phải kiểm tra TTL và sinh proposal mới nếu đã hết hạn trước lượt duyệt/rollback. Policy hiện **đang bật**. Ready 1/1 sau khôi phục image ở cả hai lần không chứng minh SLO đã hồi phục do một action của executor.
 
 ### Đối chiếu bốn kịch bản đã chạy thật
 
@@ -193,9 +220,10 @@ Lượt B7 chạy thật **09:47–09:56 UTC** dùng epoch mới có model và r
 | **KB1** — 02:04–02:14 | Fault API trễ Payment **950 ms**; severity **high** | Không đổi Deployment; không có bằng chứng capture v6/model gắn với incident trong số đo KB1 | Đã đến `RCA_READY` → `ESCALATED`; không gán score/coverage riêng khi chưa có số đo | **Không có**; remediation store **0 file** | Gỡ fault; sau đó xác minh `recovered`/`CLOSED`, revision 4; **không rollback tự động** |
 | **KB2** — 04:31–04:36 | Fault API **503**; Payment/Checkout error breach sau **19,2 giây**; severity **critical** | Không có receipt hoặc capture v6/model được bàn giao cho lượt KB2 | `OPEN` → `RCA_READY` → `ESCALATED`; không gán score/coverage riêng khi chưa có số đo | **Không có**; remediation store **0 file trước và sau** | Gỡ fault 04:36:40.64; **không rollback tự động** |
 | **KB3** — 04:47–05:01 | Deploy image regression; generation **2 → 3**; severity **high** | Capture **v5**, `deployment_changes=[]`; feed deployment-change **0 file** | **Abstain**; Payment score **0,399024**, coverage **0,40**; `ESCALATED` | **Không có** | Khôi phục image gốc, generation **3 → 4**; **không rollback tự động** |
-| **B7** — 09:47–09:56 | Deploy cùng image regression với recorder; generation **4 → 5**; severity **high**, latency breach, không error breach | Capture **v6**, `model_evidence` **3 signal `AVAILABLE`**; **1 receipt trong capture**, feed **4 file** | **Không abstain**, reasons rỗng; Payment score **0,7974433166482036**, coverage **0,80**, margin **0,39658798795773287** | **Đề xuất đầu tiên**, `oncall` / `oncall-approval-required`; **chưa duyệt** | Khôi phục image gốc, generation **5 → 6**, Ready **1/1**; **rollback tự động chưa chạy** |
+| **B7 lần 1** — 09:47–09:56 | Deploy cùng image regression với recorder; generation **4 → 5**; severity **high**, latency breach, không error breach | Capture **v6**, `model_evidence` **3 signal `AVAILABLE`**; **1 receipt trong capture**, feed **4 file** | **Không abstain**, reasons rỗng; Payment score **0,7974433166482036**, coverage **0,80**, margin **0,39658798795773287** | **Đề xuất đầu tiên**, `oncall` / `oncall-approval-required`; **chưa duyệt** | Khôi phục image gốc, generation **5 → 6**, Ready **1/1**; **rollback tự động chưa chạy** |
+| **B7 lần 2** — 10:18:54–10:27:59 | Chạy lại B7; receipt sau PATCH **0,079584 giây** | Capture **v6**, `model_evidence` và `deployment_changes` **không rỗng** | **`abstained=false`**; score **0,7971380597718186**, coverage **0,80**, margin **0,39591617375268595** | **Đề xuất mới**, ID trong bảng độ lặp lại; **chưa duyệt** | Khôi phục image gốc **10:27:46.705580Z**, generation **7 → 8**, Ready **1/1**; `b7-exec2` exit **0**; **rollback tự động chưa chạy** |
 
-Nguồn đối chiếu: KB1 — **LIVE-19** và **xác minh live 19/11/2026**; KB2/KB3 — **LIVE-19-FX3**; B7 — **LIVE-19-B7**. Khác biệt đã đo giữa KB3 và B7 là đường bằng chứng sau di trú có model và receipt, coverage tăng từ **0,40 lên đúng 0,80**, RCA hết abstain và sinh proposal. **Đây là thành công của di trú và tạo đề xuất; phê duyệt/rollback còn phải kiểm chứng.**
+Nguồn đối chiếu: KB1 — **LIVE-19** và **xác minh live 19/11/2026**; KB2/KB3 — **LIVE-19-FX3**; B7 lần 1 — **LIVE-19-B7**, lần 2 — **LIVE-19-B7-2**. Khác biệt đã đo giữa KB3 và cả hai lần B7 là đường bằng chứng sau di trú có model và receipt, coverage tăng từ **0,40 lên đúng 0,80**, RCA hết abstain và sinh proposal. **Đây là thành công của di trú và tạo đề xuất, đã lặp lại 2/2 lần; phê duyệt/rollback còn phải kiểm chứng.**
 
 ## 6. Lỗi thật đã gặp và cách sửa
 
@@ -245,7 +273,7 @@ Cấu hình sidecar trong source tại lúc đọc có `SSL_CERT_FILE` và mount
 
 ### Coverage đã đúng dự đoán; score chỉ vừa vượt ngưỡng
 
-Phép tính coverage dự đoán trước B7 (**LIVE-19-FX3**; trọng số/ngưỡng tại `configs/rca_policy.json:4`) đã được số đo **LIVE-19-B7** xác nhận:
+Phép tính coverage dự đoán trước B7 (**LIVE-19-FX3**; trọng số/ngưỡng tại `configs/rca_policy.json:4`) đã được số đo **LIVE-19-B7** và **LIVE-19-B7-2** xác nhận ở cả hai lần:
 
 | Evidence được thu nhận và chấp nhận | Phần coverage thêm | Coverage cộng dồn |
 | --- | ---: | ---: |
@@ -254,28 +282,28 @@ Phép tính coverage dự đoán trước B7 (**LIVE-19-FX3**; trọng số/ngư
 | Model | 0,25 | **0,65** |
 | Receipt deployment-change | 0,15 | **0,80** |
 
-Ngưỡng coverage cần **0,75** (`configs/rca_policy.json:12`). **Model một mình không đủ:** coverage chỉ lên **0,65**. Dự đoán **0,40 + model 0,25 + receipt 0,15 = 0,80** nay **đã đo đúng 0,80 ở B7**. KB3 vẫn giữ kết quả lịch sử coverage **0,40**, score Payment **0,399024** và ba reason abstain ở mục 4; B7 có **`abstained=false`, `abstention_reasons=[]`**. Coverage đủ không tự bảo đảm score đủ (`src/sentinelops/incidents/rca.py:120`).
+Ngưỡng coverage cần **0,75** (`configs/rca_policy.json:12`). **Model một mình không đủ:** coverage chỉ lên **0,65**. Dự đoán **0,40 + model 0,25 + receipt 0,15 = 0,80** nay **đã đo đúng 0,80 ở cả hai lần B7**. KB3 vẫn giữ kết quả lịch sử coverage **0,40**, score Payment **0,399024** và ba reason abstain ở mục 4; cả hai lần B7 có **`abstained=false`**, lần 1 ghi nhận thêm **`abstention_reasons=[]`**. Coverage đủ không tự bảo đảm score đủ (`src/sentinelops/incidents/rca.py:120`).
 
-| Gate RCA | Ngưỡng | B7 đo thực tế | Khoảng vượt ngưỡng |
-| --- | ---: | ---: | ---: |
-| Coverage | 0,75 | 0,80 | 0,05 |
-| Score Payment | 0,75 | 0,7974433166482036 | **0,0474433166482036 ≈ 0,047** |
-| Margin giữa các candidate | 0,15 | 0,39658798795773287 | 0,24658798795773287 |
+| Gate RCA | Ngưỡng | B7 lần 1 đo thực tế | Khoảng vượt ngưỡng lần 1 | B7 lần 2 đo thực tế | Khoảng vượt ngưỡng lần 2 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Coverage | 0,75 | 0,80 | 0,05 | 0,80 | 0,05 |
+| Score Payment | 0,75 | 0,7974433166482036 | **0,0474433166482036 ≈ 0,047** | 0,7971380597718186 | **0,0471380597718186 ≈ 0,047** |
+| Margin giữa các candidate | 0,15 | 0,39658798795773287 | 0,24658798795773287 | 0,39591617375268595 | 0,24591617375268595 |
 
-**Biên score RẤT MỎNG:** score **0,7974** chỉ hơn ngưỡng 0,75 khoảng **0,047**, phụ thuộc điểm **Isolation Forest (IF)**. IF thấp hơn ở lượt tiếp theo có thể kéo score xuống dưới ngưỡng dù coverage vẫn 0,80. Không dùng margin **0,3966** giữa các candidate để suy rằng score có dư địa lớn; đó là hai đại lượng khác nhau. Bộ số đo bàn giao chưa nêu giá trị IF riêng của B7, nên không suy ngược IF từ tổng score. Phải kiểm lại các thành phần và gate cho từng lượt; không bảo đảm B7 chạy lại sẽ luôn sinh proposal.
+**Quy trình đáng tin cậy: kết quả đã LẶP LẠI ĐƯỢC 2/2 lần**, với score chênh chỉ khoảng **0,038%** và coverage giống hệt. **Biên score vẫn RẤT MỎNG VỀ MẶT CẤU TRÚC:** cả hai chỉ hơn ngưỡng 0,75 khoảng **0,047**, vì **Isolation Forest (IF) đóng góp một lượng gần như cố định**. Đây không phải sự mong manh do ngẫu nhiên giữa hai lượt; nếu dữ liệu thay đổi làm IF chấm thấp đi đáng kể, score vẫn có thể trượt ngưỡng dù coverage giữ 0,80. Không dùng margin giữa các candidate để suy rằng score có dư địa lớn; đó là hai đại lượng khác nhau. Bộ số đo bàn giao chưa nêu giá trị IF riêng của từng lần, nên không suy ngược IF từ tổng score. Hai lần thành công xác nhận độ lặp lại đã quan sát, đồng thời vẫn phải kiểm lại các thành phần và gate khi dữ liệu thay đổi.
 
-**Rollback tự động CHƯA CHẠY; đề xuất đang ở bước cần owner phê duyệt.** Owner thiếu mã MFA, chưa bấm Duyệt. Policy đã bật nhưng không thay thế approval hoặc chứng minh executor đã được cấp `dispatch_authority` và đi qua đủ guard. Các chốt evidence cũ đã được B7 gỡ, không còn được mô tả như lỗi hiện tại:
+**Rollback tự động CHƯA CHẠY; các đề xuất B7 CHƯA ĐƯỢC DUYỆT.** Owner thiếu mã MFA, chưa bấm Duyệt. Policy đã bật nhưng không thay thế approval hoặc chứng minh executor đã được cấp `dispatch_authority` và đi qua đủ guard. Các chốt evidence cũ đã được B7 gỡ, không còn được mô tả như lỗi hiện tại:
 
 | Chốt / trạng thái | Kết quả sau B7 | Nguồn / giới hạn |
 | --- | --- | --- |
-| **RCA từng abstain ở KB3** | B7 **không abstain**, reasons rỗng, vượt cả score/coverage/margin | LIVE-19-FX3 → LIVE-19-B7; biên score chỉ khoảng 0,047 |
-| **Capture từng là v5, thiếu model** | B7 **v6**, `model_evidence` có **3 signal `AVAILABLE`** | LIVE-19-B7; `src/sentinelops/workers/model_signals.py:114` |
+| **RCA từng abstain ở KB3** | Cả hai lần B7 **không abstain**, vượt cả score/coverage/margin; lần 1 có reasons rỗng | LIVE-19-FX3 → LIVE-19-B7 / LIVE-19-B7-2; biên score cả hai chỉ khoảng 0,047 |
+| **Capture từng là v5, thiếu model** | Cả hai lần B7 có **v6**, `model_evidence` không rỗng; lần 1 có **3 signal `AVAILABLE`** | LIVE-19-B7 / LIVE-19-B7-2; `src/sentinelops/workers/model_signals.py:114` |
 | **Consumer cũ đóng băng profile không model** | **Đã di trú epoch thành công**; consumer epoch mới sinh capture có model | B4/B7 trong [tài liệu di trú](EPOCH_MIGRATION_2026-11-19.md); không sửa identity cũ |
-| **KB3 thiếu deployment-change receipt** | B7 recorder đã sinh receipt, feed **4 file**, capture chứa **đúng 1 receipt** | LIVE-19-B7; không hồi dựng receipt cho KB3 |
-| **Chưa từng có proposal ở KB1–KB3** | B7 sinh proposal đầu tiên: **`oncall` / `oncall-approval-required`** | LIVE-19-B7; **chưa duyệt** vì owner chưa có MFA |
+| **KB3 thiếu deployment-change receipt** | Cả hai lần B7 có receipt, `deployment_changes` trong capture không rỗng; lần 1 có feed **4 file**, capture chứa **đúng 1 receipt** | LIVE-19-B7 / LIVE-19-B7-2; không hồi dựng receipt cho KB3 |
+| **Chưa từng có proposal ở KB1–KB3** | B7 lần 1 sinh proposal đầu tiên: **`oncall` / `oncall-approval-required`**; lần 2 sinh proposal mới, **lặp lại 2/2** | LIVE-19-B7 / LIVE-19-B7-2; cả hai **chưa duyệt** vì owner chưa có MFA |
 | **Policy controller** | **Đang BẬT**, owner bật 09:58:23, rollout xong 09:58:36 | LIVE-19-B7; bật policy không tự phê duyệt proposal |
-| **Approval / executor rollback** | **Chưa duyệt, chưa chạy rollback tự động**; TTL 15 phút, hết hạn khoảng 10:10:52Z, phải chạy lại B7 sinh proposal mới | LIVE-19-B7; chưa chứng minh toàn bộ guard tại dispatch (`src/sentinelops/remediation/executor.py:66`) |
-| **Khôi phục và SLO** | B7 đã trả image gốc, generation 6, Ready 1/1; chưa có số đo chứng minh hồi phục do executor rollback | LIVE-19-B7; giữ riêng các thiếu hụt số đo hồi phục của KB1/KB2 |
+| **Approval / executor rollback** | **CHƯA ĐƯỢC DUYỆT, rollback tự động CHƯA CHẠY**; TTL 15 phút. Lần 1 hết hạn khoảng 10:10:52Z; lần 2 có proposal mới nhưng chưa có timestamp hết hạn được bàn giao | LIVE-19-B7 / LIVE-19-B7-2; kiểm TTL trước duyệt; chưa chứng minh toàn bộ guard tại dispatch (`src/sentinelops/remediation/executor.py:66`) |
+| **Khôi phục và SLO** | Cả hai lần B7 đã trả image gốc, lần 1 generation **5 → 6**, lần 2 **7 → 8**, đều Ready **1/1**; chưa có số đo chứng minh hồi phục do executor rollback | LIVE-19-B7 / LIVE-19-B7-2; giữ riêng các thiếu hụt số đo hồi phục của KB1/KB2 |
 | **Readiness public từng bị edge chặn** | Giữ kết quả chẩn đoán lịch sử ở mục 6.2; số đo B7 không kèm lần kiểm public readiness mới | Xác minh live 19/11/2026; không suy từ B7 rằng edge đã thay đổi |
 
 ## 8. Việc còn lại
@@ -290,9 +318,9 @@ Ngưỡng coverage cần **0,75** (`configs/rca_policy.json:12`). **Model một 
 
 ### Phê duyệt và kiểm chứng rollback còn lại
 
-- **Owner cần mã MFA để duyệt trên website.** Proposal B7 chưa duyệt; TTL 15 phút, hết hạn khoảng **10:10:52Z**. Phải **chạy lại B7 để sinh proposal mới**, còn hạn tại thời điểm Duyệt; không dùng proposal/receipt cũ làm bằng chứng cho lượt mới.
+- **Owner cần mã MFA để duyệt trên website.** Cả hai proposal B7 chưa duyệt; TTL 15 phút. Mốc hết hạn khoảng **10:10:52Z** thuộc **lần 1**; **lần 2 đã sinh proposal mới**, chưa có timestamp hết hạn được bàn giao. Kiểm proposal còn hạn tại thời điểm Duyệt; nếu đã hết hạn thì chạy lại B7 sinh proposal mới, không dùng proposal/receipt cũ làm bằng chứng cho lượt mới.
 - **Policy hiện đang bật.** Trước lượt B7 tiếp theo, đối chiếu baseline khỏe, known-good/ledger/approver, image/UID/generation, stream và quyền duyệt hiện tại. Số đo bàn giao chưa nêu ref/timestamp phê duyệt known-good mới, nên không suy thêm lịch sử approval từ việc có proposal.
-- **Kiểm lại evidence và mọi gate trên incident mới**, nhất là score RCA và thành phần IF vì score RCA chỉ vượt ngưỡng khoảng **0,047** ở B7. Chỉ kết luận có proposal mới khi artifact thực tế xác nhận; không hạ ngưỡng hoặc ép authority. Có proposal chưa tự chứng minh executor có `dispatch_authority` tại thời điểm dispatch (`src/sentinelops/remediation/authority.py:62`, `src/sentinelops/remediation/authority.py:67`).
+- **Kiểm lại evidence và mọi gate trên incident mới.** B7 đã lặp lại **2/2**, nhưng score RCA chỉ vượt ngưỡng khoảng **0,047** ở cả hai lần do đóng góp IF gần như cố định; dữ liệu mới làm IF giảm đáng kể vẫn có thể khiến score trượt ngưỡng. Chỉ kết luận có proposal mới khi artifact thực tế xác nhận; không hạ ngưỡng hoặc ép authority. Có proposal chưa tự chứng minh executor có `dispatch_authority` tại thời điểm dispatch (`src/sentinelops/remediation/authority.py:62`, `src/sentinelops/remediation/authority.py:67`).
 - **Ghi kết quả phê duyệt và action nếu thực sự chạy:** approval receipt, action ID, image trước/sau, generation, executor rollback và health/SLO hồi phục; nếu bị chặn thì ghi reason. B7 hiện chỉ chứng minh đến proposal và khôi phục image của lượt chạy, chưa chứng minh tự sửa (`src/sentinelops/remediation/authority.py:108`, `src/sentinelops/remediation/executor.py:59`).
 
 ### Các việc bổ sung từ báo cáo trước

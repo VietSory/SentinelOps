@@ -4,7 +4,9 @@
 
 Tài liệu tổng hợp rà soát chỉ đọc của s5 trên EKS `sentinelops-dev`, namespace `sentinelops-b-actions`, đối chiếu mã nguồn ở branch `feat/grafana-incident-dashboard`. Snapshot đầu ghi **09:57:32 UTC / 16:57:32 ICT**, snapshot cuối **10:02:41 UTC / 17:02:41 ICT ngày 19/11/2026**. Phép kiểm gồm cấu hình AWS/Kubernetes, quyền file và HTTP GET; không thử khai thác, POST hoặc PATCH. Số liệu live được ghi trực tiếp dưới đây; các tham chiếu `path:line` chỉ vị trí mã nguồn đối chiếu, không thay thế bằng chứng live.
 
-**Chênh lệch cần đối soát:** thông tin giao việc nêu EKS API giới hạn **3 CIDR**, nhưng snapshot cuối s5 ghi **5 CIDR `/32`**, không có `0.0.0.0/0`. Chưa có bằng chứng mới hơn xác nhận đã thu về 3; tài liệu giữ số đo 5 và ghi rõ việc cần xác nhận, không trình bày 3 là kết quả s5 đã kiểm chứng.
+**Allowlist EKS API hiện có 5 CIDR `/32`, cả 5 đều có chủ, không có `0.0.0.0/0`.** Snapshot cuối s5 ghi 5 CIDR; thông tin bổ sung trong yêu cầu cập nhật ngày 19/11/2026 đã xác nhận nguồn gốc cả năm địa chỉ, gồm xác nhận trực tiếp của owner cho hai địa chỉ dùng khi truy cập từ mạng khác. Chênh lệch với thông tin 3 CIDR trước đó đã được giải thích; không coi hai địa chỉ bổ sung là nguồn truy cập lạ. Bảng nguồn gốc ở mục 5 ghi riêng bằng chứng cấu hình của s5 và xác nhận của owner; phiên cập nhật tài liệu không thay đổi allowlist.
+
+**Các đề xuất B7 CHƯA ĐƯỢC DUYỆT; rollback tự động CHƯA CHẠY.** Việc policy đang bật và cả 5 CIDR có chủ không thay thế phê duyệt hoặc chứng minh đã thực thi rollback.
 
 ## 1. CAO có điều kiện — quyền PATCH vượt phạm vi image
 
@@ -67,9 +69,23 @@ Hai Cognito client operator/Grafana đã có `PreventUserExistenceErrors=ENABLED
 | --- | --- | --- |
 | Quyền file credential | Secret/projected credential volumes trong `sentinelops-b-actions` là **0440**; file credential được `stat` trong controller/health/incident worker là **0600**, không world-readable. | ĐẠT trong phạm vi đã kiểm. `/credentials` là directory 03777 nhưng main container mount read-only; không suy ra file 0600 đọc được bởi mọi UID. Đối chiếu `scripts/render_worker_manifests.py:204`, `scripts/render_worker_manifests.py:339`, `scripts/render_worker_manifests.py:351`. |
 | S3 artifacts | **4/4 PublicAccessBlock=true**, `IsPublic=false`, **SSE-KMS**, BucketKey bật, versioning Enabled. Policy Deny `s3:*` khi `aws:SecureTransport=false`, áp cả bucket và object. | ĐẠT: bucket private, mã hóa KMS và bắt buộc TLS; `infra/aws/storage.tf:19`, `infra/aws/storage.tf:28`, `infra/aws/storage.tf:40`. |
-| EKS API allowlist | Public/private endpoint đều bật; snapshot cuối là **5 CIDR `/32`**, không có `0.0.0.0/0`. Thông tin giao việc nêu **3 CIDR**, chưa có bằng chứng xác nhận mốc này. | ĐẠT về giới hạn nguồn truy cập, **chưa xác nhận đã giới hạn còn 3 CIDR**. Cần đối soát và bỏ IP tạm; `infra/aws/eks.tf:6`, `infra/aws/variables.tf:120`. Không đưa địa chỉ IP cá nhân vào báo cáo. |
+| EKS API allowlist | Public/private endpoint đều bật; snapshot cuối s5 là **5 CIDR `/32`**, không có `0.0.0.0/0`. Cập nhật từ owner xác nhận **cả 5 đều có chủ**, nguồn gốc ghi dưới đây. | ĐẠT về giới hạn nguồn truy cập; chênh lệch 3/5 trước đây đã được giải thích bằng các mạng truy cập của owner, không phải bằng chứng truy cập lạ. Duy trì rà soát nhu cầu sử dụng; `infra/aws/eks.tf:6`, `infra/aws/variables.tf:120`. |
 | Phạm vi tài nguyên của `payment-rollback` | Quyền ghi chỉ `patch` đúng **một Deployment `payment-service`**; không có quyền ghi Deployment khác hay trực tiếp đọc Secret trong role đã kiểm. | ĐẠT ở mức tài nguyên; chưa đạt giới hạn trường image-only, như mục 1. `infra/kubernetes/payment-rollback-rbac.yaml:21`. |
 | Model/review/evidence của controller | Các PVC model, review, health và incident evidence mount read-only; model release và health stream được pin. | Giảm khả năng controller sửa nguồn bằng chứng. PVC remediation vẫn cần bảo vệ riêng; `scripts/render_worker_manifests.py:345`, `scripts/render_worker_manifests.py:354`. |
+
+### Nguồn gốc 5 CIDR trong allowlist EKS API
+
+| CIDR | Nguồn gốc / chủ sở hữu đã xác nhận |
+| --- | --- |
+| `14.224.239.90/32` | Địa chỉ truy cập đã có từ trước, có chủ theo thông tin bàn giao. |
+| `42.114.156.253/32` | Địa chỉ truy cập đã có từ trước, có chủ theo thông tin bàn giao. |
+| `14.191.113.71/32` | Được phiên làm việc này thêm để truy cập EKS API, có chủ theo thông tin bàn giao. |
+| `171.225.184.117/32` | **OWNER XÁC NHẬN** chính owner thêm khi truy cập từ mạng khác. |
+| `42.117.232.154/32` | **OWNER XÁC NHẬN** chính owner thêm khi truy cập từ mạng khác. |
+
+Nguồn xác nhận chủ sở hữu: thông tin bổ sung trong yêu cầu cập nhật ngày **19/11/2026**. **Cả 5 CIDR đều có chủ; không còn mục chưa rõ nguồn gốc trong danh sách này.** Đây là xác nhận nguồn gốc cấu hình, không phải phép kiểm log cho từng request truy cập. Không có yêu cầu thu allowlist về 3 CIDR chỉ để khớp thông tin cũ.
+
+### Các phát hiện bổ sung
 
 Những phát hiện bổ sung của s5 cần giữ trong kế hoạch xử lý:
 
@@ -92,6 +108,6 @@ Các mục dưới đây là việc cần làm, không phải thay đổi đã t
 | **4 — sớm** | Gắn WAF tại CloudFront với rate limit/managed rules, kiểm false positive; nếu gắn ALB phải xử lý viewer IP đáng tin cậy. Đánh giá Cognito riêng. | Bổ sung lớp chống lạm dụng HTTP sau khi public. Xác minh WebACL thật sự gắn tài nguyên, rule/metric hoạt động, login/API/Grafana hợp lệ không bị chặn nhầm. |
 | **5 — sớm** | Thêm `/ready` và đúng các readiness route cần dùng vào allowlist `infra/aws/edge.tf`, đồng bộ route ALB, cập nhật kiểm tra edge rồi triển khai. | Sửa lỗi hai chấm UI luôn `Unknown`, giúp operator quan sát đúng trạng thái. Kiểm JSON 200/503 theo backend; route bảo vệ vẫn 401 khi thiếu token; internal/metrics/docs vẫn 403. |
 | **6 — tiếp theo** | Thay token observer tĩnh bằng projected bound token TTL ngắn, thực hiện xoay/đọc lại tự động và thu hồi bản cũ sau chuyển đổi. | Giảm thời gian credential bị lộ còn sử dụng được; kiểm observer tiếp tục chạy sau vòng xoay và token cũ không còn được chấp nhận. |
-| **7 — tiếp theo** | Đối soát chênh lệch **3/5 CIDR** EKS bằng snapshot mới; gắn chủ sở hữu/hạn dùng và bỏ IP tạm. Chuyển SG ALB từ prefix-list bootstrap sang SG VPC origin; bỏ callback localhost và public Grafana health nếu không cần. | Thu hẹp bề mặt dư thừa mà không khóa đường quản trị hợp lệ. Chỉ ghi “3 CIDR đã xác nhận” sau khi có số đo mới; ưu tiên VPN/private endpoint khi phù hợp. |
+| **7 — tiếp theo** | Duy trì rà soát nhu cầu và hạn dùng của **5 CIDR EKS đã có chủ**; bỏ địa chỉ khi không còn cần truy cập. Chuyển SG ALB từ prefix-list bootstrap sang SG VPC origin; bỏ callback localhost và public Grafana health nếu không cần. | Thu hẹp bề mặt dư thừa mà không khóa đường quản trị hợp lệ. Nguồn gốc cả 5 CIDR đã được xác nhận; không còn việc đối soát chênh lệch 3/5, không đặt mục tiêu thu về 3 theo thông tin cũ. Ưu tiên VPN/private endpoint khi phù hợp. |
 
 Khi đóng từng mục, cần ghi thời điểm và kết quả kiểm mới; không dùng các biện pháp mới được đề xuất để hạ mức rủi ro của snapshot ngày 19/11/2026.
