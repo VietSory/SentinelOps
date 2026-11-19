@@ -1,0 +1,2143 @@
+{
+  "uid": "sentinelops-slo",
+  "title": "SentinelOps — SLO / SLA",
+  "description": "Theo dõi SLO/SLA HTTP của checkout-service, payment-service và inventory-service: Success Rate ≥ 99,5% (request không trả 5xx) và p95 latency < 1000 ms. Gauge trạng thái dùng 5 phút; biểu đồ success có cửa sổ 5 phút, 1 giờ, 6 giờ; error budget dùng rule 6 giờ với ngân sách lỗi 0,5%. GIỚI HẠN RETENTION: Prometheus trên EKS sentinelops-dev lưu emptyDir, hiện chỉ có khoảng 3 giờ lịch sử và mất dữ liệu khi restart. Khoảng xem mặc định là 3 giờ; mọi cửa sổ bị giới hạn bởi retention và phần lịch sử thực sự còn lưu, nhất là rule 6 giờ. Đây là SLI và budget trượt, chưa phải bằng chứng SLA đủ kỳ. Thiếu dữ liệu/lưu lượng là CHƯA CÓ DỮ LIỆU, không mặc định đạt SLO. Hai bộ đếm sự cố/RCA cuối tích lũy theo vòng đời worker, chỉ hiển thị nếu có series.",
+  "tags": [
+    "sentinelops",
+    "slo",
+    "sla",
+    "business-health"
+  ],
+  "timezone": "browser",
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 41,
+  "version": 1,
+  "refresh": "15s",
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "15s",
+      "30s",
+      "1m",
+      "5m"
+    ]
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Trạng thái SLO",
+      "description": "Mỗi service: Success Rate ≥ 99,5% và p95 < 1000 ms, trên cửa sổ 5 phút. Vàng cảnh báo gần ngưỡng; thiếu dữ liệu không phải đạt SLO.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "gauge",
+      "title": "checkout-service — Success Rate · SLO ≥ 99,5%",
+      "description": "Tỷ lệ request không trả 5xx trong 5 phút, gộp các route và replica theo service. Đỏ < 99,5%; vàng từ 99,5% đến dưới 99,7% (gần ngưỡng); xanh ≥ 99,7%. 4xx được tính là thành công theo định nghĩa recording rule. Không có request hoặc thiếu series: CHƯA CÓ DỮ LIỆU.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio5m{service=\"checkout-service\"}",
+          "legendFormat": "checkout-service · success 5 phút",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "max": 1,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.995
+              },
+              {
+                "color": "green",
+                "value": 0.997
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75
+      }
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "checkout-service — p95 · SLO < 1000 ms",
+      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p95_ms{service=\"checkout-service\"} >= 0)",
+          "legendFormat": "checkout-service · p95 5 phút",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "min": 0,
+          "max": 2000,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 800
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75
+      }
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "payment-service — Success Rate · SLO ≥ 99,5%",
+      "description": "Tỷ lệ request không trả 5xx trong 5 phút, gộp các route và replica theo service. Đỏ < 99,5%; vàng từ 99,5% đến dưới 99,7% (gần ngưỡng); xanh ≥ 99,7%. 4xx được tính là thành công theo định nghĩa recording rule. Không có request hoặc thiếu series: CHƯA CÓ DỮ LIỆU.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio5m{service=\"payment-service\"}",
+          "legendFormat": "payment-service · success 5 phút",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "max": 1,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.995
+              },
+              {
+                "color": "green",
+                "value": 0.997
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75
+      }
+    },
+    {
+      "id": 5,
+      "type": "gauge",
+      "title": "payment-service — p95 · SLO < 1000 ms",
+      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p95_ms{service=\"payment-service\"} >= 0)",
+          "legendFormat": "payment-service · p95 5 phút",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "min": 0,
+          "max": 2000,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 800
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75
+      }
+    },
+    {
+      "id": 6,
+      "type": "gauge",
+      "title": "inventory-service — Success Rate · SLO ≥ 99,5%",
+      "description": "Tỷ lệ request không trả 5xx trong 5 phút, gộp các route và replica theo service. Đỏ < 99,5%; vàng từ 99,5% đến dưới 99,7% (gần ngưỡng); xanh ≥ 99,7%. 4xx được tính là thành công theo định nghĩa recording rule. Không có request hoặc thiếu series: CHƯA CÓ DỮ LIỆU.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio5m{service=\"inventory-service\"}",
+          "legendFormat": "inventory-service · success 5 phút",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "max": 1,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.995
+              },
+              {
+                "color": "green",
+                "value": 0.997
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75
+      }
+    },
+    {
+      "id": 7,
+      "type": "gauge",
+      "title": "inventory-service — p95 · SLO < 1000 ms",
+      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p95_ms{service=\"inventory-service\"} >= 0)",
+          "legendFormat": "inventory-service · p95 5 phút",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "min": 0,
+          "max": 2000,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 800
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75
+      }
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "checkout-service",
+      "description": "Lưu lượng, tỷ lệ thành công và phân vị latency của checkout-service. Các biểu đồ giữ khoảng trống khi mất dữ liệu.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Request rate · req/s",
+      "description": "checkout-service: tốc độ request mỗi giây, rate 1 phút, gộp theo service. Một trục req/s; không trộn với tỷ lệ thành công hoặc latency.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_request_rate:rate1m{service=\"checkout-service\"}",
+          "legendFormat": "checkout-service · req/s",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "Request / giây",
+            "axisBorderShow": true,
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Success % · mục tiêu ≥ 99,5%",
+      "description": "checkout-service: success = request không trả 5xx / tổng request. Ba đường là cửa sổ trượt 5 phút, 1 giờ và 6 giờ; đường threshold đỏ nét đứt tại 99,5% là mục tiêu. Prometheus hiện chỉ có khoảng 3 giờ lịch sử trên emptyDir, mất khi restart; cửa sổ 6 giờ chỉ tính trên dữ liệu còn lưu, chưa phải SLA đủ kỳ. Không có request hoặc thiếu series được giữ là chưa có dữ liệu.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio5m{service=\"checkout-service\"}",
+          "legendFormat": "Success · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio1h{service=\"checkout-service\"}",
+          "legendFormat": "Success · 1 giờ",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio6h{service=\"checkout-service\"}",
+          "legendFormat": "Success · 6 giờ (lịch sử hiện có)",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "Success · mục tiêu 99,5%",
+            "axisBorderShow": true,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "axisSoftMin": 0.99
+          },
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.995
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Latency · p50 / p95 / p99",
+      "description": "checkout-service: p50, p95, p99 từ histogram trên cùng cửa sổ 5 phút, một trục ms. Đường đỏ nét đứt tại 1000 ms là giới hạn SLO dành cho p95; p50/p99 giúp đối chiếu phân bố. Dữ liệu histogram đã là ms. NaN khi không có request được lọc, không bù thành 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p50_ms:rate5m{service=\"checkout-service\"} >= 0)",
+          "legendFormat": "p50 · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p95_ms{service=\"checkout-service\"} >= 0)",
+          "legendFormat": "p95 · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p99_ms:rate5m{service=\"checkout-service\"} >= 0)",
+          "legendFormat": "p99 · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "Latency (ms)",
+            "axisBorderShow": true,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "payment-service",
+      "description": "Lưu lượng, tỷ lệ thành công và phân vị latency của payment-service. Các biểu đồ giữ khoảng trống khi mất dữ liệu.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Request rate · req/s",
+      "description": "payment-service: tốc độ request mỗi giây, rate 1 phút, gộp theo service. Một trục req/s; không trộn với tỷ lệ thành công hoặc latency.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 17
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_request_rate:rate1m{service=\"payment-service\"}",
+          "legendFormat": "payment-service · req/s",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "Request / giây",
+            "axisBorderShow": true,
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Success % · mục tiêu ≥ 99,5%",
+      "description": "payment-service: success = request không trả 5xx / tổng request. Ba đường là cửa sổ trượt 5 phút, 1 giờ và 6 giờ; đường threshold đỏ nét đứt tại 99,5% là mục tiêu. Prometheus hiện chỉ có khoảng 3 giờ lịch sử trên emptyDir, mất khi restart; cửa sổ 6 giờ chỉ tính trên dữ liệu còn lưu, chưa phải SLA đủ kỳ. Không có request hoặc thiếu series được giữ là chưa có dữ liệu.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 17
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio5m{service=\"payment-service\"}",
+          "legendFormat": "Success · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio1h{service=\"payment-service\"}",
+          "legendFormat": "Success · 1 giờ",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio6h{service=\"payment-service\"}",
+          "legendFormat": "Success · 6 giờ (lịch sử hiện có)",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "Success · mục tiêu 99,5%",
+            "axisBorderShow": true,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "axisSoftMin": 0.99
+          },
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.995
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Latency · p50 / p95 / p99",
+      "description": "payment-service: p50, p95, p99 từ histogram trên cùng cửa sổ 5 phút, một trục ms. Đường đỏ nét đứt tại 1000 ms là giới hạn SLO dành cho p95; p50/p99 giúp đối chiếu phân bố. Dữ liệu histogram đã là ms. NaN khi không có request được lọc, không bù thành 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 17
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p50_ms:rate5m{service=\"payment-service\"} >= 0)",
+          "legendFormat": "p50 · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p95_ms{service=\"payment-service\"} >= 0)",
+          "legendFormat": "p95 · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p99_ms:rate5m{service=\"payment-service\"} >= 0)",
+          "legendFormat": "p99 · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "Latency (ms)",
+            "axisBorderShow": true,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "inventory-service",
+      "description": "Lưu lượng, tỷ lệ thành công và phân vị latency của inventory-service. Các biểu đồ giữ khoảng trống khi mất dữ liệu.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Request rate · req/s",
+      "description": "inventory-service: tốc độ request mỗi giây, rate 1 phút, gộp theo service. Một trục req/s; không trộn với tỷ lệ thành công hoặc latency.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_request_rate:rate1m{service=\"inventory-service\"}",
+          "legendFormat": "inventory-service · req/s",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "Request / giây",
+            "axisBorderShow": true,
+            "thresholdsStyle": {
+              "mode": "off"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Success % · mục tiêu ≥ 99,5%",
+      "description": "inventory-service: success = request không trả 5xx / tổng request. Ba đường là cửa sổ trượt 5 phút, 1 giờ và 6 giờ; đường threshold đỏ nét đứt tại 99,5% là mục tiêu. Prometheus hiện chỉ có khoảng 3 giờ lịch sử trên emptyDir, mất khi restart; cửa sổ 6 giờ chỉ tính trên dữ liệu còn lưu, chưa phải SLA đủ kỳ. Không có request hoặc thiếu series được giữ là chưa có dữ liệu.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio5m{service=\"inventory-service\"}",
+          "legendFormat": "Success · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio1h{service=\"inventory-service\"}",
+          "legendFormat": "Success · 1 giờ",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:http_success_ratio:ratio6h{service=\"inventory-service\"}",
+          "legendFormat": "Success · 6 giờ (lịch sử hiện có)",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "Success · mục tiêu 99,5%",
+            "axisBorderShow": true,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "axisSoftMin": 0.99
+          },
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.995
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Latency · p50 / p95 / p99",
+      "description": "inventory-service: p50, p95, p99 từ histogram trên cùng cửa sổ 5 phút, một trục ms. Đường đỏ nét đứt tại 1000 ms là giới hạn SLO dành cho p95; p50/p99 giúp đối chiếu phân bố. Dữ liệu histogram đã là ms. NaN khi không có request được lọc, không bù thành 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p50_ms:rate5m{service=\"inventory-service\"} >= 0)",
+          "legendFormat": "p50 · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p95_ms{service=\"inventory-service\"} >= 0)",
+          "legendFormat": "p95 · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "(sentinelops:http_latency_p99_ms:rate5m{service=\"inventory-service\"} >= 0)",
+          "legendFormat": "p99 · 5 phút",
+          "instant": false,
+          "range": true,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 0,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "Latency (ms)",
+            "axisBorderShow": true,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            },
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Error budget",
+      "description": "Ngân sách lỗi cho mục tiêu success 99,5%. Rule cửa sổ 6 giờ chỉ dùng lịch sử hiện có (~3 giờ, emptyDir); không chứng nhận SLA đủ kỳ.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "gauge",
+      "title": "checkout-service — Error Budget Remaining",
+      "description": "Ngân sách lỗi còn lại = clamp(1 − error_ratio_6h / 0,005, 0, 1). 100%: chưa dùng ngân sách; 0%: đã hết hoặc vượt ngân sách. Đỏ < 10%; vàng từ 10% đến dưới 25%; xanh ≥ 25%. Rule dùng cửa sổ 6 giờ nhưng Prometheus hiện chỉ giữ khoảng 3 giờ dữ liệu trên emptyDir và mất lịch sử khi restart. Kết quả chỉ phản ánh phần lịch sử còn lưu; thiếu request/series hiển thị CHƯA CÓ DỮ LIỆU.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:error_budget_remaining:ratio6h{service=\"checkout-service\"}",
+          "legendFormat": "checkout-service · budget còn lại (6 giờ, lịch sử hiện có)",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "green",
+                "value": 0.25
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75
+      }
+    },
+    {
+      "id": 22,
+      "type": "gauge",
+      "title": "payment-service — Error Budget Remaining",
+      "description": "Ngân sách lỗi còn lại = clamp(1 − error_ratio_6h / 0,005, 0, 1). 100%: chưa dùng ngân sách; 0%: đã hết hoặc vượt ngân sách. Đỏ < 10%; vàng từ 10% đến dưới 25%; xanh ≥ 25%. Rule dùng cửa sổ 6 giờ nhưng Prometheus hiện chỉ giữ khoảng 3 giờ dữ liệu trên emptyDir và mất lịch sử khi restart. Kết quả chỉ phản ánh phần lịch sử còn lưu; thiếu request/series hiển thị CHƯA CÓ DỮ LIỆU.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:error_budget_remaining:ratio6h{service=\"payment-service\"}",
+          "legendFormat": "payment-service · budget còn lại (6 giờ, lịch sử hiện có)",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "green",
+                "value": 0.25
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75
+      }
+    },
+    {
+      "id": 23,
+      "type": "gauge",
+      "title": "inventory-service — Error Budget Remaining",
+      "description": "Ngân sách lỗi còn lại = clamp(1 − error_ratio_6h / 0,005, 0, 1). 100%: chưa dùng ngân sách; 0%: đã hết hoặc vượt ngân sách. Đỏ < 10%; vàng từ 10% đến dưới 25%; xanh ≥ 25%. Rule dùng cửa sổ 6 giờ nhưng Prometheus hiện chỉ giữ khoảng 3 giờ dữ liệu trên emptyDir và mất lịch sử khi restart. Kết quả chỉ phản ánh phần lịch sử còn lưu; thiếu request/series hiển thị CHƯA CÓ DỮ LIỆU.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 35
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sentinelops:error_budget_remaining:ratio6h{service=\"inventory-service\"}",
+          "legendFormat": "inventory-service · budget còn lại (6 giờ, lịch sử hiện có)",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "green",
+                "value": 0.25
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true,
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75
+      }
+    },
+    {
+      "id": 24,
+      "type": "row",
+      "title": "Sự cố và RCA abstention",
+      "description": "Bộ đếm của incident worker khi có series. Tích lũy từ khi worker khởi động, có thể reset; không phải số sự cố đang mở hay số phát sinh riêng trong 3 giờ.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Số nhóm sự cố · tích lũy worker",
+      "description": "Tổng bộ đếm nhóm sự cố worker ghi nhận, cộng theo environment. Tích lũy từ lúc worker khởi động, có thể giảm khi replica restart; không phải số sự cố đang mở hoặc tổng riêng trong khoảng thời gian dashboard. Chỉ hiển thị khi có series, không bù thiếu thành 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sum by (environment) (sentinelops_incident_groups_total)",
+          "legendFormat": "{{environment}} · nhóm sự cố",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto"
+      }
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "RCA abstention · tích lũy worker",
+      "description": "Tổng lượt RCA chủ động chưa kết luận của incident worker, cộng theo environment. Tích lũy từ lúc worker khởi động và có thể reset. Abstention phản ánh quyết định chưa kết luận, không tự chứng minh độ chính xác RCA. Chỉ hiển thị khi có series, không bù thiếu thành 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "sentinelops-prometheus"
+          },
+          "expr": "sum by (environment) (sentinelops_rca_abstentions_total)",
+          "legendFormat": "{{environment}} · RCA chưa kết luận",
+          "instant": true,
+          "range": false,
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "CHƯA CÓ DỮ LIỆU",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "CHƯA CÓ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "CHƯA ĐỦ DỮ LIỆU",
+                  "color": "orange",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto"
+      }
+    }
+  ]
+}

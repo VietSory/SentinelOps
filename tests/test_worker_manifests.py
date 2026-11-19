@@ -247,8 +247,57 @@ def test_resources_have_valid_references_and_separate_worker_entrypoints():
         assert container['env'][0] == {'name': 'CONTROL_DATABASE_URL', 'valueFrom': {'secretKeyRef': {
             'name': 'control-runtime', 'key': 'database-url', 'optional': False}}}
         assert '--source-policy' in container['args'] and 'in-cluster' in container['args']
+        assert '--metrics-otlp-endpoint' not in container['args']
+        assert '--metrics-instance' not in container['args']
         assert 'ports' not in container
     assert not any(d['kind'] in ('Secret', 'PersistentVolumeClaim', 'Service') for d in documents)
+
+
+@pytest.mark.parametrize('slot', [0, 15])
+def test_metrics_only_enable_main_workers_and_preserve_status_probes(slot, monkeypatch):
+    endpoint = 'http://otel-collector:4317'
+    extra = {'metrics_otlp_endpoint': endpoint}
+    if slot:
+        extra.update(health_metrics_instance=f'health-{slot}', incident_metrics_instance=f'incidents-{slot}')
+    documents = worker.render(IMAGE, **PARAMETERS, **extra)
+    expected = deepcopy(worker.render(IMAGE, **PARAMETERS))
+    runtime = configs(documents)[worker.CONFIG]
+    for deployment, baseline, cli, instance in zip(deployments(documents), deployments(expected),
+            (run_health_worker, run_incident_worker), (f'health-{slot}', f'incidents-{slot}'), strict=True):
+        container, = deployment['spec']['template']['spec']['containers']
+        original, = baseline['spec']['template']['spec']['containers']
+        original['args'] += ['--metrics-otlp-endpoint', endpoint, '--metrics-instance', instance]
+        assert '--status' not in container['args']
+        for key in ('readinessProbe', 'livenessProbe'):
+            assert container[key] == original[key]
+            command = container[key]['exec']['command']
+            assert '--status' in command
+            assert '--metrics-otlp-endpoint' not in command and '--metrics-instance' not in command
+        for arguments, status in ((container['args'], False),
+                                  (container['readinessProbe']['exec']['command'][4:], True),
+                                  (container['livenessProbe']['exec']['command'][4:], True)):
+            seen = []
+            async def capture(args):
+                seen.append(args)
+            monkeypatch.setattr(cli, 'run', capture)
+            monkeypatch.setattr(sys, 'argv', [container['command'][1],
+                *[runtime[a[2:-1]] if a.startswith('$(') else a for a in arguments]])
+            cli.main()
+            parsed, = seen
+            assert parsed.status is status
+            assert parsed.metrics_otlp_endpoint == (None if status else endpoint)
+            if not status:
+                assert parsed.metrics_instance == instance
+    assert documents == expected
+
+
+@pytest.mark.parametrize('values', [
+    {'health_metrics_instance': 'health-16'}, {'health_metrics_instance': 'incidents-0'},
+    {'health_metrics_instance': None}, {'incident_metrics_instance': 'incidents-16'},
+    {'incident_metrics_instance': 'health-0'}, {'incident_metrics_instance': 'incidents-01'}])
+def test_metrics_reject_unbounded_or_mismatched_worker_instances(values):
+    with pytest.raises(ValueError, match='stable'):
+        worker.render(IMAGE, **PARAMETERS, metrics_otlp_endpoint='http://otel-collector:4317', **values)
 
 
 def test_observer_rbac_is_read_only_and_never_bound_to_health_worker():
@@ -499,13 +548,19 @@ def cli_arguments(output):
     return arguments
 
 
-def test_cli_yaml_roundtrip_is_deterministic_and_refuses_overwrite(tmp_path, monkeypatch):
+@pytest.mark.parametrize('metrics', [False, True])
+def test_cli_yaml_roundtrip_is_deterministic_and_refuses_overwrite(tmp_path, monkeypatch, metrics):
     first, second = tmp_path / 'first.yaml', tmp_path / 'second.yaml'
+    extra = {'metrics_otlp_endpoint': 'http://otel-collector:4317',
+             'health_metrics_instance': 'health-15', 'incident_metrics_instance': 'incidents-15'} if metrics else {}
     for output in (first, second):
-        monkeypatch.setattr(sys, 'argv', cli_arguments(output))
+        arguments = cli_arguments(output)
+        for key, value in extra.items():
+            arguments += ['--' + key.replace('_', '-'), value]
+        monkeypatch.setattr(sys, 'argv', arguments)
         worker.main()
     assert first.read_bytes() == second.read_bytes()
-    assert list(yaml.safe_load_all(first.read_text())) == worker.render(IMAGE, **PARAMETERS)
+    assert list(yaml.safe_load_all(first.read_text())) == worker.render(IMAGE, **PARAMETERS, **extra)
     with pytest.raises(FileExistsError):
         worker.main()
 

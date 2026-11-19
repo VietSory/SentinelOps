@@ -134,7 +134,7 @@ def test_non_root_readonly_and_all_writable_directories_have_volumes():
         assert container[name]['httpGet'] == {'path': '/grafana/api/health', 'port': 'http'}
 
 
-def test_repository_provisioning_and_dashboard_are_mounted_without_rewriting_the_source():
+def test_repository_provisioning_and_dashboards_are_mounted_without_rewriting_the_source():
     docs = grafana.render(**inputs())
     source = grafana.GRAFANA / 'provisioning/datasources/prometheus.yaml'
     original = yaml.safe_load(source.read_text(encoding='utf-8'))
@@ -146,9 +146,13 @@ def test_repository_provisioning_and_dashboard_are_mounted_without_rewriting_the
     assert original['datasources'][0]['url'] == 'http://prometheus:9090'
     assert provisioning['sentinelops.yaml'] == (
         grafana.GRAFANA / 'provisioning/dashboards/sentinelops.yaml').read_text(encoding='utf-8')
-    dashboard = resource(docs, 'ConfigMap', 'grafana-dashboards')['data']['sentinelops-workers.json']
-    assert dashboard == (grafana.GRAFANA / 'dashboards/sentinelops-workers.json').read_text(encoding='utf-8')
-    assert not json.loads(dashboard)['editable']
+    dashboards = resource(docs, 'ConfigMap', 'grafana-dashboards')['data']
+    paths = sorted((grafana.GRAFANA / 'dashboards').glob('*.json'))
+    assert set(dashboards) == {
+        'sentinelops-workers.json', 'sentinelops-incidents.json', 'sentinelops-slo.json'}
+    assert list(dashboards) == [path.name for path in paths]
+    assert dashboards == {path.name: path.read_text(encoding='utf-8') for path in paths}
+    assert all(json.loads(dashboard)['editable'] is False for dashboard in dashboards.values())
     pod = resource(docs, 'Deployment')['spec']['template']['spec']
     volume = next(volume for volume in pod['volumes'] if volume['name'] == 'provisioning')
     assert volume['configMap']['items'] == [
@@ -157,7 +161,9 @@ def test_repository_provisioning_and_dashboard_are_mounted_without_rewriting_the
     assert yaml.safe_load(provisioning['sentinelops.yaml'])['providers'][0]['options']['path'] == '/var/lib/grafana/dashboards'
 
 
-def test_config_and_dashboard_changes_restart_grafana(tmp_path, monkeypatch):
+@pytest.mark.parametrize('name', [
+    'sentinelops-workers.json', 'sentinelops-incidents.json', 'sentinelops-slo.json'])
+def test_config_and_dashboard_changes_restart_grafana(tmp_path, monkeypatch, name):
     before = grafana.render(**inputs())
     changed = grafana.render(**{**inputs(), 'cloudfront_domain': 'new.cloudfront.net'})
     def checksum(docs):
@@ -171,7 +177,7 @@ def test_config_and_dashboard_changes_restart_grafana(tmp_path, monkeypatch):
             dest = tmp_path / source.relative_to(grafana.GRAFANA)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(source.read_bytes())
-    path = tmp_path / 'dashboards/sentinelops-workers.json'
+    path = tmp_path / 'dashboards' / name
     dashboard = json.loads(path.read_text(encoding='utf-8'))
     dashboard['title'] += ' updated'
     path.write_text(json.dumps(dashboard), encoding='utf-8')

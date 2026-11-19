@@ -72,7 +72,10 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
            remediation_store_claim: str = 'remediation-artifacts',
            known_good_store_claim: str = 'review-artifacts',
            deployment_change_store_claim: str = 'deployment-change-artifacts',
-           policy_enabled: bool = False, demo_ui: bool = False) -> list[dict]:
+           policy_enabled: bool = False, demo_ui: bool = False,
+           metrics_otlp_endpoint: str | None = None,
+           health_metrics_instance: str = 'health-0',
+           incident_metrics_instance: str = 'incidents-0') -> list[dict]:
     image_digest(image)
     _label(remediation_store_claim, 'remediation artifact claim')
     _label(known_good_store_claim, 'known-good artifact claim')
@@ -210,6 +213,12 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                 mounts.append({'name': 'models', 'mountPath': '/models', 'readOnly': True})
                 args += ['--model-store', '$(SENTINELOPS_MODEL_STORE)', '--model-release-ref', '$(SENTINELOPS_MODEL_RELEASE_REF)']
         status_command = ['python', '-c', STATUS_EXEC, f'scripts/run_{worker}_worker.py', *args, '--status']
+        if metrics_otlp_endpoint:
+            instance = incident_metrics_instance if incident else health_metrics_instance
+            prefix = 'incidents' if incident else 'health'
+            if not isinstance(instance, str) or not re.fullmatch(prefix + r'-(?:[0-9]|1[0-5])', instance):
+                raise ValueError(f'worker metrics require a stable {prefix}-0..{prefix}-15 slot')
+            args += ['--metrics-otlp-endpoint', metrics_otlp_endpoint, '--metrics-instance', instance]
         documents.append({'apiVersion': 'apps/v1', 'kind': 'Deployment', 'metadata': metadata(name), 'spec': {
             'replicas': 1, 'strategy': {'type': 'Recreate'}, 'selector': {'matchLabels': {'app': name}},
             'template': {'metadata': {'labels': {**labels, 'app': name}, 'annotations': {
@@ -435,6 +444,9 @@ def main():
     parser.add_argument('--deployment-change-store-claim', default='deployment-change-artifacts')
     parser.add_argument('--policy-enabled', action='store_true')
     parser.add_argument('--demo-ui', action='store_true', help='OIDC UI sidecar sharing controller PVC; API renderer supplies config/Service')
+    parser.add_argument('--metrics-otlp-endpoint', help='Opt-in OTLP metrics endpoint for both workers')
+    parser.add_argument('--health-metrics-instance', default='health-0')
+    parser.add_argument('--incident-metrics-instance', default='incidents-0')
     parser.add_argument('--output', type=Path, required=True)
     args = vars(parser.parse_args())
     output = args.pop('output')
