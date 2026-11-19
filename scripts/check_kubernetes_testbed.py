@@ -299,7 +299,7 @@ def main():
     files = ['scripts/check_kubernetes_testbed.py', 'scripts/kubernetes_testbed.py', 'scripts/check_rollback_kubernetes.py',
              'services/common/observability.py', 'services/common/runtime.py', 'docker/Dockerfile.service',
              'infra/local/init.sql', 'observability/otel-collector-config.yaml', 'observability/prometheus.yml',
-             'observability/rules/sentinelops-workers.yml',
+             'observability/rules/sentinelops-workers.yml', 'observability/rules/sentinelops-business.yml',
              'pyproject.toml', 'infra/kubernetes/payment-rollback-rbac.yaml',
              'infra/kubernetes/payment-quarantine-observer-rbac.yaml']
     files += [f'services/{name}/app.py' for name in ('checkout', 'payment', 'inventory')]

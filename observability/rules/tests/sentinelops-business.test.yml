@@ -639,3 +639,56 @@ tests:
       exp_samples:
       - labels: sentinelops:error_budget_remaining:ratio6h{service="checkout-service"}
         value: 1
+
+  - name: status needs both indicators to be healthy; one known breach is enough
+    interval: 15s
+    input_series:
+      # checkout: 50% 5xx, no latency histogram -> error breach alone -> 1
+      - series: 'sentinelops_http_requests_total{service="checkout-service",status_code="200"}'
+        values: '0+30x40'
+      - series: 'sentinelops_http_requests_total{service="checkout-service",status_code="500"}'
+        values: '0+30x40'
+      # payment: no 5xx, fast histogram -> both observed within threshold -> 0
+      - series: 'sentinelops_http_requests_total{service="payment-service",status_code="200"}'
+        values: '0+60x40'
+      - series: 'sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="500"}'
+        values: '0+60x40'
+      - series: 'sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="1000"}'
+        values: '0+60x40'
+      - series: 'sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="+Inf"}'
+        values: '0+60x40'
+      # inventory: no 5xx but no latency histogram -> unknown, no status sample
+      - series: 'sentinelops_http_requests_total{service="inventory-service",status_code="200"}'
+        values: '0+60x40'
+      # rds-proxy: under 0.5 req/s -> 2
+      - series: 'sentinelops_http_requests_total{service="rds-proxy",status_code="200"}'
+        values: '0+1x40'
+    promql_expr_test:
+      - expr: sentinelops:slo_status
+        eval_time: 8m
+        exp_samples:
+          - labels: 'sentinelops:slo_status{service="checkout-service"}'
+            value: 1
+          - labels: 'sentinelops:slo_status{service="payment-service"}'
+            value: 0
+          - labels: 'sentinelops:slo_status{service="rds-proxy"}'
+            value: 2
+
+  - name: stale telemetry leaves the status absent, never healthy or low-traffic
+    interval: 15s
+    input_series:
+      - series: 'sentinelops_http_requests_total{service="payment-service",status_code="200"}'
+        values: '0+60x20 stale'
+      - series: 'sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="500"}'
+        values: '0+60x20 stale'
+      - series: 'sentinelops_http_request_duration_ms_milliseconds_bucket{service="payment-service",le="+Inf"}'
+        values: '0+60x20 stale'
+    promql_expr_test:
+      - expr: sentinelops:slo_status
+        eval_time: 4m
+        exp_samples:
+          - labels: 'sentinelops:slo_status{service="payment-service"}'
+            value: 0
+      - expr: sentinelops:slo_status
+        eval_time: 9m
+        exp_samples: []

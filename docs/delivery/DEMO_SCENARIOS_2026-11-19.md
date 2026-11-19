@@ -26,10 +26,10 @@
 
 | Đại lượng | Định nghĩa trong cấu hình | Bằng chứng |
 | --- | --- | --- |
-| Request rate | Tổng `rate(sentinelops_http_requests_total[1m])` theo service, đơn vị req/s | `observability/rules/sentinelops-business.yml:7` |
-| p95 latency | `histogram_quantile(0.95, sum by (service, le) (rate(sentinelops_http_request_duration_ms_milliseconds_bucket[5m])))`; histogram đã dùng ms, không nhân thêm 1000 | `observability/rules/sentinelops-business.yml:21` |
-| `sentinelops:slo_latency_breach` | `1` khi p95 lớn hơn 750 ms, `0` khi có dữ liệu trong ngưỡng; lọc dữ liệu không hợp lệ trước so sánh | `observability/rules/sentinelops-business.yml:30` |
-| Error ratio / error breach | Tỷ lệ 5xx theo cửa sổ 5 phút; ngưỡng error breach lớn hơn 0,05 | `observability/rules/sentinelops-business.yml:10`, `observability/rules/sentinelops-business.yml:36` |
+| Request rate | Tổng `rate(sentinelops_http_requests_total[1m])` theo service, đơn vị req/s | `observability/rules/sentinelops-business.yml:22` |
+| p95 latency | `histogram_quantile(0.95, sum by (service, le) (rate(sentinelops_http_request_duration_ms_milliseconds_bucket[5m])))`; histogram đã dùng ms, không nhân thêm 1000 | `observability/rules/sentinelops-business.yml:82` |
+| `sentinelops:slo_latency_breach` | `1` khi p95 lớn hơn 750 ms, `0` khi có dữ liệu trong ngưỡng; lọc dữ liệu không hợp lệ trước so sánh | `observability/rules/sentinelops-business.yml:112` |
+| Error ratio / error breach | Tỷ lệ 5xx theo cửa sổ 5 phút; ngưỡng error breach lớn hơn 0,05 | `observability/rules/sentinelops-business.yml:25`, `observability/rules/sentinelops-business.yml:115` |
 | Health policy | Tối thiểu 30 request, coverage 0,8; 2 bucket vào trạng thái breach, 3 bucket để hồi phục | `configs/slo_health_policy.json:5` |
 
 Recording rule mô tả cửa sổ metric hiện tại, không phải toàn bộ trạng thái SLO có lưu của health worker (`observability/rules/sentinelops-business.yml:2`). Request rate tại một snapshot cũng không thay thế bằng chứng eligibility/coverage của từng bucket; bảng KB1 ghi đúng rate đã được bàn giao và không suy thêm kết quả eligibility chưa có.
@@ -39,7 +39,7 @@ Recording rule mô tả cửa sổ metric hiện tại, không phải toàn bộ
 | Hạng mục | Kết quả đã bàn giao | Bằng chứng |
 | --- | --- | --- |
 | CloudFront | Đã bật distribution, có hai URL public thật nêu trên | LIVE-19 |
-| Recording rules nghiệp vụ | Thêm **5** rule: request rate, error ratio, p95 latency, latency breach và error breach | `observability/rules/sentinelops-business.yml:7`, `observability/rules/sentinelops-business.yml:10`, `observability/rules/sentinelops-business.yml:21`, `observability/rules/sentinelops-business.yml:33`, `observability/rules/sentinelops-business.yml:36`; triển khai hôm nay: LIVE-19 |
+| Recording rules nghiệp vụ | Thêm **17** rule: tuổi telemetry counter/histogram; request rate; error ratio 5m/1h/6h; success ratio 5m/1h/6h; p50/p95/p99 latency; error budget remaining và burn rate 6h; latency breach, error breach và trạng thái SLO theo service | `observability/rules/sentinelops-business.yml:16`, `observability/rules/sentinelops-business.yml:22`, `observability/rules/sentinelops-business.yml:25`, `observability/rules/sentinelops-business.yml:82`, `observability/rules/sentinelops-business.yml:101`, `observability/rules/sentinelops-business.yml:112`, `observability/rules/sentinelops-business.yml:115`, `observability/rules/sentinelops-business.yml:124`; triển khai hôm nay: LIVE-19 |
 | Dashboard nghiệp vụ/sự cố | Thêm dashboard UID `sentinelops-incidents`, tên `SentinelOps — suc khoe nghiep vu va su co` | `observability/grafana/dashboards/sentinelops-incidents.json:2`; thực hiện hôm nay: LIVE-19 |
 | Ship nhiều dashboard | Renderer đọc toàn bộ file dashboard JSON rồi đưa vào ConfigMap `grafana-dashboards` | `scripts/aws_demo/render_grafana.py:181`, `scripts/aws_demo/render_grafana.py:193`; thực hiện hôm nay: LIVE-19 |
 | Traffic | Tăng `sentinelops-traffic` lên **2 replica** | LIVE-19 |

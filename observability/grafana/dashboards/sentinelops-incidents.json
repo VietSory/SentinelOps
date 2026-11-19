@@ -1,7 +1,7 @@
 {
   "uid": "sentinelops-incidents",
   "title": "SentinelOps — suc khoe nghiep vu va su co",
-  "description": "Sức khỏe HTTP của checkout-service, payment-service và inventory-service: đỏ = vượt ngưỡng SLO, xanh = đủ lưu lượng và cả hai chỉ số trong ngưỡng, cam = thiếu dữ liệu hoặc lưu lượng. P95 và tỷ lệ lỗi dùng cửa sổ 5 phút; request rate dùng 1 phút. Ngưỡng: 750 ms, 5%, tối thiểu 30 request/60 giây (0,5 req/s). Đây là quan sát cửa sổ trượt, không thay thế bucket hợp lệ, độ phủ, độ trễ và trạng thái bền của health worker. Hai biểu đồ cuối là bộ đếm tích lũy của incident worker, không phải số sự cố đang mở; RCA chưa kết luận không đồng nghĩa xử lý lỗi.",
+  "description": "Sức khỏe HTTP của checkout-service, payment-service và inventory-service: đỏ = vượt ngưỡng SLO, xanh = đủ lưu lượng và cả hai chỉ số trong ngưỡng, cam = thiếu dữ liệu hoặc lưu lượng. P95 và tỷ lệ lỗi dùng cửa sổ 5 phút; request rate dùng 1 phút. Ngưỡng: 750 ms, 5%, tối thiểu 30 request/60 giây (0,5 req/s). Đây là quan sát cửa sổ trượt, không thay thế bucket hợp lệ, độ phủ, độ trễ và trạng thái bền của health worker. Hai biểu đồ cuối là số phát sinh mới mỗi 5 phút (increase() trên bộ đếm của incident worker, bỏ qua lần đặt lại khi worker khởi động lại), không phải số sự cố đang mở; RCA chưa kết luận không đồng nghĩa xử lý lỗi.",
   "tags": [
     "sentinelops",
     "business-health",
@@ -25,7 +25,7 @@
       "id": 1,
       "type": "stat",
       "title": "checkout-service — trạng thái SLO",
-      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách. Counter hoặc histogram không còn cập nhật trong 2 phút: CHƯA RÕ.",
+      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách. Counter hoặc histogram không còn cập nhật trong 2 phút: CHƯA RÕ. Nguồn: recording rule sentinelops:slo_status. Một chỉ số trong ngưỡng chưa đủ để báo xanh; một vi phạm đã đo được là đủ để báo đỏ.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -39,7 +39,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "((clamp_max(sentinelops:slo_latency_breach{service=\"checkout-service\"} + on (service) sentinelops:slo_error_breach{service=\"checkout-service\"}, 1) and on (service) (sentinelops:http_request_rate:rate1m{service=\"checkout-service\"} >= 0.5)) or on (service) (2 + 0 * (sentinelops:http_request_rate:rate1m{service=\"checkout-service\"} < 0.5))) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"checkout-service\"} < 120) and on (service) (sentinelops:http_latency_telemetry_age_seconds{service=\"checkout-service\"} < 120)",
+          "expr": "sentinelops:slo_status{service=\"checkout-service\"}",
           "instant": true,
           "range": false,
           "legendFormat": "checkout-service"
@@ -145,7 +145,7 @@
       "id": 2,
       "type": "stat",
       "title": "payment-service — trạng thái SLO",
-      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách. Counter hoặc histogram không còn cập nhật trong 2 phút: CHƯA RÕ.",
+      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách. Counter hoặc histogram không còn cập nhật trong 2 phút: CHƯA RÕ. Nguồn: recording rule sentinelops:slo_status. Một chỉ số trong ngưỡng chưa đủ để báo xanh; một vi phạm đã đo được là đủ để báo đỏ.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -159,7 +159,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "((clamp_max(sentinelops:slo_latency_breach{service=\"payment-service\"} + on (service) sentinelops:slo_error_breach{service=\"payment-service\"}, 1) and on (service) (sentinelops:http_request_rate:rate1m{service=\"payment-service\"} >= 0.5)) or on (service) (2 + 0 * (sentinelops:http_request_rate:rate1m{service=\"payment-service\"} < 0.5))) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"payment-service\"} < 120) and on (service) (sentinelops:http_latency_telemetry_age_seconds{service=\"payment-service\"} < 120)",
+          "expr": "sentinelops:slo_status{service=\"payment-service\"}",
           "instant": true,
           "range": false,
           "legendFormat": "payment-service"
@@ -265,7 +265,7 @@
       "id": 3,
       "type": "stat",
       "title": "inventory-service — trạng thái SLO",
-      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách. Counter hoặc histogram không còn cập nhật trong 2 phút: CHƯA RÕ.",
+      "description": "Đỏ: p95 > 750 ms hoặc tỷ lệ 5xx > 5%. Xanh: cả hai chỉ số được quan sát trong ngưỡng và lưu lượng 1 phút ≥ 0,5 req/s (xấp xỉ 30 request/phút). Cam: thiếu lưu lượng hoặc thiếu dữ liệu. Các chỉ số trượt phản ánh ngưỡng hiện tại; trạng thái sự cố của worker còn phụ thuộc bucket hợp lệ và độ bền theo chính sách. Counter hoặc histogram không còn cập nhật trong 2 phút: CHƯA RÕ. Nguồn: recording rule sentinelops:slo_status. Một chỉ số trong ngưỡng chưa đủ để báo xanh; một vi phạm đã đo được là đủ để báo đỏ.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -279,7 +279,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "((clamp_max(sentinelops:slo_latency_breach{service=\"inventory-service\"} + on (service) sentinelops:slo_error_breach{service=\"inventory-service\"}, 1) and on (service) (sentinelops:http_request_rate:rate1m{service=\"inventory-service\"} >= 0.5)) or on (service) (2 + 0 * (sentinelops:http_request_rate:rate1m{service=\"inventory-service\"} < 0.5))) and on (service) (sentinelops:http_request_telemetry_age_seconds{service=\"inventory-service\"} < 120) and on (service) (sentinelops:http_latency_telemetry_age_seconds{service=\"inventory-service\"} < 120)",
+          "expr": "sentinelops:slo_status{service=\"inventory-service\"}",
           "instant": true,
           "range": false,
           "legendFormat": "inventory-service"
@@ -399,7 +399,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sentinelops:http_latency_p95_ms{service=~\"checkout-service|payment-service|inventory-service\"} and on (service) (sentinelops:http_latency_telemetry_age_seconds < 120)",
+          "expr": "(sentinelops:http_latency_p95_ms{service=~\"checkout-service|payment-service|inventory-service\"} >= 0) and on (service) (sentinelops:http_latency_telemetry_age_seconds < 120)",
           "range": true,
           "instant": false,
           "legendFormat": "{{service}}"
@@ -523,7 +523,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sentinelops:http_error_ratio:ratio5m{service=~\"checkout-service|payment-service|inventory-service\"} and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)",
+          "expr": "(sentinelops:http_error_ratio:ratio5m{service=~\"checkout-service|payment-service|inventory-service\"} >= 0) and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)",
           "range": true,
           "instant": false,
           "legendFormat": "{{service}}"
@@ -756,8 +756,8 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Nhóm sự cố — tổng worker đã ghi nhận",
-      "description": "Bộ đếm sentinelops_incident_groups_total cộng theo environment. Tích lũy từ khi worker khởi động, có thể giảm khi replica khởi động lại; không phải số sự cố đang mở. Thiếu series hiển thị khoảng trống, không bù thành 0.",
+      "title": "Nhóm sự cố mới — mỗi 5 phút",
+      "description": "Số nhóm sự cố mới trong mỗi 5 phút: increase() của bộ đếm sentinelops_incident_groups_total, cộng theo environment. increase() bỏ qua lần đặt lại bộ đếm khi worker khởi động lại. Không phải số sự cố đang mở. Thiếu series hiển thị khoảng trống, không bù thành 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -771,7 +771,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (environment) (sentinelops_incident_groups_total)",
+          "expr": "sum by (environment) (increase(sentinelops_incident_groups_total[5m]))",
           "range": true,
           "instant": false,
           "legendFormat": "{{environment}} — nhóm sự cố"
@@ -809,7 +809,7 @@
             "showPoints": "never",
             "spanNulls": false,
             "axisPlacement": "left",
-            "axisLabel": "Nhóm sự cố tích lũy",
+            "axisLabel": "Nhóm sự cố mới / 5 phút",
             "axisBorderShow": true,
             "thresholdsStyle": {
               "mode": "off"
@@ -822,8 +822,8 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "RCA chưa kết luận — tổng lượt worker ghi nhận",
-      "description": "Bộ đếm sentinelops_rca_abstentions_total cộng theo environment. RCA chủ động chưa kết luận khi không đủ bằng chứng; chỉ số này không tự đánh giá chất lượng RCA. Tích lũy từ khi worker khởi động, có thể giảm khi replica khởi động lại. Thiếu series không được bù thành 0.",
+      "title": "RCA chưa kết luận — lượt mới mỗi 5 phút",
+      "description": "Số lượt RCA chủ động chưa kết luận mới trong mỗi 5 phút: increase() của sentinelops_rca_abstentions_total, cộng theo environment; bỏ qua lần đặt lại khi worker khởi động lại. Chỉ số này không tự đánh giá chất lượng RCA. Thiếu series không được bù thành 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -837,7 +837,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (environment) (sentinelops_rca_abstentions_total)",
+          "expr": "sum by (environment) (increase(sentinelops_rca_abstentions_total[5m]))",
           "range": true,
           "instant": false,
           "legendFormat": "{{environment}} — RCA chưa kết luận"
@@ -875,7 +875,7 @@
             "showPoints": "never",
             "spanNulls": false,
             "axisPlacement": "left",
-            "axisLabel": "Lượt RCA chưa kết luận tích lũy",
+            "axisLabel": "Lượt RCA chưa kết luận / 5 phút",
             "axisBorderShow": true,
             "thresholdsStyle": {
               "mode": "off"
