@@ -23,6 +23,7 @@ from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2, queries, source_configuration_hash
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers import kubernetes_evidence as evidence
+from sentinelops.workers import metrics as worker_metrics
 from sentinelops.workers.source_policy import SourcePolicy, _credential
 from test_kubernetes_evidence import TARGET, inventory, original_log, pod_response, projected
 from test_prometheus_capture import END, source_response
@@ -247,8 +248,115 @@ def test_resources_have_valid_references_and_separate_worker_entrypoints():
         assert container['env'][0] == {'name': 'CONTROL_DATABASE_URL', 'valueFrom': {'secretKeyRef': {
             'name': 'control-runtime', 'key': 'database-url', 'optional': False}}}
         assert '--source-policy' in container['args'] and 'in-cluster' in container['args']
+        assert '--metrics-otlp-endpoint' not in container['args']
+        assert '--metrics-instance' not in container['args']
         assert 'ports' not in container
     assert not any(d['kind'] in ('Secret', 'PersistentVolumeClaim', 'Service') for d in documents)
+
+
+@pytest.fixture
+def offline_otlp_exporters(monkeypatch):
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+    exporters = []
+    def reader(exporter, **kwargs):
+        exporters.append(exporter)
+        return InMemoryMetricReader()
+    # Keep runtime validation and real OTLP exporter construction; disable sending.
+    monkeypatch.setattr(worker_metrics, 'PeriodicExportingMetricReader', reader)
+    try:
+        yield exporters
+    finally:
+        for exporter in exporters:
+            exporter.shutdown()
+
+
+@pytest.mark.parametrize('environment', ['staging', 'production'])
+@pytest.mark.parametrize('endpoint', ['http://127.0.0.1:4317', 'http://localhost:4317/'])
+@pytest.mark.parametrize('slot', [0, 15])
+def test_metrics_only_enable_main_workers_and_preserve_status_probes(
+        environment, endpoint, slot, monkeypatch, offline_otlp_exporters):
+    parameters = {**PARAMETERS, 'environment': environment}
+    extra = {'metrics_otlp_endpoint': endpoint}
+    if slot:
+        extra.update(health_metrics_instance=f'health-{slot}', incident_metrics_instance=f'incidents-{slot}')
+    documents = worker.render(IMAGE, **parameters, **extra)
+    expected = deepcopy(worker.render(IMAGE, **parameters))
+    runtime = configs(documents)[worker.CONFIG]
+    for deployment, baseline, cli, instance in zip(deployments(documents), deployments(expected),
+            (run_health_worker, run_incident_worker), (f'health-{slot}', f'incidents-{slot}'), strict=True):
+        container, = deployment['spec']['template']['spec']['containers']
+        original, = baseline['spec']['template']['spec']['containers']
+        original['args'] += ['--metrics-otlp-endpoint', endpoint, '--metrics-instance', instance]
+        assert '--status' not in container['args']
+        for key in ('readinessProbe', 'livenessProbe'):
+            assert container[key] == original[key]
+            command = container[key]['exec']['command']
+            assert '--status' in command
+            assert '--metrics-otlp-endpoint' not in command and '--metrics-instance' not in command
+        for arguments, status in ((container['args'], False),
+                                  (container['readinessProbe']['exec']['command'][4:], True),
+                                  (container['livenessProbe']['exec']['command'][4:], True)):
+            seen = []
+            async def capture(args):
+                seen.append(args)
+            monkeypatch.setattr(cli, 'run', capture)
+            monkeypatch.setattr(sys, 'argv', [container['command'][1],
+                *[runtime[a[2:-1]] if a.startswith('$(') else a for a in arguments]])
+            cli.main()
+            parsed, = seen
+            assert parsed.status is status
+            assert parsed.metrics_otlp_endpoint == (None if status else endpoint)
+            if not status:
+                assert parsed.metrics_instance == instance
+                metrics_type = cli.WorkerMetrics if cli is run_health_worker else cli.IncidentWorkerMetrics
+                metrics = metrics_type.otlp(parsed.metrics_otlp_endpoint,
+                    environment=parsed.environment, instance=parsed.metrics_instance)
+                try:
+                    assert offline_otlp_exporters[-1]._endpoint == urlsplit(endpoint).netloc
+                    assert metrics.provider._sdk_config.resource.attributes['deployment.environment'] == environment
+                finally:
+                    metrics.close()
+    assert documents == expected
+
+
+@pytest.mark.parametrize('environment', ['aws-dev', 'dev'])
+@pytest.mark.parametrize('endpoint', ['http://127.0.0.1:4317', 'http://otel-collector:4317'])
+def test_metrics_reject_environments_rejected_by_both_runtime_exporters(environment, endpoint):
+    for metrics_type, instance in ((worker_metrics.WorkerMetrics, 'health-0'),
+                                   (worker_metrics.IncidentWorkerMetrics, 'incidents-0')):
+        with pytest.raises(ValueError, match='environment'):
+            metrics_type.otlp(endpoint, environment=environment, instance=instance)
+    with pytest.raises(ValueError, match='environment') as error:
+        worker.render(IMAGE, **{**PARAMETERS, 'environment': environment}, metrics_otlp_endpoint=endpoint)
+    assert repr(environment) in str(error.value)
+    assert all(allowed in str(error.value) for allowed in ('local', 'test', 'staging', 'production'))
+
+
+@pytest.mark.parametrize('endpoint', [
+    'http://otel-collector:4317', 'http://otel-collector.sentinelops-b-actions.svc.cluster.local:4317',
+    'http://10.0.0.1:4317', 'http://[::1]:4317', 'https://localhost:4317',
+    'http://user:password@localhost:4317', 'http://localhost:4317/v1/metrics',
+    'http://localhost:4317?token=value', 'http://localhost:4317#fragment',
+    'http://localhost:0', 'http://localhost:65536', 'http://localhost:invalid', ''])
+def test_metrics_reject_endpoints_rejected_by_both_runtime_exporters(endpoint):
+    for metrics_type, instance in ((worker_metrics.WorkerMetrics, 'health-0'),
+                                   (worker_metrics.IncidentWorkerMetrics, 'incidents-0')):
+        with pytest.raises(ValueError, match='loopback'):
+            metrics_type.otlp(endpoint, environment='staging', instance=instance)
+    with pytest.raises(ValueError, match='endpoint') as error:
+        worker.render(IMAGE, **{**PARAMETERS, 'environment': 'staging'}, metrics_otlp_endpoint=endpoint)
+    assert repr(endpoint) in str(error.value)
+    assert '127.0.0.1' in str(error.value) and 'localhost' in str(error.value)
+
+
+@pytest.mark.parametrize('values', [
+    {'health_metrics_instance': 'health-16'}, {'health_metrics_instance': 'incidents-0'},
+    {'health_metrics_instance': None}, {'incident_metrics_instance': 'incidents-16'},
+    {'incident_metrics_instance': 'health-0'}, {'incident_metrics_instance': 'incidents-01'}])
+def test_metrics_reject_unbounded_or_mismatched_worker_instances(values):
+    with pytest.raises(ValueError, match='stable'):
+        worker.render(IMAGE, **{**PARAMETERS, 'environment': 'staging'},
+            metrics_otlp_endpoint='http://127.0.0.1:4317', **values)
 
 
 def test_observer_rbac_is_read_only_and_never_bound_to_health_worker():
@@ -488,9 +596,9 @@ def test_only_registry_digest_images_are_accepted(image):
         worker.render(image, **PARAMETERS)
 
 
-def cli_arguments(output):
+def cli_arguments(output, parameters=PARAMETERS):
     arguments = ['render_worker_manifests', '--image', IMAGE, '--output', str(output)]
-    for key, value in PARAMETERS.items():
+    for key, value in parameters.items():
         if key == 'deployment_uids':
             arguments += [part for service, uid in value.items()
                           for part in ('--' + service.removesuffix('-service') + '-deployment-uid', uid)]
@@ -499,15 +607,34 @@ def cli_arguments(output):
     return arguments
 
 
-def test_cli_yaml_roundtrip_is_deterministic_and_refuses_overwrite(tmp_path, monkeypatch):
+@pytest.mark.parametrize('metrics', [False, True])
+def test_cli_yaml_roundtrip_is_deterministic_and_refuses_overwrite(tmp_path, monkeypatch, metrics):
     first, second = tmp_path / 'first.yaml', tmp_path / 'second.yaml'
+    parameters = {**PARAMETERS, 'environment': 'staging'} if metrics else PARAMETERS
+    extra = {'metrics_otlp_endpoint': 'http://127.0.0.1:4317',
+             'health_metrics_instance': 'health-15', 'incident_metrics_instance': 'incidents-15'} if metrics else {}
     for output in (first, second):
-        monkeypatch.setattr(sys, 'argv', cli_arguments(output))
+        arguments = cli_arguments(output, parameters)
+        for key, value in extra.items():
+            arguments += ['--' + key.replace('_', '-'), value]
+        monkeypatch.setattr(sys, 'argv', arguments)
         worker.main()
     assert first.read_bytes() == second.read_bytes()
-    assert list(yaml.safe_load_all(first.read_text())) == worker.render(IMAGE, **PARAMETERS)
+    assert list(yaml.safe_load_all(first.read_text())) == worker.render(IMAGE, **parameters, **extra)
     with pytest.raises(FileExistsError):
         worker.main()
+
+
+@pytest.mark.parametrize(('environment', 'endpoint'), [
+    ('aws-dev', 'http://127.0.0.1:4317'), ('dev', 'http://otel-collector:4317'),
+    ('staging', 'http://otel-collector:4317')])
+def test_cli_invalid_metrics_does_not_create_output(tmp_path, monkeypatch, environment, endpoint):
+    output = tmp_path / 'manifest.yaml'
+    arguments = cli_arguments(output, {**PARAMETERS, 'environment': environment})
+    monkeypatch.setattr(sys, 'argv', [*arguments, '--metrics-otlp-endpoint', endpoint])
+    with pytest.raises(ValueError, match='worker metrics'):
+        worker.main()
+    assert not output.exists()
 
 
 @pytest.mark.parametrize('invalid', ['missing', 'pair', 'unsafe'])

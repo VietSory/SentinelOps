@@ -178,7 +178,8 @@ enabled = false
     entry = next(item for item in datasource['datasources'] if item['uid'] == 'sentinelops-prometheus')
     entry['url'] = PROMETHEUS_URL
     provider = (GRAFANA / 'provisioning/dashboards/sentinelops.yaml').read_text(encoding='utf-8')
-    dashboard = (GRAFANA / 'dashboards/sentinelops-workers.json').read_text(encoding='utf-8')
+    dashboards = {path.name: path.read_text(encoding='utf-8')
+                  for path in sorted((GRAFANA / 'dashboards').glob('*.json'))}
     labels = {'app': NAME, 'app.kubernetes.io/name': NAME, 'app.kubernetes.io/part-of': 'sentinelops'}
 
     def metadata(name):
@@ -190,7 +191,7 @@ enabled = false
         {'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': metadata('grafana-provisioning'),
          'data': {'prometheus.yaml': yaml.safe_dump(datasource, sort_keys=False), 'sentinelops.yaml': provider}},
         {'apiVersion': 'v1', 'kind': 'ConfigMap', 'metadata': metadata('grafana-dashboards'),
-         'data': {'sentinelops-workers.json': dashboard}},
+         'data': dashboards},
     ]
     checksum = hashlib.sha256(json.dumps(configs, sort_keys=True).encode()).hexdigest()
 

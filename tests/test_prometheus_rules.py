@@ -114,3 +114,42 @@ def test_model_unavailability_is_not_alerted():
                 assert 'sentinelops_model' not in rule.get('expr', '')
                 if 'alert' in rule:
                     assert 'ready' not in rule['alert'].lower() or 'worker' in rule['alert'].lower()
+
+
+def _business_rules():
+    groups = yaml.safe_load((PROJECT / 'observability/rules/sentinelops-business.yml').read_text())['groups']
+    return {rule['record']: rule['expr'] for group in groups for rule in group['rules']}
+
+
+def test_business_breach_thresholds_match_the_health_policy():
+    # The incident dashboards must agree with the health worker's own thresholds.
+    policy = json.loads((PROJECT / 'configs/slo_health_policy.json').read_text())
+    rules = _business_rules()
+    latency = float(rules['sentinelops:slo_latency_breach'].rsplit('> bool', 1)[1])
+    error = float(rules['sentinelops:slo_error_breach'].rsplit('> bool', 1)[1])
+    assert latency == policy['latency_ms']
+    assert error == policy['error_rate']
+
+
+def test_every_declared_rule_file_ships_in_the_kubernetes_rules_configmap():
+    # Prometheus treats rule_files as globs: a file missing from the ConfigMap loads
+    # nothing and raises no error, which silently empties every dashboard on it.
+    from scripts.kubernetes_testbed import render
+    from tests.test_kubernetes_testbed import eks_images, images
+    declared = {path.rsplit('/', 1)[1] for path in PROMETHEUS_CONFIG['rule_files']}
+    for documents in (render(images()), render(eks_images(), target='eks')):
+        rules = next(d for d in documents if d['kind'] == 'ConfigMap' and d['metadata']['name'] == 'prometheus-rules')
+        assert declared <= set(rules['data']), declared - set(rules['data'])
+        for name in declared:
+            assert rules['data'][name] == (RULES / name).read_text()
+
+
+def test_incident_status_panels_read_the_tested_status_rule():
+    # The status semantics live in one promtool-tested rule; panels must not re-derive them.
+    dashboard = json.loads((PROJECT / 'observability/grafana/dashboards/sentinelops-incidents.json').read_text())
+    status = [p for p in dashboard['panels'] if p.get('title', '').endswith('trạng thái SLO')]
+    assert len(status) == 3
+    for panel in status:
+        service = panel['targets'][0]['legendFormat']
+        assert panel['targets'][0]['expr'] == f'sentinelops:slo_status{{service="{service}"}}'
+    assert 'sentinelops:slo_status' in _business_rules()

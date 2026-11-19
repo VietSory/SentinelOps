@@ -6,11 +6,14 @@ rejects it, so a guard cannot silently stop guarding.
 from __future__ import annotations
 
 import copy
+from io import BytesIO
 import json
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import yaml
 
+from scripts import check_grafana_dashboards as checker
 from scripts.check_grafana_dashboards import (
     DASHBOARDS, GRAFANA, PROJECT, assert_console_is_not_production_auth, assert_legend_present,
     assert_missing_data_is_not_healthy, assert_provisioned_read_only, assert_queries_resolve,
@@ -18,7 +21,12 @@ from scripts.check_grafana_dashboards import (
     recording_rule_names)
 
 KNOWN = exported_metric_names() | recording_rule_names()
-NAME = 'sentinelops-workers.json'
+WORKERS = 'sentinelops-workers.json'
+DASHBOARD_UIDS = {
+    'sentinelops-incidents.json': 'sentinelops-incidents',
+    'sentinelops-slo.json': 'sentinelops-slo',
+    WORKERS: 'sentinelops-workers',
+}
 
 
 @pytest.fixture
@@ -27,21 +35,23 @@ def board():
 
 
 def panel(board, title):
-    return next(item for item in board[NAME]['panels'] if item['title'] == title)
+    return next(item for item in board[WORKERS]['panels'] if item['title'] == title)
 
 
 def test_real_console_satisfies_every_guard():
     all_dashboards = dashboards()
+    assert set(all_dashboards) == set(DASHBOARD_UIDS)
     checks = (assert_queries_resolve(all_dashboards, KNOWN)
               + assert_source_availability_is_guarded(all_dashboards)
               + assert_missing_data_is_not_healthy(all_dashboards)
               + assert_single_axis(all_dashboards) + assert_legend_present(all_dashboards)
               + assert_provisioned_read_only(all_dashboards) + assert_console_is_not_production_auth())
-    assert len(checks) == 9
+    # Guards aggregate over all three dashboards; provisioning emits three checks.
+    assert len(checks) == 6 + 3
 
 
 def test_dashboard_declares_its_limits():
-    description = dashboards()[NAME]['description'].lower()
+    description = dashboards()[WORKERS]['description'].lower()
     for phrase in ('not business', 'not model quality', 'not rca accuracy'):
         assert phrase in description
     scope = panel(dashboards(), 'Scope')['options']['content'].lower()
@@ -57,7 +67,7 @@ def test_misspelled_metric_is_rejected(board):
 
 
 def test_unknown_template_variable_query_is_rejected(board):
-    board[NAME]['templating']['list'][0]['query'] = 'label_values(sentinelops_bogus_metric, environment)'
+    board[WORKERS]['templating']['list'][0]['query'] = 'label_values(sentinelops_bogus_metric, environment)'
     with pytest.raises(ValueError, match='unknown series'):
         assert_queries_resolve(board, KNOWN)
 
@@ -78,7 +88,7 @@ def test_explicitly_joined_guard_is_accepted(board):
 
 
 def test_removing_the_source_panel_is_rejected(board):
-    board[NAME]['panels'] = [item for item in board[NAME]['panels']
+    board[WORKERS]['panels'] = [item for item in board[WORKERS]['panels']
                              if item['title'] != 'Source eligibility for decided replicas']
     with pytest.raises(ValueError, match='expected a panel showing source eligibility'):
         assert_source_availability_is_guarded(board)
@@ -133,14 +143,17 @@ def test_hidden_legend_is_rejected(board):
         assert_legend_present(board)
 
 
-def test_editable_dashboard_is_rejected(board):
-    board[NAME]['editable'] = True
+@pytest.mark.parametrize('name', DASHBOARD_UIDS)
+def test_editable_dashboard_is_rejected(board, name):
+    board[name]['editable'] = True
     with pytest.raises(ValueError, match='not editable'):
         assert_provisioned_read_only(board)
 
 
-def test_foreign_datasource_is_rejected(board):
-    panel(board, 'Replica readiness')['datasource'] = {'type': 'prometheus', 'uid': 'somewhere-else'}
+@pytest.mark.parametrize('name', DASHBOARD_UIDS)
+def test_foreign_datasource_is_rejected(board, name):
+    target = next(item for item in board[name]['panels'] if item.get('targets'))
+    target['datasource'] = {'type': 'prometheus', 'uid': 'somewhere-else'}
     with pytest.raises(ValueError, match='points at datasource'):
         assert_provisioned_read_only(board)
 
@@ -158,7 +171,14 @@ def test_console_is_loopback_only_and_pinned():
 def test_provisioning_binds_are_individual_read_only_files():
     compose = yaml.safe_load((PROJECT/'docker-compose.yml').read_text())
     binds = [mount for mount in compose['services']['grafana']['volumes'] if mount.startswith('./')]
-    assert len(binds) == 3
+    expected = {
+        './observability/grafana/provisioning/datasources/prometheus.yaml:/etc/grafana/provisioning/datasources/prometheus.yaml:ro',
+        './observability/grafana/provisioning/dashboards/sentinelops.yaml:/etc/grafana/provisioning/dashboards/sentinelops.yaml:ro',
+        *(f'./observability/grafana/dashboards/{name}:/var/lib/grafana/dashboards/{name}:ro'
+          for name in DASHBOARD_UIDS),
+    }
+    assert len(binds) == 5
+    assert set(binds) == expected
     for mount in binds:
         source, _, mode = mount.split(':')
         assert mode == 'ro'
@@ -174,8 +194,53 @@ def test_grafana_port_is_reserved_in_the_lane_b_launcher():
 
 
 def test_dashboard_file_is_valid_json_and_uniquely_identified():
-    for path in DASHBOARDS.glob('*.json'):
+    paths = sorted(DASHBOARDS.glob('*.json'))
+    assert {path.name for path in paths} == set(DASHBOARD_UIDS)
+    seen_uids = set()
+    for path in paths:
         document = json.loads(path.read_text())
-        assert document['uid'] and document['title']
+        assert document['uid'] == DASHBOARD_UIDS[path.name]
+        assert document['uid'] not in seen_uids
+        seen_uids.add(document['uid'])
+        assert document['title']
     datasource = yaml.safe_load((GRAFANA/'provisioning/datasources/prometheus.yaml').read_text())
     assert len(datasource['datasources']) == 1
+
+
+def running_grafana(monkeypatch, query_response=None):
+    boards, evaluated = dashboards(), []
+    by_uid = {board['uid']: board for board in boards.values()}
+    def urlopen(url, timeout):
+        assert timeout == 10
+        parsed = urlsplit(url)
+        if parsed.path == '/api/health':
+            body = {'database': 'ok', 'version': 'fixture'}
+        elif parsed.path.startswith('/api/dashboards/uid/'):
+            body = {'dashboard': by_uid[parsed.path.rsplit('/', 1)[1]], 'meta': {'provisioned': True}}
+        elif parsed.path == '/api/datasources':
+            body = [{'uid': checker.DATASOURCE_UID}]
+        else:
+            assert parsed.path == '/api/datasources/proxy/uid/sentinelops-prometheus/api/v1/query'
+            expression, = parse_qs(parsed.query)['query']
+            assert '$' not in expression, 'the datasource proxy requires interpolated PromQL'
+            evaluated.append(expression)
+            body = query_response or {'status': 'success', 'data': {'resultType': 'vector', 'result': []}}
+        return BytesIO(json.dumps(body).encode())
+    monkeypatch.setattr(checker.urllib.request, 'urlopen', urlopen)
+    return boards, evaluated
+
+
+def test_runtime_verification_interpolates_every_dashboard_query_without_mutating_it(monkeypatch):
+    boards, evaluated = running_grafana(monkeypatch)
+    original = copy.deepcopy(boards)
+    result = checker.verify_running('http://grafana.invalid', boards)
+    assert result['expressions_evaluated_on_prometheus'] == len(evaluated) == 51
+    for metric in ('sentinelops_incident_groups_total', 'sentinelops_rca_abstentions_total'):
+        assert f'sum by (environment) (increase({metric}[1h]))' in evaluated
+    assert boards == original
+
+
+def test_runtime_verification_still_rejects_a_failed_prometheus_evaluation(monkeypatch):
+    boards, _ = running_grafana(monkeypatch, {'status': 'error', 'error': 'invalid PromQL'})
+    with pytest.raises(ValueError, match='failed evaluation'):
+        checker.verify_running('http://grafana.invalid', boards)

@@ -1,0 +1,138 @@
+# Reusable HTTP business metrics, aggregated across routes and replicas by service.
+# These describe the current window, not the health worker's persistent SLO state.
+# Dashboard availability SLO: 0.995 (99.5%); p95 latency SLO: 1000 ms.
+# Success means non-5xx, consistent with the existing request-counter error ratio.
+# RETENTION LIMIT: EKS Prometheus uses emptyDir, currently with only ~3h of data;
+# a restart loses its history. Windows are limited to 6h (never 24h) because of
+# this retention constraint. A 6h range uses only available samples until history
+# fills it; these rolling SLIs/budgets do not attest to a full SLA reporting period.
+groups:
+  - name: sentinelops-business-derived
+    interval: 15s
+    rules:
+      # Measure raw sample age, not the evaluation time of a derived rate. Long
+      # range functions can still return valid historical values after staleness.
+      # Keep counter and histogram freshness independent; either can disappear.
+      - record: sentinelops:http_request_telemetry_age_seconds
+        expr: time() - max by (service) (timestamp(sentinelops_http_requests_total))
+
+      - record: sentinelops:http_latency_telemetry_age_seconds
+        expr: time() - max by (service) (timestamp(sentinelops_http_request_duration_ms_milliseconds_bucket))
+
+      - record: sentinelops:http_request_rate:rate1m
+        expr: sum by (service) (rate(sentinelops_http_requests_total[1m]))
+
+      - record: sentinelops:http_error_ratio:ratio5m
+        # A service with requests but no 5xx series has zero errors. Retain its
+        # service label when filling zero; absent traffic must not become healthy.
+        expr: |
+          (
+            sum by (service) (rate(sentinelops_http_requests_total{status_code=~"5.."}[5m]))
+            or on (service)
+            (0 * sum by (service) (rate(sentinelops_http_requests_total[5m])))
+          )
+          / sum by (service) (rate(sentinelops_http_requests_total[5m]))
+          and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)
+
+      - record: sentinelops:http_error_ratio:ratio1h
+        # A positive denominator excludes idle services instead of recording NaN.
+        expr: |
+          (
+            sum by (service) (rate(sentinelops_http_requests_total{status_code=~"5.."}[1h]))
+            or on (service)
+            (0 * sum by (service) (rate(sentinelops_http_requests_total[1h])))
+          )
+          / (sum by (service) (rate(sentinelops_http_requests_total[1h])) > 0)
+          and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)
+
+      - record: sentinelops:http_error_ratio:ratio6h
+        expr: |
+          (
+            sum by (service) (rate(sentinelops_http_requests_total{status_code=~"5.."}[6h]))
+            or on (service)
+            (0 * sum by (service) (rate(sentinelops_http_requests_total[6h])))
+          )
+          / (sum by (service) (rate(sentinelops_http_requests_total[6h])) > 0)
+          and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)
+
+      # Ratios use 0..1 (Grafana percentunit). Filtering NaN in the legacy 5m
+      # error ratio also excludes idle traffic; never fill missing data with 1.
+      # Error ratios above require raw samples younger than 2m, so success,
+      # budgets and breaches also disappear when counter telemetry is stale.
+      # Use a filtering comparison (no bool): stale data must be absent, not 0.
+      - record: sentinelops:http_success_ratio:ratio5m
+        expr: 1 - (sentinelops:http_error_ratio:ratio5m >= 0)
+
+      - record: sentinelops:http_success_ratio:ratio1h
+        expr: 1 - (sentinelops:http_error_ratio:ratio1h >= 0)
+
+      - record: sentinelops:http_success_ratio:ratio6h
+        expr: 1 - (sentinelops:http_error_ratio:ratio6h >= 0)
+
+      - record: sentinelops:http_latency_p50_ms:rate5m
+        # Histogram buckets already use milliseconds. Filter idle histogram NaN.
+        expr: |
+          histogram_quantile(0.50,
+            sum by (service, le) (
+              rate(sentinelops_http_request_duration_ms_milliseconds_bucket[5m])
+            )
+          ) >= 0
+          and on (service) (sentinelops:http_latency_telemetry_age_seconds < 120)
+
+      - record: sentinelops:http_latency_p95_ms
+        # The exported histogram already uses milliseconds; do not scale by 1000.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (service, le) (
+              rate(sentinelops_http_request_duration_ms_milliseconds_bucket[5m])
+            )
+          )
+          and on (service) (sentinelops:http_latency_telemetry_age_seconds < 120)
+
+      - record: sentinelops:http_latency_p99_ms:rate5m
+        expr: |
+          histogram_quantile(0.99,
+            sum by (service, le) (
+              rate(sentinelops_http_request_duration_ms_milliseconds_bucket[5m])
+            )
+          ) >= 0
+          and on (service) (sentinelops:http_latency_telemetry_age_seconds < 120)
+
+      - record: sentinelops:error_budget_remaining:ratio6h
+        # Remaining fraction of the 0.5% request error budget, clamped to 0..1.
+        expr: clamp(1 - (sentinelops:http_error_ratio:ratio6h / (1 - 0.995)), 0, 1)
+
+      - record: sentinelops:error_budget_burn_rate:ratio6h
+        # 1 = consuming exactly the allowed error fraction; may exceed 1.
+        expr: sentinelops:http_error_ratio:ratio6h / (1 - 0.995)
+
+      # Thresholds: configs/slo_health_policy.json latency_ms=750, error_rate=0.05.
+      # 1 = breach, 0 = observed within threshold. Filter NaN (e.g. zero traffic)
+      # before the bool comparison so unknown data never records a healthy zero.
+      - record: sentinelops:slo_latency_breach
+        expr: (sentinelops:http_latency_p95_ms >= 0) > bool 750
+
+      - record: sentinelops:slo_error_breach
+        expr: (sentinelops:http_error_ratio:ratio5m >= 0) > bool 0.05
+
+      # Per-service status for dashboards: 1 = any known breach, 0 = both indicators
+      # observed and within threshold, 2 = under 0.5 req/s (about 30 requests/min,
+      # the health policy minimum). Absent = unknown: one indicator healthy and the
+      # other missing must not read as healthy. Freshness comes from the breach
+      # inputs (p95 and ratio5m require telemetry younger than 2m); the low-traffic
+      # branch requires fresh counters too, so stale data is absent, never 0 or 2.
+      - record: sentinelops:slo_status
+        expr: |
+          (
+            (
+              max by (service) ({__name__=~"sentinelops:slo_latency_breach|sentinelops:slo_error_breach"} == 1)
+              or on (service)
+              (sentinelops:slo_latency_breach == 0 and on (service) sentinelops:slo_error_breach == 0)
+            )
+            and on (service) (sentinelops:http_request_rate:rate1m >= 0.5)
+          )
+          or on (service)
+          (
+            2 + 0 * (sentinelops:http_request_rate:rate1m < 0.5)
+            and on (service) (sentinelops:http_request_telemetry_age_seconds < 120)
+          )
