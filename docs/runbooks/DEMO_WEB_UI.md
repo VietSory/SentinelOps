@@ -44,6 +44,27 @@ python -m scripts.approve_known_good --review-store "$REVIEW_STORE" \
 
 Căn cứ: `docs/runbooks/CONTROLLED_REMEDIATION.md:118`; ledger kết quả được truyền vào `LEDGER_REF`, không lấy ref minh họa.
 
+## 2a. Trạng thái live 19/11/2026 và thứ tự chạy trên dev 833925774773
+
+Đã có [LIVE 19/11]:
+- Operator `nvtank` đã enroll TOTP: hosted login hỏi mã 6 số. `admin-get-user` vẫn trả `UserMFASettingList` rỗng sau khi enroll qua hosted UI; đó là hành vi của Cognito, không phải lỗi.
+- Secret `remediation-read` (key `action-read-database-url`) do `control.py action-read` tạo. Role `control_action_reader` chỉ SELECT; `ActionReader.check_ready` PASS trong runner.
+- `job/demo-runner` (`scripts/aws_demo/demo-runner.yaml`) Running trên node chứa các PVC RWO. Runner đọc được Deployment Payment bằng cả token payment và observer. Payment ở known-good `application@sha256:e520e702…`.
+- Incident worker tạo incident thật trên luồng health `6028fde7…`, nên UI có dữ liệu để xem.
+- Grafana chỉ đăng nhập qua Cognito OAuth, đi qua CloudFront.
+
+Còn thiếu:
+- **Model release** (B giữ store `alibaba-de38fc6b-20261114`): chưa có thì controller không tạo proposal dispatch được.
+- **RBAC `demo-fault`** cho lượt failed-verify: cần quyền ClusterAdmin. Namespace AdminPolicy bị RBAC escalation check chặn. Xem `scripts/aws_demo/demo-fault-rbac.yaml`.
+
+Thứ tự sau khi có release, mỗi bước ghi AWS/kubectl đều qua hai lượt review:
+1. `scripts/aws_demo/MODELWIRE.md`, đường A local với `--storage-class gp2 --access-mode ReadWriteOnce --colocate-with remediation-controller`, đẩy archive bằng `kubectl exec -i`. Chờ đến khi có `MODELWIRE_PVC_VERIFIED`.
+2. Tạo health epoch mới (`modelwire epoch --health-only`), lấy stream `COMMITTED` mới.
+3. Render workers với `--model-claim model-de38fc6b --model-release-ref <ref> --policy-enabled --demo-ui` và stream mới. Chạy `kubectl diff`, rồi apply bản đã review.
+4. Cập nhật `HEALTH_STREAM` của runner theo stream mới: tạo lại Job, tạo lại RBAC `demo-fault` theo UID Job mới.
+5. Tập dượt bằng `kubectl exec job/demo-runner` theo lệnh ở đầu `demo-runner.yaml`: 3 lượt duyệt trên UI, `--reject-run`, `--kill-switch-run`, `--failed-verify-run --fault-token-file /tmp/fault-token`.
+6. Xoá `job/demo-runner` và `configmap/demo-runner-script`; RBAC `demo-fault` tự xoá theo owner.
+
 ## 3. Dùng UI đã deploy; chỉ render lại khi cần
 
 ### Cấu hình chung cho cả hai đường [LIVE/B/C]
