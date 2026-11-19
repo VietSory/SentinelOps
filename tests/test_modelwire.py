@@ -329,3 +329,19 @@ def test_wrapper_forwards_policy_and_controller_trusts_rds_ca():
     docs = render_all.render(images, terraform, runtime)['40-workers.yaml']
     controller = next(d for d in docs if d['kind'] == 'Deployment' and d['metadata']['name'] == 'remediation-controller')
     assert '--policy-enabled' not in controller['spec']['template']['spec']['containers'][0]['args']
+
+
+def test_new_epoch_root_skips_the_demo_ui_sidecar():
+    # --demo-ui adds an operator-ui container with a command and HTTP probes only;
+    # the epoch rewrite must leave it alone and still move every health reader.
+    from scripts import render_worker_manifests as worker
+    from tests.test_worker_manifests import IMAGE, PARAMETERS
+    original = worker.render(IMAGE, **PARAMETERS, demo_ui=True)
+    controller = next(d for d in original if d['kind'] == 'Deployment' and d['metadata']['name'] == 'remediation-controller')
+    assert len(controller['spec']['template']['spec']['containers']) == 2
+    root = '/artifacts/health/model-de38fc6b-20261119'
+    docs = wire.health_epoch(original, root)
+    controller = next(d for d in docs if d['kind'] == 'Deployment' and d['metadata']['name'] == 'remediation-controller')
+    main, sidecar = controller['spec']['template']['spec']['containers']
+    assert main['args'][main['args'].index('--source-store') + 1] == root
+    assert root not in json.dumps(sidecar)

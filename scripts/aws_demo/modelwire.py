@@ -311,7 +311,13 @@ def health_epoch(documents, root, *, health_only=False):
         found.add(name)
         template = doc['spec']['template']
         template['metadata'].setdefault('annotations', {})['sentinelops.io/modelwire-health-root'] = root
+        rewritten = 0
         for container in template['spec']['containers']:
+            # Sidecars such as the --demo-ui operator UI take no health root: they
+            # have a command and HTTP probes only. Rewrite only containers that
+            # actually pass the health root flag, and require at least one.
+            if expected[name] not in container.get('args', []):
+                continue
             sequences = [container['args']]
             for probe in ('readinessProbe', 'livenessProbe'):
                 if probe in container:
@@ -321,6 +327,9 @@ def health_epoch(documents, root, *, health_only=False):
                 if not sequence[position].startswith('/artifacts/health'):
                     raise ValueError('unexpected health artifact root in worker manifest')
                 sequence[position] = root
+            rewritten += 1
+        if not rewritten:
+            raise ValueError(name + ' has no container passing ' + expected[name])
     if found != set(expected):
         raise ValueError('expected all three worker/controller Deployments from render_worker_manifests')
     if health_only:
