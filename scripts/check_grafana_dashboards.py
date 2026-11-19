@@ -252,6 +252,10 @@ def verify_running(base_url: str, all_dashboards: dict[str, dict]) -> dict:
     for name, dashboard in all_dashboards.items():
         for panel, expression in queries(dashboard):
             concrete = expression.replace('$environment', 'local').replace('$job', '.*')
+            # Grafana substitutes its built-in range variables before querying; use
+            # fixed stand-ins so the expression itself is what gets validated.
+            for variable, value in (('$__rate_interval', '1m'), ('$__interval', '1m'), ('$__range', '1h')):
+                concrete = concrete.replace(variable, value)
             encoded = urllib.parse.quote(concrete, safe='')
             path = '/api/datasources/proxy/uid/'+DATASOURCE_UID+'/api/v1/query?query='+encoded
             try:
