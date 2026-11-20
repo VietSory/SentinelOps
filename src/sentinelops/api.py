@@ -471,7 +471,9 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
         filters = {"state":state,"service":service}
         rows = await call(repo.list_current(limit=limit,after=decode_cursor(cursor,filters),state=state,service=service))
         items = [{"incident_id":row["incident_id"],"revision":row["revision"],
-                  **{key:row["payload"][key] for key in ("state","severity","detected_at","affected_services")}}
+                  **{key:row["payload"][key] for key in (
+                      "state","severity","detected_at","affected_services")},
+                  "root_cause_ranking":row["payload"].get("root_cause_ranking",[])}
                  for row in rows[:limit]]
         result = {"schema_version":"1.0","items":items,
                   "next_cursor":encode_cursor(rows[limit-1],filters) if len(rows)>limit else None}

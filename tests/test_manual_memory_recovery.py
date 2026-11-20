@@ -149,6 +149,7 @@ def test_expired_missing_oom_manual_child_api_to_actual_baseline_recovery_once(t
             assert approvals.read_slot(store, kind, pid)['approval_mode'] == approvals.MANUAL_MEMORY_RECOVERY
         assert (await repo.get(child['incident_id']))['context']['recovery_source'] == 'manual'
         assert all('Kubernetes observed OOMKilled' not in row['payload']['evidence'][0]['fact'] for row in repo.history)
+        assert all(row['payload']['root_cause_ranking'] == [] for row in repo.history)
         assert (await MemoryController(**kwargs).tick())['phase'] == 'observing'
         assert kube.patches == 1 and approvals.read_slot(store, 'approval', parent['proposal_id']) is None
         assert approvals.read_slot(store, 'used', parent['proposal_id']) is None

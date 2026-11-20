@@ -89,8 +89,11 @@ export function dataset(rows:Row[],contexts:Record<string,Row>,overview:Row|null
   const incidents=rows.map((row):Incident=>{
     const storedContext=contexts[row.incident_id];
     const context=storedContext?.revision>=row.revision?storedContext:undefined;
-    const payload=context?.payload||row,ranking:Row[]=payload.root_cause_ranking||[];
     const revision=context?.revision??row.revision;
+    const payload=context?.payload??row;
+    const listRca=revision===row.revision?row:undefined;
+    const ranking:Row[]=context?.payload?.root_cause_ranking??listRca?.root_cause_ranking??[];
+    const rcaAbstained=context?.payload?.rca_abstained??listRca?.rca_abstained??!ranking.length;
     const detectedAt=payload.detected_at??row.detected_at;
     const startedAt=payload.started_at??row.started_at??detectedAt;
     const rawPrimary=ranking[0]?.service,primary=names[rawPrimary]||'Unknown';
@@ -108,8 +111,8 @@ export function dataset(rows:Row[],contexts:Record<string,Row>,overview:Row|null
       impactVi:payload.affected_services.join(', '),severity:payload.severity,status:payload.state,
       services:payload.affected_services.map((s:string)=>names[s]).filter(Boolean),primaryService:primary,
       environment:overview?.environment||'Unknown',startedAt,detectedAt,
-      suspectedRootCause:rawPrimary||(isEn?'Not yet concluded':'Chưa có kết luận'),rcaConfidence:number(ranking[0]?.score)*100,
-      rcaCoverage:number(payload.rca_coverage)*100,rcaAbstained:payload.rca_abstained??!ranking.length,
+      suspectedRootCause:(!rcaAbstained&&rawPrimary)||(isEn?'Not yet concluded':'Chưa có kết luận'),rcaConfidence:number(ranking[0]?.score)*100,
+      rcaCoverage:number(payload.rca_coverage)*100,rcaAbstained,
       rcaAbstainReasonVi:context?.reason|| (isEn?'Insufficient recorded RCA evidence':'Chưa đủ bằng chứng RCA được ghi nhận'),
       ...explanations[explanationKey(row.incident_id,revision)],
       hasRemediation:Boolean(linked),remediationId:linked?.id,

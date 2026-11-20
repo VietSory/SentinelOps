@@ -27,6 +27,12 @@ NAME = 'sentinelops-oom-demo'
 NAMESPACE = 'sentinelops-b-actions'
 BEFORE, AFTER = '64Mi', '256Mi'
 TERMINAL = {'recovered', 'blocked', 'escalated', 'rejected', 'expired'}
+OOM_WINDOW_SECONDS = 180
+OOM_EVIDENCE_ID = 'kubernetes-oom'
+OOM_RCA_RULE = 'config://pod-memory-oom-rca/v1'
+# Direct evidence supports termination at the observed limit. The score leaves
+# uncertainty about why memory ran out, such as a leak or increased load.
+OOM_RCA_SCORE = 0.9
 
 
 class ObservationPending(RuntimeError):
@@ -91,6 +97,16 @@ def template_hash(deployment):
     return stable_id(template)
 
 
+def _within_oom_window(observed_at, finished_at):
+    if not isinstance(finished_at, str):
+        return False
+    try:
+        age = (observed_at - utc_time(finished_at)).total_seconds()
+    except ValueError:
+        return False
+    return 0 <= age <= OOM_WINDOW_SECONDS
+
+
 def project(target, deployment, pods, replica_sets, node, hpas, *, now):
     """Validate actual Kubernetes ownership/limits; never infer OOM from absence."""
     spec, meta = deployment['spec'], deployment['metadata']
@@ -136,15 +152,15 @@ def project(target, deployment, pods, replica_sets, node, hpas, *, now):
     state = states[0]
     termination = state.get('state', {}).get('terminated') or state.get('lastState', {}).get('terminated') or {}
     oom = termination.get('reason') == 'OOMKilled' and termination.get('exitCode') == 137
-    age = (now - utc_time(termination['finishedAt'])).total_seconds() if oom else None
+    finished_at = termination.get('finishedAt') if oom else None
     return {'observed_at': timestamp(now), 'target': asdict(target),
             'resource_version': meta['resourceVersion'], 'generation': meta['generation'],
             'observed_generation': deployment.get('status', {}).get('observedGeneration', 0),
             'template_sha256': template_hash(deployment),
             'memory': container['resources']['limits']['memory'], 'pod_uid': pod['metadata']['uid'],
             'restart_count': state['restartCount'], 'oom': oom,
-            'oom_finished_at': termination.get('finishedAt') if oom else None,
-            'fresh_oom': oom and 0 <= age <= 180,
+            'oom_finished_at': finished_at,
+            'fresh_oom': oom and _within_oom_window(now, finished_at),
             'ready': bool(state.get('ready')) and pod['status'].get('phase') == 'Running'
                      and deployment.get('status', {}).get('readyReplicas') == 1
                      and deployment.get('status', {}).get('updatedReplicas') == 1
@@ -260,6 +276,26 @@ class MemoryController:
         if not self.enabled or self.kill_switch.exists():
             raise Blocked('oom-demo-disabled-or-kill-switch')
 
+    def _oom_ranking(self, proposal):
+        try:
+            reference = proposal['observation_ref']
+            if not reference.startswith('artifact://observations/'):
+                return []
+            observed = self.store.read(reference)
+            if (observed['oom'] is True and observed['fresh_oom'] is True
+                and proposal['target'] == observed['target'] == asdict(self.target)
+                and isinstance(observed['pod_uid'], str) and observed['pod_uid'].strip()
+                and observed['pod_uid'] == proposal['pod_uid']
+                and observed['generation'] == proposal['generation']
+                and observed['template_sha256'] == proposal['template_sha256']
+                and observed['memory'] == BEFORE
+                and _within_oom_window(utc_time(observed['observed_at']), observed['oom_finished_at'])):
+                return [{'service': self.target.deployment, 'score': OOM_RCA_SCORE,
+                         'evidence_refs': [OOM_EVIDENCE_ID]}]
+        except (OSError, KeyError, TypeError, ValueError, AttributeError):
+            return []
+        return []
+
     async def _incident(self, proposal, stage, *, state='incident', availability='UNKNOWN', ref=None,
                         expected_revision=None):
         try:
@@ -273,6 +309,10 @@ class MemoryController:
         action = read_state(self.store, proposal['proposal_id']) or {}
         manual = action.get('approval_mode') == approvals.MANUAL_MEMORY_RECOVERY
         verified_oom = not manual and review_change(proposal) is not None and bool(proposal.get('observation_ref'))
+        if current:
+            ranking = current['payload']['root_cause_ranking']
+        else:
+            ranking = self._oom_ranking(proposal) if verified_oom else []
         source_ref = (proposal['observation_ref'] if verified_oom
                       else self.store.write('manifests', proposal))
         references = list(dict.fromkeys([source_ref] + ([ref] if ref else [])))
@@ -282,12 +322,12 @@ class MemoryController:
                 'OOM cause and failed-pod evidence are not established by this recovery approval.')
         payload = {'schema_version': '1.0', 'incident_id': proposal['incident_id'],
             'detected_at': proposal['created_at'], 'state': state, 'severity': 'high',
-            'affected_services': [NAME], 'service_signals': [], 'root_cause_ranking': [],
-            'evidence': [{'id': 'kubernetes-oom' if verified_oom else 'manual-memory-recovery',
+            'affected_services': [NAME], 'service_signals': [], 'root_cause_ranking': ranking,
+            'evidence': [{'id': OOM_EVIDENCE_ID if verified_oom else 'manual-memory-recovery',
                 'type': 'log', 'service': NAME, 'observed_at': proposal['created_at'],
                 'source_ref': source_ref, 'fact': fact}]}
         context = {'availability': availability, 'source_refs': references,
-            'config_refs': ['config://pod-memory-limit-demo/v1'],
+            'config_refs': ['config://' + RUNBOOK] + ([OOM_RCA_RULE] if ranking else []),
             'recovery_source': ('manual' if manual else 'action') if state in ('recovering', 'recovered') else None,
             'trigger_sources': [{'source': 'kubernetes' if verified_oom else 'manual',
                 'signal_id': proposal['proposal_id'], 'emitted_at': proposal['created_at'], 'source_ref': source_ref}]}
