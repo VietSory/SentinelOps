@@ -299,7 +299,7 @@ def run(config, *, check=False, kube=None):
         # /spec may include environment values or annotations. Pass the patch on
         # stdin rather than putting it in argv, terminal output or a temp file.
         result = kube.run(['patch', 'deployment', NAME, '-n', NAMESPACE, '--type=json',
-                           '--patch-file=/dev/stdin'], input_json=trigger_patch(config, deployment))
+                           '--patch-file=/dev/stdin', '-o', 'json'], input_json=trigger_patch(config, deployment))
         validate_deployment(config, result, memory='64Mi')
         if result['metadata']['generation'] != deployment['metadata']['generation'] + 1:
             raise Blocked('unexpected PATCH response generation; do not retry')

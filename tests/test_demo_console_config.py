@@ -238,6 +238,35 @@ def test_one_guarded_patch_then_observation_without_auto_recovery(tmp_path, monk
     assert kube.workload['spec']['template']['spec']['containers'][0]['resources']['limits']['memory'] == '64Mi'
 
 
+def test_real_kubectl_adapter_requests_json_patch_response_and_observes_once(tmp_path, monkeypatch):
+    """kubectl defaults to human-readable 'patched'; exercise the actual decoder."""
+    cfg, dep = config(tmp_path), deployment()
+    response = deepcopy(dep)
+    response['metadata']['generation'] += 1
+    response['spec']['template']['spec']['containers'][0]['resources']['limits']['memory'] = '64Mi'
+    calls, observations = [], []
+    def subprocess_run(command, **kwargs):
+        calls.append((command, kwargs))
+        assert command[:len(kube.base)] == kube.base
+        assert command[len(kube.base):len(kube.base) + 3] == ['patch', 'deployment', oom.NAME]
+        assert json.loads(kwargs['input']) == oom.trigger_patch(cfg, dep)
+        # Model the provider's actual output contract, including its non-JSON default.
+        stdout = json.dumps(response) if command[-2:] == ['-o', 'json'] else 'deployment.apps/' + oom.NAME + ' patched\n'
+        return oom.subprocess.CompletedProcess(command, 0, stdout, '')
+    def observe(configured, client, generation, started):
+        observations.append((configured, client, generation))
+        return True
+    kube = oom.Kubectl(cfg)
+    monkeypatch.setenv('DEMO_CONSOLE_OOM_EXECUTE', '1')
+    monkeypatch.setattr(oom, 'preflight', lambda configured, client: deepcopy(dep))
+    monkeypatch.setattr(oom, 'observe_oom', observe)
+    monkeypatch.setattr(oom.subprocess, 'run', subprocess_run)
+    assert oom.run(cfg, kube=kube) == 0
+    assert len(calls) == len(observations) == 1
+    assert observations[0] == (cfg, kube, 4)
+    assert calls[0][0][-2:] == ['-o', 'json']
+
+
 def test_no_raw_kubectl_stderr_or_credentials_printed(tmp_path, monkeypatch, capsys):
     def failed(*args, **kwargs):
         class Result:
