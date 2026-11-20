@@ -1,0 +1,12 @@
+ARG OPERATOR_IMAGE
+FROM ${OPERATOR_IMAGE}
+ARG OPERATOR_USER
+ARG SOURCE_REVISION
+LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
+COPY dist/index.html /opt/venv/lib/python3.11/site-packages/sentinelops/ui/assets/index.html
+COPY dist/assets/ /opt/venv/lib/python3.11/site-packages/sentinelops/ui/assets/
+COPY deployment/observability_api.py /opt/venv/lib/python3.11/site-packages/sentinelops/ui/live_observability.py
+USER root
+RUN --mount=type=bind,source=deployment/install_live.py,target=/tmp/install-live.py \
+    /opt/venv/bin/python -B /tmp/install-live.py
+USER ${OPERATOR_USER}
