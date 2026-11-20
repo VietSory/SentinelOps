@@ -72,7 +72,7 @@ export function mount(root, ctx) {
   };
   const search = field('Search incident ID',node('input'));
   search.type = 'search'; search.name = 'incident-query'; search.maxLength = 256;
-  search.placeholder = 'Enter all or part of an incident ID'; search.autocomplete = 'off';
+  search.placeholder = 'Incident ID…'; search.autocomplete = 'off';
   search.spellcheck = false;
   const select = (label, name, options) => {
     const control = field(label,node('select'));
@@ -87,17 +87,41 @@ export function mount(root, ctx) {
   const range = select('Detected within','incident-range',[
     ['all','All time'],['24h','Last 24 hours'],['7d','Last 7 days'],['30d','Last 30 days']]);
   const sort = select('Sort by','incident-sort',[
-    ['newest','Newest detected first'],['oldest','Oldest detected first'],['severity','Highest severity first']]);
-  const reset = node('button','Clear all filters','incident-filters-reset'); reset.type = 'button';
+    ['newest','Newest first'],['oldest','Oldest first'],['severity','Highest severity']]);
+  const reset = node('button','Reset','button quiet incident-filters-reset'); reset.type = 'button';
+  reset.setAttribute('aria-label','Clear all filters');
   controls.append(reset);
+  const help = node('details',undefined,'help-disclosure');
+  const helpToggle = node('summary');
+  const helpIcon = node('span','i','info-icon'); helpIcon.setAttribute('aria-hidden','true');
+  helpToggle.append(helpIcon,node('span','About incident filters','sr-only'));
+  const helpBody = node('div',undefined,'help-disclosure__body');
+  help.append(helpToggle,helpBody); controls.append(help);
+  const feedback = node('div',undefined,'incident-filters-feedback');
   const summary = node('p',undefined,'incident-filters-summary');
   summary.setAttribute('role','status'); summary.setAttribute('aria-live','polite'); summary.setAttribute('aria-atomic','true');
+  const chips = node('div',undefined,'incident-filters-chips');
+  chips.setAttribute('aria-label','Applied incident filters');
+  const chipControls = new Map();
+  for (const key of Object.keys(DEFAULTS)) {
+    const chip = node('button',undefined,'status-chip incident-filters-chip');
+    chip.type = 'button'; chip.dataset.filterKey = key;
+    const icon = node('span',undefined,'status-chip__icon'); icon.setAttribute('aria-hidden','true');
+    const label = node('span',undefined,'status-chip__label');
+    const remove = node('span','×'); remove.setAttribute('aria-hidden','true');
+    chip.append(icon,label,remove); chips.append(chip);
+    chipControls.set(key,{chip,icon,label});
+  }
   const scope = node('p',undefined,'incident-filters-note');
   const privacy = node('p',undefined,'incident-filters-note');
   privacy.textContent = 'Only incident-ID searches (INC- plus hexadecimal characters, or at least 4 hexadecimal characters) are saved in the link. Other searches stay in this tab until refresh.';
   const message = node('div',undefined,'incident-filters-message');
-  const title = node('strong'), description = node('p'); message.append(title,description);
-  panel.append(controls,summary,scope,privacy,message); root.append(panel);
+  const title = node('strong');
+  const messageHelp = node('details',undefined,'help-disclosure');
+  const messageToggle = node('summary','Details'), description = node('p',undefined,'help-disclosure__body');
+  messageHelp.append(messageToggle,description); message.append(title,messageHelp);
+  helpBody.append(scope,privacy); feedback.append(summary,chips,message);
+  panel.append(controls,feedback); root.append(panel);
 
   function syncControls() {
     search.value = filters.query; severity.value = filters.severity;
@@ -124,6 +148,18 @@ export function mount(root, ctx) {
     const total = state.session ? loaded.length : 0;
     const available = state.session && Boolean(state.updatedAt) && !state.listError;
     const pending = timer !== null || composing;
+    const chipLabels = {query:`Search: ${filters.query}`,severity:`Severity: ${filters.severity}`,
+      range:`Within: ${filters.range}`,sort:`Sort: ${filters.sort}`};
+    for (const [key,{chip,icon,label}] of chipControls) {
+      chip.hidden = filters[key] === DEFAULTS[key];
+      chip.disabled = !state.session;
+      chip.dataset.status = key === 'severity' ? {critical:'critical',high:'serious',medium:'warning'}[filters.severity] || 'neutral' : 'neutral';
+      icon.textContent = key === 'severity' ? {critical:'×',high:'!!',medium:'!'}[filters.severity] || '?' : '⌕';
+      label.textContent = chipLabels[key];
+      chip.setAttribute('aria-label',`Remove ${chipLabels[key]}`);
+    }
+    chips.hidden = ![...chipControls.values()].some(({chip}) => !chip.hidden);
+    reset.hidden = chips.hidden && !state.filters?.state && !state.filters?.service;
     let status = 'ready', heading = '', detail = '';
     if (!state.session) {
       status = 'disconnected'; heading = 'Connect to view incidents'; detail = 'No incident data is loaded for this session.';
@@ -140,11 +176,11 @@ export function mount(root, ctx) {
       detail = `${total} incident${total === 1 ? ' is' : 's are'} loaded. Change the search or clear filters to see them.`;
     }
     for (const control of [search,severity,range,sort,reset]) control.disabled = !state.session;
-    summary.textContent = available || total ? `${rows.length} of ${total}${pending ? ' · Applying search…' : ''}` : 'Results unavailable';
+    summary.textContent = available || total ? `${rows.length} of ${total} loaded${pending ? ' · Applying…' : ''}` : 'Results unavailable';
     scope.textContent = state.nextCursor ? 'Search, filters and sorting apply only to loaded incidents. Load more to include additional records.' :
       'Search, filters and sorting apply to loaded incidents within the current state and service filters.';
     panel.setAttribute('aria-busy',String(pending || Boolean(state.listLoading)));
-    message.hidden = status === 'ready'; title.textContent = heading; description.textContent = detail;
+    message.hidden = status === 'ready'; title.textContent = heading ? `ⓘ ${heading}` : ''; description.textContent = detail;
     const result = {rows,total,matched:rows.length,filters:{...filters},status,
       emptyTitle:heading,emptyDescription:detail,partial:Boolean(state.nextCursor),pending};
     ctx.onChange(result);
@@ -166,7 +202,7 @@ export function mount(root, ctx) {
     cancelSearch();
     if (composing) return;
     timer = window.setTimeout(applyControls,250);
-    summary.textContent = 'Applying search…'; panel.setAttribute('aria-busy','true');
+    refresh(); panel.setAttribute('aria-busy','true');
   }
 
   listen(search,'input',scheduleSearch);
@@ -176,6 +212,15 @@ export function mount(root, ctx) {
     if (event.key === 'Enter') { event.preventDefault(); if (!composing) applyControls(); }
   });
   for (const control of [severity,range,sort]) listen(control,'change',applyControls);
+  listen(chips,'click',event => {
+    const chip = event.target.closest?.('[data-filter-key]');
+    if (!chip || chip.disabled || !chips.contains(chip)) return;
+    cancelSearch(); composing = false;
+    filters[chip.dataset.filterKey] = DEFAULTS[chip.dataset.filterKey];
+    syncControls(); writeHash(); refresh();
+    const next = [...chipControls.values()].find(({chip:control}) => !control.hidden && !control.disabled);
+    (next?.chip || search).focus();
+  });
   listen(reset,'click',() => {
     cancelSearch(); composing = false; filters = {...DEFAULTS}; syncControls(); writeHash();
     ctx.resetFilters(); refresh(); search.focus();

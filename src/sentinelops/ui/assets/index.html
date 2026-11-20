@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>Incidents · SentinelOps</title>
-  <link rel="stylesheet" href="/ui/assets/styles.css">
   <link rel="stylesheet" href="/ui/assets/deeplinks.css">
   <link rel="stylesheet" href="/ui/assets/filters.css">
   <link rel="stylesheet" href="/ui/assets/summary.css">
   <link rel="stylesheet" href="/ui/assets/proposalwatch.css">
+  <link rel="stylesheet" href="/ui/assets/styles.css">
   <script type="module" src="/ui/assets/app.js"></script>
 </head>
 <body>
@@ -31,7 +31,7 @@
   <main id="workspace" tabindex="-1">
     <section class="page-heading" aria-labelledby="workspace-title">
       <div>
-        <h1 id="workspace-title">Incident workspace</h1>
+        <h1 id="workspace-title">Incidents</h1>
         <p class="subtitle">Triage incidents, inspect the evidence, and track recovery.</p>
       </div>
       <button id="refresh" class="button secondary" type="button" disabled><span aria-hidden="true">↻</span><span id="refresh-label">Refresh</span></button>
@@ -50,8 +50,9 @@
     </section>
     <div id="notice" class="alert error" role="alert" hidden></div>
     <div id="slot-summary" class="module-slot"></div>
-    <div id="workspace-status" hidden>
-      <section class="summary-card status-card" aria-labelledby="status-title">
+    <details id="workspace-status" class="help-disclosure workspace-health" hidden>
+      <summary><span class="info-icon" aria-hidden="true">i</span>Workspace checks</summary>
+      <section class="status-card help-disclosure__body" aria-labelledby="status-title">
         <h2 id="status-title">Workspace status</h2>
         <dl>
           <div><dt>Incident store</dt><dd id="store-status">Not checked</dd></div>
@@ -59,37 +60,42 @@
         </dl>
         <p id="readiness-error" class="small-error" role="status"></p>
       </section>
-    </div>
+    </details>
     <div class="workspace-grid" id="incident-workspace" hidden>
-      <section class="panel list-panel" aria-labelledby="list-title">
+      <section class="queue-tools" aria-labelledby="list-title">
         <div class="panel-title">
           <h2 id="list-title" tabindex="-1">Incident queue</h2>
-          <span class="count" id="loaded-count">0 loaded</span>
+          <span class="count" id="loaded-count">Not loaded</span>
         </div>
-        <form id="filter-form" class="filters">
-          <label>State
-            <select id="state-filter">
-              <option value="">All states</option>
-              <option value="degrading">Degrading</option>
-              <option value="incident">Incident</option>
-              <option value="recovering">Recovering</option>
-              <option value="recovered">Recovered</option>
-              <option value="escalated">Escalated</option>
-            </select>
-          </label>
-          <label>Service
-            <select id="service-filter">
-              <option value="">All services</option>
-              <option value="checkout-service">Checkout</option>
-              <option value="payment-service">Payment</option>
-              <option value="inventory-service">Inventory</option>
-            </select>
-          </label>
-          <div class="filter-actions">
-            <button class="button secondary" type="submit">Apply filters</button>
-          </div>
-        </form>
-        <div id="slot-filters" class="module-slot"></div>
+        <div class="filter-bar" role="group" aria-label="Incident filters" tabindex="0">
+          <form id="filter-form" class="filters" aria-label="Filter incidents">
+            <label>State
+              <select id="state-filter">
+                <option value="">All states</option>
+                <option value="degrading">Degrading</option>
+                <option value="incident">Incident</option>
+                <option value="recovering">Recovering</option>
+                <option value="recovered">Recovered</option>
+                <option value="escalated">Escalated</option>
+              </select>
+            </label>
+            <label>Service
+              <select id="service-filter">
+                <option value="">All services</option>
+                <option value="checkout-service">Checkout</option>
+                <option value="payment-service">Payment</option>
+                <option value="inventory-service">Inventory</option>
+              </select>
+            </label>
+            <div id="slot-filters" class="module-slot"></div>
+            <div class="filter-actions">
+              <button class="button secondary" type="submit">Apply filters</button>
+            </div>
+          </form>
+        </div>
+        <p class="filter-scroll-hint">Scroll for more filters <span aria-hidden="true">→</span></p>
+      </section>
+      <section class="panel list-panel" aria-labelledby="list-title">
         <div id="list-error" class="inline-error" role="alert" hidden></div>
         <div id="incident-list" aria-live="polite"></div>
         <div class="list-footer">

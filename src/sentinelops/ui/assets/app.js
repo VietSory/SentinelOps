@@ -22,10 +22,23 @@ const button = (text, action, className = 'button quiet') => {
 };
 const stateLabels = {incident:'Incident',degrading:'Degrading',recovering:'Recovering',recovered:'Recovered',escalated:'Escalated'};
 const severityLabels = {low:'Low',medium:'Medium',high:'High',critical:'Critical'};
-const badge = value => {
-  const label = Object.hasOwn(stateLabels,value) ? stateLabels[value] :
-    Object.hasOwn(severityLabels,value) ? severityLabels[value] : null;
-  return raw('span',label || value,`badge ${label ? value : 'unknown'}`);
+const severityTones = {low:'good',medium:'warning',high:'serious',critical:'critical'};
+const stateTones = {incident:'critical',degrading:'serious',recovering:'warning',recovered:'good',escalated:'critical'};
+const statusIcons = {good:'✓',warning:'!',serious:'▲',critical:'✕',neutral:'?'};
+const statusChip = (label, tone) => {
+  const item = node('span',null,`status-chip status-chip--${tone}`);
+  item.dataset.status = tone;
+  const icon = node('span',statusIcons[tone],'status-chip__icon'); icon.setAttribute('aria-hidden','true');
+  item.append(icon,node('span',label,'status-chip__label'));
+  return item;
+};
+const badge = (value, kind) => {
+  const labels = kind === 'severity' ? severityLabels : stateLabels;
+  const tones = kind === 'severity' ? severityTones : stateTones;
+  const known = Object.hasOwn(labels,value), tone = known ? tones[value] : 'neutral';
+  const item = statusChip(known ? labels[value] : `Unknown ${kind}`,tone);
+  item.title = `${kind === 'severity' ? 'Severity' : 'State'}: ${known ? labels[value] : value || 'not recorded'}`;
+  return item;
 };
 const date = value => {
   if (typeof value !== 'string' || !value) return 'Unavailable';
@@ -34,6 +47,20 @@ const date = value => {
     year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' UTC';
 };
 const time = value => { const item = node('time',date(value)); if (value) item.dateTime = value; return item; };
+const relativeTime = value => {
+  const item = time(value), timestamp = typeof value === 'string' && value ? Date.parse(value) : NaN;
+  item.title = date(value);
+  if (!Number.isFinite(timestamp)) { item.textContent = 'Time unknown'; return item; }
+  item.dataset.relativeTime = value;
+  updateRelativeTime(item);
+  return item;
+};
+function updateRelativeTime(item) {
+  const delta = Date.now() - Date.parse(item.dataset.relativeTime), elapsed = Math.abs(delta);
+  const unit = elapsed < 60000 ? 's' : elapsed < 3600000 ? 'm' : elapsed < 86400000 ? 'h' : 'd';
+  const count = Math.floor(elapsed / ({s:1000,m:60000,h:3600000,d:86400000}[unit]));
+  item.textContent = delta < 0 ? `in ${count}${unit}` : `${count}${unit} ago`;
+}
 const short = (value, width = 26) => value.length > width ? value.slice(0,width-7)+'…'+value.slice(-6) : value;
 const score = value => typeof value === 'number' && Number.isFinite(value) ? value.toFixed(3) : 'Unavailable';
 const serviceClass = value => ({'checkout-service':'service-checkout','payment-service':'service-payment','inventory-service':'service-inventory'}[value] || '');
@@ -70,7 +97,9 @@ const ctx = Object.freeze({
   resetFilters: () => { tab = 'overview'; return workspace.filter({state:'',service:''}); },
   onChange: result => {
     renderList({...workspace.state,rows:result.rows});
-    $('#loaded-count').textContent = `${result.matched} of ${result.total}`;
+    const unavailable = !result.total && ['error','disconnected','loading'].includes(result.status);
+    $('#loaded-count').textContent = unavailable ? result.status === 'error' ? 'Results unavailable' : 'Unknown' :
+      `${result.matched} of ${result.total}`;
   },
   onReview: async row => {
     await openIncident(row.proposal.incident_id,row.proposal.incident_revision);
@@ -171,21 +200,27 @@ function renderList(state) {
   for (const [index,row] of state.rows.entries()) {
     const item = node('li'); item.dataset.testid = 'incident-row';
     const selected = row.incident_id === state.selected;
-    const open = button('',() => openIncident(row.incident_id,row.revision),`incident-link ${selected ? 'selected' : ''}`);
-    open.title = row.incident_id; open.setAttribute('aria-label',`Open ${row.incident_id}, revision ${row.revision}`);
+    const open = button('',() => openIncident(row.incident_id,row.revision),`incident-link incident-link--compact ${selected ? 'selected' : ''}`);
+    open.dataset.severity = Object.hasOwn(severityTones,row.severity) ? row.severity : 'unknown';
+    open.title = `${row.incident_id} · revision ${row.revision}`; open.setAttribute('aria-label',`Open ${row.incident_id}, revision ${row.revision}`);
     if (selected) open.setAttribute('aria-current','true');
     const heading = node('span',null,'queue-heading'), chevron = node('span','›','queue-chevron');
     chevron.setAttribute('aria-hidden','true');
-    heading.append(raw('strong',short(row.incident_id,32)),chevron);
+    const id = raw('strong',short(row.incident_id,23)); id.title = row.incident_id;
+    heading.append(id,chevron);
     const services = node('span',null,'row-services');
-    for (const name of row.affected_services || []) services.append(raw('span',service(name),`service-label ${serviceClass(name)}`));
-    if (!services.childNodes.length) services.append(node('span','No services recorded'));
+    for (const name of row.affected_services || []) {
+      const chip = raw('span',service(name),'incident-service'); chip.title = name; services.append(chip);
+    }
+    if (!services.childNodes.length) services.append(node('span','Services unknown','incident-services-unknown'));
     const footer = node('span',null,'queue-badges');
-    footer.append(badge(row.severity),badge(row.state));
+    footer.append(badge(row.severity,'severity'),badge(row.state,'state'));
     services.id = `queue-services-${index}`;
     footer.id = `queue-status-${index}`;
     open.setAttribute('aria-describedby',`${services.id} ${footer.id}`);
-    open.append(heading,services,footer,node('span',`r${row.revision} · ${date(row.detected_at)}`,'row-time'));
+    const detected = relativeTime(row.detected_at); detected.className = 'row-time';
+    detected.setAttribute('aria-label',`Detected ${date(row.detected_at)}`);
+    open.append(heading,services,footer,detected);
     item.append(open); list.append(item);
   }
   target.append(list);
@@ -210,19 +245,23 @@ function section(title, note = null) {
   const heading = node('div',null,'section-heading'); heading.append(node('h3',title));
   if (note) heading.append(node('span',note)); return heading;
 }
+function helpDisclosure(title, ...content) {
+  const item = node('details',null,'help-disclosure');
+  const body = node('div',null,'help-disclosure__body'); body.append(...content);
+  const summary = node('summary'), icon = node('span','i','info-icon'); icon.setAttribute('aria-hidden','true');
+  summary.append(icon,node('span',title));
+  item.append(summary,body); return item;
+}
 function overview(detail) {
   const target = node('div'), payload = detail.payload, context = detail.context;
   const grid = node('div',null,'facts-grid overview-facts');
-  grid.append(fact('Affected services',payload.affected_services.map(service).join(', ') || 'None recorded'),
-    fact('Detected',date(payload.detected_at)),fact('Lifecycle',context.lifecycle_stage),
+  grid.append(fact('Lifecycle',context.lifecycle_stage),
     fact('Evidence availability',context.availability),fact('Recovery source',context.recovery_source || 'Not recorded'),
     fact('Revision recorded',date(detail.recorded_at)));
-  target.append(section('At a glance'),grid);
+  target.append(helpDisclosure('Revision context',grid));
   target.append(section('Root-cause hypotheses',`${payload.root_cause_ranking.length} ranked`));
-  const warning = node('div',null,'callout');
-  warning.append(node('strong','Diagnostic qualification not exposed'),node('span',
-    'The ranking shows relative evidence support. This revision omits RCA coverage, margin and a qualified diagnostic decision.'));
-  target.append(warning);
+  target.append(helpDisclosure('Diagnostic qualification not exposed',node('p',
+    'The ranking shows relative evidence support. This revision omits RCA coverage, margin and a qualified diagnostic decision.')));
   if (!payload.root_cause_ranking.length) target.append(node('p','No root-cause hypotheses were recorded.','subtle'));
   payload.root_cause_ranking.forEach((candidate,index) => {
     const card = node('div',null,'hypothesis'), heading = node('div',null,'hypothesis-heading');
@@ -259,7 +298,7 @@ function overview(detail) {
 function evidence(detail) {
   const target = node('div');
   target.append(section('Evidence for this revision'));
-  target.append(node('p','Source references are identifiers, not automatically downloadable links. Facts are shown exactly as recorded.','subtle'));
+  target.append(helpDisclosure('About evidence references',node('p','Source references are identifiers, not automatically downloadable links. Facts are shown exactly as recorded.','subtle')));
   if (!detail.payload.evidence.length) target.append(node('p','No evidence was recorded in this revision.','subtle'));
   for (const item of detail.payload.evidence) {
     const card = node('details',null,`evidence-card ${highlightedEvidence === item.id ? 'highlight' : ''}`);
@@ -283,7 +322,7 @@ function evidence(detail) {
 
 function timeline(detail, state) {
   const target = node('div');
-  target.append(node('p',`Recorded lifecycle events through revision ${detail.revision}. Recorded times are not inferred detection or recovery latencies.`,'subtle'));
+  target.append(helpDisclosure('About this timeline',node('p',`Recorded lifecycle events through revision ${detail.revision}. Recorded times are not inferred detection or recovery latencies.`,'subtle')));
   const list = node('ol',null,'timeline');
   for (const event of detail.timeline.events) {
     const item = node('li'), heading = node('div',null,'timeline-heading');
@@ -304,7 +343,7 @@ function explanation(state) {
   const target = node('div'), result = state.explanation;
   target.setAttribute('aria-busy',String(state.explanationLoading));
   target.append(section('Evidence summary','Generated explanation'));
-  target.append(node('p',`Evidence summary for incident revision ${state.detail.revision}. Recorded evidence and ranked hypotheses do not establish a confirmed cause or action permission.`,'subtle'));
+  target.append(helpDisclosure('About this explanation',node('p',`Evidence summary for incident revision ${state.detail.revision}. Recorded evidence and ranked hypotheses do not establish a confirmed cause or action permission.`,'subtle')));
   if (state.explanationError) {
     const error = node('div',null,'inline-error'); error.setAttribute('role','alert'); showError(error,state.explanationError); target.append(error);
   }
@@ -312,7 +351,7 @@ function explanation(state) {
   if (result) {
     target.append(section(result.fallback ? 'Deterministic fallback' : 'Provider-selected evidence'),
       node('p',`Provider ${result.provider} · generated ${date(result.generated_at)}`,'subtle'),
-      raw('p',result.payload.summary,'explanation-summary'));
+      helpDisclosure('Generated summary',raw('p',result.payload.summary,'explanation-summary')));
     if (!result.payload.claims.length) target.append(node('p','No bounded evidence claims are available for this revision.','subtle'));
     for (const claim of result.payload.claims) {
       const card = node('div',null,'explanation-claim'); card.append(raw('p',claim.text));
@@ -341,7 +380,7 @@ function explanation(state) {
 function actionHistory(state,opened) {
   const target = node('div');
   target.append(section('Action journal','Recorded execution and verification'));
-  target.append(node('p',`Action journal through incident revision ${state.detail.revision}. Action phases do not change the incident lifecycle. Review the proposal panel for its approval decision.`,'subtle'));
+  target.append(helpDisclosure('About action phases',node('p',`Action journal through incident revision ${state.detail.revision}. Action phases do not change the incident lifecycle. Review the proposal panel for its approval decision.`,'subtle')));
   if (state.actionsError) {
     const error = node('div',null,'inline-error'); error.setAttribute('role','alert'); showError(error,state.actionsError); target.append(error);
   }
@@ -407,11 +446,11 @@ function runbookProposals(state, drafts) {
   const heading = node('div',null,'proposal-heading');
   const title = node('div',null,'proposal-title');
   title.append(node('h3','Runbook proposals'));
-  if (pending) title.append(node('span',`${pending} awaiting decision`,'badge degrading'));
+  if (pending) title.append(statusChip(`${pending} awaiting decision`,'warning'));
   const reload = button('Reload proposals',() => workspace.loadProposals(),'button secondary');
   reload.disabled = state.proposalsLoading || state.decisionLoading;
   heading.append(title,reload); panel.append(heading);
-  if (pending) panel.append(node('p','The controller checks all safeguards after approval. Rejection sends the proposal to an engineer.'));
+  if (pending) panel.append(helpDisclosure('Approval safeguards',node('p','The controller checks all safeguards after approval. Rejection sends the proposal to an engineer.')));
   if (pending && !state.canApprove) panel.append(node('p','This session has read-only access. Decisions require the remediation.approve scope.','callout uncertain'));
   if (state.proposalsLoading) panel.append(node('p','Loading proposals…'));
   if (state.proposalsError) {
@@ -478,6 +517,9 @@ function renderDetail(state) {
     if (active) item.setAttribute('aria-current','page'); else item.removeAttribute('aria-current');
   }
   const target = $('#detail-pane');
+  // Keep the mounted module and its handle alive when rebuilding the header.
+  const deeplinks = $('#slot-deeplinks');
+  if (target.contains(deeplinks)) target.before(deeplinks);
   const titleFocused = document.activeElement === $('#detail-title');
   const drafts = new Map([...target.querySelectorAll('.proposal-decision textarea')].map(item => [item.id,item.value]));
   const opened=new Set([...target.querySelectorAll('details[data-action-id][open]')].map(item => item.dataset.actionId));
@@ -500,8 +542,21 @@ function renderDetail(state) {
   const title = raw('h2',detail.incident_id); title.id = 'detail-title'; title.tabIndex = -1;
   if (detail.incident_id.length > 36) title.replaceChildren(document.createTextNode(detail.incident_id.slice(0,36)),
     node('wbr'),document.createTextNode(detail.incident_id.slice(36)));
-  const summary = node('div',null,'detail-summary'); summary.append(badge(payload.severity),badge(payload.state));
-  header.append(overline,title,summary);
+  const titleRow = node('div',null,'incident-title-row'); titleRow.append(title,deeplinks);
+  const summary = node('div',null,'detail-summary');
+  summary.append(badge(payload.severity,'severity'),badge(payload.state,'state'));
+  const essentials = node('dl',null,'incident-essentials');
+  const affected = node('div'), serviceChips = node('dd',null,'incident-affected-services');
+  for (const name of payload.affected_services) {
+    const chip = node('span',service(name),'incident-service'); chip.title = name; serviceChips.append(chip);
+  }
+  if (!serviceChips.childNodes.length) serviceChips.append(node('span','Services unknown'));
+  affected.append(node('dt','Affected services'),serviceChips);
+  const detected = node('div'), detectedValue = node('dd');
+  detectedValue.append(relativeTime(payload.detected_at),time(payload.detected_at));
+  detected.append(node('dt','Detected'),detectedValue);
+  essentials.append(affected,detected);
+  header.append(overline,titleRow,summary,essentials);
   const form = node('form',null,'revision-controls'), label = node('label','Revision '), input = node('input');
   input.type = 'number'; input.min = '1'; input.max = String(Number.MAX_SAFE_INTEGER); input.step = '1'; input.value = String(detail.revision);
   input.id = 'revision-input'; label.htmlFor = input.id; form.append(label,input);
@@ -572,6 +627,9 @@ const checkVisibleSession = () => { if (!document.hidden) {
   if (!document.activeElement?.closest('.proposal-decision')) workspace.loadProposals();
 } };
 setInterval(updateProposalClocks,1000);
+setInterval(() => {
+  for (const item of document.querySelectorAll('[data-relative-time]')) updateRelativeTime(item);
+},30000);
 setInterval(checkVisibleSession,30000);
 document.addEventListener('visibilitychange',checkVisibleSession);
 window.addEventListener('pagehide',() => {

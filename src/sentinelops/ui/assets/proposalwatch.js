@@ -6,6 +6,7 @@ const terminal = new Set(['approved', 'consumed', 'engineer']);
 const secondsUntil = (deadline, now) => Math.max(0, Math.ceil((deadline - now) / 1000));
 const timestamp = value => typeof value === 'string' ? Date.parse(value) : NaN;
 const displayTime = value => new Date(value).toLocaleString('en-GB', {hour12:false});
+const duration = seconds => `${String(Math.floor(seconds / 60)).padStart(2,'0')}:${String(seconds % 60).padStart(2,'0')}`;
 
 function validate(body, incidentId) {
   if (!Array.isArray(body?.items) || typeof body.has_more !== 'boolean' || body.items.length > 100) {
@@ -82,30 +83,50 @@ export function mount(root, ctx) {
     element.type = 'button';
     return element;
   };
+  const setStatus = (element, label, status = 'neutral', icon = '?') => {
+    if (element.dataset.status === status && element.dataset.label === label) return;
+    element.dataset.status = status; element.dataset.label = label;
+    const symbol = create('span','status-chip__icon',icon); symbol.setAttribute('aria-hidden','true');
+    element.replaceChildren(symbol,create('span','status-chip__label',label));
+  };
   const panel = create('section', 'proposalwatch');
   panel.setAttribute('aria-label', 'Runbook proposal watch');
   const header = create('div', 'proposalwatch-header');
-  const heading = create('div');
-  heading.append(create('h2', 'proposalwatch-title', 'Runbook proposal watch'),
-    create('p', 'proposalwatch-description', 'New proposals need your review. Approval is always a separate human decision.'));
+  const heading = create('h2', 'proposalwatch-title', 'Proposal watch');
+  const humanDecision = create('span','proposalwatch-description','Human approval required.');
   const controls = create('div', 'proposalwatch-controls');
-  const notificationsButton = button('Enable browser notifications');
-  const refreshButton = button('Refresh now');
-  controls.append(notificationsButton, refreshButton);
-  header.append(heading, controls);
+  const notificationsButton = button('Browser alerts');
+  const refreshButton = button('↻');
+  refreshButton.setAttribute('aria-label','Refresh proposals now'); refreshButton.title = 'Refresh proposals now';
+  const help = create('details','help-disclosure');
+  const helpToggle = create('summary');
+  const helpIcon = create('span','info-icon','i'); helpIcon.setAttribute('aria-hidden','true');
+  helpToggle.append(helpIcon,create('span','sr-only','About proposal watch'));
+  const helpBody = create('div','help-disclosure__body');
+  help.append(helpToggle,helpBody);
+  controls.append(refreshButton,help);
   const notificationStatus = create('p', 'proposalwatch-meta');
-  const connection = create('p', 'proposalwatch-connection', 'Checking proposals…');
+  const connection = create('span', 'status-chip proposalwatch-connection');
+  setStatus(connection,'Checking proposals…');
   connection.setAttribute('role', 'status');
-  const announcement = create('p', 'proposalwatch-announcement');
+  header.append(heading,connection,humanDecision,controls);
+  const connectionDetail = create('p','proposalwatch-meta');
+  const announcement = create('p', 'sr-only proposalwatch-announcement');
   announcement.setAttribute('role', 'status');
   announcement.setAttribute('aria-live', 'polite');
-  const coverage = create('p', 'proposalwatch-warning');
+  const coverage = create('p', 'status-chip proposalwatch-warning');
   coverage.hidden = true;
   const explanation = create('p', 'proposalwatch-meta',
     'Review window estimate = earlier of proposal expiry and RCA time + 900 seconds. The server also checks current evidence and revision.');
   const list = create('div', 'proposalwatch-list');
   const empty = create('p', 'proposalwatch-empty', 'Waiting for the first successful check.');
-  panel.append(header, notificationStatus, connection, announcement, coverage, explanation, empty, list);
+  const history = create('details','proposalwatch-history'); history.hidden = true;
+  const historyToggle = create('summary');
+  const historyList = create('div','proposalwatch-list');
+  history.append(historyToggle,historyList);
+  helpBody.append(create('p', 'proposalwatch-meta', 'New proposals need your review. Approval is always a separate human decision.'),
+    notificationsButton,notificationStatus,explanation,connectionDetail,empty);
+  panel.append(header,announcement,coverage,list,history);
   root.append(panel);
 
   const seen = new Map();
@@ -124,15 +145,17 @@ export function mount(root, ctx) {
     const available = window.isSecureContext && typeof window.Notification === 'function';
     const permission = available ? window.Notification.permission : 'unavailable';
     notificationsButton.disabled = permissionBusy || permission !== 'default';
-    notificationsButton.textContent = permissionBusy ? 'Requesting permission…' :
-      permission === 'granted' ? 'Browser notifications enabled' :
-      permission === 'denied' ? 'Browser notifications blocked' :
-      permission === 'unavailable' ? 'Browser notifications unavailable' : 'Enable browser notifications';
+    notificationsButton.textContent = permissionBusy ? 'Requesting…' :
+      permission === 'granted' ? 'Alerts on' :
+      permission === 'denied' ? 'Alerts blocked' :
+      permission === 'unavailable' ? 'Alerts unavailable' : 'Browser alerts';
+    notificationsButton.setAttribute('aria-label',permission === 'default' ? 'Enable browser notifications' : notificationsButton.textContent);
     notificationStatus.textContent = permission === 'granted' ? 'Browser alerts are enabled. In-page alerts stay active.' :
       permission === 'denied' ? 'Notifications were blocked. In-page alerts stay active; change browser site settings to allow browser alerts.' :
       permission === 'unavailable' ? 'Browser notifications require a supported browser and a secure context. In-page alerts stay active.' :
       permissionError ? 'Browser permission could not be enabled. In-page alerts stay active; you can try again.' :
       'Browser alerts are optional. Permission is requested only when you select Enable browser notifications.';
+    notificationsButton.title = notificationStatus.textContent;
   }
 
   async function enableNotifications() {
@@ -165,6 +188,7 @@ export function mount(root, ctx) {
       notification.onclick = () => {
         if (!disposed) {
           window.focus();
+          if (entry.card.parentNode === historyList) history.open = true;
           entry.card.scrollIntoView({block:'nearest'});
           entry.card.focus();
         }
@@ -180,23 +204,36 @@ export function mount(root, ctx) {
     card.tabIndex = -1;
     const titlebar = create('div', 'proposalwatch-card-header');
     const title = create('h3', 'proposalwatch-card-title');
-    const badge = create('span', 'proposalwatch-badge');
+    const badge = create('span', 'status-chip proposalwatch-badge');
     titlebar.append(title, badge);
     const identity = create('p', 'proposalwatch-meta');
     const discovered = create('p', 'proposalwatch-discovered');
     const countdown = create('p', 'proposalwatch-countdown');
+    const countdownLabel = create('span','proposalwatch-countdown-label');
+    const countdownValue = create('strong','proposalwatch-countdown-value');
+    countdownValue.setAttribute('aria-hidden','true');
+    const countdownAccessible = create('span','sr-only');
+    countdown.append(countdownLabel,countdownValue,countdownAccessible);
     const ttl = create('p', 'proposalwatch-meta');
     const clocks = create('p', 'proposalwatch-meta');
     const reason = create('p', 'proposalwatch-reason');
+    const reasonDetail = create('p','proposalwatch-meta');
     const receipt = create('p', 'proposalwatch-meta');
+    const details = create('details','help-disclosure proposalwatch-details');
+    const detailsToggle = create('summary',null,'Proposal details');
+    const detailsBody = create('div','help-disclosure__body');
+    detailsBody.append(identity,discovered,ttl,clocks,reasonDetail,receipt);
+    details.append(detailsToggle,detailsBody);
     const actions = create('div', 'proposalwatch-controls');
-    const review = ctx.onReview ? button('Open proposal review') : null;
+    const review = ctx.onReview ? button('Open incident →') : null;
+    review?.setAttribute('aria-label','Open incident proposal review');
     const acknowledge = button('Mark as seen');
     if (review) actions.append(review);
     actions.append(acknowledge);
-    card.append(titlebar, identity, discovered, countdown, ttl, clocks, reason, receipt, actions);
+    actions.append(details);
+    card.append(titlebar,countdown,reason,actions);
     const entry = {row, rca:NaN, firstSeen, isNew, card, title, badge, identity, discovered,
-      countdown, ttl, clocks, reason, receipt, review, acknowledge};
+      countdown,countdownLabel,countdownValue,countdownAccessible,ttl,clocks,reason,reasonDetail,receipt,review,acknowledge};
     acknowledge.addEventListener('click', () => {
       entry.isNew = false;
       updateCard(entry, Date.now());
@@ -223,33 +260,45 @@ export function mount(root, ctx) {
     const row = entry.row;
     const proposal = row.proposal;
     const state = timing(row, entry.rca, now);
-    const actionable = !terminal.has(state.status);
-    const urgency = actionable && state.status !== 'expired' ?
+    const urgency = state.status === 'pending' ?
       state.remaining === null ? 'unknown' : state.remaining <= 60 ? 'critical' :
-        state.remaining <= 180 ? 'warning' : 'normal' : 'normal';
+        state.remaining <= 180 ? 'serious' : 'warning' : state.status === 'expired' ? 'critical' :
+        state.status === 'stale' ? 'serious' : 'neutral';
     entry.card.dataset.urgency = urgency;
+    entry.card.dataset.status = state.status;
     entry.card.dataset.new = String(entry.isNew);
     entry.title.textContent = `${proposal.incident_id} · ${proposal.runbook_id}`;
-    entry.badge.textContent = labels[state.status];
-    entry.badge.dataset.status = state.status;
+    const badgeStatus = state.status === 'approved' ? 'good' : state.status === 'not_yet_valid' || state.status === 'engineer' ? 'warning' :
+      urgency === 'unknown' ? 'neutral' : urgency;
+    const badgeLabel = `${labels[state.status]}${state.status === 'pending' && urgency === 'critical' ? ' · Urgent' :
+      state.status === 'pending' && urgency === 'serious' ? ' · Ending soon' : ''}`;
+    setStatus(entry.badge,badgeLabel,badgeStatus,{good:'✓',warning:'!',serious:'!!',critical:'×',neutral:'?'}[badgeStatus]);
     entry.identity.textContent = `Proposal ${proposal.proposal_id} · revision ${proposal.incident_revision}`;
     entry.discovered.textContent = `${entry.isNew ? 'NEW · ' : ''}Created ${displayTime(timestamp(proposal.created_at))} · ` +
       `First seen ${displayTime(entry.firstSeen)} (this watch session)`;
-    entry.countdown.textContent = terminal.has(state.status) ? 'Decision recorded' :
+    const countdownText = terminal.has(state.status) ? 'Decision recorded' :
       state.status === 'expired' ? 'Expired · 0s remaining' : state.status === 'stale' ? 'Stale · review blocked' :
       state.status === 'not_yet_valid' ? 'Not yet valid · waiting for server confirmation' :
       state.futureRca ? 'Review window unavailable · RCA time is in the future' :
       state.remaining === null ? 'Review window unknown · RCA timestamp unavailable' :
       state.remaining === 0 ? 'RCA freshness elapsed · 0s remaining' :
-      `Review window estimate: ${state.remaining}s remaining${urgency === 'critical' ? ' · Urgent' : urgency === 'warning' ? ' · Ending soon' : ''}`;
+      `Review window estimate: ${state.remaining}s remaining${urgency === 'critical' ? ' · Urgent' : urgency === 'serious' ? ' · Ending soon' : ''}`;
+    const running = state.status === 'pending' && !state.futureRca && state.remaining !== null && state.remaining > 0;
+    entry.countdownLabel.textContent = running ? 'Review window estimate:' : countdownText;
+    entry.countdownValue.textContent = running ? duration(state.remaining) : state.status === 'pending' && state.remaining === null ? '—' : '';
+    entry.countdownValue.hidden = !entry.countdownValue.textContent;
+    entry.countdownAccessible.textContent = running ? `${state.remaining}s remaining` : '';
+    entry.countdown.hidden = state.status !== 'pending';
     entry.ttl.textContent = `Proposal TTL: ${state.ttl}s remaining · expires ${displayTime(timestamp(proposal.expires_at))}`;
     entry.clocks.textContent = Number.isFinite(entry.rca) ?
       `RCA time: ${displayTime(entry.rca)} · freshness limit ${displayTime(entry.rca + 900000)} (900s)` :
       'The RCA clock is unavailable. The proposal TTL alone does not establish the usable approval window.';
     let reason = '';
-    if (state.status === 'stale' || (!terminal.has(state.status) && row.current_revision !== proposal.incident_revision)) {
+    if (!terminal.has(state.status) && row.current_revision !== proposal.incident_revision) {
       reason = `Incident revision advanced from ${proposal.incident_revision} to ${row.current_revision}. ` +
         'This proposal targets the older revision and cannot be approved. Reload the current incident and review a new proposal.';
+    } else if (state.status === 'stale') {
+      reason = 'The server marked this proposal stale. Approval is blocked; reload the current incident and review a new proposal.';
     } else if (state.status === 'expired') {
       reason = 'The proposal TTL has ended. Wait for a new proposal and review the current incident.';
     } else if (state.status === 'not_yet_valid' || now < timestamp(proposal.created_at)) {
@@ -268,17 +317,47 @@ export function mount(root, ctx) {
       reason = 'Approval recorded. This does not establish that execution has completed.';
     }
     if (row.outcome?.reason && typeof row.outcome.reason === 'string') reason += ` Controller reason: ${row.outcome.reason}.`;
+    entry.reasonDetail.textContent = reason;
+    entry.reasonDetail.hidden = !reason;
     entry.reason.textContent = reason;
     entry.reason.hidden = !reason;
     entry.receipt.textContent = row.approval?.decision ? `Recorded decision: ${row.approval.decision}` : '';
     entry.receipt.hidden = !entry.receipt.textContent;
     entry.acknowledge.hidden = !entry.isNew;
-    if (entry.review) entry.review.disabled = !healthy || !state.reviewable || Boolean(entry.opening);
+    if (entry.review) {
+      entry.review.disabled = !healthy || !state.reviewable || Boolean(entry.opening);
+      entry.review.title = !healthy ? 'Proposal updates unavailable. Refresh before review.' :
+        reason || 'Open the incident and review this proposal. Approval is a separate human decision.';
+    }
+  }
+
+  function updateLayout(now) {
+    let pending = 0, blocked = 0, archived = 0;
+    for (const entry of cards.values()) {
+      const state = timing(entry.row,entry.rca,now);
+      const historical = terminal.has(state.status) || state.status === 'expired';
+      if (state.status === 'pending') pending++;
+      else if (!historical) blocked++;
+      if (historical) archived++;
+      const target = historical ? historyList : list;
+      if (entry.card.parentNode !== target) target.append(entry.card);
+    }
+    list.hidden = pending + blocked === 0;
+    history.hidden = archived === 0;
+    historyToggle.textContent = `Proposal history (${archived})`;
+    panel.dataset.compact = String(pending + blocked === 0);
+    humanDecision.hidden = pending + blocked === 0;
+    if (healthy) {
+      setStatus(connection,pending ? `${pending} pending review` : blocked ? `${blocked} review blocked` :
+        coverage.hidden ? 'No pending proposals' : 'No pending in loaded proposals',pending ? 'warning' : blocked ? 'serious' : 'neutral',
+        pending || blocked ? '!' : '—');
+    }
   }
 
   function tick() {
     const now = Date.now();
     for (const entry of cards.values()) updateCard(entry, now);
+    updateLayout(now);
   }
 
   function announceNew() {
@@ -330,29 +409,39 @@ export function mount(root, ctx) {
         updateCard(entry, now);
         if (entry.isNew && unseen) added.push(entry);
       }
-      let position = list.firstElementChild;
+      // Classify cards before reordering so insertion references stay in their own list.
+      updateLayout(now);
+      const positions = new Map([[list,list.firstElementChild],[historyList,historyList.firstElementChild]]);
       for (const row of body.items) {
         const card = cards.get(row.proposal.proposal_id).card;
-        if (card !== position) list.insertBefore(card, position);
-        position = card.nextElementSibling;
+        const status = timing(row,cards.get(row.proposal.proposal_id).rca,now).status;
+        const target = terminal.has(status) || status === 'expired' ? historyList : list;
+        const position = positions.get(target);
+        if (card !== position) target.insertBefore(card,position);
+        positions.set(target,card.nextElementSibling);
       }
       initialized = true;
       coverage.hidden = !body.has_more;
-      coverage.textContent = 'Partial coverage: only the latest 100 proposals are returned. Older proposals may be missing. Filter by incident for a complete review.';
+      setStatus(coverage,'Partial coverage · latest 100 only','warning','!');
+      coverage.title = 'Partial coverage: only the latest 100 proposals are returned. Older proposals may be missing. Filter by incident for a complete review.';
       empty.hidden = cards.size > 0;
       empty.textContent = 'No proposals returned by the server.';
       connection.dataset.state = 'connected';
-      connection.textContent = `Last successful check: ${displayTime(now)} · polling every ${interval / 1000}s. ` +
+      connectionDetail.textContent = `Last successful check: ${displayTime(now)} · polling every ${interval / 1000}s. ` +
         'Countdowns use the local clock; background tabs may delay alerts.';
+      connection.title = connectionDetail.textContent;
+      updateLayout(now);
       announceNew();
       for (const entry of added) notify(entry);
     } catch {
       if (disposed) return;
       healthy = false;
       connection.dataset.state = 'error';
-      connection.textContent = 'Proposal updates unavailable. ' +
+      setStatus(connection,'Proposal status unknown','warning','!');
+      connectionDetail.textContent = 'Proposal updates unavailable. ' +
         (lastSuccess === null ? 'No proposals have been verified.' : `Last successful check: ${displayTime(lastSuccess)}. Displayed data may be outdated.`) +
         ' Retrying automatically; refresh before review.';
+      connection.title = connectionDetail.textContent;
       empty.textContent = 'Proposal status is unknown until a successful check.';
       tick();
     } finally {
@@ -397,6 +486,7 @@ export function mount(root, ctx) {
   document.addEventListener('visibilitychange', resume);
   window.addEventListener('focus', resume);
   ctx.signal?.addEventListener('abort', destroy, {once:true});
+  updateLayout(Date.now());
   notificationState();
   if (ctx.signal?.aborted) destroy();
   else void refresh();

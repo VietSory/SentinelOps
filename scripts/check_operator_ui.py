@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
-from sentinelops.telemetry.core import stable_id
+from sentinelops.telemetry.core import stable_id, timestamp
 
 
 UI_ASSETS = (
@@ -26,6 +27,27 @@ UI_ASSETS = (
 )
 UI_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
           "img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+FIXTURE_TOKEN = 'fixture-browser-token-not-a-real-secret'*2
+FIXTURE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def fixture_records(now=None):
+    """Shared synthetic feed; a supplied clock keeps local preview filters useful."""
+    now = now or FIXTURE_TIME
+    cases = [
+        ('A', 3, 'escalated', 'high', 5, ['payment-service', 'checkout-service']),
+        ('B', 1, 'incident', 'medium', 35, ['inventory-service']),
+        ('C', 4, 'escalated', 'critical', 80, ['checkout-service']),
+        ('D', 3, 'recovered', 'high', 180, ['payment-service']),
+        ('E', 2, 'recovered', 'medium', 420, ['inventory-service']),
+        ('F', 2, 'incident', 'critical', 720, ['payment-service', 'inventory-service']),
+        ('G', 2, 'degrading', 'high', 1320, ['checkout-service']),
+        ('H', 2, 'recovering', 'low', 1800, ['inventory-service']),
+    ]
+    return [{'incident_id':'INC-FIXTURE-'+name, 'revision':revision, 'state':state,
+             'severity':severity, 'detected_at':timestamp(now-timedelta(minutes=age)),
+             'affected_services':services}
+            for name, revision, state, severity, age, services in cases]
 
 
 def verify_ui_assets(client):
@@ -44,12 +66,12 @@ def verify_ui_assets(client):
     return {'assets_checked':len(UI_ASSETS),'asset_methods':['GET','HEAD'],'strict_csp':True}
 
 
-def fixture_envelope(incident, revision, after=0):
+def fixture_envelope(incident, revision, after=0, *, now=None):
     events = [{'event_id':str(uuid5(NAMESPACE_URL,f'fixture/{incident}/{i}')),'incident_id':incident,'revision':i,'event_type':'incident.revised',
         'lifecycle_stage':'ESCALATED','actor':'fixture-ui-only','reason':'Software fixture, not observed source evidence',
         'recorded_at':'2026-01-01T00:00:00Z'} for i in range(1,revision+1)]
     page = events[:1] if after == 0 and revision>1 else [e for e in events if e['revision']>after]
-    return {'schema_version':'1.0','incident_id':incident,'revision':revision,'recorded_at':'2026-01-01T00:00:00Z',
+    result = {'schema_version':'1.0','incident_id':incident,'revision':revision,'recorded_at':'2026-01-01T00:00:00Z',
         'context':{'availability':'UNKNOWN','lifecycle_stage':'ESCALATED','recovery_source':None,
             'trigger_sources':[{'source':'manual','signal_id':'fixture-ui','emitted_at':'2026-01-01T00:00:00Z',
                                'source_ref':'fixture://ui-only'}],
@@ -61,56 +83,100 @@ def fixture_envelope(incident, revision, after=0):
                 'fact':'<img src=x onerror="window.__evidence_xss=true">','source_ref':'javascript:window.__evidence_xss=true'}]},
         'actor':'fixture-ui-only','reason':'Software fixture, not observed source evidence',
         'timeline':{'events':page,'next_after_revision':page[-1]['revision'] if page and page[-1]['revision']<revision else None}}
+    record = next((row for row in fixture_records(now) if row['incident_id'] == incident), None)
+    if record:
+        result['payload'].update({key:deepcopy(record[key]) for key in
+                                  ('detected_at','state','severity','affected_services')})
+        service = record['affected_services'][0]
+        result['payload']['root_cause_ranking'][0]['service'] = service
+        result['payload']['evidence'][0]['service'] = service
+        stage = {'escalated':'ESCALATED','recovered':'RECOVERED','recovering':'VERIFYING'}.get(record['state'],'OPEN')
+        result['context']['lifecycle_stage'] = stage
+        if record['state'] == 'recovered':
+            result['context'].update(availability='ELIGIBLE', recovery_source='manual')
+        result['context']['trigger_sources'][0]['emitted_at'] = record['detected_at']
+        result['recorded_at'] = record['detected_at']
+        for event in page:
+            event.update(recorded_at=record['detected_at'], lifecycle_stage=stage)
+    if incident == 'INC-FIXTURE-A':
+        # This exact prefix is the UI clock contract, NOT a source-verification claim.
+        result['payload']['evidence'].append({'id':'fixture-rca-clock','type':'timeline','service':None,
+            'observed_at':timestamp((now or FIXTURE_TIME)-timedelta(seconds=30)),
+            'fact':'Source-verified continuous RCA hypotheses; SOFTWARE FIXTURE ONLY, no actual source evidence.',
+            'source_ref':'artifact://manifests/'+'f'*64+'.json'})
+    return result
 
 
-def fixture_explanation(incident, revision):
+def fixture_explanation(incident, revision, *, now=None):
     """Explicit browser contract fixture, never source/model/provider evidence."""
     return {'schema_version':'1.0','incident_id':incident,'revision':revision,
-        'generated_at':'2026-01-01T00:00:00Z','provider':'deterministic-facts/v1','fallback':True,
+        'generated_at':timestamp(now or FIXTURE_TIME),'provider':'deterministic-facts/v1','fallback':True,
         'payload':{'schema_version':'1.0','incident_id':incident,
             'summary':f'Software fixture for revision {revision}; hypotheses are not confirmed causes.',
             'claims':[{'text':'<img src=x onerror="window.__explanation_xss=true">',
                        'evidence_refs':['fixture-evidence-1']}]}}
 
 
-def fixture_actions(incident, revision, cursor=None):
+def fixture_actions(incident, revision, cursor=None, *, now=None):
     reason='<img src=x onerror="window.__action_xss=true">'
+    recorded = timestamp(now or FIXTURE_TIME)
     item={'observation_version':'action-observation/v1','action_id':('2' if cursor else '1')*64,
         'incident_id':incident,'incident_revision':2,'action_revision':3,'runbook':'payment-rollback-known-good/v1',
-        'phase':'escalated','recorded_at':'2026-01-01T00:00:00Z','updated_at':'2026-01-01T00:00:00Z',
+        'phase':'escalated','recorded_at':recorded,'updated_at':recorded,
         'reason':reason,'before_image':'localhost:5001/payment@sha256:'+'b'*64,
         'known_good_image':'localhost:5001/payment@sha256:'+'a'*64,
         'target':{'cluster_uid':'fixture-cluster','namespace':'sentinelops-b-actions','namespace_uid':'fixture-namespace',
                   'deployment':'payment-service','deployment_uid':'fixture-deployment','container':'payment'},
-        'history':[{'revision':i,'phase':phase,'recorded_at':'2026-01-01T00:00:00Z','reason':reason,
+        'history':[{'revision':i,'phase':phase,'recorded_at':recorded,'reason':reason,
                     'event_hash':str(i)*64,'previous_hash':str(i-1)*64 if i>1 else None}
                    for i,phase in enumerate(('prepared','dispatching','escalated'),1)]}
     return {'observation_version':'action-list/v1','incident_id':incident,'incident_revision':revision,
         'items':[item] if revision>=2 else [],'next_cursor':'fixture-actions-2' if revision>=2 and not cursor else None}
 
 
-def fixture_quarantine(action_id):
-    item=fixture_actions('INC-FIXTURE-A',3)['items'][0]
+def fixture_quarantine(action_id, *, now=None):
+    item=fixture_actions('INC-FIXTURE-A',3,now=now)['items'][0]
+    opened = timestamp(now or FIXTURE_TIME)
+    observed = timestamp((now or FIXTURE_TIME)+timedelta(seconds=280))
     payload={'release_version':'manual-quarantine-release/v1','review_ref':'artifact://manifests/'+'d'*64+'.json',
         'action_id':action_id,'action_revision':3,'terminal_event_hash':'3'*64,'target_key':stable_id(item['target']),
-        'opened_at':'2026-01-01T00:00:00Z','observed_at':'2026-01-01T00:04:40Z',
-        'verification_as_of':'2026-01-01T00:04:40Z','last_bucket_end':'2026-01-01T00:04:00Z',
+        'opened_at':opened,'observed_at':observed,
+        'verification_as_of':observed,'last_bucket_end':timestamp((now or FIXTURE_TIME)+timedelta(minutes=4)),
         'before_ref':'artifact://observations/'+'a'*64+'.json','after_ref':'artifact://observations/'+'b'*64+'.json',
         'health_ref':'artifact://manifests/'+'c'*64+'.json','dispatch_authorized':False,'recovery_accepted':False,'ier_mutated':False}
     return {'observation_version':'quarantine-status/v1','action_id':action_id,'action_revision':3,
         'action_phase':'escalated','quarantine_state':'released','resolution':{'status':'RELEASED','resolution_id':'d'*64,
             'action_id':action_id,'operator_actor':'<img src=x onerror=window.__quarantine_xss=true>',
-            'recorded_at':'2026-01-01T00:04:40Z','payload':payload}}
+            'recorded_at':observed,'payload':payload}}
+
+
+def fixture_proposals(now=None):
+    """Synthetic pending review shared by HTTP preview and browser checks.
+
+    Freeze ``now`` for a preview session: polling must not renew its deadline.
+    """
+    now = now or FIXTURE_TIME
+    incident = fixture_envelope('INC-FIXTURE-A',3,now=now)['payload']
+    proposal = {'proposal_version':'runbook-proposal/v1','proposal_id':'a'*64,
+        'incident_id':incident['incident_id'],'incident_revision':3,
+        'runbook_id':'payment-bad-deploy-rollback','catalog_sha256':'c'*64,
+        'executor_runbook':'payment-rollback-known-good/v1','decision':'oncall',
+        'score':.95,'margin':.4,'symptoms':{'severity':incident['severity']},
+        'created_at':timestamp(now-timedelta(seconds=30)),
+        'expires_at':timestamp(now+timedelta(minutes=14)),
+        'current_image':'localhost:5001/payment@sha256:'+'b'*64,
+        'rollback_image':'localhost:5001/payment@sha256:'+'a'*64}
+    return [{'proposal':proposal,'proposal_sha256':stable_id(proposal),'status':'pending',
+        'approval':None,'outcome':None,'current_revision':3,'incident':incident,
+        'review_images':{key:proposal[key] for key in ('current_image','rollback_image')}}]
 
 
 def exercise_fixtures(page, base, output, expect):
-    token = 'fixture-browser-token-not-a-real-secret'*2
+    token = FIXTURE_TOKEN
     outage = {'active':False,'actions':False,'quarantine':False,'explanation':False,'proposals':False,
               'read_scope':False,'expired':False,'identity_provider':False,'model_available':False}
-    records = [{'incident_id':'INC-FIXTURE-A','revision':3,'state':'escalated','severity':'high','detected_at':'2026-01-01T00:00:00Z',
-        'affected_services':['payment-service','checkout-service']},
-        {'incident_id':'INC-FIXTURE-B','revision':1,'state':'incident','severity':'medium','detected_at':'2026-01-01T01:00:00Z',
-        'affected_services':['inventory-service']}]
+    # The two-row subset deliberately exercises pagination and empty state filters.
+    records = fixture_records()[:2]
     def reply(route):
         assert route.request.method == 'GET', 'browser fixtures must not write to the API'
         url = urlsplit(route.request.url); query = parse_qs(url.query)
@@ -216,7 +282,7 @@ def exercise_fixtures(page, base, output, expect):
     expect(proposals.get_by_role('alert')).to_have_count(0)
     expect(page.get_by_text('Diagnostic qualification not exposed',exact=True)).to_be_visible()
     page.locator('.reference').click()
-    expect(page.locator('.evidence-body p')).to_have_text('<img src=x onerror="window.__evidence_xss=true">')
+    expect(page.locator('details[data-evidence-id="fixture-evidence-1"] .evidence-body p')).to_have_text('<img src=x onerror="window.__evidence_xss=true">')
     assert page.evaluate('window.__evidence_xss') is None
     assert page.locator('#detail-pane img').count() == 0
     assert '1970' not in page.locator('#detail-pane').inner_text()

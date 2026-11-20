@@ -20,25 +20,39 @@ export function mount(root, ctx) {
 
   function refresh() {
     if (destroyed) return;
+    const menuWasOpen = panel.querySelector('details')?.open;
+    const previousIncident = panel.dataset.incident;
     panel.replaceChildren();
     panel.hidden = true;
-    const payload = ctx.getDetail()?.payload;
+    panel.removeAttribute('title');
+    const detail = ctx.getDetail(), payload = detail?.payload;
     if (!payload) return;
+    panel.dataset.incident = `${detail.incident_id}:${detail.revision}`;
     const grafana = baseUrl(document, 'grafana');
     const jaeger = baseUrl(document, 'jaeger');
     if (!grafana && !jaeger) return;
     const links = document.createElement('div');
     links.className = 'incident-deeplinks-list';
-    function add(url, label, evidenceId = null) {
+    const traces = document.createElement('div');
+    traces.className = 'incident-deeplinks-options';
+    function icon(symbol) {
+      const item = document.createElement('span');
+      item.textContent = symbol;
+      item.setAttribute('aria-hidden', 'true');
+      return item;
+    }
+    function add(url, label, evidenceId = null, container = traces) {
       const anchor = document.createElement('a');
       anchor.className = 'incident-deeplinks-link';
       anchor.href = url.href;
-      anchor.textContent = label;
+      if (container === links) anchor.append(icon('▥'));
+      const text = document.createElement('span'); text.textContent = label; anchor.append(text);
       anchor.target = '_blank';
       anchor.rel = 'noopener noreferrer';
       anchor.setAttribute('aria-label', `${label} (opens in a new tab)`);
       if (evidenceId) anchor.dataset.evidenceId = evidenceId;
-      links.append(anchor);
+      container.append(anchor);
+      return anchor;
     }
 
     const detected = typeof payload.detected_at === 'string' ? Date.parse(payload.detected_at) : NaN;
@@ -50,7 +64,9 @@ export function mount(root, ctx) {
         const url = new URL('d/sentinelops-slo', grafana);
         url.searchParams.set('from', String(from));
         url.searchParams.set('to', String(to));
-        add(url, 'Open SLO dashboard');
+        const anchor = add(url, 'Grafana', null, links);
+        anchor.title = 'Open SLO dashboard';
+        anchor.setAttribute('aria-label', 'Grafana: Open SLO dashboard (opens in a new tab)');
       }
       if (jaeger) {
         const services = Array.isArray(payload.affected_services) ? payload.affected_services : [];
@@ -76,16 +92,26 @@ export function mount(root, ctx) {
         add(new URL(`trace/${trace}`, jaeger), `Open trace ${trace}`, item.id);
       }
     }
+    if (traces.childElementCount) {
+      const menu = document.createElement('details'); menu.className = 'incident-deeplinks-menu';
+      menu.open = Boolean(menuWasOpen && previousIncident === panel.dataset.incident);
+      const summary = document.createElement('summary');
+      summary.className = 'incident-deeplinks-link';
+      const label = document.createElement('span'); label.textContent = 'Jaeger';
+      summary.append(icon('⌕'), label, icon('⌄'));
+      summary.title = 'Find service traces or open recorded traces';
+      menu.append(summary, traces);
+      menu.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { menu.open = false; summary.focus(); event.stopPropagation(); }
+      });
+      traces.addEventListener('click', event => {
+        if (event.target.closest('a')) { menu.open = false; summary.focus(); }
+      });
+      links.append(menu);
+    }
     if (!links.childElementCount) return;
-    const heading = document.createElement('h3');
-    heading.className = 'incident-deeplinks-heading';
-    heading.textContent = 'Explore incident telemetry';
-    panel.append(heading);
     if (validWindow) {
-      const window = document.createElement('p');
-      window.className = 'incident-deeplinks-window';
-      window.textContent = `Incident window: ${new Date(from).toISOString()} to ${new Date(to).toISOString()}`;
-      panel.append(window);
+      panel.title = `Incident window: ${new Date(from).toISOString()} to ${new Date(to).toISOString()}`;
     }
     panel.append(links);
     panel.hidden = false;
