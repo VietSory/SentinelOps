@@ -66,6 +66,18 @@ def test_shell_loads_external_modules_and_persistent_slots():
                not any(name.startswith('on') for name in attrs) for tag,attrs in parser.tags)
 
 
+def test_proposals_render_static_expiry_without_countdown_assets():
+    app = (routes.ASSETS/'app.js').read_text()
+    watch = (routes.ASSETS/'proposalwatch.js').read_text()
+    assert all('`Expires ${expiryTime(' in source for source in (app, watch))
+    removed = ('proposal-countdown','proposalwatch-countdown','Review window estimate',
+               'Proposal TTL:','s remaining','left to approve','Urgent','Ending soon')
+    assert all(text not in app+watch for text in removed)
+    assert 'Decision recorded' in app and 'Decision recorded' in watch
+    assert '.proposal-countdown' not in (routes.ASSETS/'styles.css').read_text()
+    assert '.proposalwatch-countdown' not in (routes.ASSETS/'proposalwatch.css').read_text()
+
+
 STATUS_COLORS = ('good','warning','serious','critical')
 TEXT_BACKGROUNDS = (
     'page','surface','subtle','good-tint','warning-tint','serious-tint',

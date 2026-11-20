@@ -46,6 +46,14 @@ const date = value => {
   return Number.isNaN(parsed.getTime()) ? 'Unavailable' : parsed.toLocaleString('en-US',{timeZone:'UTC',
     year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' UTC';
 };
+const expiryTime = value => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 'Unavailable' : parsed.toLocaleTimeString('en-GB', {
+    hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false,
+  });
+};
+const proposalStatus = status => ['approved','consumed','engineer'].includes(status) ? 'Decision recorded' :
+  ({pending:'Pending',expired:'Expired',stale:'Stale',not_yet_valid:'Not yet valid'}[status] || status);
 const time = value => { const item = node('time',date(value)); if (value) item.dateTime = value; return item; };
 const relativeTime = value => {
   const item = time(value), timestamp = typeof value === 'string' && value ? Date.parse(value) : NaN;
@@ -468,15 +476,15 @@ function runbookProposals(state, drafts) {
       fact('Score',score(p.score)),fact('Margin',score(p.margin)),
       fact('Current image',currentImage || 'Image evidence unavailable'),
       fact('Rollback image',targetImage || 'Image evidence unavailable'),
-      fact('Approval deadline',date(p.expires_at)),fact('Status',row.status));
+      fact('Approval deadline',date(p.expires_at)),fact('Status',proposalStatus(row.status)));
     card.append(grid,node('h4','RCA top-3'));
     if (!currentImage || !targetImage) card.append(node('p','This proposal needs both image digests for approval. You can reject it and send it to an engineer.','callout uncertain'));
     const ranking = node('ol');
     for (const item of row.incident.root_cause_ranking.slice(0,3)) ranking.append(raw('li',`${item.service} · ${score(item.score)}`));
     if (!ranking.childNodes.length) ranking.append(node('li','No root-cause hypotheses recorded.'));
     card.append(ranking,raw('code',`SHA-256: ${row.proposal_sha256}`,'source'));
-    const countdown = node('p',null,'proposal-countdown');
-    countdown.dataset.expires = p.expires_at; countdown.dataset.status = row.status; card.append(countdown);
+    card.dataset.proposalExpires = p.expires_at;
+    card.append(node('p',`Expires ${expiryTime(p.expires_at)}`));
     if (row.approval) card.append(raw('p',`${row.approval.decision} · ${row.approval.approved_by} · ${date(row.approval.approved_at)} · ${row.approval.reason}`));
     if (row.status === 'engineer') card.append(node('p',row.approval?.decision === 'reject' ?
       'An engineer will review the rejected proposal. The controller will skip execution.' : 'The controller referred this proposal to an engineer. See the outcome for details.'));
@@ -500,12 +508,10 @@ function runbookProposals(state, drafts) {
   return panel;
 }
 
-function updateProposalClocks() {
-  for (const clock of document.querySelectorAll('[data-expires]')) {
-    const seconds = Math.max(0,Math.ceil((Date.parse(clock.dataset.expires)-Date.now())/1000));
-    clock.textContent = clock.dataset.status === 'pending' ? seconds ?
-      `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')} left to approve` : 'Approval window expired' : 'No longer awaiting approval';
-    for (const item of clock.closest('article').querySelectorAll('[data-decision]')) item.disabled = item.dataset.locked === 'true' || seconds === 0;
+function updateProposalAvailability() {
+  for (const card of document.querySelectorAll('.proposal-card[data-proposal-expires]')) {
+    const expired = Date.now() >= Date.parse(card.dataset.proposalExpires);
+    for (const item of card.querySelectorAll('[data-decision]')) item.disabled = item.dataset.locked === 'true' || expired;
   }
 }
 
@@ -570,7 +576,7 @@ function renderDetail(state) {
   }
   const content = node('div',null,'detail-content'); content.append(tab === 'evidence' ? evidence(detail) : tab === 'timeline' ? timeline(detail,state) : tab === 'explanation' ? explanation(state) : tab === 'actions' ? actionHistory(state,opened) : overview(detail));
   const ier = node('details',null,'ier-record'); ier.append(node('summary','Incident evidence record (JSON)'),raw('pre',JSON.stringify(payload,null,2)));
-  target.append(tabs,runbookProposals(state,drafts),content,ier); updateProposalClocks();
+  target.append(tabs,runbookProposals(state,drafts),content,ier); updateProposalAvailability();
   if (titleFocused) title.focus({preventScroll:true});
 }
 
@@ -626,7 +632,7 @@ const checkVisibleSession = () => { if (!document.hidden) {
   workspace.checkReadiness();
   if (!document.activeElement?.closest('.proposal-decision')) workspace.loadProposals();
 } };
-setInterval(updateProposalClocks,1000);
+setInterval(updateProposalAvailability,1000);
 setInterval(() => {
   for (const item of document.querySelectorAll('[data-relative-time]')) updateRelativeTime(item);
 },30000);

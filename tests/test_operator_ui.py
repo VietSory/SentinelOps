@@ -50,6 +50,11 @@ def test_ui_serves_same_origin_without_exposing_token_or_private_incidents():
         for filename in ('app.js','client.js','workspace.js','styles.css'):
             asset = client.get('/ui/assets/'+filename)
             assert asset.status_code == 200 and token not in asset.text
+        app = client.get('/ui/assets/app.js').text
+        watch = client.get('/ui/assets/proposalwatch.js').text
+        assert all('`Expires ${expiryTime(' in source for source in (app,watch))
+        assert all(text not in app+watch for text in
+                   ('proposal-countdown','Review window estimate','Proposal TTL:','s remaining'))
         for filename in ('index.html','api-token','routes.py','..%2F..%2Fapi_settings.py'):
             assert client.get('/ui/assets/'+filename).status_code == 404
         assert '/ui/' not in client.get('/openapi.json').json()['paths']

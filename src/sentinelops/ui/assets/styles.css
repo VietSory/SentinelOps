@@ -649,7 +649,6 @@ h1 { font-size: clamp(28px, 3vw, 38px); line-height: 1.15; font-weight: 720; let
 .proposal-decision { display: flex; flex-wrap: wrap; gap: 8px; }
 .proposal-decision label, .proposal-decision textarea { flex-basis: 100%; }
 .proposal-decision textarea { width: 100%; padding: 8px; background: var(--subtle); border: 1px solid var(--baseline); border-radius: 8px; }
-.proposal-countdown { font-variant-numeric: tabular-nums; font-weight: 650; }
 .ier-record { margin: 0 clamp(16px,2.6vw,28px) 20px; padding: 10px 0 0; border-top: 1px solid var(--line); color: var(--secondary); font-size: 13px; }
 .ier-record pre { overflow: auto; max-height: 28rem; }
 
