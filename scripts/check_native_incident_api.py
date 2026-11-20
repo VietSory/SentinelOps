@@ -25,6 +25,12 @@ from sentinelops.contracts import validate_payload
 from sentinelops.workers.incident_replay import bounded_bytes, json_object, require
 
 
+def assert_read_only_explanation(payload: dict) -> None:
+    """Accept the current v2 Vietnamese disclaimer, still fail if it is absent."""
+    assert payload["schema_version"] == "2.0"
+    assert "Phần giải thích này không cho phép hành động." in payload["summary"]
+
+
 async def check(runs: list[Path], output: Path) -> dict:
     require(__debug__, "native API acceptance requires assertions enabled")
     dsn = os.environ.get("CONTROL_DATABASE_URL", "")
@@ -118,7 +124,7 @@ async def check(runs: list[Path], output: Path) -> dict:
                     assert explanation["fallback"] and explanation["provider"] == "deterministic-facts/v1"
                     known = {item["id"] for item in payload["evidence"]}
                     assert all(set(claim["evidence_refs"]) <= known for claim in explanation["payload"]["claims"])
-                    assert "No action is authorized" in explanation["payload"]["summary"]
+                    assert_read_only_explanation(explanation["payload"])
                 assert (await client.get(url, headers={**auth, "if-none-match": '"4"'})).status_code == 304
                 first = await client.get(url + "/context", params={"limit": 1}, headers=auth)
                 assert first.status_code == 200 and first.json()["timeline"]["next_after_revision"] == 1
