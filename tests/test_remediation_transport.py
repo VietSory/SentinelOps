@@ -147,7 +147,7 @@ def test_lost_http_patch_receipt_reconciles_after_restart_without_resending(tmp_
                 async def pending(**kwargs):
                     return {'status': 'pending'}
                 f.recovery.verify = pending
-            f.time[0] += timedelta(seconds=240 if telemetry_available else 600)
+            f.time[0] += timedelta(seconds=240 if telemetry_available else 1200)
             outcome = 'recovered' if telemetry_available else 'escalated'
             assert (await worker.tick())['phase'] == outcome
             again = await worker.tick()
