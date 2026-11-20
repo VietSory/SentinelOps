@@ -25,12 +25,16 @@ exists in a serving route or command.
 The local policy `payment-rollback/local-v1` binds exact cluster, namespace and
 Deployment UIDs to `sentinelops-b-actions/payment-service`, container `payment`.
 It permits one replica/existing pod, zero surge, no HPA or paused Deployment,
-600-second verification/cooldown, 900-second evidence freshness and a matching
+a 1,200-second executor verification budget, 600-second verifier telemetry window
+and cooldown, 900-second evidence freshness and a matching
 observed deployment change within 600 seconds before source incident onset.
+The executor budget includes time to finish source reads after health-ledger
+commit lag; it does not enlarge the verifier's window after action effectiveness.
 The owner chose 900 seconds to give operators time to respond. The validator
-also accepts 180 seconds to read historical actions with their original policy
-and hash; stored actions are not rewritten. Deployment-change receipt uncertainty
-remains capped at 180 seconds, independently of evidence freshness.
+also accepts 180-second freshness and a 600-second executor budget to read
+historical actions with their original policy and hash; stored actions are not
+rewritten. Deployment-change receipt uncertainty remains capped at 180 seconds,
+independently of evidence freshness.
 Frozen RCA weights/score/coverage/margin remain unchanged. The adapter uses an
 explicit loopback HTTPS server, CA and private ServiceAccount token; it never
 reads ambient kubeconfig or AWS credentials. JSON Patch tests UID, unmodified
@@ -611,7 +615,9 @@ operator's behalf. Pause shared-host trials while lane A is acquiring data.
 
 For an authorized trial, use the existing harness ordering and guards: observed
 bad change, current H4/revision/freshness checks, durable intent, one rollback,
-then the unchanged three eligible post-action buckets/600-second verification.
+then the unchanged three eligible post-action buckets in the verifier's 600-second
+telemetry window; the executor has 1,200 seconds from dispatch to finish the read
+and commit its outcome.
 In the failed-verify case, retain escalation, quarantine and its complete audit;
 never redeploy the bad image to manufacture a recovery. Retain a control DB with
 pending audit under the existing cleanup guard. No AWS, holdout or model/threshold

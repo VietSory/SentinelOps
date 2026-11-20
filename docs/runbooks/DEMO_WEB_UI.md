@@ -213,7 +213,7 @@ Căn cứ nhãn/hành vi: `src/sentinelops/ui/assets/app.js:550`, `src/sentinelo
 **Điểm chặn đã biết:** nếu producer chưa xuất đủ image digest, UI có thể chỉ đọc/từ chối, approve trả `409 proposal_review_incomplete`. Phải xác minh proposal đủ digest; không điền từ browser (`scripts/aws_demo/README.ui.md:114`).
 
 4. Nhập **Lý do quyết định**, bấm **Duyệt** một lần. API chỉ ghi receipt; **chỉ khi policy đã bật và đủ guard**, tick controller sau mới claim approval một lần, kiểm guard và PATCH rollback known-good. Bản live hiện tắt policy như mục 2.
-5. Chỉ xác nhận thành công sau `recovered` + `telemetry_verified`, Payment ready ở known-good, dispatch tăng đúng 1 và 3 bucket Payment eligible/clear sau action; deadline verify 600 giây.
+5. Chỉ xác nhận thành công sau `recovered` + `telemetry_verified`, Payment ready ở known-good, dispatch tăng đúng 1 và 3 bucket Payment eligible/clear sau action; verifier chỉ dùng telemetry trong 600 giây từ `effective_at`, executor có 1200 giây từ dispatch để hoàn tất source read và ghi outcome.
 Căn cứ: `docs/design/AUTO_RUNBOOK_INTERFACE.md:131`, `docs/design/AUTO_RUNBOOK_INTERFACE.md:172`, `scripts/run_runbook_demo.py:236`, `docs/runbooks/CONTROLLED_REMEDIATION.md:215`.
 
 Fault RAM `POST /internal/faults` với `{"mode":"latency","delay_ms":950}` chỉ demo phát hiện, không thay deployment nên không đủ điều kiện rollback bad-deploy; Inventory chỉ có runbook thủ công.
