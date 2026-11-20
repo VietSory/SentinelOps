@@ -1,5 +1,6 @@
 """Offline orchestration checks; no cloud, kubectl or executor bypass."""
 import asyncio
+import sys
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import json
@@ -529,3 +530,67 @@ def test_fault_wait_uses_inflight_inventory_validation(tmp_path):
     asyncio.run(backend.deployment())
     asyncio.run(backend.deployment(inflight=True))
     assert calls == [{'before_dispatch': True}, {'before_dispatch': False}]
+
+
+def test_wait_for_retries_transient_kubernetes_unavailable_then_succeeds():
+    # A rolling Deployment makes observe() report KubernetesUnavailable between reads;
+    # the demo must keep waiting instead of aborting right after its own PATCH.
+    from sentinelops.remediation.domain import KubernetesUnavailable
+    from scripts.run_runbook_demo import wait_for
+    calls, t = [], [0.0]
+    async def read():
+        calls.append(1)
+        if len(calls) < 3:
+            raise KubernetesUnavailable('deployment-changed-during-inventory-retry-snapshot')
+        return {'status': 'CHANGE_OBSERVED'}
+    async def sleep(seconds):
+        t[0] += seconds
+    value = asyncio.run(wait_for(read, lambda v: v['status'] == 'CHANGE_OBSERVED', timeout=30, poll=2,
+                                 clock=lambda: t[0], sleep=sleep))
+    assert value == {'status': 'CHANGE_OBSERVED'} and len(calls) == 3
+
+
+def test_wait_for_reraises_kubernetes_unavailable_at_the_deadline():
+    from sentinelops.remediation.domain import KubernetesUnavailable
+    from scripts.run_runbook_demo import wait_for
+    t = [0.0]
+    async def read():
+        raise KubernetesUnavailable('kubernetes-transport-unavailable')
+    async def sleep(seconds):
+        t[0] += seconds
+    with pytest.raises(KubernetesUnavailable):
+        asyncio.run(wait_for(read, lambda v: True, timeout=6, poll=2, clock=lambda: t[0], sleep=sleep))
+    assert t[0] >= 6
+
+
+def test_cli_reports_the_guard_message_but_not_other_exception_text(monkeypatch, capsys):
+    import scripts.run_runbook_demo as demo
+    monkeypatch.setattr(sys, 'argv', ['run_runbook_demo'] + [a for pair in (
+        ('--regression-image', 'x'), ('--server', 'x'), ('--health-stream', 'x'), ('--ledger-ref', 'x'),
+        ('--approved-by', 'x'), ('--environment', 'dev'), ('--source-store', 'x'), ('--review-store', 'x'), ('--store', 'x'),
+        ('--deployment-change-store', 'x'), ('--target', 'x'), ('--token-file', 'x'), ('--ca-file', 'x'),
+        ('--observer-token-file', 'x'), ('--observer-ca-file', 'x'), ('--kill-switch', 'x')) for a in pair])
+    async def guard(args):
+        raise ValueError('action is missing matching regression evidence')
+    monkeypatch.setattr(demo, 'run', guard)
+    with pytest.raises(SystemExit) as exc:
+        demo.main()
+    assert str(exc.value) == 'runbook demo failed: ValueError: action is missing matching regression evidence'
+    async def other(args):
+        raise RuntimeError('postgresql://user:secret@host/db')
+    monkeypatch.setattr(demo, 'run', other)
+    with pytest.raises(SystemExit) as exc:
+        demo.main()
+    assert str(exc.value) == 'runbook demo failed: RuntimeError'
+
+
+def test_safe_reason_never_echoes_library_value_errors():
+    import scripts.run_runbook_demo as demo
+    from sentinelops.remediation.domain import Blocked
+    assert demo.safe_reason(ValueError('regression must be a distinct digest in the known-good image repository'))
+    assert demo.safe_reason(Blocked('deployment-change-baseline-mismatch')) == ': deployment-change-baseline-mismatch'
+    for leaky in (ValueError('postgresql://user:password@host/db'), Blocked('abc-def-123'),
+                  ValueError("image: 'https://user:password@host/x' does not match"),
+                  Blocked('postgresql://user:password@host/db'), TimeoutError('token=abc'),
+                  Blocked('invalid demo cooldown/deadline/poll bounds')):
+        assert demo.safe_reason(leaky) == ''

@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import asyncpg
 
-from sentinelops.remediation.domain import Policy, Target, image_digest
+from sentinelops.remediation.domain import Blocked, KubernetesUnavailable, Policy, Target, image_digest
 from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.kubernetes import LocalKubernetes
 from sentinelops.remediation.reader import ActionReader
@@ -45,9 +45,16 @@ RUNBOOK_ID = 'payment-bad-deploy-rollback'
 async def wait_for(read, accept, *, timeout, poll, clock, sleep):
     deadline = clock() + timeout
     while True:
-        value = await read()
-        if accept(value):
-            return value
+        try:
+            value = await read()
+        except KubernetesUnavailable:
+            # A rolling Deployment can change between the ReplicaSet and Pod reads, which the
+            # client reports as unavailable. Retry until the deadline; re-raise only then.
+            if deadline - clock() <= 0:
+                raise
+        else:
+            if accept(value):
+                return value
         remaining = deadline - clock()
         if remaining <= 0:
             raise TimeoutError('runbook demo evidence deadline exceeded')
@@ -492,7 +499,38 @@ def main():
     try:
         print(json.dumps(asyncio.run(run(args)), ensure_ascii=False, default=str))
     except Exception as exc:
-        raise SystemExit('runbook demo failed: ' + type(exc).__name__) from None
+        raise SystemExit('runbook demo failed: ' + type(exc).__name__ + safe_reason(exc)) from None
+
+
+# Fixed guard strings. Library ValueErrors (asyncpg configuration, schema validation) can
+# echo DSNs or rejected values, so only literals that appear verbatim in a raise of this
+# driver or of the sentinelops package are printed; anything else prints its class only.
+def _raise_literals(paths, names):
+    pattern = re.compile(r"raise (?:" + "|".join(names) + r")\('([^'\\]+)'\)")
+    found = set()
+    for path in paths:
+        try:
+            found.update(pattern.findall(path.read_text(encoding='utf-8')))
+        except OSError:
+            continue
+    return frozenset(found)
+
+
+import sentinelops as _package
+GUARD_MESSAGES = _raise_literals([Path(__file__)], ('ValueError', 'TimeoutError'))
+DOMAIN_CODES = _raise_literals(Path(_package.__file__).parent.rglob('*.py'), ('Blocked', 'KubernetesUnavailable'))
+TERMINAL_PHASES = ('blocked', 'escalated', 'recovered', 'verifying', 'dispatching', 'prepared')
+
+
+def safe_reason(exc):
+    message = str(exc)
+    driver = type(exc) in (ValueError, TimeoutError)
+    if ((driver and message in GUARD_MESSAGES)
+            or (isinstance(exc, (Blocked, KubernetesUnavailable)) and message in DOMAIN_CODES)
+            or (type(exc) is ValueError
+                and message in {'approved action did not recover: ' + phase for phase in TERMINAL_PHASES})):
+        return ': ' + message
+    return ''
 
 
 if __name__ == '__main__':
