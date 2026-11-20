@@ -11,6 +11,7 @@
 !scripts/run_health_worker.py
 !scripts/run_incident_worker.py
 !scripts/run_remediation_controller.py
+!scripts/run_pod_memory_demo.py
 !scripts/approve_runbook.py
 !configs/
 !configs/alibaba_relative_features.json

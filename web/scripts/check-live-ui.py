@@ -5,7 +5,7 @@ No production requests, credentials, fault injection or remediation are used.
 import argparse
 import base64
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import re
 import os
@@ -23,6 +23,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes
 from playwright.sync_api import sync_playwright, expect
 from scripts.check_operator_ui import fixture_records, fixture_envelope, fixture_proposals, fixture_actions, fixture_explanation
+from sentinelops.telemetry.core import stable_id, timestamp
 
 ORIGIN='https://live-ui.test'
 EXPLANATION_CASES = (
@@ -364,7 +365,8 @@ def scenario(browser, width, output_dir, read_only=False):
         fixture['missing']=False;fixture['stale']=True
         page.get_by_role('button',name='Reload proposals',exact=True).click()
         expect(card.get_by_text('Incident revision advanced. Reload the current incident.',exact=True)).to_be_visible()
-        assert approve.count()==0, 'Stale proposals must have no decision form'
+        expect(approve).to_be_disabled()
+        expect(card.get_by_role('button',name='Reject',exact=True)).to_be_disabled()
         fixture['stale']=False
         page.get_by_role('button',name='Reload proposals',exact=True).click()
         expect(card.get_by_text('pending',exact=True)).to_be_visible()
@@ -401,6 +403,536 @@ def scenario(browser, width, output_dir, read_only=False):
             'newest_incident_first':True,'incident_display_timezone':'Asia/Ho_Chi_Minh'}
 
 
+def paginated_approval_scenario(browser, output_dir):
+    """Verify multi-page ascending /v1/incidents draining, ranking badges, and pending approval."""
+    now = datetime.now(timezone.utc)
+    # Page 1: 25 older incidents in ascending created_at order (matching backend ORDER BY created_at ASC).
+    page1 = [
+        {
+            'incident_id': f'INC-OLD-{index:02d}',
+            'revision': 2,
+            'state': 'recovered' if index < 24 else 'escalated',
+            'severity': 'medium' if index < 24 else 'high',
+            'detected_at': timestamp(now - timedelta(hours=30 - index)),
+            'affected_services': ['payment-service', 'checkout-service'],
+        }
+        for index in range(1, 26)
+    ]
+    ranked_old_id = 'INC-OLD-25'
+    abstained_old_id = 'INC-OLD-24'
+    newest_id = 'INC-NEWEST-PENDING'
+    polled_newest_id = 'INC-POLLED-NEWEST'
+    page2_base = [
+        {
+            'incident_id': 'INC-OLD-26',
+            'revision': 2,
+            'state': 'recovered',
+            'severity': 'medium',
+            'detected_at': timestamp(now - timedelta(hours=2)),
+            'affected_services': ['checkout-service'],
+        },
+        {
+            'incident_id': newest_id,
+            'revision': 3,
+            'state': 'escalated',
+            'severity': 'critical',
+            'detected_at': timestamp(now - timedelta(minutes=2)),
+            'affected_services': ['payment-service', 'checkout-service'],
+        },
+    ]
+    polled_record = {
+        'incident_id': polled_newest_id,
+        'revision': 2,
+        'state': 'incident',
+        'severity': 'critical',
+        'detected_at': timestamp(now - timedelta(seconds=30)),
+        'affected_services': ['payment-service'],
+    }
+    all_records = {r['incident_id']: r for r in [*page1, *page2_base, polled_record]}
+
+    def make_envelope(incident_id, revision, after=0):
+        rec = all_records[incident_id]
+        env = fixture_envelope(incident_id, revision, after, now=now)
+        env['recorded_at'] = rec['detected_at']
+        env['payload'].update(
+            incident_id=incident_id,
+            detected_at=rec['detected_at'],
+            state=rec['state'],
+            severity=rec['severity'],
+            affected_services=copy.deepcopy(rec['affected_services']),
+        )
+        if incident_id == abstained_old_id:
+            env['payload']['root_cause_ranking'] = []
+        elif incident_id in (ranked_old_id, newest_id, polled_newest_id):
+            env['payload']['root_cause_ranking'] = [
+                {'service': 'payment-service', 'score': 0.648, 'evidence_refs': ['fixture-evidence-1']},
+            ]
+        else:
+            env['payload']['root_cause_ranking'] = [
+                {'service': 'checkout-service', 'score': 0.52, 'evidence_refs': ['fixture-evidence-1']},
+            ]
+        return env
+
+    newest_payload = make_envelope(newest_id, 3)['payload']
+    proposal_id = '245729b0' + '0' * 56
+    proposal_body = {
+        'proposal_version': 'runbook-proposal/v1',
+        'proposal_id': proposal_id,
+        'incident_id': newest_id,
+        'incident_revision': 3,
+        'runbook_id': 'payment-bad-deploy-rollback',
+        'catalog_sha256': 'c' * 64,
+        'executor_runbook': 'payment-rollback-known-good/v1',
+        'decision': 'oncall',
+        'score': 0.94,
+        'margin': 0.35,
+        'symptoms': {'severity': 'critical'},
+        'created_at': timestamp(now - timedelta(seconds=20)),
+        'expires_at': timestamp(now + timedelta(minutes=14)),
+        'current_image': 'localhost:5001/payment@sha256:' + 'b' * 64,
+        'rollback_image': 'localhost:5001/payment@sha256:' + 'a' * 64,
+    }
+    proposal = {
+        'proposal': proposal_body,
+        'proposal_sha256': stable_id(proposal_body),
+        'status': 'pending',
+        'approval': None,
+        'outcome': None,
+        'current_revision': 3,
+        'incident': newest_payload,
+        'review_images': {
+            'current_image': proposal_body['current_image'],
+            'rollback_image': proposal_body['rollback_image'],
+        },
+    }
+    fixture = {
+        'authorize': None,
+        'access': None,
+        'posts': [],
+        'cursors': [],
+        'poll_new_visible': False,
+    }
+    errors = []
+    context = browser.new_context(viewport={'width': 1440, 'height': 900}, service_workers='block', timezone_id='UTC')
+    page = context.new_page()
+    page.set_default_timeout(8000)
+    page.on('pageerror', lambda error: errors.append(str(error)))
+
+    def handler(route):
+        request = route.request
+        url = urlsplit(request.url)
+        query = parse_qs(url.query)
+        if request.url.startswith(CONFIG['domain'] + '/oauth2/authorize?'):
+            fixture['authorize'] = query
+            route.fulfill(content_type='text/html', body='<p>Test-only OAuth authorization</p>')
+            return
+        if request.url == CONFIG['domain'] + '/oauth2/token':
+            seconds = int(time.time())
+            nonce = fixture['authorize']['nonce'][0]
+            access = signed({
+                'iss': CONFIG['issuer'], 'client_id': CONFIG['client_id'], 'sub': 'fixture-owner',
+                'token_use': 'access', 'exp': seconds + 300,
+                'scope': CONFIG['read_scope'] + ' ' + CONFIG['approval_scope'],
+            })
+            fixture['access'] = access
+            identity = signed({
+                'iss': CONFIG['issuer'], 'aud': CONFIG['client_id'], 'sub': 'fixture-owner',
+                'token_use': 'id', 'iat': seconds, 'exp': seconds + 300, 'nonce': nonce,
+            })
+            route.fulfill(json={'token_type': 'Bearer', 'access_token': access, 'id_token': identity, 'expires_in': 300})
+            return
+        if request.url == CONFIG['jwks_url']:
+            route.fulfill(json={'keys': [JWK]})
+            return
+        path = url.path
+        if path in ('/ui/', '/ui/callback'):
+            route.fulfill(path=ROOT / 'web/dist/index.html', content_type='text/html')
+            return
+        if path.startswith('/ui/assets/'):
+            name = path.rsplit('/', 1)[1]
+            source = ROOT / 'web/dist/assets' / name
+            if name in ('client.js', 'workspace.js'):
+                source = ROOT / 'src/sentinelops/ui/assets' / name
+            if source.is_file():
+                route.fulfill(path=source, content_type='text/css' if name.endswith('.css') else 'text/javascript')
+            else:
+                route.fulfill(status=404)
+            return
+        if path == '/ui/auth-config':
+            route.fulfill(json=CONFIG)
+            return
+        if path == '/ready':
+            route.fulfill(status=200, json={'status': 'ready', 'dependencies': {'incident_store': True, 'model': True, 'authentication': True}})
+            return
+        if path == '/ready/incidents':
+            route.fulfill(json={'status': 'ready', 'component': 'incident-store'})
+            return
+        if path == '/v1/observability/overview':
+            at = time.time()
+            times = [at - 86400 + i * 300 for i in range(289)]
+            route.fulfill(json={
+                'schema_version': 'live-observability/v1', 'as_of': now.isoformat(), 'environment': 'dev',
+                'services': [{'service': name, 'p95_ms': 950 if name == 'payment-service' else 40, 'error_pct': 18 if name == 'payment-service' else 0, 'success_pct': 82 if name == 'payment-service' else 100, 'rps': 5} for name in ['checkout-service', 'payment-service', 'inventory-service']],
+                'series': {'p95_ms': {'payment-service': [[t, 950] for t in times]}, 'error_pct': {'payment-service': [[t, 18] for t in times]}},
+                'unavailable': [],
+            })
+            return
+        if path.startswith('/v1/observability/'):
+            route.fulfill(json={'schema_version': 'live-traces/v1', 'association': 'window', 'items': []})
+            return
+        if path == '/v1/incidents':
+            cursor = query.get('cursor', [None])[0]
+            fixture['cursors'].append(cursor)
+            if cursor is None:
+                route.fulfill(json={'schema_version': '1.0', 'items': page1, 'next_cursor': 'page-2-cursor'})
+            elif cursor == 'page-2-cursor':
+                items = list(page2_base) + ([polled_record] if fixture['poll_new_visible'] else [])
+                route.fulfill(json={'schema_version': '1.0', 'items': items, 'next_cursor': None})
+            else:
+                route.fulfill(status=422, json={'code': 'invalid_cursor'})
+            return
+        if path.endswith('/context'):
+            incident = path.split('/')[3]
+            revision = int(query.get('revision', [all_records[incident]['revision']])[0])
+            after = int(query.get('after_revision', [0])[0])
+            route.fulfill(json=make_envelope(incident, revision, after))
+            return
+        if path.endswith('/actions'):
+            incident = path.split('/')[3]
+            revision = int(query['revision'][0])
+            route.fulfill(json={'observation_version': 'action-list/v1', 'incident_id': incident, 'incident_revision': revision, 'items': [], 'next_cursor': None})
+            return
+        if path.endswith('/explanation'):
+            incident = path.split('/')[3]
+            revision = int(query['revision'][0])
+            env = make_envelope(incident, revision)
+            top = env['payload']['root_cause_ranking'][0] if env['payload']['root_cause_ranking'] else None
+            mode = 'abstained' if top is None else 'fallback'
+            exp = fixture_explanation(incident, revision, now=now, mode=mode)
+            if top is not None:
+                exp['payload']['root_cause'].update(service=top['service'], score=top['score'], evidence_refs=top['evidence_refs'])
+            route.fulfill(json=exp)
+            return
+        if path == '/v1/runbook-proposals':
+            item = copy.deepcopy(proposal)
+            want = query.get('incident_id', [None])[0]
+            items = [item] if not want or want == item['proposal']['incident_id'] else []
+            route.fulfill(json={'items': items, 'has_more': False})
+            return
+        if path == f'/v1/runbook-proposals/{proposal_id}/decision':
+            assert request.method == 'POST'
+            body = request.post_data_json
+            assert set(body) == {'decision', 'reason'} and body['reason'].strip()
+            assert request.headers['if-match'] == '"' + proposal['proposal_sha256'] + '"'
+            fixture['posts'].append({'path': path, 'body': body, 'if_match': request.headers['if-match']})
+            proposal.update(
+                status='approved' if body['decision'] == 'approve' else 'engineer',
+                approval={
+                    'decision': body['decision'], 'reason': body['reason'], 'approved_by': 'fixture-owner',
+                    'proposal_sha256': proposal['proposal_sha256'], 'approved_at': now.isoformat(),
+                },
+            )
+            route.fulfill(status=201, json=proposal)
+            return
+        route.fulfill(status=404, json={'code': 'not_found'})
+
+    context.route('**/*', handler)
+    page.goto(ORIGIN + '/ui/?lang=en', wait_until='networkidle')
+    page.get_by_role('button', name='Sign in with Cognito', exact=True).click()
+    page.wait_for_url(CONFIG['domain'] + '/oauth2/authorize?*')
+    page.goto(ORIGIN + '/ui/callback?code=fixture-code&state=' + fixture['authorize']['state'][0], wait_until='networkidle')
+
+    def nav(label):
+        page.get_by_role('navigation', name='Primary navigation', exact=True).get_by_role(
+            'button', name=re.compile('^' + re.escape(label) + r'(?:\s|$)')
+        ).click()
+
+    nav('Incidents')
+    rows = page.get_by_test_id('live-incident-row')
+    # Both page 1 (25 old) and page 2 (2 newer) must be loaded, with newest on top.
+    expect(rows).to_have_count(27)
+    expect(rows.first).to_contain_text(newest_id)
+    assert None in fixture['cursors'] and 'page-2-cursor' in fixture['cursors'], fixture['cursors']
+
+    # Unselected ranked incident displays ranking score badge and suspected root cause (not abstained).
+    ranked_row = rows.filter(has_text=ranked_old_id)
+    ranked_badge = ranked_row.get_by_test_id('rca-confidence')
+    expect(ranked_badge).to_have_attribute('data-source', 'ranking')
+    expect(ranked_badge).to_contain_text('65%')
+    expect(ranked_row).to_contain_text('payment-service')
+    expect(ranked_row).not_to_contain_text('AI abstained')
+
+    # Genuinely abstained incident displays abstained badge.
+    abstained_row = rows.filter(has_text=abstained_old_id)
+    abstained_badge = abstained_row.get_by_test_id('rca-confidence')
+    expect(abstained_badge).to_contain_text('AI abstained')
+
+    # Open the newest incident detail view to verify selection works cleanly.
+    rows.first.click()
+    expect(page.get_by_test_id('live-incident-id')).to_contain_text(newest_id)
+
+    # Remediation page approves the pending proposal and POSTs the expected decision.
+    nav('Remediation')
+    rem_card = page.get_by_test_id('live-proposal')
+    expect(rem_card).to_be_visible()
+    expect(rem_card).to_contain_text(newest_id)
+    reason_text = 'Approved payment-service rollback for newest paginated incident'
+    rem_card.get_by_role('textbox', name='Decision reason', exact=True).fill(reason_text)
+    approve_btn = rem_card.get_by_role('button', name='Approve', exact=True)
+    expect(approve_btn).to_be_enabled()
+    page.once('dialog', lambda dialog: dialog.accept())
+    approve_btn.click()
+    expect(rem_card.get_by_text('fixture-owner', exact=False)).to_be_visible()
+    assert len(fixture['posts']) == 1, fixture['posts']
+    assert fixture['posts'][0]['body'] == {'decision': 'approve', 'reason': reason_text}
+
+    # Refresh/poll drains page 2 again and surfaces newly created incidents at the top.
+    fixture['poll_new_visible'] = True
+    page.get_by_role('button', name='Refresh live data', exact=True).click()
+    nav('Incidents')
+    expect(rows).to_have_count(28)
+    expect(rows.first).to_contain_text(polled_newest_id)
+
+    assert not errors, errors
+    context.close()
+    return {
+        'scenario': 'paginated_two_page_approval',
+        'pages_fetched': len(fixture['cursors']),
+        'total_rows_after_poll': 28,
+        'newest_first': True,
+        'ranking_badge_verified': True,
+        'abstained_badge_verified': True,
+        'remediation_approve_enabled': True,
+        'decision_posts': len(fixture['posts']),
+    }
+
+
+def oom_proposal_scenario(browser, output_dir):
+    """Verify pod-memory-limit-demo/v1 OOM proposals use review_change instead of review_images."""
+    now = datetime.now(timezone.utc)
+    incident_id = 'INC-OOM-DEMO'
+    oom_image = 'localhost:5001/oom-demo@sha256:' + 'e' * 64
+    pod_uid = 'pod-uid-oom-fixture-1'
+    record = {
+        'incident_id': incident_id,
+        'revision': 2,
+        'state': 'escalated',
+        'severity': 'high',
+        'detected_at': timestamp(now - timedelta(minutes=1)),
+        'affected_services': ['sentinelops-oom-demo'],
+        'root_cause_ranking': [{'service': 'sentinelops-oom-demo', 'score': 0.9, 'evidence_refs': ['kubernetes-oom']}],
+    }
+    envelope = fixture_envelope(incident_id, 2, 0, now=now)
+    envelope['recorded_at'] = record['detected_at']
+    envelope['payload'].update(
+        incident_id=incident_id,
+        detected_at=record['detected_at'],
+        state='escalated',
+        severity='high',
+        affected_services=['sentinelops-oom-demo'],
+        root_cause_ranking=copy.deepcopy(record['root_cause_ranking']),
+        evidence=[{
+            'id': 'kubernetes-oom', 'type': 'log', 'service': 'sentinelops-oom-demo',
+            'observed_at': record['detected_at'], 'fact': 'Container oom-demo terminated with OOMKilled at 64Mi.',
+            'source_ref': 'k8s://sentinelops-b-actions/pod/' + pod_uid,
+        }],
+    )
+    proposal_id = 'f' * 64
+    proposal_body = {
+        'proposal_version': 'runbook-proposal/v1',
+        'proposal_id': proposal_id,
+        'incident_id': incident_id,
+        'incident_revision': 2,
+        'runbook_id': 'pod-memory-limit-demo/v1',
+        'executor_runbook': 'pod-memory-limit-demo/v1',
+        'cause': 'OOMKilled',
+        'pod_uid': pod_uid,
+        'resource_change': {'memory_before': '64Mi', 'memory_after': '256Mi'},
+        'target': {
+            'cluster_uid': 'fixture-cluster',
+            'namespace_uid': 'fixture-namespace',
+            'deployment_uid': 'fixture-deployment',
+            'namespace': 'sentinelops-b-actions',
+            'deployment': 'sentinelops-oom-demo',
+            'container': 'oom-demo',
+            'image': oom_image,
+        },
+        'current_image': oom_image,
+        'created_at': timestamp(now - timedelta(seconds=20)),
+        'expires_at': timestamp(now + timedelta(minutes=14)),
+    }
+    review_change = {
+        'kind': 'memory_limit',
+        'memory_before': '64Mi',
+        'memory_after': '256Mi',
+        'cause': 'OOMKilled',
+        'pod_uid': pod_uid,
+        'deployment': 'sentinelops-oom-demo',
+        'container': 'oom-demo',
+        'image': oom_image,
+    }
+    proposal = {
+        'proposal': proposal_body,
+        'proposal_sha256': stable_id(proposal_body),
+        'status': 'pending',
+        'approval': None,
+        'outcome': None,
+        'current_revision': 2,
+        'incident': envelope['payload'],
+        'review_images': None,
+        'review_change': review_change,
+        'manual_recovery_available': True,
+        'memory_action': None,
+    }
+    fixture = {'authorize': None, 'access': None, 'posts': [], 'missing_review': True}
+    errors = []
+    context = browser.new_context(viewport={'width': 1440, 'height': 900}, service_workers='block', timezone_id='UTC')
+    page = context.new_page()
+    page.set_default_timeout(8000)
+    page.on('pageerror', lambda error: errors.append(str(error)))
+
+    def handler(route):
+        request = route.request
+        url = urlsplit(request.url)
+        query = parse_qs(url.query)
+        if request.url.startswith(CONFIG['domain'] + '/oauth2/authorize?'):
+            fixture['authorize'] = query
+            route.fulfill(content_type='text/html', body='<p>Test-only OAuth authorization</p>')
+            return
+        if request.url == CONFIG['domain'] + '/oauth2/token':
+            seconds = int(time.time())
+            nonce = fixture['authorize']['nonce'][0]
+            access = signed({
+                'iss': CONFIG['issuer'], 'client_id': CONFIG['client_id'], 'sub': 'fixture-owner',
+                'token_use': 'access', 'exp': seconds + 300,
+                'scope': CONFIG['read_scope'] + ' ' + CONFIG['approval_scope'],
+            })
+            fixture['access'] = access
+            identity = signed({
+                'iss': CONFIG['issuer'], 'aud': CONFIG['client_id'], 'sub': 'fixture-owner',
+                'token_use': 'id', 'iat': seconds, 'exp': seconds + 300, 'nonce': nonce,
+            })
+            route.fulfill(json={'token_type': 'Bearer', 'access_token': access, 'id_token': identity, 'expires_in': 300})
+            return
+        if request.url == CONFIG['jwks_url']:
+            route.fulfill(json={'keys': [JWK]})
+            return
+        path = url.path
+        if path in ('/ui/', '/ui/callback'):
+            route.fulfill(path=ROOT / 'web/dist/index.html', content_type='text/html')
+            return
+        if path.startswith('/ui/assets/'):
+            name = path.rsplit('/', 1)[1]
+            source = ROOT / 'web/dist/assets' / name
+            if name in ('client.js', 'workspace.js'):
+                source = ROOT / 'src/sentinelops/ui/assets' / name
+            if source.is_file():
+                route.fulfill(path=source, content_type='text/css' if name.endswith('.css') else 'text/javascript')
+            else:
+                route.fulfill(status=404)
+            return
+        if path == '/ui/auth-config':
+            route.fulfill(json=CONFIG)
+            return
+        if path == '/ready':
+            route.fulfill(status=200, json={'status': 'ready', 'dependencies': {'incident_store': True, 'model': True, 'authentication': True}})
+            return
+        if path == '/ready/incidents':
+            route.fulfill(json={'status': 'ready', 'component': 'incident-store'})
+            return
+        if path == '/v1/observability/overview':
+            route.fulfill(json={'schema_version': 'live-observability/v1', 'as_of': now.isoformat(), 'environment': 'dev', 'services': [], 'series': {}, 'unavailable': []})
+            return
+        if path.startswith('/v1/observability/'):
+            route.fulfill(json={'schema_version': 'live-traces/v1', 'association': 'window', 'items': []})
+            return
+        if path == '/v1/incidents':
+            route.fulfill(json={'schema_version': '1.0', 'items': [record], 'next_cursor': None})
+            return
+        if path.endswith('/context'):
+            route.fulfill(json=envelope)
+            return
+        if path.endswith('/actions'):
+            route.fulfill(json={'observation_version': 'action-list/v1', 'incident_id': incident_id, 'incident_revision': 2, 'items': [], 'next_cursor': None})
+            return
+        if path.endswith('/explanation'):
+            exp = fixture_explanation(incident_id, 2, now=now, mode='fallback')
+            exp['payload']['root_cause'].update(service='sentinelops-oom-demo', score=0.9, evidence_refs=['kubernetes-oom'])
+            exp['payload']['claims'][0]['evidence_refs'] = ['kubernetes-oom']
+            route.fulfill(json=exp)
+            return
+        if path == '/v1/runbook-proposals':
+            item = copy.deepcopy(proposal)
+            if fixture['missing_review']:
+                item['review_change'] = None
+            want = query.get('incident_id', [None])[0]
+            items = [item] if not want or want == incident_id else []
+            route.fulfill(json={'items': items, 'has_more': False})
+            return
+        if path == f'/v1/runbook-proposals/{proposal_id}/decision':
+            assert request.method == 'POST'
+            body = request.post_data_json
+            assert set(body) == {'decision', 'reason', 'approval_mode'} and body['reason'].strip()
+            assert body['approval_mode'] == 'manual_memory_recovery'
+            assert request.headers['if-match'] == '"' + proposal['proposal_sha256'] + '"'
+            fixture['posts'].append(body)
+            proposal.update(
+                status='approved' if body['decision'] == 'approve' else 'engineer',
+                approval={
+                    'decision': body['decision'], 'reason': body['reason'], 'approved_by': 'fixture-owner',
+                    'approval_mode': 'manual_memory_recovery',
+                    'proposal_sha256': proposal['proposal_sha256'], 'approved_at': now.isoformat(),
+                },
+            )
+            route.fulfill(status=201, json=proposal)
+            return
+        route.fulfill(status=404, json={'code': 'not_found'})
+
+    context.route('**/*', handler)
+    page.goto(ORIGIN + '/ui/?lang=en', wait_until='networkidle')
+    page.get_by_role('button', name='Sign in with Cognito', exact=True).click()
+    page.wait_for_url(CONFIG['domain'] + '/oauth2/authorize?*')
+    page.goto(ORIGIN + '/ui/callback?code=fixture-code&state=' + fixture['authorize']['state'][0], wait_until='networkidle')
+
+    page.get_by_role('navigation', name='Primary navigation', exact=True).get_by_role(
+        'button', name=re.compile(r'^Remediation(?:\s|$)')
+    ).click()
+    card = page.get_by_test_id('live-proposal')
+    expect(card).to_be_visible()
+
+    # Incomplete memory review evidence must lock Approve while allowing Reject.
+    expect(card.get_by_text('Complete pinned memory change evidence is required before approval.', exact=True)).to_be_visible()
+    card.get_by_role('textbox', name='Decision reason', exact=True).fill('Incomplete memory evidence check')
+    approve_btn = card.get_by_role('button', name='Approve', exact=True)
+    reject_btn = card.get_by_role('button', name='Reject', exact=True)
+    expect(approve_btn).to_be_disabled()
+    expect(reject_btn).to_be_enabled()
+
+    # Valid review_change (with review_images=None) unlocks Approve and displays pinned memory facts.
+    fixture['missing_review'] = False
+    page.get_by_role('button', name='Reload proposals', exact=True).click()
+    expect(card).to_contain_text('OOMKilled')
+    expect(card).to_contain_text('64Mi → 256Mi')
+    expect(card).to_contain_text('sentinelops-oom-demo / oom-demo')
+    expect(card).to_contain_text(pod_uid)
+    reason_text = 'Verified OOMKilled pod UID and bounded 64Mi -> 256Mi change'
+    card.get_by_role('textbox', name='Decision reason', exact=True).fill(reason_text)
+    expect(approve_btn).to_be_enabled()
+    page.once('dialog', lambda dialog: dialog.accept())
+    approve_btn.click()
+    expect(card.get_by_text('fixture-owner', exact=False)).to_be_visible()
+    assert fixture['posts'] == [{'decision': 'approve', 'reason': reason_text, 'approval_mode': 'manual_memory_recovery'}], fixture['posts']
+
+    assert not errors, errors
+    context.close()
+    return {
+        'scenario': 'oom_memory_limit_proposal_approval',
+        'incomplete_evidence_blocked': True,
+        'memory_evidence_displayed': True,
+        'decision_posts': len(fixture['posts']),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', type=Path, default=ROOT / '.herdr/out', help='Directory for RCA panel screenshots')
@@ -414,6 +946,8 @@ def main():
         )
         try:
             scenarios = [scenario(browser, width, args.output_dir, width < 1024) for width in widths]
+            scenarios.append(paginated_approval_scenario(browser, args.output_dir))
+            scenarios.append(oom_proposal_scenario(browser, args.output_dir))
             print(json.dumps({'status':'PASS','scenarios':scenarios}))
         finally:
             browser.close()
