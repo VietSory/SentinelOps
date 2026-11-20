@@ -498,12 +498,24 @@ def main():
     args = parser.parse_args()
     try:
         print(json.dumps(asyncio.run(run(args)), ensure_ascii=False, default=str))
-    except (ValueError, TimeoutError, Blocked) as exc:
-        # These carry fixed guard strings from this driver and the domain, never DSNs or tokens;
-        # the operator needs them to know which guard stopped the round.
-        raise SystemExit('runbook demo failed: ' + type(exc).__name__ + ': ' + str(exc)[:300]) from None
     except Exception as exc:
-        raise SystemExit('runbook demo failed: ' + type(exc).__name__) from None
+        raise SystemExit('runbook demo failed: ' + type(exc).__name__ + safe_reason(exc)) from None
+
+
+# Fixed guard strings raised by this driver. Library ValueErrors (asyncpg configuration,
+# schema validation) can echo DSNs or rejected values, so only allowlisted text is printed.
+GUARD_MESSAGES = frozenset(re.findall(r"raise (?:ValueError|TimeoutError)\('([^'\\]+)'\)",
+                                      Path(__file__).read_text(encoding='utf-8')))
+TERMINAL_PHASES = ('blocked', 'escalated', 'recovered', 'verifying', 'dispatching', 'prepared')
+
+
+def safe_reason(exc):
+    message = str(exc)
+    if (message in GUARD_MESSAGES
+            or (isinstance(exc, Blocked) and re.fullmatch(r'[a-z0-9][a-z0-9-]{2,80}', message))
+            or message in {'approved action did not recover: ' + phase for phase in TERMINAL_PHASES}):
+        return ': ' + message
+    return ''
 
 
 if __name__ == '__main__':

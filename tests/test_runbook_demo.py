@@ -582,3 +582,14 @@ def test_cli_reports_the_guard_message_but_not_other_exception_text(monkeypatch,
     with pytest.raises(SystemExit) as exc:
         demo.main()
     assert str(exc.value) == 'runbook demo failed: RuntimeError'
+
+
+def test_safe_reason_never_echoes_library_value_errors():
+    import scripts.run_runbook_demo as demo
+    from sentinelops.remediation.domain import Blocked
+    assert demo.safe_reason(ValueError('regression must be a distinct digest in the known-good image repository'))
+    assert demo.safe_reason(Blocked('deployment-change-baseline-mismatch')) == ': deployment-change-baseline-mismatch'
+    for leaky in (ValueError('postgresql://user:password@host/db'),
+                  ValueError("image: 'https://user:password@host/x' does not match"),
+                  Blocked('postgresql://user:password@host/db'), TimeoutError('token=abc')):
+        assert demo.safe_reason(leaky) == ''
