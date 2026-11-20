@@ -1,12 +1,28 @@
 /** Same-origin client. Secrets live only in this instance, never in state/storage. */
+export const memoryRunbook = 'pod-memory-limit-demo/v1';
+export function memoryReview(row) {
+  const p = row?.proposal, review = row?.review_change, target = p?.target;
+  return p?.executor_runbook === memoryRunbook && review?.kind === 'memory_limit' &&
+    p.resource_change?.memory_before === '64Mi' && p.resource_change?.memory_after === '256Mi' &&
+    review.memory_before === '64Mi' && review.memory_after === '256Mi' &&
+    review.cause === 'OOMKilled' && p.cause === 'OOMKilled' && typeof p.pod_uid === 'string' &&
+    !!p.pod_uid && review.pod_uid === p.pod_uid && target?.deployment === 'sentinelops-oom-demo' &&
+    target.namespace === 'sentinelops-b-actions' && target.container === 'oom-demo' &&
+    review.deployment === target.deployment && review.container === target.container &&
+    typeof target.image === 'string' && /^.+@sha256:[a-f0-9]{64}$/.test(target.image) &&
+    review.image === target.image && p.current_image === target.image ? review : null;
+}
 export function validProposal(row) {
   const p = row?.proposal;
+  const memory = p?.executor_runbook === memoryRunbook;
   return p?.proposal_version === 'runbook-proposal/v1' && /^[a-f0-9]{64}$/.test(p.proposal_id) &&
     /^[a-f0-9]{64}$/.test(row.proposal_sha256) && typeof p.incident_id === 'string' &&
     Number.isSafeInteger(p.incident_revision) && p.incident_revision > 0 &&
     Number.isFinite(Date.parse(p.expires_at)) && Number.isFinite(Date.parse(p.created_at)) &&
-    typeof p.runbook_id === 'string' && Number.isFinite(p.score) && Number.isFinite(p.margin) &&
-    ['pending','approved','engineer','expired','consumed','stale','not_yet_valid'].includes(row.status);
+    typeof p.runbook_id === 'string' && (memory || Number.isFinite(p.score) && Number.isFinite(p.margin)) &&
+    (memory ? ['pending','approved','engineer','expired','consumed','stale','not_yet_valid',
+      'dispatching','verifying','recovered','blocked','escalated','rejected'] :
+      ['pending','approved','engineer','expired','consumed','stale','not_yet_valid']).includes(row.status);
 }
 export class ApiFailure extends Error {
   constructor(status, code, requestId = null) {
@@ -24,7 +40,7 @@ export class ApiFailure extends Error {
       proposal_changed: 'The proposal changed. Reload and review it before making a decision.',
       proposal_stale: 'The incident has a newer revision. Review its current proposal before approving.',
       proposal_not_pending: 'The proposal expired or already has a decision. Reload to see its status.',
-      proposal_review_incomplete: 'Approval requires both image digests. Send the proposal to an engineer or wait for a new one.',
+      proposal_review_incomplete: 'Approval requires complete pinned change evidence. Send the proposal to an engineer or wait for a new one.',
       operator_required: 'An operator access token is required to review and approve proposals.',
       approval_scope_required: 'This token has read-only access. Proposal decisions require the remediation.approve scope.',
       timeout: 'The API did not respond in time. Try again.',
@@ -181,7 +197,9 @@ export class IncidentClient {
           row.incident?.incident_id !== id || !['low','medium','high','critical'].includes(row.incident.severity) ||
           !Array.isArray(row.incident.root_cause_ranking) || row.incident.root_cause_ranking.some(
             item => typeof item?.service !== 'string' || !Number.isFinite(item.score)))) throw new ApiFailure(200,'invalid_response');
-    return body.items.filter(row => row.proposal.incident_revision === revision);
+    return body.items.filter(row => row.proposal.incident_revision === revision ||
+      row.proposal.executor_runbook === memoryRunbook && row.status !== 'pending' &&
+      row.proposal.incident_revision < revision && row.current_revision === revision);
   }
   async proposal(id, signal) {
     if (!/^[a-f0-9]{64}$/.test(id)) throw new ApiFailure(0,'invalid_response');
@@ -196,7 +214,10 @@ export class IncidentClient {
       {method:'POST',etag:`"${row.proposal_sha256}"`,body:{decision,reason:reason.trim()}});
     if (!validProposal(body) || body.proposal.proposal_id !== row.proposal.proposal_id ||
         body.proposal_sha256 !== row.proposal_sha256 || body.approval?.decision !== decision ||
-        !(decision === 'reject' ? ['engineer'] : ['approved','consumed','engineer']).includes(body.status) ||
+        !(decision === 'reject' ? (row.proposal.executor_runbook === memoryRunbook ? ['engineer','rejected'] : ['engineer']) :
+          (row.proposal.executor_runbook === memoryRunbook ?
+            ['approved','consumed','engineer','dispatching','verifying','recovered','blocked','escalated'] :
+            ['approved','consumed','engineer'])).includes(body.status) ||
         body.approval?.proposal_sha256 !== row.proposal_sha256 || typeof body.approval?.approved_by !== 'string') {
       throw new ApiFailure(200,'invalid_response');
     }

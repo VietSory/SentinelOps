@@ -76,7 +76,8 @@
                   "anomaly",
                   "risk",
                   "slo",
-                  "manual"
+                  "manual",
+                  "kubernetes"
                 ]
               },
               "signal_id": {

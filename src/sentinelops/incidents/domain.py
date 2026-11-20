@@ -78,7 +78,7 @@ class IncidentWrite:
             raise ValueError("incident requires explicit trigger provenance")
         identities = set()
         for trigger in triggers:
-            if not isinstance(trigger,dict) or set(trigger) != {"source","signal_id","emitted_at","source_ref"} or trigger["source"] not in ("anomaly","risk","slo","manual"):
+            if not isinstance(trigger,dict) or set(trigger) != {"source","signal_id","emitted_at","source_ref"} or trigger["source"] not in ("anomaly","risk","slo","manual","kubernetes"):
                 raise ValueError("invalid trigger provenance")
             if any(not isinstance(trigger[key],str) or not trigger[key].strip() for key in ("signal_id","source_ref")):
                 raise ValueError("missing trigger identity/reference")

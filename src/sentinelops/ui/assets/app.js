@@ -1,5 +1,5 @@
 import {Workspace, proposalRemaining} from './workspace.js';
-import {CognitoLogin, IncidentClient} from './client.js';
+import {CognitoLogin, IncidentClient, memoryReview, memoryRunbook} from './client.js';
 import {mount as mountDeeplinks} from './deeplinks.js';
 import {mount as mountFilters} from './filters.js';
 import {mount as mountSummary} from './summary.js';
@@ -463,17 +463,26 @@ function runbookProposals(state, drafts) {
     const grid = node('div',null,'facts-grid');
     const currentImage = row.review_images?.current_image;
     const targetImage = row.review_images?.rollback_image;
+    const memory = memoryReview(row);
+    const reviewComplete = p.executor_runbook === memoryRunbook ? Boolean(memory) : Boolean(currentImage && targetImage);
     grid.append(fact('Incident / revision',`${p.incident_id} / r${p.incident_revision}`),
-      fact('Severity',p.symptoms?.severity || row.incident.severity),fact('Proposed runbook',p.runbook_id),
-      fact('Score',score(p.score)),fact('Margin',score(p.margin)),
+      fact('Severity',p.symptoms?.severity || row.incident.severity),fact('Proposed runbook',p.runbook_id));
+    if (memory) grid.append(fact('Observed failure',memory.cause), fact('Failed pod UID',memory.pod_uid),
+      fact('Memory limit change',`${memory.memory_before} → ${memory.memory_after}`),
+      fact('Deployment',memory.deployment),fact('Image stays unchanged',memory.image),
+      fact('Recovery checks','Replacement ready, zero restarts, HTTP healthy for 30 seconds'));
+    else grid.append(fact('Score',score(p.score)),fact('Margin',score(p.margin)),
       fact('Current image',currentImage || 'Image evidence unavailable'),
-      fact('Rollback image',targetImage || 'Image evidence unavailable'),
+      fact('Rollback image',targetImage || 'Image evidence unavailable'));
+    grid.append(
       fact('Approval deadline',date(p.expires_at)),fact('Status',row.status));
-    card.append(grid,node('h4','RCA top-3'));
-    if (!currentImage || !targetImage) card.append(node('p','This proposal needs both image digests for approval. You can reject it and send it to an engineer.','callout uncertain'));
+    card.append(grid,node('h4',memory ? 'Kubernetes evidence' : 'RCA top-3'));
+    if (!reviewComplete) card.append(node('p','This proposal needs pinned change evidence for approval. You can reject it and send it to an engineer.','callout uncertain'));
     const ranking = node('ol');
     for (const item of row.incident.root_cause_ranking.slice(0,3)) ranking.append(raw('li',`${item.service} · ${score(item.score)}`));
-    if (!ranking.childNodes.length) ranking.append(node('li','No root-cause hypotheses recorded.'));
+    if (!ranking.childNodes.length) ranking.append(node('li',memory ?
+      'OOMKilled was observed by Kubernetes. This demo uses a fixed memory allocation; no ML confidence is claimed.' :
+      'No root-cause hypotheses recorded.'));
     card.append(ranking,raw('code',`SHA-256: ${row.proposal_sha256}`,'source'));
     const countdown = node('p',null,'proposal-countdown');
     countdown.dataset.expires = p.expires_at; countdown.dataset.status = row.status; card.append(countdown);
@@ -481,6 +490,7 @@ function runbookProposals(state, drafts) {
     if (row.status === 'engineer') card.append(node('p',row.approval?.decision === 'reject' ?
       'An engineer will review the rejected proposal. The controller will skip execution.' : 'The controller referred this proposal to an engineer. See the outcome for details.'));
     if (row.outcome) card.append(raw('p',`${row.outcome.phase}: ${row.outcome.reason}`));
+    if (row.memory_action) card.append(raw('p',`Recovery: ${row.memory_action.phase} · ${row.memory_action.reason}`));
     const form = node('form',null,'proposal-decision'), label = node('label','Decision reason'), reason = node('textarea');
     reason.id = `reason-${p.proposal_id}`; reason.required = true; reason.maxLength = 2000; reason.rows = 2;
     reason.value = drafts.get(reason.id) || '';
@@ -490,7 +500,7 @@ function runbookProposals(state, drafts) {
         if (form.reportValidity() && reason.value.trim()) workspace.decideProposal(p.proposal_id,decision,reason.value);
       },`button ${decision === 'approve' ? 'primary' : 'secondary'}`);
       item.dataset.decision = decision;
-      const locked = !state.canApprove || state.decisionLoading || row.status !== 'pending' || decision === 'approve' && (!currentImage || !targetImage);
+      const locked = !state.canApprove || state.decisionLoading || row.status !== 'pending' || decision === 'approve' && !reviewComplete;
       item.disabled = locked || !proposalRemaining(row);
       item.dataset.locked = String(locked); form.append(item);
     }

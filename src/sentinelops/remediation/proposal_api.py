@@ -13,6 +13,7 @@ from sentinelops.api_http import ApiError
 from sentinelops.contracts import utc_time
 from sentinelops.remediation import approvals
 from sentinelops.remediation.domain import Blocked, image_digest
+from sentinelops.remediation.pod_memory import RUNBOOK as MEMORY_RUNBOOK, review_change, read_state
 from sentinelops.telemetry.core import stable_id
 from sentinelops.telemetry.store import ArtifactStore
 
@@ -60,13 +61,17 @@ class ProposalStore:
         used = approvals.read_slot(self.store, 'used', identifier)
         outcome = approvals.read_slot(self.store, 'outcome', identifier)
         now = datetime.now(timezone.utc)
-        status = ('engineer' if outcome or receipt and receipt['decision'] == 'reject' else
+        memory = proposal.get('executor_runbook') == MEMORY_RUNBOOK
+        action = read_state(self.store, identifier) if memory else None
+        status = (action['phase'] if memory and action and action['phase'] != 'pending' else
+                  'engineer' if outcome or receipt and receipt['decision'] == 'reject' else
                   'consumed' if used else 'approved' if receipt else
                   'expired' if now >= utc_time(proposal['expires_at']) else
                   'not_yet_valid' if now < utc_time(proposal['created_at']) else 'pending')
         return {'proposal': proposal, 'proposal_sha256': stable_id(proposal),
                 'status': status, 'approval': receipt, 'outcome': outcome,
-                'review_images': review_images(proposal)}
+                'review_images': review_images(proposal),
+                **({'review_change': review_change(proposal), 'memory_action': action} if memory else {})}
 
     def decide(self, identifier, expected_hash, actor, decision, reason):
         proposal = self.get(identifier)
@@ -74,8 +79,14 @@ class ProposalStore:
             raise ApiError(404, 'proposal_not_found', 'Runbook proposal was not found')
         if stable_id(proposal) != expected_hash:
             raise ApiError(412, 'proposal_changed', 'Reload the proposal before deciding')
-        if decision == 'approve' and review_images(proposal) is None:
-            raise ApiError(409, 'proposal_review_incomplete', 'Proposal has no pinned current and rollback image digests')
+        memory = proposal.get('executor_runbook') == MEMORY_RUNBOOK
+        complete = review_change(proposal) is not None if memory else review_images(proposal) is not None
+        if decision == 'approve' and not complete:
+            raise ApiError(409, 'proposal_review_incomplete', 'Proposal has no complete pinned change evidence')
+        if memory:
+            action = read_state(self.store, identifier)
+            if action and action['phase'] != 'pending':
+                raise ApiError(409, 'proposal_not_pending', 'Proposal was already handled by the controller')
         try:
             reference = approvals.record_approval(self.store, proposal_id=identifier,
                 approved_by=actor, decision=decision, reason=reason, confirm_oncall_approval=True)

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {IncidentClient, ApiFailure} from '../../src/sentinelops/ui/assets/client.js';
+import {IncidentClient, ApiFailure, validProposal, memoryReview, memoryRunbook} from '../../src/sentinelops/ui/assets/client.js';
 import {Workspace, proposalRemaining} from '../../src/sentinelops/ui/assets/workspace.js';
 
 const row = () => ({proposal:{proposal_version:'runbook-proposal/v1',proposal_id:'a'.repeat(64),
@@ -13,6 +13,16 @@ const deferred = () => {let resolve; const promise = new Promise(r => {resolve=r
 const client = overrides => ({list:async () => ({items:[],next_cursor:null}),readiness:async () => ({}),
   context:async (id,revision) => ({incident_id:id,revision,payload:{evidence:[]}}),
   proposals:async () => [row()],...overrides});
+const memoryRow = () => {
+  const image = `registry.invalid/oom-demo@sha256:${'1'.repeat(64)}`;
+  const value = row(); delete value.proposal.score; delete value.proposal.margin;
+  Object.assign(value.proposal,{executor_runbook:memoryRunbook,cause:'OOMKilled',pod_uid:'failed-pod',
+    current_image:image,resource_change:{memory_before:'64Mi',memory_after:'256Mi'},
+    target:{namespace:'sentinelops-b-actions',deployment:'sentinelops-oom-demo',container:'oom-demo',image}});
+  value.review_change={kind:'memory_limit',cause:'OOMKilled',pod_uid:'failed-pod',memory_before:'64Mi',
+    memory_after:'256Mi',image,deployment:'sentinelops-oom-demo',container:'oom-demo'};
+  return value;
+};
 async function workspace(overrides={}) {
   const w = new Workspace(() => {},() => client(overrides));
   await w.connect('private-token'); await w.select('INC-a&b',2); await w.loadProposals(); return w;
@@ -24,6 +34,33 @@ test('proposal reads encode incident filter and pin selected revision',async () 
     {...row(),proposal:{...row().proposal,incident_revision:3}}],has_more:false});});
   assert.equal((await c.proposals('INC-a&b',2)).length,1);
   assert.equal(new URL(path,'http://local').searchParams.get('incident_id'),'INC-a&b');
+});
+
+test('OOM uses Kubernetes evidence without requiring ML scores and validates exact change',() => {
+  const value=memoryRow(); assert.equal(validProposal(value),true); assert.ok(memoryReview(value));
+  for (const mutate of [r => r.review_change.memory_after='512Mi',r => r.proposal.pod_uid='other',
+    r => r.proposal.target.namespace='payment',r => r.proposal.current_image='mutable:tag']) {
+    const broken=memoryRow(); mutate(broken);
+    broken.review_images={current_image:'old',rollback_image:'older'};
+    assert.equal(memoryReview(broken),null);
+  }
+});
+
+test('OOM recovery remains visible on latest revision without weakening Payment revision pinning',async () => {
+  const recovered={...memoryRow(),status:'recovered',current_revision:7};
+  const payment={...row(),current_revision:7};
+  const c=new IncidentClient('secret',async () => Response.json({items:[recovered,payment],has_more:false}));
+  assert.deepEqual((await c.proposals('INC-a&b',7)).map(r => r.status),['recovered']);
+  assert.equal((await c.proposals('INC-a&b',6)).length,0);
+});
+
+test('OOM decisions accept a raced controller result with the original immutable receipt',async () => {
+  for (const status of ['dispatching','verifying','recovered','blocked','escalated']) {
+    const value=memoryRow(), result={...receipt(value,'approve'),status};
+    const c=new IncidentClient('secret',async () => Response.json(result,{status:201}));
+    assert.equal((await c.decideProposal(value,'approve','reviewed')).status,status);
+  }
+  assert.equal(validProposal({...row(),status:'recovered'}),false);
 });
 
 test('approve/reject POST carries exact If-Match and only decision/reason, with bearer kept private',async () => {
