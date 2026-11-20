@@ -34,7 +34,7 @@
       "type": "text",
       "title": "OOM demo — phạm vi và cách đọc",
       "gridPos": {
-        "h": 5,
+        "h": 7,
         "w": 24,
         "x": 0,
         "y": 0
@@ -57,7 +57,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 5
+        "y": 7
       },
       "targets": [
         {
@@ -132,7 +132,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 5
+        "y": 7
       },
       "targets": [
         {
@@ -151,10 +151,10 @@
           "fields": "",
           "values": false
         },
-        "textMode": "value_and_name",
+        "textMode": "value",
         "colorMode": "value",
         "graphMode": "none",
-        "wideLayout": true
+        "wideLayout": false
       },
       "fieldConfig": {
         "defaults": {
@@ -169,12 +169,12 @@
               "type": "value",
               "options": {
                 "67108864": {
-                  "text": "64 MiB — giới hạn bơm lỗi",
+                  "text": "64 MiB",
                   "color": "red",
                   "index": 0
                 },
                 "268435456": {
-                  "text": "256 MiB — giới hạn khôi phục",
+                  "text": "256 MiB",
                   "color": "blue",
                   "index": 1
                 }
@@ -207,7 +207,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 5
+        "y": 7
       },
       "targets": [
         {
@@ -282,7 +282,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 5
+        "y": 7
       },
       "targets": [
         {
@@ -332,7 +332,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 11
       },
       "targets": [
         {
@@ -395,7 +395,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 11
       },
       "targets": [
         {
@@ -457,7 +457,8 @@
                 }
               }
             }
-          ]
+          ],
+          "max": 1
         },
         "overrides": []
       }
@@ -475,7 +476,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 16
+        "y": 18
       },
       "targets": [
         {
@@ -538,7 +539,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 16
+        "y": 18
       },
       "targets": [
         {
@@ -601,7 +602,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 25
       },
       "targets": [
         {
@@ -782,7 +783,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Không có quan sát hợp lệ"
+                "value": "UNKNOWN — trạng thái controller"
               }
             ]
           }
@@ -802,7 +803,7 @@
         "h": 4,
         "w": 12,
         "x": 0,
-        "y": 32
+        "y": 34
       },
       "targets": [
         {
@@ -965,7 +966,7 @@
             "properties": [
               {
                 "id": "displayName",
-                "value": "Không có quan sát hợp lệ"
+                "value": "UNKNOWN — trạng thái controller"
               }
             ]
           }
@@ -985,7 +986,7 @@
         "h": 4,
         "w": 12,
         "x": 12,
-        "y": 32
+        "y": 34
       },
       "targets": [
         {
