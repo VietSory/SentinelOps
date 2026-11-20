@@ -109,11 +109,18 @@ const REMEDIATION_META: Record<RemediationStatus, { vi: string; en: string; tone
   success: { vi: 'Success · Đã xác minh', en: 'Verified · Success', tone: 'success' },
   failed: { vi: 'Failed · Thất bại', en: 'Verification Failed', tone: 'critical' },
   rejected: { vi: 'Rejected · Đã từ chối', en: 'Rejected', tone: 'neutral' },
+  dispatching: { vi: 'Đang gửi thực thi', en: 'Dispatching', tone: 'orange' },
+  verifying: { vi: 'Đang xác minh hồi phục', en: 'Verifying recovery', tone: 'medium' },
+  recovered: { vi: 'Đã xác minh hồi phục', en: 'Verified recovery', tone: 'success' },
+  blocked: { vi: 'Bị chặn', en: 'Blocked', tone: 'critical' },
+  escalated: { vi: 'Chuyển kỹ sư', en: 'Escalated', tone: 'critical' },
 };
 
 export function RemediationBadge({ status }: { status: RemediationStatus }) {
   const { isEn } = useLocale();
-  const meta = REMEDIATION_META[status];
+  const meta = Object.prototype.hasOwnProperty.call(REMEDIATION_META, status)
+    ? REMEDIATION_META[status]
+    : { vi: 'Chưa rõ', en: 'Unknown', tone: 'neutral' as const };
   return (
     <Badge tone={meta.tone} dot>
       {isEn ? meta.en : meta.vi}

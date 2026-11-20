@@ -264,7 +264,7 @@ export function RemediationView({
                   <CardDescription>
                     Runbook: <code className="font-mono text-slate-700">{activeProposal.runbookId}</code> ·{' '}
                     {live?(isEn?'Runbook match: ':'Điểm khớp runbook: '):(isEn ? 'RCA Confidence: ' : 'Độ tin cậy RCA: ')}
-                    <strong className="text-orange-700">{activeProposal.confidence}%</strong>
+                    <strong className="text-orange-700">{Number.isFinite(activeProposal.confidence)?`${activeProposal.confidence}%`:(isEn?'Not provided':'Chưa có điểm')}</strong>
                   </CardDescription>
                 </div>
 

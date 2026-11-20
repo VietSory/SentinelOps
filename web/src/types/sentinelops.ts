@@ -17,6 +17,11 @@ export type RemediationStatus =
   | 'running'
   | 'success'
   | 'failed'
+  | 'dispatching'
+  | 'verifying'
+  | 'recovered'
+  | 'blocked'
+  | 'escalated'
   | 'rejected' | 'engineer' | 'stale' | 'expired' | 'consumed' | 'not_yet_valid';
 
 export type NavSection =
