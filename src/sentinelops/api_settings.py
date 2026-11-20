@@ -26,6 +26,8 @@ class Settings:
     llm_model: str | None = None
     llm_api_key: str | None = field(default=None,repr=False)
     llm_actor_authorization: str | None = field(default=None,repr=False)
+    incident_artifact_store: str | None = None
+    health_artifact_store: str | None = None
 
     def __post_init__(self):
         if self.oidc is not None and (self.api_token or self.operator_token):
@@ -91,6 +93,8 @@ class Settings:
                    llm_model=os.getenv("SENTINELOPS_LLM_MODEL"),
                    llm_api_key=os.getenv("SENTINELOPS_LLM_API_KEY"),
                    llm_actor_authorization=os.getenv("SENTINELOPS_LLM_ACTOR_AUTHORIZATION"),
+                   incident_artifact_store=os.getenv("SENTINELOPS_INCIDENT_ARTIFACT_STORE"),
+                   health_artifact_store=os.getenv("SENTINELOPS_HEALTH_ARTIFACT_STORE"),
                    oidc=oidc_from_env())
 
 

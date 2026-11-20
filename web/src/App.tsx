@@ -565,10 +565,10 @@ export default function App({live}: {live?:LiveVisualBinding}) {
             {live?.connected && <div className="mb-4 flex flex-wrap gap-3"><Button variant="secondary" size="sm" onClick={live.onRefresh}>{isEn?'Refresh live data':'Làm mới dữ liệu'}</Button><a className="text-sm text-orange-700 underline self-center" href="/ui/demo/">{isEn?'Original simulation':'Bản mô phỏng gốc'}</a></div>}
             {!live?.connected && live ? live.gate : <>
             {incidentUnavailable ? (
-              <div className="rounded-xl border bg-white p-8 text-slate-500" role="status">
+              <div className="min-w-0 rounded-xl border bg-white p-8 text-slate-500 break-words [overflow-wrap:anywhere]" role="status">
                 {isEn ? `Incident ${selectedIncidentId} is missing from the loaded feed.` : `Sự cố ${selectedIncidentId} chưa có trong danh sách đã tải.`}
               </div>
-            ) : live && !incidents.length && section!=='dashboard' ? <div className="rounded-xl border bg-white p-8 text-slate-500">{isEn?'No incidents in the loaded feed.':'Chưa có incident trong danh sách đã tải.'}</div> :
+            ) : live && !incidents.length && section!=='dashboard' ? <div className="min-w-0 rounded-xl border bg-white p-8 text-slate-500 break-words">{isEn?'No incidents in the loaded feed.':'Chưa có incident trong danh sách đã tải.'}</div> :
             <AnimatePresence mode="wait">
               <motion.div
                 key={section === 'incident-detail' ? `detail-${currentIncident?.id || ''}` : section}
@@ -576,6 +576,7 @@ export default function App({live}: {live?:LiveVisualBinding}) {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -4 }}
                 transition={{ duration: 0.16, ease: 'easeOut' }}
+                className="min-w-0"
               >
                 {section === 'dashboard' && (
                   <DashboardView
@@ -635,7 +636,7 @@ export default function App({live}: {live?:LiveVisualBinding}) {
                     onSelectionChange={live?.onSelect}
                   />
                 )}
-                {section==='remediation' && live && <div className="mt-6 space-y-6">{live.reviewPanel}{live.journal}</div>}
+                {section==='remediation' && live && <div className="mt-6 min-w-0 space-y-6">{live.reviewPanel}{live.journal}</div>}
 
                 {section === 'reports' && (
                   <ReportsView

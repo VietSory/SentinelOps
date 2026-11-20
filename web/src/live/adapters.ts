@@ -1,4 +1,4 @@
-import {formatVietnamClock, formatVietnamStamp} from '@/lib/utils';
+import {formatNumber, formatVietnamClock, formatVietnamStamp} from '@/lib/utils';
 import type {AiExplanation, Incident, RemediationProposal, ServiceHealthOverview, ServiceName, TraceRecord, TraceSpan} from '@/types/sentinelops';
 type Row=Record<string,any>;
 export const number=(v:any):number=>typeof v==='number'&&Number.isFinite(v)?v:Number.NaN;
@@ -74,6 +74,17 @@ export function dataset(rows:Row[],contexts:Record<string,Row>,overview:Row|null
   });
   const remediations:RemediationProposal[]=proposals.map(row=>{
     const p=row.proposal;const action=actions.find(a=>a.incident_id===p.incident_id&&a.incident_revision===p.incident_revision);
+    const verification=action?.verification;
+    const locale=isEn?'en':'vi';
+    const verified=action?.phase==='recovered' && verification?.status==='telemetry_verified';
+    const reading=(value:unknown,unit:string)=>Number.isFinite(number(value))
+      ? `${formatNumber(number(value),2,locale)}${unit}` : '—';
+    const checks=verified&&Number.isFinite(verification.p95_latency_ms)&&Number.isFinite(verification.error_rate)?[
+      {metric:isEn?'Payment p95 latency':'Độ trễ p95 Payment',before:reading(p.symptoms?.root_p95_ms,' ms'),
+        after:reading(verification.p95_latency_ms,' ms'),target:isEn?'Verified SLO':'SLO đã xác minh',passed:true},
+      {metric:isEn?'Payment error rate':'Tỷ lệ lỗi Payment',before:reading(number(p.symptoms?.root_error_rate)*100,'%'),
+        after:reading(verification.error_rate*100,'%'),target:isEn?'Verified SLO':'SLO đã xác minh',passed:true},
+    ]:[];
     let status=row.status;
     if(action?.phase==='recovered')status='success';else if(action?.phase==='blocked'||action?.phase==='escalated')status='engineer';
     else if(action?.phase==='dispatching'||action?.phase==='verifying')status='running';
@@ -84,7 +95,9 @@ export function dataset(rows:Row[],contexts:Record<string,Row>,overview:Row|null
       currentImage:row.review_images?.current_image,rollbackImage:row.review_images?.rollback_image,
       approvedBy:row.approval?.approved_by,approvedAt:row.approval?.approved_at,decisionReason:row.approval?.reason,
       steps:(action?.history||[]).map((event:Row,i:number)=>({order:i+1,title:event.phase,command:event.reason||'',status:'done'})),
-      verificationChecks:[],verificationSummaryVi:row.outcome?.reason||action?.reason};
+      verificationChecks:checks,verificationSummaryVi:verified
+        ? (isEn?'Verified across 3 post-rollback buckets. After shows the highest value in those buckets.':'Đã xác minh 3 bucket sau rollback. Cột Sau xử lý hiển thị giá trị cao nhất trong 3 bucket.')
+        : row.outcome?.reason||action?.reason};
   });
   const incidents=rows.map((row):Incident=>{
     const storedContext=contexts[row.incident_id];
@@ -112,18 +125,18 @@ export function dataset(rows:Row[],contexts:Record<string,Row>,overview:Row|null
       services:payload.affected_services.map((s:string)=>names[s]).filter(Boolean),primaryService:primary,
       environment:overview?.environment||'Unknown',startedAt,detectedAt,
       suspectedRootCause:(!rcaAbstained&&rawPrimary)||(isEn?'Not yet concluded':'Chưa có kết luận'),rcaConfidence:number(ranking[0]?.score)*100,
-      rcaCoverage:number(payload.rca_coverage)*100,rcaAbstained,
+      rcaCoverage:number(context?.rca_coverage?.[rawPrimary]??payload.rca_coverage)*100,rcaAbstained,
       rcaAbstainReasonVi:context?.reason|| (isEn?'Insufficient recorded RCA evidence':'Chưa đủ bằng chứng RCA được ghi nhận'),
       ...explanations[explanationKey(row.incident_id,revision)],
       hasRemediation:Boolean(linked),remediationId:linked?.id,
       metricsSnapshot:{p95LatencyMs:peak,baselineLatencyMs:baseline,errorRatePct:errorRate,sloHealthPct:100-errorRate,affectedRequestsPct:NaN},
       metricSeries:points.map(([t,v])=>({time:when(t),p95Ms:number(v),baselineMs:baseline,errorRate:number(errors.get(t))})),
-      evidence:(payload.evidence||[]).map((e:Row)=>({id:e.id,category:({metric:'metrics',log:'logs',trace:'traces',deployment:'deployments',model:'signals',timeline:'signals'} as Record<string,string>)[e.type]||'signals',
+      evidence:(payload.evidence||[]).map((e:Row)=>({id:e.id,category:({metric:'metrics',log:'logs',trace:'traces',change:'deployments',deployment:'deployments',model:'signals',timeline:'signals'} as Record<string,string>)[e.type]||'signals',
         service:names[e.service]||e.service,title:e.type+' · '+e.service,annotationVi:e.fact,detail:e.fact,
         severity:'normal',observedAt:e.observed_at,sourceRef:e.source_ref,highlight:ranking[0]?.evidence_refs?.includes(e.id)})),
       traces:traces[row.incident_id]||[],hypotheses:ranking.map((r:Row,i:number)=>({id:r.service,rank:i+1,service:r.service,title:r.service,
         descriptionVi:(isEn?'Recorded RCA hypothesis: ':'Giả thuyết RCA đã ghi nhận: ')+r.service,
-        confidence:number(r.score)*100,score:r.score,coverage:number(r.coverage)*100,isPrimary:i===0,
+        confidence:number(r.score)*100,score:r.score,coverage:number(context?.rca_coverage?.[r.service]??r.coverage)*100,isPrimary:i===0,
         supportingEvidenceIds:r.evidence_refs||[],signalsUsed:[]})),
       reasoningTimeline:history.map((e:Row,i:number)=>({step:i+1,time:e.recorded_at,stage:e.lifecycle_stage,summaryVi:e.reason,status:e.lifecycle_stage==='ESCALATED'?'warning':'verified'})),
       updateHistory:history.map(e=>({id:e.event_id,revision:e.revision,stage:e.lifecycle_stage,time:e.recorded_at,actor:e.actor,summaryVi:e.reason})),

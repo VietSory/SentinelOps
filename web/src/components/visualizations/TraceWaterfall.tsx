@@ -110,13 +110,13 @@ export function TraceWaterfall({ traces, compact = false,selectedTraceId,onSelec
               ? activeTrace.source==='live' ? (isEn?'Recorded error / slow spans':'Span lỗi / chậm đã ghi nhận') : isEn ? 'Anomalous Trace · Bottleneck Detected' : 'Trace bất thường · Có Bottleneck'
               : activeTrace.source==='live' ? (isEn?'Recorded trace':'Trace đã ghi nhận') : isEn ? 'Baseline Trace (Healthy)' : 'Trace mức nền (Healthy)'}
           </Badge>
-          <span className="font-mono text-xs text-slate-500">ID: {activeTrace.id}</span>
+          <span className="font-mono text-xs text-slate-500 break-all">ID: {activeTrace.id}</span>
           <span className="ml-auto text-xs font-semibold tabular-nums text-slate-700">
             {isEn ? 'Total duration: ' : 'Tổng thời gian: '}
             {formatNumber(activeTrace.totalDurationMs, 0, locale)} ms
           </span>
         </div>
-        <p className="text-sm text-slate-700">{activeTrace.summaryVi}</p>
+        <p className="text-sm text-slate-700 break-words [overflow-wrap:anywhere]">{activeTrace.summaryVi}</p>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -231,7 +231,7 @@ export function TraceWaterfall({ traces, compact = false,selectedTraceId,onSelec
                         {span.noteVi && (
                           <p
                             className={cn(
-                              'text-xs font-medium px-3 py-2 rounded-lg border',
+                              'text-xs font-medium px-3 py-2 rounded-lg border break-words [overflow-wrap:anywhere]',
                               isError
                                 ? 'bg-red-50 border-red-200 text-red-900'
                                 : 'bg-orange-50 border-orange-200 text-orange-900',
@@ -244,7 +244,7 @@ export function TraceWaterfall({ traces, compact = false,selectedTraceId,onSelec
                           {Object.entries(span.tags).map(([k, v]) => (
                             <span
                               key={k}
-                              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] text-slate-700"
+                              className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[11px] text-slate-700 break-all"
                             >
                               <span className="text-slate-400">{k}=</span>
                               <span className="font-semibold">{v}</span>

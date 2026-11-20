@@ -73,32 +73,70 @@ def explanation_fixture(incident, revision, now, mode):
 
 
 def assert_no_horizontal_overflow(page):
-    layout = page.evaluate('''() => ({
-        width: window.innerWidth,
-        scrollWidth: document.documentElement.scrollWidth,
-        overflowing: [...document.querySelectorAll('body *')]
+    layout = page.evaluate('''() => {
+        const viewportOverflow = [...document.querySelectorAll('body *')]
             .filter(element => element.getBoundingClientRect().right > window.innerWidth + 1)
-            .slice(-15).map(element => ({ tag: element.tagName, text: element.textContent.slice(0, 80) }))
-    })''')
+            .slice(-15)
+            .map(element => ({ tag: element.tagName, text: (element.textContent || '').slice(0, 80) }));
+        const sectionOverflow = [...document.querySelectorAll('section, main div.rounded-xl, main div.rounded-2xl')]
+            .filter(box => {
+                const style = getComputedStyle(box);
+                if (style.overflowX === 'auto' || style.overflowX === 'scroll') return false;
+                if (box.closest('.recharts-wrapper, .react-flow, .table-wrapper')) return false;
+                return box.clientWidth > 0 && box.scrollWidth > box.clientWidth + 2;
+            })
+            .slice(0, 15)
+            .map(box => ({
+                tag: box.tagName,
+                className: (box.className || '').toString().slice(0, 80),
+                scrollWidth: box.scrollWidth,
+                clientWidth: box.clientWidth,
+                text: (box.textContent || '').slice(0, 80),
+            }));
+        return {
+            width: window.innerWidth,
+            scrollWidth: document.documentElement.scrollWidth,
+            overflowing: viewportOverflow,
+            sectionOverflow,
+        };
+    }''')
     assert layout['scrollWidth'] <= layout['width'], layout
+    assert not layout['sectionOverflow'], layout
 
 
 def check_incident_list(page, records, width):
+    page_size = 5
     rows = page.get_by_test_id('live-incident-row')
-    expect(rows).to_have_count(len(records))
+    ordered = sorted(records, key=lambda record: datetime.fromisoformat(record['detected_at']), reverse=True)
+    total_pages = max(1, (len(ordered) + page_size - 1) // page_size)
     assert page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone') == 'UTC'
-    newest = max(records, key=lambda record: datetime.fromisoformat(record['detected_at']))
+    newest = ordered[0]
     assert records[0]['incident_id'] != newest['incident_id']
+    expect(page.get_by_test_id('pagination')).to_be_visible()
+    expect(rows).to_have_count(min(page_size, len(ordered)))
     expect(rows.first).to_contain_text(newest['incident_id'])
-    for record in records:
-        row = rows.filter(has_text=record['incident_id'])
-        detected = datetime.fromisoformat(record['detected_at']).astimezone(ZoneInfo('Asia/Ho_Chi_Minh'))
-        expected_time = detected.strftime('%m/%d, %H:%M (GMT+7)')
-        expect(row.get_by_text(expected_time, exact=True)).to_be_visible()
-    for incident, _, _ in EXPLANATION_CASES:
-        expect(rows.filter(has_text=incident).get_by_test_id('rca-confidence')).to_be_visible()
-    if width == 390:
+
+    seen_incidents = set()
+    for page_num in range(1, total_pages + 1):
+        if page_num > 1:
+            page.get_by_test_id(f'pagination-page-{page_num}').click()
+        expected_slice = ordered[(page_num - 1) * page_size : page_num * page_size]
+        expect(rows).to_have_count(len(expected_slice))
+        for record in expected_slice:
+            row = rows.filter(has_text=record['incident_id'])
+            expect(row).to_be_visible()
+            detected = datetime.fromisoformat(record['detected_at']).astimezone(ZoneInfo('Asia/Ho_Chi_Minh'))
+            expected_time = detected.strftime('%m/%d, %H:%M (GMT+7)')
+            expect(row.get_by_text(expected_time, exact=True)).to_be_visible()
+            seen_incidents.add(record['incident_id'])
+        for incident, _, _ in EXPLANATION_CASES:
+            if any(r['incident_id'] == incident for r in expected_slice):
+                expect(rows.filter(has_text=incident).get_by_test_id('rca-confidence')).to_be_visible()
         assert_no_horizontal_overflow(page)
+    assert seen_incidents == {r['incident_id'] for r in records}
+    if total_pages > 1:
+        page.get_by_test_id('pagination-page-1').click()
+        expect(rows.first).to_contain_text(newest['incident_id'])
 
 
 def set_locale(page, locale):
@@ -194,7 +232,7 @@ def scenario(browser, width, output_dir, read_only=False):
     incoming = EXPLANATION_CASES[-1][0]
     incoming_visible = False
     proposal=fixture_proposals(now)[0]
-    fixture={'authorize':None,'access':None,'posts':[],'stale':False,'missing':False,'outage':False,'lose_reply':False}
+    fixture={'authorize':None,'access':None,'posts':[],'stale':False,'missing':False,'outage':False,'lose_reply':False,'verified':False}
     errors=[]
     context=browser.new_context(viewport={'width':width,'height':900},service_workers='block',timezone_id='UTC')
     page=context.new_page()
@@ -255,9 +293,25 @@ def scenario(browser, width, output_dir, read_only=False):
             route.fulfill(json={'schema_version':'1.0','items':rows,'next_cursor':None});return
         if path.endswith('/context'):
             incident=path.split('/')[3];revision=int(query.get('revision',[revisions[incident]])[0]);after=int(query.get('after_revision',[0])[0])
-            route.fulfill(json=fixture_envelope(incident,revision,after,now=now));return
+            envelope=fixture_envelope(incident,revision,after,now=now)
+            if envelope['payload']['root_cause_ranking']:
+                service=envelope['payload']['root_cause_ranking'][0]['service']
+                envelope['rca_coverage']={service:0.8}
+            route.fulfill(json=envelope);return
         if path.endswith('/actions'):
             incident=path.split('/')[3];revision=int(query['revision'][0])
+            if fixture['verified']:
+                proposal_body=proposal['proposal']
+                action={'observation_version':'action-observation/v1','incident_id':incident,
+                    'incident_revision':proposal_body['incident_revision'],'action_revision':1,'action_id':'c'*64,
+                    'runbook':'payment-rollback-known-good/v1','phase':'recovered',
+                    'history':[{'revision':1,'phase':'recovered','recorded_at':now.isoformat()}],
+                    'verification':{'status':'telemetry_verified','verified_at':now.isoformat(),
+                        'bucket_ends':[(now-timedelta(minutes=m)).isoformat() for m in (3,2,1)],
+                        'p95_latency_ms':9.28,'error_rate':0}}
+                route.fulfill(json={'observation_version':'action-list/v1','incident_id':incident,
+                    'incident_revision':revision,'items':[action] if incident==proposal_body['incident_id'] else [],
+                    'next_cursor':None});return
             route.fulfill(status=503,json={'code':'action_store_unavailable'});return
         if path.endswith('/explanation'):
             incident = path.split('/')[3]
@@ -315,7 +369,7 @@ def scenario(browser, width, output_dir, read_only=False):
     expect(page.locator('.recharts-area').first).to_be_visible()
     nav('Incidents')
     rows = page.get_by_test_id('live-incident-row')
-    expect(rows).to_have_count(len(records) - 1)
+    expect(rows).to_have_count(min(5, len(records) - 1))
     expect(rows.filter(has_text=incoming)).to_have_count(0)
     incoming_visible = True
     page.get_by_role('button', name='Refresh live data', exact=True).click()
@@ -341,9 +395,22 @@ def scenario(browser, width, output_dir, read_only=False):
     assert fixture['access'] not in page.evaluate('JSON.stringify({...localStorage,...sessionStorage})')
     assert not page.locator('text=INC-2026-1048').count()
     for incident, mode, source in EXPLANATION_CASES:
-        page.get_by_test_id('live-incident-row').filter(has_text=incident).click()
+        found = False
+        expect(page.get_by_test_id('pagination')).to_be_visible()
+        for page_num in range(1, max(1, (len(records) + 4) // 5) + 1):
+            page_btn = page.get_by_test_id(f'pagination-page-{page_num}')
+            if page_num > 1:
+                page_btn.click()
+            expect(page_btn).to_have_attribute('aria-current', 'page')
+            match = page.get_by_test_id('live-incident-row').filter(has_text=incident)
+            if match.count() > 0:
+                match.first.click()
+                found = True
+                break
+        assert found, f'Could not find {incident} across paginated incident pages'
         expect(page.get_by_test_id('live-incident-id')).to_contain_text(incident)
         check_explanation_panel(page, explanations[incident, revisions[incident]], mode, source, width, output_dir)
+        assert_no_horizontal_overflow(page)
         if incident != EXPLANATION_CASES[-1][0]:
             nav('Incidents')
     nav('Remediation')
@@ -387,6 +454,14 @@ def scenario(browser, width, output_dir, read_only=False):
     assert page.locator('img[src="x"]').count()==0 and not page.evaluate('window.__evidence_xss || false')
     nav('Remediation')
     expect(page.get_by_role('alert').filter(has_text='Action history is unavailable')).to_be_visible()
+    if not read_only:
+        fixture['verified']=True
+        page.get_by_role('button',name='Refresh live data',exact=True).click()
+        table=page.get_by_role('region',name='Post-remediation verification table')
+        expect(table.get_by_text('9.28 ms',exact=True)).to_be_visible()
+        expect(table.get_by_text('0%',exact=True)).to_be_visible()
+        nav('Root Cause Analysis')
+        expect(page.get_by_text('80%',exact=True)).to_be_visible()
     page.get_by_role('button',name=re.compile('^vi$',re.I)).click()
     expect(page.get_by_role('button',name='Ngắt kết nối',exact=True)).to_be_visible()
     assert_no_horizontal_overflow(page)
@@ -649,10 +724,13 @@ def paginated_approval_scenario(browser, output_dir):
 
     nav('Incidents')
     rows = page.get_by_test_id('live-incident-row')
-    # Both page 1 (25 old) and page 2 (2 newer) must be loaded, with newest on top.
-    expect(rows).to_have_count(27)
+    # Both page 1 (25 old) and page 2 (2 newer) must be loaded (27 total), paginated 5 per page with newest on top.
+    expect(rows).to_have_count(5)
     expect(rows.first).to_contain_text(newest_id)
+    expect(page.get_by_test_id('pagination')).to_contain_text('27 incidents')
+    expect(page.get_by_test_id('pagination-page-6')).to_be_visible()
     assert None in fixture['cursors'] and 'page-2-cursor' in fixture['cursors'], fixture['cursors']
+    assert_no_horizontal_overflow(page)
 
     # Unselected ranked incident displays ranking score badge and suspected root cause (not abstained).
     ranked_row = rows.filter(has_text=ranked_old_id)
@@ -667,15 +745,25 @@ def paginated_approval_scenario(browser, output_dir):
     abstained_badge = abstained_row.get_by_test_id('rca-confidence')
     expect(abstained_badge).to_contain_text('AI abstained')
 
+    # Navigate to page 6 and verify the last 2 oldest rows (27 = 5*5 + 2) render cleanly.
+    page.get_by_test_id('pagination-page-6').click()
+    expect(rows).to_have_count(2)
+    assert_no_horizontal_overflow(page)
+    page.get_by_test_id('pagination-page-1').click()
+    expect(rows).to_have_count(5)
+    expect(rows.first).to_contain_text(newest_id)
+
     # Open the newest incident detail view to verify selection works cleanly.
     rows.first.click()
     expect(page.get_by_test_id('live-incident-id')).to_contain_text(newest_id)
+    assert_no_horizontal_overflow(page)
 
     # Remediation page approves the pending proposal and POSTs the expected decision.
     nav('Remediation')
     rem_card = page.get_by_test_id('live-proposal')
     expect(rem_card).to_be_visible()
     expect(rem_card).to_contain_text(newest_id)
+    assert_no_horizontal_overflow(page)
     reason_text = 'Approved payment-service rollback for newest paginated incident'
     rem_card.get_by_role('textbox', name='Decision reason', exact=True).fill(reason_text)
     approve_btn = rem_card.get_by_role('button', name='Approve', exact=True)
@@ -686,11 +774,18 @@ def paginated_approval_scenario(browser, output_dir):
     assert len(fixture['posts']) == 1, fixture['posts']
     assert fixture['posts'][0]['body'] == {'decision': 'approve', 'reason': reason_text}
 
+    # Verify Reports page also paginates max 5 per page with no overflow.
+    nav('Reports & History')
+    expect(page.get_by_test_id('live-incident-row')).to_have_count(5)
+    expect(page.get_by_test_id('pagination')).to_contain_text('27 incidents')
+    assert_no_horizontal_overflow(page)
+
     # Refresh/poll drains page 2 again and surfaces newly created incidents at the top.
     fixture['poll_new_visible'] = True
     page.get_by_role('button', name='Refresh live data', exact=True).click()
     nav('Incidents')
-    expect(rows).to_have_count(28)
+    expect(rows).to_have_count(5)
+    expect(page.get_by_test_id('pagination')).to_contain_text('28 incidents')
     expect(rows.first).to_contain_text(polled_newest_id)
 
     assert not errors, errors

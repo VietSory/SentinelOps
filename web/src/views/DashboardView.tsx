@@ -1,3 +1,4 @@
+import * as React from 'react';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -13,6 +14,7 @@ import { ConfidenceBadge, incidentConfidence } from '@/components/ai/ConfidenceB
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge, SeverityBadge, StatusBadge, Keyword } from '@/components/ui/badge';
+import { INCIDENTS_PER_PAGE, Pagination } from '@/components/ui/pagination';
 import { cn, formatDateTime, formatNumber, formatRelativeMinutes } from '@/lib/utils';
 import { useLocale } from '@/i18n/LocaleContext';
 import { getDashboardTrend } from '@/data';
@@ -41,10 +43,20 @@ export function DashboardView({
   onNavigate,
 }: DashboardViewProps) {
   const { locale, isEn } = useLocale();
+  const [recentPage, setRecentPage] = React.useState(1);
   const trendData = live ? live.trend : getDashboardTrend(locale);
 
   const sortedIncidents = [...incidents].sort((first, second) =>
     Date.parse(second.detectedAt || second.startedAt) - Date.parse(first.detectedAt || first.startedAt),
+  );
+  const totalRecentPages = Math.max(1, Math.ceil(sortedIncidents.length / INCIDENTS_PER_PAGE));
+  const safeRecentPage = Math.min(recentPage, totalRecentPages);
+  React.useEffect(() => {
+    if (recentPage > totalRecentPages) setRecentPage(totalRecentPages);
+  }, [recentPage, totalRecentPages]);
+  const pagedRecentIncidents = sortedIncidents.slice(
+    (safeRecentPage - 1) * INCIDENTS_PER_PAGE,
+    safeRecentPage * INCIDENTS_PER_PAGE,
   );
   const openIncidents = sortedIncidents.filter((inc) => inc.status !== 'recovered' && !inc.resolvedAt);
   const latestOpenIncident = openIncidents[0];
@@ -87,7 +99,7 @@ export function DashboardView({
         className="overflow-hidden"
       >
         <div className="p-5 md:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-          <div className="space-y-2.5 max-w-3xl">
+          <div className="min-w-0 space-y-2.5 max-w-3xl">
             <div className="flex flex-wrap items-center gap-2">
               {systemHealthy ? (
                 <Badge tone="success" dot>
@@ -104,7 +116,7 @@ export function DashboardView({
               )}
             </div>
 
-            <h2 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900">
+            <h2 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 break-words [overflow-wrap:anywhere]">
               {systemHealthy
                 ? isEn
                   ? 'All core services are operating normally with no high-severity incidents.'
@@ -414,7 +426,7 @@ export function DashboardView({
                   )}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="min-w-0 flex flex-wrap items-center gap-2">
                       {isCritical ? (
                         <ShieldAlert className="h-4 w-4 text-red-600 shrink-0" />
                       ) : isDegraded ? (
@@ -422,20 +434,20 @@ export function DashboardView({
                       ) : (
                         <CheckCircle2 className={cn('h-4 w-4 shrink-0',svc.status==='unknown'?'text-slate-400':'text-emerald-600')} />
                       )}
-                      <span className="font-bold text-slate-900">{svc.name}</span>
-                      <span className="font-mono text-[11px] text-slate-400">{svc.version}</span>
+                      <span className="font-bold text-slate-900 break-words">{svc.name}</span>
+                      <span className="min-w-0 break-all font-mono text-[11px] text-slate-400">{svc.version}</span>
                     </div>
                     <Badge tone={isCritical ? 'critical' : isDegraded ? 'high' : 'success'} dot>
                       {svc.statusLabelVi}
                     </Badge>
                   </div>
 
-                  <div className="mt-2.5 grid grid-cols-3 gap-2 text-xs tabular-nums">
-                    <div className="rounded-lg bg-white/90 border border-slate-200/70 px-2.5 py-1.5">
+                  <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs tabular-nums">
+                    <div className="min-w-0 rounded-lg bg-white/90 border border-slate-200/70 px-2.5 py-1.5">
                       <span className="block text-[11px] text-slate-500">Latency p95</span>
                       <strong
                         className={cn(
-                          'text-sm',
+                          'text-sm break-words',
                           svc.p95LatencyMs > svc.sloLatencyTargetMs
                             ? 'text-orange-700'
                             : 'text-slate-900',
@@ -444,11 +456,11 @@ export function DashboardView({
                         {formatNumber(svc.p95LatencyMs, 0, locale)} ms
                       </strong>
                     </div>
-                    <div className="rounded-lg bg-white/90 border border-slate-200/70 px-2.5 py-1.5">
+                    <div className="min-w-0 rounded-lg bg-white/90 border border-slate-200/70 px-2.5 py-1.5">
                       <span className="block text-[11px] text-slate-500">Error Rate</span>
                       <strong
                         className={cn(
-                          'text-sm',
+                          'text-sm break-words',
                           svc.errorRatePct >= 5
                             ? 'text-red-700'
                             : svc.errorRatePct > 0.5
@@ -459,15 +471,15 @@ export function DashboardView({
                         {formatNumber(svc.errorRatePct, 1, locale)}%
                       </strong>
                     </div>
-                    <div className="rounded-lg bg-white/90 border border-slate-200/70 px-2.5 py-1.5">
+                    <div className="min-w-0 rounded-lg bg-white/90 border border-slate-200/70 px-2.5 py-1.5">
                       <span className="block text-[11px] text-slate-500">SLO Success</span>
-                      <strong className="text-sm text-slate-900">
+                      <strong className="text-sm text-slate-900 break-words">
                         {formatNumber(svc.sloSuccessPct, 1, locale)}%
                       </strong>
                     </div>
                   </div>
 
-                  <p className="mt-2 text-xs text-slate-600">{svc.noteVi}</p>
+                  <p className="mt-2 text-xs text-slate-600 break-words [overflow-wrap:anywhere]">{svc.noteVi}</p>
                 </div>
               );
             })}
@@ -513,7 +525,7 @@ export function DashboardView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {sortedIncidents.slice(0, 5).map((inc) => {
+                {pagedRecentIncidents.map((inc) => {
                   const isActive = inc.status !== 'recovered' && !inc.resolvedAt;
                   const detectedAt = inc.detectedAt || inc.startedAt;
                   return (
@@ -527,7 +539,7 @@ export function DashboardView({
                         isActive && inc.severity === 'critical' && 'bg-red-50/45',
                       )}
                     >
-                      <th scope="row" className="px-4 py-3.5 text-left font-normal">
+                      <th scope="row" className="min-w-0 px-4 py-3.5 text-left font-normal max-w-md">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="max-w-full break-all font-mono text-xs font-semibold text-orange-700">
                             {inc.id}
@@ -538,11 +550,11 @@ export function DashboardView({
                             </Badge>
                           )}
                         </div>
-                        <p className="mt-0.5 font-semibold text-slate-900 line-clamp-1">
+                        <p className="mt-0.5 font-semibold text-slate-900 line-clamp-1 break-words [overflow-wrap:anywhere]">
                           {inc.title}
                         </p>
                       </th>
-                      <td data-label="Service" className="px-4 py-3.5 text-slate-700 font-medium">
+                      <td data-label="Service" className="px-4 py-3.5 text-slate-700 font-medium break-words">
                         {inc.services.join(', ')}
                       </td>
                       <td data-label="Severity" className="px-4 py-3.5">
@@ -551,10 +563,10 @@ export function DashboardView({
                       <td data-label="Status" className="px-4 py-3.5">
                         <StatusBadge status={inc.status} />
                       </td>
-                      <td data-label={isEn ? 'Root Cause' : 'Nguyên nhân'} className="px-4 py-3.5 text-xs text-slate-600 max-w-xs">
+                      <td data-label={isEn ? 'Root Cause' : 'Nguyên nhân'} className="min-w-0 px-4 py-3.5 text-xs text-slate-600 max-w-xs">
                         <div className="min-w-0 space-y-1.5">
                           <ConfidenceBadge {...incidentConfidence(inc)} />
-                          <span className="line-clamp-2 break-words">{inc.suspectedRootCause}</span>
+                          <span className="line-clamp-2 break-words [overflow-wrap:anywhere]">{inc.suspectedRootCause}</span>
                         </div>
                       </td>
                       <td
@@ -572,6 +584,13 @@ export function DashboardView({
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={safeRecentPage}
+            totalItems={sortedIncidents.length}
+            pageSize={INCIDENTS_PER_PAGE}
+            onPageChange={setRecentPage}
+            className="mt-3 rounded-b-xl border border-slate-200 bg-white"
+          />
         </CardContent>
       </Card>
     </div>

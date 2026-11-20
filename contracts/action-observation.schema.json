@@ -17,6 +17,21 @@
     "reason": {"type": ["string", "null"], "maxLength": 256},
     "before_image": {"$ref": "#/$defs/image"},
     "known_good_image": {"$ref": "#/$defs/image"},
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "verified_at", "bucket_ends"],
+      "properties": {
+        "status": {"const": "telemetry_verified"},
+        "verified_at": {"type": "string", "format": "date-time"},
+        "bucket_ends": {
+          "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true,
+          "items": {"type": "string", "format": "date-time"}
+        },
+        "p95_latency_ms": {"type": "number", "minimum": 0},
+        "error_rate": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
     "target": {
       "type": "object", "additionalProperties": false,
       "required": ["cluster_uid", "namespace", "namespace_uid", "deployment", "deployment_uid", "container"],

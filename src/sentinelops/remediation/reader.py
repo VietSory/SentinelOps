@@ -10,13 +10,14 @@ import json
 import re
 
 from sentinelops.contracts import utc_time, validate_payload
+from sentinelops.operator_evidence import action_verification
 from sentinelops.remediation.domain import RUNBOOK
 from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.quarantine import RECEIPT_SELECT, receipt
 from sentinelops.telemetry.core import stable_id
 
 
-def observation(state):
+def observation(state, health_artifacts=None):
     evidence = state['intent']['evidence']
     if evidence is None:
         evidence = {}
@@ -31,8 +32,11 @@ def observation(state):
         'before_image': evidence.get('before', {}).get('image'),
         'known_good_image': evidence.get('known_good', {}).get('image'), 'history': state['history']}
     try:
+        verification = action_verification(state, health_artifacts)
+        if verification is not None:
+            result['verification'] = verification
         validate_payload('action-observation.schema.json', result)
-    except ValueError:
+    except (KeyError, TypeError, ValueError):
         raise RuntimeError('stored action cannot be projected as a valid observation') from None
     return result
 
@@ -54,8 +58,9 @@ def decode_cursor(value, incident_id, max_revision):
 
 
 class ActionReader:
-    def __init__(self, pool):
+    def __init__(self, pool, *, health_artifacts=None):
         self.pool, self._snapshots = pool, ActionJournal(pool)
+        self.health_artifacts = health_artifacts
 
     async def check_ready(self):
         async with self.pool.acquire() as conn:
@@ -82,7 +87,7 @@ class ActionReader:
 
     async def get(self, action_id):
         state = await self._snapshots.get(action_id)
-        return observation(state) if state else None
+        return observation(state, self.health_artifacts) if state else None
 
     async def quarantine(self,action_id):
         async with self.pool.acquire() as conn,conn.transaction(isolation='repeatable_read',readonly=True):
@@ -111,7 +116,8 @@ class ActionReader:
                 AND ($4::timestamptz IS NULL OR (recorded_at,action_id)>($4,$5))
                 ORDER BY recorded_at,action_id LIMIT $3''', incident_id, max_revision, limit + 1,
                 after[0] if after else None, after[1] if after else None)
-            items = [observation(await self._snapshots._read(conn, row['action_id'])) for row in rows[:limit]]
+            items = [observation(await self._snapshots._read(conn, row['action_id']), self.health_artifacts)
+                     for row in rows[:limit]]
         cursor = None
         if len(rows) > limit:
             last = items[-1]

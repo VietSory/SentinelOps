@@ -41,7 +41,7 @@ function Facts({items}: {items: [string, any][]}) {
   return <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{items.map(([k,v]) => <div key={k} className="min-w-0"><dt className="text-xs text-slate-500 mb-1">{k}</dt><dd className="text-sm font-medium break-words [overflow-wrap:anywhere]">{text(v)}</dd></div>)}</dl>;
 }
 function Raw({value}: {value:any}) {return <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs">{JSON.stringify(value,null,2)}</pre>;}
-function Notice({children,error=false}: {children:React.ReactNode,error?:boolean}) {return <div role={error?'alert':'status'} className={cn('rounded-xl border p-4 text-sm',error?'border-red-200 bg-red-50 text-red-800':'border-orange-200 bg-orange-50 text-orange-900')}>{children}</div>;}
+function Notice({children,error=false}: {children:React.ReactNode,error?:boolean}) {return <div role={error?'alert':'status'} className={cn('min-w-0 rounded-xl border p-4 text-sm break-words [overflow-wrap:anywhere]',error?'border-red-200 bg-red-50 text-red-800':'border-orange-200 bg-orange-50 text-orange-900')}>{children}</div>;}
 
 function Proposal({row,state,engine,now,isEn,memoryReview,memoryRecoveryReview,onDecided}: {row:Row,state:Row,engine:any,now:number,isEn:boolean,memoryReview:MemoryReview,memoryRecoveryReview:MemoryReview,onDecided?:()=>void}) {
   const [reason,setReason] = React.useState('');
@@ -113,6 +113,8 @@ export default function LiveApp() {
   const [traceData,setTraceData]=React.useState<Record<string,Row>>({}),[traceError,setTraceError]=React.useState('');
   const traceRun=React.useRef(0);
   const [allProposals,setAllProposals]=React.useState<Row|null>(null), [watchError,setWatchError]=React.useState('');
+  const actionFeedRef=React.useRef<Record<string,Row[]>>({});
+  const [proposalActions,setProposalActions]=React.useState<Row[]>([]);
   const [now,setNow]=React.useState(Date.now());
   const engine=React.useRef<any>(null), login=React.useRef<any>(null), client=React.useRef<any>(null);
   const validProposal=React.useRef<(row:Row)=>boolean>(()=>false);
@@ -128,6 +130,7 @@ export default function LiveApp() {
     client.current=null; login.current?.clear();engine.current?.disconnect();
     setLoadedRows([]);setFeedReady(false);setFeedUpdatedAt(null);setPagesLoading(false);setPagesError('');setRemainingCursor(null);
     setAllProposals(null);
+    actionFeedRef.current={};setProposalActions([]);
   },[]);
   React.useEffect(()=>{
     let disposed=false;
@@ -185,6 +188,41 @@ export default function LiveApp() {
     const listPoll=setInterval(()=>void engine.current?.loadList(),30000);
     return()=>{controller.abort();clearInterval(poll);clearInterval(listPoll);};
   },[state.session,readProposals]);
+
+  React.useEffect(()=>{
+    const activeClient=client.current;
+    if(!state.session||!activeClient||!allProposals)return;
+    const controller=new AbortController();
+    const pending=new Map<string,Row>();
+    for(const row of allProposals.items){
+      const proposal=row.proposal;
+      if(proposal.executor_runbook!=='payment-rollback-known-good/v1'||!['approved','consumed','engineer'].includes(row.status)
+        ||row.approval?.decision!=='approve')continue;
+      const key=explanationKey(proposal.incident_id,proposal.incident_revision);
+      if(!actionFeedRef.current[key]?.some(action=>['recovered','blocked','escalated'].includes(action.phase))){
+        pending.set(key,proposal);
+      }
+    }
+    const entries=[...pending.entries()];
+    async function collect(){
+      for(let offset=0;offset<entries.length;offset+=4){
+        if(controller.signal.aborted||activeClient!==client.current)return;
+        const batch=entries.slice(offset,offset+4);
+        const responses=await Promise.allSettled(batch.map(([,p])=>
+          activeClient.actions(p.incident_id,p.incident_revision,null,controller.signal)));
+        if(controller.signal.aborted||activeClient!==client.current)return;
+        responses.forEach((response,index)=>{
+          if(response.status==='fulfilled'){
+            const [key,proposal]=batch[index];
+            actionFeedRef.current[key]=response.value.items.filter((item:Row)=>item.incident_revision===proposal.incident_revision);
+          }
+        });
+        setProposalActions(Object.values(actionFeedRef.current).flat());
+      }
+    }
+    void collect();
+    return()=>controller.abort();
+  },[allProposals,state.session]);
 
   // Drain all remaining pages from GET /v1/incidents (which returns rows in ascending
   // created_at order) before exposing the merged dataset so newest incidents are never missed.
@@ -481,7 +519,16 @@ export default function LiveApp() {
   React.useEffect(()=>{if(!detail)return;setContexts(old=>({...old,[detail.incident_id]:detail}));void loadTraces();return()=>{traceRun.current++;};},[selectedId,revision,loadTraces]);
   const traces=React.useMemo(()=>Object.fromEntries(Object.entries(traceData).map(([id,result])=>[id,result.items.map((item:Row)=>traceRecord(item,result.association,isEn))])),[traceData,isEn]);
   const proposals=React.useMemo(()=>[...new Map([...(allProposals?.items||[]),...(state.proposals||[])].map((row:Row)=>[row.proposal.proposal_id,row])).values()] as Row[],[allProposals,state.proposals]);
-  const data=React.useMemo(()=>dataset(loadedRows,contexts,overview,traces,proposals,state.actions?.items||[],isEn,explanations),[loadedRows,contexts,overview,traces,proposals,state.actions,isEn,explanations]);
+  const actions=React.useMemo(()=>{
+    const latest=new Map<string,Row>();
+    for(const action of [...proposalActions,...(state.actions?.items||[])]){
+      if(!latest.has(action.action_id)||latest.get(action.action_id)!.action_revision<=action.action_revision){
+        latest.set(action.action_id,action);
+      }
+    }
+    return [...latest.values()];
+  },[proposalActions,state.actions]);
+  const data=React.useMemo(()=>dataset(loadedRows,contexts,overview,traces,proposals,actions,isEn,explanations),[loadedRows,contexts,overview,traces,proposals,actions,isEn,explanations]);
   const selectedExplanation=selectedId&&revision?explanations[explanationKey(selectedId,revision)]:undefined;
   const select=React.useCallback((id:string)=>{
     const wsState=engine.current?.state;
@@ -490,8 +537,8 @@ export default function LiveApp() {
     if(wsState?.selected!==id||!wsState?.detail||staleDetail)void engine.current?.select(id);
   },[]);
   const gate=<Card className="p-6 sm:p-10 max-w-2xl mx-auto mt-8 space-y-5"><h2 className="text-xl font-semibold">{tr('Kết nối workspace vận hành','Connect to your operator workspace')}</h2><p className="text-sm text-slate-500">{tr('Đăng nhập để xem dashboard, trace waterfall và service map bằng dữ liệu thật.','Sign in for live dashboards, trace waterfalls and the service map.')}</p>{mode==='oidc'&&<Button onClick={async()=>{try{setLocale(locale);window.location.assign(await login.current.begin());}catch(e:any){setError(e.message);}}}><LogIn className="h-4 w-4"/>{tr('Đăng nhập Cognito','Sign in with Cognito')}</Button>}{mode==='manual'&&<form className="flex flex-wrap gap-3" onSubmit={async e=>{e.preventDefault();const input=tokenInput.current;if(!input?.value)return;const value=input.value;input.value='';await engine.current.connect(value);}}><input ref={tokenInput} type="password" autoComplete="off" aria-label="API access token" className="rounded-lg border px-3 py-2"/><Button type="submit">{tr('Kết nối','Connect')}</Button></form>}{mode==='loading'&&<p role="status">{tr('Đang kiểm tra đăng nhập…','Checking sign-in…')}</p>}{mode==='unavailable'&&<Notice error>{tr('Đăng nhập chưa được cấu hình.','Sign-in is not configured.')}</Notice>}<a href="/ui/demo/" className="text-sm text-orange-700 underline block">{tr('Mở giao diện mô phỏng gốc','Open the original simulation')}</a></Card>;
-  const review=<div className="space-y-4"><div className="flex flex-wrap gap-3 justify-between"><h2 className="font-semibold">{tr('Duyệt proposal theo revision thật','Review the actual revision-bound proposal')}</h2><Button size="sm" variant="secondary" disabled={state.proposalsLoading||state.decisionLoading||!detail} onClick={()=>void engine.current.loadProposals()}>{tr('Tải lại đề xuất','Reload proposals')}</Button></div>{state.proposalsError&&<Notice error>{state.proposalsError.message} · {tr('Tải lại để xác minh kết quả trước khi quyết định tiếp.','Reload to verify the outcome before another decision.')}</Notice>}{state.proposalsLoading&&<p>{tr('Đang tải…','Loading…')}</p>}{state.proposals?.length===0&&<Notice>{tr('Revision này không có proposal để duyệt.','No proposal for this revision.')}</Notice>}{state.proposals?.map((row:Row)=><Proposal key={row.proposal.proposal_id} row={row} state={state} engine={engine.current} now={now} isEn={isEn} memoryReview={memoryReview.current} memoryRecoveryReview={memoryRecoveryReview.current} onDecided={()=>void readProposals()}/>)}</div>;
-  const journal=<Card className="p-5 space-y-3"><h3 className="font-semibold">{tr('Nhật ký thực thi / Giải thích','Execution journal / Explanation')}</h3>{state.actionsError&&<Notice error>{state.actionsError.message}</Notice>}{state.actions?.items.map((item:Row)=><details key={item.action_id}><summary className="cursor-pointer text-sm break-all">{item.phase} · {item.action_id}</summary><Raw value={item}/></details>)}{selectedExplanation?.aiExplanationStatus==='ready'&&<p className="whitespace-pre-wrap text-sm">{selectedExplanation.aiExplanation.summary}</p>}{selectedExplanation?.aiExplanationStatus==='error'&&<Notice error>{selectedExplanation.aiExplanationError}</Notice>}</Card>;
+  const review=<div className="min-w-0 space-y-4"><div className="flex flex-wrap gap-3 justify-between"><h2 className="font-semibold">{tr('Duyệt proposal theo revision thật','Review the actual revision-bound proposal')}</h2><Button size="sm" variant="secondary" disabled={state.proposalsLoading||state.decisionLoading||!detail} onClick={()=>void engine.current.loadProposals()}>{tr('Tải lại đề xuất','Reload proposals')}</Button></div>{state.proposalsError&&<Notice error>{state.proposalsError.message} · {tr('Tải lại để xác minh kết quả trước khi quyết định tiếp.','Reload to verify the outcome before another decision.')}</Notice>}{state.proposalsLoading&&<p>{tr('Đang tải…','Loading…')}</p>}{state.proposals?.length===0&&<Notice>{tr('Revision này không có proposal để duyệt.','No proposal for this revision.')}</Notice>}{state.proposals?.map((row:Row)=><Proposal key={row.proposal.proposal_id} row={row} state={state} engine={engine.current} now={now} isEn={isEn} memoryReview={memoryReview.current} memoryRecoveryReview={memoryRecoveryReview.current} onDecided={()=>void readProposals()}/>)}</div>;
+  const journal=<Card className="p-5 space-y-3"><h3 className="font-semibold">{tr('Nhật ký thực thi / Giải thích','Execution journal / Explanation')}</h3>{state.actionsError&&<Notice error>{state.actionsError.message}</Notice>}{state.actions?.items.map((item:Row)=><details key={item.action_id}><summary className="min-w-0 cursor-pointer text-sm break-all">{item.phase} · {item.action_id}</summary><Raw value={item}/></details>)}{selectedExplanation?.aiExplanationStatus==='ready'&&<p className="min-w-0 whitespace-pre-wrap text-sm break-words [overflow-wrap:anywhere]">{selectedExplanation.aiExplanation.summary}</p>}{selectedExplanation?.aiExplanationStatus==='error'&&<Notice error>{selectedExplanation.aiExplanationError}</Notice>}</Card>;
   const notices=<div className="space-y-3 mb-5">{error&&<Notice error>{error}</Notice>}{state.notice&&<Notice error>{state.notice}</Notice>}{state.listError&&<Notice error>{state.listError.message}</Notice>}{pagesError&&<Notice error>{pagesError}</Notice>}{watchError&&<Notice error>{watchError}</Notice>}{telemetryError&&<Notice error>{telemetryError}</Notice>}{traceError&&state.session&&<Notice>{tr('Trace: ','Trace: ')}{traceError}</Notice>}{state.session&&<p className="text-xs text-slate-500">{tr('Telemetry từ Prometheus; incident trong feed đã tải. Cạnh trace theo span đã ghi nhận.','Telemetry from Prometheus; incidents from loaded feed. Trace edges follow recorded spans.')} {overview?.as_of&&`${tr('Đo lúc','Observed')} ${stamp(overview.as_of,locale)}`}{pagesLoading&&` · ${tr('Đang tải toàn bộ incident…','Loading all incidents…')}`}{remainingCursor&&!pagesLoading&&<Button size="sm" variant="ghost" onClick={()=>void loadMorePages()}>{tr('Tải thêm incident','Load more incidents')}</Button>}</p>}</div>;
   return <App live={{...data,connected:state.session,selectedId:state.selected||'',onSelect:select,gate,
     header:state.session?<Button size="sm" variant="ghost" onClick={disconnect}><LogOut className="h-4 w-4"/>{tr('Ngắt kết nối','Disconnect')}</Button>:null,
