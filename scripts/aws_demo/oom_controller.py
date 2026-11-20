@@ -1,7 +1,8 @@
 """Render the bounded OOM sidecar and its RBAC from a captured controller.
 
 Offline only: no cluster calls, Secret reads, apply or approval. The guarded JSON
-patch preserves the deployed controller and authenticated operator UI verbatim.
+patch preserves controller settings and the authenticated operator UI. Enabling
+the new incident source also requires an explicitly reviewed reader image.
 """
 from __future__ import annotations
 
@@ -49,9 +50,13 @@ def render_rbac(*, node_names=()):
     return docs
 
 
-def render(controller, target, image, *, enabled=False, node_names=()):
+def render(controller, target, image, *, enabled=False, node_names=(), reader_image=None):
     """Return (ConfigMap/RBAC documents, race-guarded controller JSON patch)."""
     image_digest(image)
+    if enabled and not reader_image:
+        raise ValueError('enabled OOM policy requires an explicitly reviewed compatible reader image')
+    if reader_image is not None:
+        image_digest(reader_image)
     target = MemoryTarget(**target)
     meta, spec = controller['metadata'], controller['spec']['template']['spec']
     if (meta['name'] != CONTROLLER or meta['namespace'] != NAMESPACE
@@ -65,6 +70,8 @@ def render(controller, target, image, *, enabled=False, node_names=()):
     ui = by_name['operator-ui']
     if CONTROLLER not in by_name:
         raise ValueError('existing remediation controller is required')
+    if reader_image is not None:
+        image_digest(by_name[CONTROLLER]['image'])
     env = {e['name']: e for e in ui['env']}
     database_env = []
     for key in ('CONTROL_DATABASE_URL', 'UI_DATABASE_PASSWORD'):
@@ -108,6 +115,9 @@ def render(controller, target, image, *, enabled=False, node_names=()):
     }
     annotations = deepcopy(controller['spec']['template'].get('metadata', {}).get('annotations', {}))
     annotations['sentinelops.io/oom-policy-sha256'] = digest
+    if reader_image is not None:
+        annotations['sentinelops.io/oom-reader-base-image'] = by_name[CONTROLLER]['image']
+        annotations['sentinelops.io/oom-reader-image'] = reader_image
     patch = [
         {'op': 'test', 'path': '/metadata/uid', 'value': meta['uid']},
         {'op': 'test', 'path': '/metadata/resourceVersion', 'value': meta['resourceVersion']},
@@ -118,6 +128,10 @@ def render(controller, target, image, *, enabled=False, node_names=()):
          'value': {'name': POLICY, 'configMap': {'name': POLICY, 'optional': False}}},
         {'op': 'add', 'path': '/spec/template/metadata/annotations', 'value': annotations},
     ]
+    if reader_image is not None:
+        reader_index = next(i for i, value in enumerate(containers) if value['name'] == CONTROLLER)
+        patch.append({'op': 'replace', 'path': f'/spec/template/spec/containers/{reader_index}/image',
+                      'value': reader_image})
     docs = [{'apiVersion': 'v1', 'kind': 'ConfigMap',
              'metadata': {'name': POLICY, 'namespace': NAMESPACE}, 'data': data}]
     docs += render_rbac(node_names=node_names)
@@ -129,12 +143,15 @@ def main():
     parser.add_argument('--controller', type=Path, required=True, help='Fresh kubectl get deployment -o json capture')
     parser.add_argument('--target', type=Path, required=True, help='Pinned MemoryTarget JSON from actual workload UIDs')
     parser.add_argument('--image', required=True, help='Built controller image, pinned by digest')
+    parser.add_argument('--reader-image',
+                        help='Reviewed reader compatibility image digest; required with --policy-enabled')
     parser.add_argument('--policy-enabled', action='store_true')
     parser.add_argument('--node-name', action='append', default=[], help='Allow get only these observed node names')
     parser.add_argument('--output-dir', type=Path, required=True)
     args = parser.parse_args()
     docs, patch = render(json.loads(args.controller.read_text()), json.loads(args.target.read_text()),
-                         args.image, enabled=args.policy_enabled, node_names=args.node_name)
+                         args.image, enabled=args.policy_enabled, node_names=args.node_name,
+                         reader_image=args.reader_image)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with (args.output_dir / 'oom-policy.yaml').open('x') as stream:
         yaml.safe_dump_all(docs, stream, sort_keys=False)
