@@ -83,7 +83,7 @@ spec:
           type: RuntimeDefault
       initContainers:
       - name: private-credentials
-        image: 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:bb40c73ad3c17e585e36f6e49d99f491371e971b3f730ee9d0d341de949a4859
+        image: 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:8af9fd87b65984c2fb44407a534e443231934504f037fcfa2dd99da23ad6fdb3
         command:
         - python
         - -c
@@ -102,7 +102,7 @@ spec:
         - {name: observer-token, mountPath: /source, readOnly: true}
       containers:
       - name: runner
-        image: 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:bb40c73ad3c17e585e36f6e49d99f491371e971b3f730ee9d0d341de949a4859
+        image: 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:8af9fd87b65984c2fb44407a534e443231934504f037fcfa2dd99da23ad6fdb3
         command: [sleep, '7200']
         securityContext:
           allowPrivilegeEscalation: false
