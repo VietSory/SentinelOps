@@ -4,11 +4,22 @@
   "title": "GroundedExplanation",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "incident_id", "summary", "claims"],
+  "required": ["schema_version", "incident_id", "summary", "root_cause", "claims"],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {"const": "2.0"},
     "incident_id": {"type": "string"},
     "summary": {"type": "string"},
+    "root_cause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service", "score", "explanation", "evidence_refs"],
+      "properties": {
+        "service": {"type": ["string", "null"]},
+        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "explanation": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "evidence_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
     "claims": {
       "type": "array",
       "items": {

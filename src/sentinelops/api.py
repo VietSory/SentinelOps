@@ -28,6 +28,8 @@ from sentinelops.ui.routes import router as ui_router, ui_index, HEADERS as UI_H
 from sentinelops.remediation.reader import ActionReader, decode_cursor as decode_action_cursor
 from sentinelops.remediation.proposal_api import install_routes as install_proposal_routes
 from sentinelops.explanations.service import ExplanationProvider, explain_incident
+from sentinelops.explanations.bedrock import bedrock_runtime_provider
+from sentinelops.explanations.openai_compatible import openai_responses_provider
 
 logger = logging.getLogger("sentinelops-api")
 STATES = {"degrading","incident","recovering","recovered","escalated"}
@@ -110,6 +112,16 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
     registry = model_registry if model_registry is not None else ModelRegistry()
     if model_registry is None and settings.model_store:
         registry = ModelRegistry.load(ArtifactStore(settings.model_store), settings.model_release_ref)
+    bedrock_runtime = None
+    llm_runtime = None
+    if explanation_provider is None:
+        if settings.llm_base_url is not None:
+            llm_runtime, explanation_provider = openai_responses_provider(
+                base_url=settings.llm_base_url, model=settings.llm_model, api_key=settings.llm_api_key,
+                actor_authorization=settings.llm_actor_authorization)
+        elif settings.bedrock_region is not None:
+            bedrock_runtime, explanation_provider = bedrock_runtime_provider(
+                region=settings.bedrock_region, model_id=settings.bedrock_model_id)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -139,8 +151,14 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
                 if action_pool is not None:
                     await action_pool.close()
             finally:
-                if pool is not None:
-                    await pool.close()
+                try:
+                    if pool is not None:
+                        await pool.close()
+                finally:
+                    if bedrock_runtime is not None:
+                        await bedrock_runtime.close()
+                    if llm_runtime is not None:
+                        await llm_runtime.close()
 
     app = FastAPI(title="SentinelOps API",version="0.2.1",lifespan=lifespan,
                   description="Incident persistence with revision headers. Real inference is unavailable until a model is activated; local demo mode is explicit.")

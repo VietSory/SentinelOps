@@ -1,8 +1,9 @@
+import asyncio
 import json
 
 import pytest
 
-from sentinelops.explanations.bedrock import bedrock_provider
+from sentinelops.explanations.bedrock import Boto3BedrockRuntime, bedrock_provider, bedrock_runtime_provider
 from tests.test_explanations import envelope, run, selection
 
 
@@ -11,7 +12,7 @@ def response(value):
         "role": "assistant", "content": [{"text": json.dumps(value)}]}}}
 
 
-def test_converse_uses_pinned_model_bounded_tokens_and_no_tools_or_raw_facts():
+def test_converse_uses_pinned_model_bounded_tokens_and_sanitized_facts():
     calls = []
     async def converse(**kwargs):
         calls.append(kwargs)
@@ -23,8 +24,30 @@ def test_converse_uses_pinned_model_bounded_tokens_and_no_tools_or_raw_facts():
     assert calls[0]["modelId"] == "configured.model-v1"
     assert calls[0]["inferenceConfig"] == {"maxTokens": 512, "temperature": 0}
     assert set(calls[0]) == {"modelId", "system", "messages", "inferenceConfig"}
-    assert envelope()["payload"]["evidence"][0]["fact"] not in json.dumps(calls[0])
-    assert run(provider)["payload"] == run()["payload"]
+    assert envelope()["payload"]["evidence"][0]["fact"] in json.dumps(calls[0])
+    assert "source_ref" not in json.dumps(calls[0])
+    assert run(provider)["payload"]["claims"] == run()["payload"]["claims"]
+    assert run(provider)["payload"]["root_cause"]["service"] == "rds"
+
+
+def test_converse_returns_a_human_root_cause_narrative_bound_to_ranked_evidence():
+    async def converse(**kwargs):
+        request = json.loads(kwargs["messages"][0]["content"][0]["text"])
+        return response(selection(request))
+    result = run(bedrock_provider(region="us-east-1", model_id="configured.model-v1", converse=converse))
+    assert result["payload"]["root_cause"]["service"] == "rds"
+    assert result["payload"]["root_cause"]["evidence_refs"]
+    assert not result["fallback"]
+
+
+def test_converse_ignores_reasoning_content_before_final_text():
+    async def converse(**kwargs):
+        request = json.loads(kwargs["messages"][0]["content"][0]["text"])
+        result = response(selection(request))
+        result["output"]["message"]["content"].insert(0, {"reasoningContent": {"text": "internal"}})
+        return result
+    result = run(bedrock_provider(region="us-east-1", model_id="configured.model-v1", converse=converse))
+    assert not result["fallback"]
 
 
 @pytest.mark.parametrize("change", [
@@ -76,3 +99,32 @@ def test_region_model_and_async_transport_are_explicit_and_in_provider_identity(
         bedrock_provider(region="us-east-1", model_id="arn:aws:bedrock:eu-west-1:123456789012:inference-profile/one", converse=converse)
     with pytest.raises(ValueError):
         bedrock_provider(region="us-east-1", model_id="arn:aws:bedrock:us-east-1:123456789012:prompt/example", converse=converse)
+
+
+def test_runtime_uses_a_bounded_async_boundary_and_closes_the_client(monkeypatch):
+    calls = []
+
+    class Client:
+        def converse(self, **kwargs):
+            calls.append(kwargs)
+            return {"ok": True}
+
+        def close(self):
+            calls.append("closed")
+
+    runtime = Boto3BedrockRuntime("us-east-1")
+    monkeypatch.setattr(runtime, "_create_client", lambda: Client())
+    async def run_inline(operation, *args, **kwargs):
+        return operation(*args, **kwargs)
+    monkeypatch.setattr("sentinelops.explanations.bedrock.asyncio.to_thread", run_inline)
+    async def scenario():
+        assert await runtime.converse(modelId="model") == {"ok": True}
+        await runtime.close()
+    asyncio.run(scenario())
+    assert calls == [{"modelId": "model"}, "closed"]
+
+
+def test_runtime_provider_returns_the_provider_and_its_lifecycle():
+    runtime, provider = bedrock_runtime_provider(region="us-east-1", model_id="configured.model-v1")
+    assert isinstance(runtime, Boto3BedrockRuntime)
+    assert provider.provider_id.startswith("bedrock-converse/v1/")

@@ -86,7 +86,7 @@ output "operations_dashboard_name" {
 
 output "bedrock_invoke_granted" {
   description = "False until explicit model ids are supplied; the explanation role then has no invoke permission."
-  value       = length(var.bedrock_model_ids) > 0
+  value       = length(var.bedrock_model_ids) + length(var.bedrock_resource_arns) > 0
 }
 
 output "model_activation_allowed" {

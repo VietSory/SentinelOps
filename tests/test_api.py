@@ -2,10 +2,13 @@ import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
 from sentinelops.main import app
 from sentinelops.api import create_app
+import sentinelops.api as api_module
 from sentinelops.api_settings import Settings
+from sentinelops.explanations.bedrock import bedrock_provider
 
 ROOT = Path(__file__).resolve().parents[1]
 client = TestClient(app)
@@ -74,6 +77,31 @@ def test_demo_cannot_be_enabled_outside_sandbox_and_weak_token_is_rejected():
                      {"environment":"aws","api_token":"x"*32},{"environment":"aws","operator_token":"y"*32}):
         with pytest.raises(ValueError):
             Settings(**settings)
+
+
+def test_bedrock_configuration_requires_an_explicit_region_and_model(monkeypatch):
+    monkeypatch.setenv('SENTINELOPS_BEDROCK_REGION', 'us-east-1')
+    monkeypatch.setenv('SENTINELOPS_BEDROCK_MODEL_ID', 'configured.model-v1')
+    settings = Settings.from_env()
+    assert settings.bedrock_region == 'us-east-1'
+    assert settings.bedrock_model_id == 'configured.model-v1'
+    monkeypatch.delenv('SENTINELOPS_BEDROCK_MODEL_ID')
+    with pytest.raises(ValueError, match='both SENTINELOPS_BEDROCK_REGION'):
+        Settings.from_env()
+
+
+def test_api_factory_wires_bedrock_only_from_complete_settings(monkeypatch):
+    calls = []
+
+    async def converse(**kwargs):
+        return {}
+
+    provider = bedrock_provider(region='us-east-1', model_id='configured.model-v1', converse=converse)
+    runtime = object()
+    monkeypatch.setattr(api_module, 'bedrock_runtime_provider',
+                        lambda **kwargs: (calls.append(kwargs) or (runtime, provider)))
+    create_app(Settings(bedrock_region='us-east-1', bedrock_model_id='configured.model-v1'))
+    assert calls == [{'region': 'us-east-1', 'model_id': 'configured.model-v1'}]
 
 
 def test_request_body_limit_applies_to_chunked_data_without_trusting_content_length():

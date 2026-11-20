@@ -448,7 +448,12 @@ Foundation `POST /v1/incidents` ban đầu echo. [Migration persistence hiện t
 
 Input là fact cards từ một IER revision đã validate, chỉ gồm metrics/facts/timestamps/ranking và evidence IDs cần thiết. Không gửi raw request body, credentials, ground truth hoặc nguyên khối log chưa lọc.
 
-Provider trả schema GroundedExplanation. Validator MUST kiểm tra shape, refs tồn tại, incident/revision khớp và metric/time/entity tokens không bị đổi. Claims dùng facts/relations được phép; causal assertion chỉ được diễn đạt như suspected nếu RCA đã cung cấp. Không có tools/AWS/Kubernetes credentials trong runtime của model.
+Provider trả schema GroundedExplanation gồm AI root-cause narrative. Validator MUST
+kiểm tra shape, service thuộc ranked RCA, refs tồn tại trong hypothesis/cards,
+incident/revision khớp và metric/time/entity tokens không bị đổi. Claims dùng
+facts/relations được phép; narrative chỉ diễn đạt ranked hypothesis, không biến
+nó thành confirmed cause. Không có tools/AWS/Kubernetes credentials trong runtime
+của model.
 
 Text entailment không thể được bảo đảm chỉ bằng kiểm tra refs. V1 ưu tiên bounded fact-card rendering: text claims cuối cùng được render từ validated fact/template selections; free-text summary bị ràng buộc vào facts và bị loại nếu chứa dữ kiện không xác minh được. Evaluation có adversarial paraphrase/unsupported-causality cases, không báo "zero hallucination" trên mọi input.
 

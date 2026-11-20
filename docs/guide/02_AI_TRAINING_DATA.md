@@ -10,7 +10,7 @@ Báo cáo dựa trên mã nguồn, cấu hình, test và báo cáo đã lưu tro
 
 Bundle hiện hành được tài liệu xác định là **`de38fc6b`**, feature set **`http-relative-5m/v2`**, theo ADR-019. Model đã được duyệt G3 **có điều kiện** và có báo cáo tích hợp local; các mốc này không đồng nghĩa nghiệm thu toàn bộ chất lượng, AWS hoặc final holdout. Xem [README](../../README.md), [ADR-019](../../docs/adr/ADR-019-breach-relative-retrain.md), [G3 packet](../../docs/reports/G3_CANDIDATE_ALIBABA_DE38FC6B.md) và [trạng thái dự án](../../docs/PROJECT_STATUS.md).
 
-**Có code hỗ trợ LLM qua Amazon Bedrock**, nhưng đó là provider tùy chọn cho phần giải thích incident. Code hiện hành giới hạn LLM ở việc chọn thẻ bằng chứng; nội dung cuối cùng được render cục bộ. Entry point mặc định không cấu hình provider, dùng deterministic fallback. Không có bằng chứng Bedrock đã được triển khai/gọi thật trong các tài liệu hiện hành; không có train/fine-tune LLM. Nguồn: [Bedrock adapter](../../src/sentinelops/explanations/bedrock.py), [explanation service](../../src/sentinelops/explanations/service.py), [ASGI entry point](../../src/sentinelops/main.py), [explanation runbook](../../docs/runbooks/EXPLANATIONS.md).
+**Có code hỗ trợ LLM qua Amazon Bedrock** như provider tùy chọn để tổng hợp lời giải thích root cause dựa trên evidence đã lọc và RCA hypothesis được xếp hạng. Service kiểm tra service, score và evidence refs trước khi hiển thị; mặc định không cấu hình provider và dùng lời giải thích deterministic. Chưa có bằng chứng Bedrock đã được triển khai/gọi thật; không có train/fine-tune LLM. Nguồn: [Bedrock adapter](../../src/sentinelops/explanations/bedrock.py), [explanation service](../../src/sentinelops/explanations/service.py), [ASGI entry point](../../src/sentinelops/main.py), [explanation runbook](../../docs/runbooks/EXPLANATIONS.md).
 
 ## 2. Thành phần nào là ML, thành phần nào là luật
 
@@ -22,7 +22,7 @@ Bundle hiện hành được tài liệu xác định là **`de38fc6b`**, featur
 | Slope control | Đối chứng dự báo dùng độ dốc latency. Không phải một model deep learning và không thay XGBoost trong serving. | `scripts/alibaba_controls.py`; `configs/alibaba_local_evaluation.json` |
 | SLO health | Luật latency p95 > 750 ms hoặc error rate > 5%, với điều kiện số request, coverage và persistence. Lỗi HTTP 5xx được xử lý bằng luật này vì Alibaba không có trường lỗi. | `configs/slo_health_policy.json`; `src/sentinelops/incidents/health.py` |
 | Correlation / RCA | Thuật toán xác định dựa trên topology, thời gian và bằng chứng; ranking có trọng số cố định, có quyền abstain. Không có quá trình fit một neural RCA model. | `src/sentinelops/incidents/correlation.py`; `src/sentinelops/incidents/rca.py`; `configs/rca_policy.json` |
-| Explanation | Deterministic renderer; có thể gắn Bedrock để chọn metadata cards. Không quyết định root cause hay remediation. | `src/sentinelops/explanations/service.py`; `src/sentinelops/explanations/bedrock.py` |
+| Explanation | Deterministic RCA ranking; Bedrock tùy chọn tổng hợp narrative từ ranked hypothesis và evidence. Không thay ranking hoặc cấp remediation. | `src/sentinelops/explanations/service.py`; `src/sentinelops/explanations/bedrock.py` |
 | Demo / samples | JSON minh họa và điểm giả lập phục vụ hợp đồng/demo, không phải output estimator hay dữ liệu train chính thức. | `samples/`; `src/sentinelops/demo.py` |
 
 Dependencies ML được pin trong [pyproject.toml](../../pyproject.toml): `numpy==2.2.6`, `pandas==2.3.3`, `pyarrow==21.0.0`, `scikit-learn==1.7.2`, `xgboost-cpu==3.1.1`, cài qua extra `[ml]`. Code dùng `joblib` để lưu/load detector; bundle ghi phiên bản thư viện và kiểm tra khi nạp. Không thấy pipeline PyTorch/TensorFlow, embedding, vector database hay RAG trong mã nguồn backend được rà soát.
@@ -268,17 +268,22 @@ IF cung cấp anomaly strength và XGB cung cấp risk facts vào IER; chúng kh
 
 ### 8.1. Tích hợp có thật trong code
 
-[src/sentinelops/explanations/bedrock.py](../../src/sentinelops/explanations/bedrock.py) có factory `bedrock_provider(region, model_id, converse)` cho Bedrock Converse. Caller phải truyền async transport và định danh model/region cụ thể. Adapter không import AWS SDK hoặc tự lấy credential, không tự gọi mạng khi tạo provider. Không pin sẵn Claude, GPT, Llama hay một model nền tảng cụ thể; `.env.example` chỉ có placeholder `BEDROCK_MODEL_ID` để trống.
+[src/sentinelops/explanations/bedrock.py](../../src/sentinelops/explanations/bedrock.py) có factory `bedrock_provider(region, model_id, converse)` cho Bedrock Converse và runtime boto3 tùy chọn. LLM nhận evidence facts đã qua lọc cùng RCA hypothesis, rồi trả service/score/evidence refs và lời giải thích cho operator; service kiểm tra lại các giá trị có thể đối chiếu trước khi trả response. Không pin sẵn một foundation model cụ thể.
 
 Khi caller thật sự gắn transport, lời gọi Converse dùng system instruction, một user message JSON, `maxTokens=512`, `temperature=0`, không tool configuration. Provider identity hash region/model/prompt/instructions/config để theo dõi phiên bản.
 
-`create_app` ở [src/sentinelops/api.py](../../src/sentinelops/api.py) nhận `explanation_provider=None`; [main.py](../../src/sentinelops/main.py) gọi `create_app()` không inject Bedrock. Vì vậy đường mặc định dùng **`deterministic-facts/v1`**. Chỉ đặt tên biến môi trường không chứng minh có provider được nối hoặc model đã được gọi.
+`create_app` ở [src/sentinelops/api.py](../../src/sentinelops/api.py) tự nối Bedrock runtime khi có đủ `SENTINELOPS_BEDROCK_REGION` và `SENTINELOPS_BEDROCK_MODEL_ID`; thiếu cấu hình thì dùng deterministic fallback. Có cấu hình chỉ chứng minh runtime được nối, không chứng minh AWS cấp quyền hoặc model đã được gọi thành công.
 
 ### 8.2. LLM được phép làm gì?
 
-Theo implementation `explanations/service.py`, provider nhận incident ID/revision, state/severity, availability, affected services, structured service signals, hypothesis scores và tối đa **64 metadata cards**. Cards chỉ có ID/type/service/observed time; raw fact/log text, source URI, actor/reason và timeline không được đưa vào remote request.
+Theo implementation `explanations/service.py`, provider nhận incident ID/revision, state/severity, availability, affected services, structured service signals, ranked hypotheses và tối đa **64 evidence cards đã lọc**. Card gồm ID/type/service/time/fact giới hạn; fact có thông tin nhạy cảm hoặc nội dung giống chỉ dẫn sẽ bị loại. Source URI, actor/reason và timeline không được đưa vào remote request.
 
-LLM chỉ trả JSON gồm `incident_id`, `revision`, `prompt_version`, **`card_ids`** với 1–12 IDs hợp lệ, duy nhất. Service khôi phục thứ tự nguồn và render claims cục bộ bằng evidence gốc. LLM không trả prose, sửa số/thời gian, tạo bằng chứng, rerank RCA, xác nhận root cause hoặc thực thi Kubernetes/AWS action. Đây là hành vi cụ thể hẹp hơn câu “LLM viết giải thích tự do” trong mô tả kiến trúc tổng quát.
+LLM trả JSON gồm `incident_id`, `revision`, `prompt_version`, **`card_ids`** và
+`root_cause`. `root_cause` phải chọn service từ ranked RCA, sao chép RCA score,
+human-readable explanation và evidence refs là tập con của hypothesis/cards.
+Service khôi phục thứ tự nguồn và render claims cục bộ bằng evidence gốc. LLM
+không sửa số/thời gian, tạo bằng chứng, thêm service/reference, biến hypothesis
+thành certainty hoặc thực thi Kubernetes/AWS action.
 
 Deadline mặc định 10 s gồm cả queueing, concurrency 4, không retry; ba lần lỗi mở circuit 30 s. Timeout, transport failure, JSON sai, stale revision, unknown/duplicate card IDs, request quá lớn hoặc thiếu provider đều dùng deterministic fallback trên **cùng revision**. Claims giữ evidence refs. Nguồn: `ExplanationProvider`, `_validate_selection`, `_cards`, `_render`, `explain_incident`.
 
@@ -296,7 +301,7 @@ Deadline mặc định 10 s gồm cả queueing, concurrency 4, không retry; ba
 2. **Nguồn train hiện hành là Alibaba**, không phải `samples/`, local HTTP, RCAEval hay tổng hợp mọi dataset từng được nhắc. Local-data fitting đã retired; GAMMA chưa có verifier admission hợp lệ; SMD chỉ historical.
 3. **Synthetic data phục vụ gate/tests**, local injected traffic phục vụ evaluation/integration. Chúng có vai trò khác dữ liệu production dùng fit và khác payload mẫu.
 4. **Model hiệu quả theo phạm vi đã đo:** kết quả local development tốt trên S1/S3 nhưng production Alibaba forecast còn yếu; chưa đủ để tuyên bố tổng quát hóa, RCA chính xác, live MTTD đầy đủ hoặc final quality acceptance.
-5. **Có LLM adapter, mặc định dùng deterministic fallback; chưa có LLM training hoặc Bedrock runtime evidence.** Không có tên foundation model hiện hành để khẳng định.
+5. **Có Bedrock LLM adapter cho grounded root-cause narrative; mặc định dùng deterministic fallback. Chưa có Bedrock runtime evidence hoặc LLM training.** Model ID phụ thuộc cấu hình môi trường.
 6. **Giới hạn của lần rà soát:** không có raw archives/model binaries/store trong checkout, không chạy lại train/evaluation và không kiểm runtime. Các đường `artifact://`/`artifacts/...` trong report được trích như provenance lịch sử, không coi là artifact đã được xác minh trên máy hiện tại.
 
 Các tài liệu nền để đọc tiếp: [model pipeline](../../docs/runbooks/MODEL_PIPELINE.md), [ADR-002](../../docs/adr/ADR-002-ml-models.md), [ADR-016](../../docs/adr/ADR-016-public-production-training-source.md), [ADR-019](../../docs/adr/ADR-019-breach-relative-retrain.md), [G3 model hiện hành](../../docs/reports/G3_CANDIDATE_ALIBABA_DE38FC6B.md), [layer 2](../../docs/reports/LAYER2_LOCAL_ALIBABA_DE38FC6B.md), [explanation runbook](../../docs/runbooks/EXPLANATIONS.md).

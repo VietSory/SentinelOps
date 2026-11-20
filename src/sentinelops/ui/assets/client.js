@@ -288,8 +288,18 @@ export class IncidentClient {
       typeof body.generated_at !== 'string' || !Number.isFinite(Date.parse(body.generated_at)) ||
       typeof body.provider !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(body.provider) ||
       typeof body.fallback !== 'boolean' || body.fallback !== (body.provider === 'deterministic-facts/v1') ||
-      body.payload?.schema_version !== '1.0' || body.payload.incident_id !== id ||
+      body.payload?.schema_version !== '2.0' || body.payload.incident_id !== id ||
       typeof body.payload.summary !== 'string' || !Array.isArray(body.payload.claims) || body.payload.claims.length > 12 ||
+      !body.payload.root_cause ||
+      !(body.payload.root_cause.service === null || typeof body.payload.root_cause.service === 'string') ||
+      !(body.payload.root_cause.score === null || typeof body.payload.root_cause.score === 'number' &&
+        Number.isFinite(body.payload.root_cause.score) && body.payload.root_cause.score >= 0 && body.payload.root_cause.score <= 1) ||
+      typeof body.payload.root_cause.explanation !== 'string' || !body.payload.root_cause.explanation ||
+      !Array.isArray(body.payload.root_cause.evidence_refs) ||
+      new Set(body.payload.root_cause.evidence_refs).size !== body.payload.root_cause.evidence_refs.length ||
+      body.payload.root_cause.evidence_refs.some(ref => typeof ref !== 'string' || !known.has(ref)) ||
+      (body.payload.root_cause.service === null &&
+        (body.payload.root_cause.score !== null || body.payload.root_cause.evidence_refs.length)) ||
       body.payload.claims.some(claim => !claim || typeof claim.text !== 'string' || !claim.text ||
         !Array.isArray(claim.evidence_refs) || !claim.evidence_refs.length ||
         new Set(claim.evidence_refs).size !== claim.evidence_refs.length ||

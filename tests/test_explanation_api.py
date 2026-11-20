@@ -9,6 +9,7 @@ from sentinelops.api import create_app
 from sentinelops.api_settings import Settings
 from sentinelops.contracts import validate_payload
 from sentinelops.explanations.service import ExplanationProvider, PROMPT_VERSION
+from tests.test_explanations import selection
 from sentinelops.incidents.domain import IncidentNotFound
 
 TOKEN = 'fixture-explanation-token-' + 'x' * 32
@@ -102,8 +103,8 @@ def test_http_reuses_bounded_provider_and_same_revision_fallback(mode, caplog):
     async def invoke(request):
         if mode == 'failure': raise RuntimeError('PRIVATE provider credential')
         if mode == 'timeout': await asyncio.sleep(1)
-        return {'incident_id': request['incident_id'], 'revision': 999 if mode == 'stale' else request['revision'],
-                'prompt_version': PROMPT_VERSION, 'card_ids': [request['cards'][0]['card_id']]}
+        return selection(request, revision=999 if mode == 'stale' else request['revision'],
+                         card_ids=[request['cards'][0]['card_id']])
     provider = ExplanationProvider('software-fixture/v1', invoke, timeout_seconds=.01)
     repo = ReadOnlyRepository()
     with client(repo, provider) as api:

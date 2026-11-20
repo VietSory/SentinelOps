@@ -6,9 +6,15 @@
   "provider": "deterministic-facts/v1",
   "fallback": true,
   "payload": {
-    "schema_version": "1.0",
+    "schema_version": "2.0",
     "incident_id": "INC-EXAMPLE",
     "summary": "Software contract sample. No diagnostic accuracy or action permission is established.",
+    "root_cause": {
+      "service": null,
+      "score": null,
+      "explanation": "No ranked root-cause hypothesis is available for this sample revision.",
+      "evidence_refs": []
+    },
     "claims": []
   }
 }

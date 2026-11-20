@@ -9,11 +9,15 @@ again and snapshots its input. It returns exactly:
 {"payload": grounded_explanation, "provider": provider_id, "fallback": bool}
 ```
 
-`payload` follows the existing `explanation.schema.json`. No fields are added to
-IER. The summary identifies the incident/revision, current state, severity,
-availability and uncertainty. Claims quote recorded evidence verbatim with the
-original evidence ID. The summary reports the displayed and total evidence counts,
-so bounded selection is visible. Claims describe records, not independently verified causes.
+`payload` follows `explanation.schema.json` v2.0. No fields are added to IER.
+The summary identifies the incident/revision, current state, severity,
+availability and uncertainty. `root_cause` contains the selected service,
+authoritative RCA score, a short explanation and supporting evidence IDs. When
+Bedrock is active, this explanation is an AI synthesis of the ranked hypothesis
+and recorded evidence; the score is not a probability. Claims quote recorded
+evidence verbatim with the original evidence ID. The summary reports displayed
+and total evidence counts. Claims describe records, not independently verified
+causes.
 Empty/oversized evidence produces an explicit limited summary, never invented
 claims, a healthy score or action permission.
 
@@ -42,11 +46,13 @@ quoted evidence; source evidence remains untrusted content.
 
 Create one reusable `ExplanationProvider(provider_id, invoke)` per configured
 provider/model version. `invoke` is an async callable receiving a JSON-compatible
-request with `prompt_version=incident-fact-selection/v1`, incident ID/revision,
-state/severity/availability, affected services, structured service signals,
-ranked hypothesis scores and at most 64 metadata cards. Each card contains
-`card_id`, evidence type, service and observed time. Raw fact/log text, source
-URIs, actor/reason, timeline and trigger references are excluded.
+request with `prompt_version=incident-root-cause-narrative/v2`, incident
+ID/revision, state/severity/availability, affected services, structured service
+signals, ranked root-cause hypotheses and at most 64 sanitized evidence cards.
+Each card contains `card_id`, `evidence_id`, evidence type, service, observed
+time and a bounded fact. Source URIs, actor/reason, timeline and trigger
+references are excluded. The provider may explain a ranked hypothesis, but
+cannot introduce a service, score, evidence reference or action.
 
 The transport returns exactly:
 
@@ -54,18 +60,25 @@ The transport returns exactly:
 {
   "incident_id": "<same input ID>",
   "revision": 1,
-  "prompt_version": "incident-fact-selection/v1",
-  "card_ids": ["evidence-00000"]
+  "prompt_version": "incident-root-cause-narrative/v2",
+  "card_ids": ["evidence-00000"],
+  "root_cause": {
+    "service": "payments",
+    "score": 0.91,
+    "explanation": "Payments is the leading hypothesis because the recorded evidence points to it.",
+    "evidence_refs": ["E001"]
+  }
 }
 ```
 
-Return 1–12 unique card IDs from this request. The service restores source order
-and renders the final GroundedExplanation locally. A provider selects evidence;
-it cannot supply prose, change numbers, substitute refs, rerank RCA or authorize
-actions. This is the spec's bounded fact/template rendering mode, with deliberately
-limited narrative flexibility. Provider output with extra prose or stale identity
-is rejected even if it sounds plausible. No general hallucination guarantee is
-claimed for source evidence itself.
+Return 1–12 unique card IDs from this request. `root_cause.service` must be a
+ranked hypothesis or null; `score` must copy that hypothesis score; and
+`evidence_refs` must be a non-empty subset of both the hypothesis refs and the
+selected cards. A null service requires null score and no refs. The service
+restores source order, validates the narrative and renders the final response.
+Provider output with extra keys, stale identity, unsupported measurements,
+unknown services or refs is rejected even if it sounds plausible. No general
+hallucination guarantee is claimed for source evidence itself.
 
 Default total deadline is 10 seconds, including queueing; concurrency is 4,
 with no retries. Three failed/invalid responses open the per-instance circuit
@@ -91,7 +104,7 @@ Focused regression: `python -m pytest -q tests/test_explanations.py`.
 
 `sentinelops.explanations.bedrock.bedrock_provider` adapts the
 [AWS Converse protocol](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html)
-to the same bounded selector. Its factory requires a region, exact model or
+to a bounded root-cause narrative. Its factory requires a region, exact model or
 inference-profile ID and an explicitly supplied async operation:
 
 ```python
@@ -105,22 +118,30 @@ provider = bedrock_provider(region=approved_region, model_id=approved_model_id,
 result = await explain_incident(envelope, provider=provider)
 ```
 
-The application/deployment owns the asynchronous runtime client, its regional
-endpoint, scoped IAM role, lifecycle, response byte limits, network timeouts and
-disabled SDK retries. Do not pass a synchronous SDK method or disguise a blocking
-call with `async def`. No AWS SDK is loaded and no request is sent by the factory.
-The deployment must supply that client; the adapter alone does not demonstrate
-cloud access. Model support/access, region, budget and authorization must be
-checked before enabling it. Its role needs only approved model invocation,
-without infrastructure/action mutation permissions.
+The API can construct the runtime from `SENTINELOPS_BEDROCK_REGION` and
+`SENTINELOPS_BEDROCK_MODEL_ID`. Both are required; omitting either keeps the
+deterministic fallback. boto3 uses the process's AWS credential chain, with a
+2-second connect timeout, 8-second read timeout and no SDK retries. The deployed
+API role currently does not have Bedrock permission, and the separate explanation
+role is not wired to that API process. Therefore the AWS path remains fallback
+until a deployment explicitly connects a least-privilege explanation identity.
+No AWS access or model invocation is enabled by this code change.
 
-The adapter sends system instructions and one metadata-only user message, with a
-512-token output bound and no tool configuration. It accepts one assistant text
-block ending with `end_turn`, parses strict JSON and rejects duplicate keys,
-non-finite constants, extra blocks, tool requests, guardrail/truncated responses
-and markdown. The core selector then checks exact incident/revision/cards. Provider
-identity hashes region/model/prompt/instructions/inference parameters for version
-tracking. Errors use the existing same-revision fallback. Tests of this protocol
-do not prove Bedrock availability, explanation quality or G5 acceptance.
+The adapter sends one bounded user message containing sanitized fact cards and
+ranked RCA hypotheses. It asks the model for selected cards plus
+`root_cause={service,score,explanation,evidence_refs}`. The service accepts only
+a ranked service, the copied score, references from that hypothesis and selected
+cards, and a short human-readable narrative. It rejects secrets, URLs,
+instruction-like fact text, unknown services, unknown references, duplicate
+keys, non-finite constants, extra blocks, tools, guardrail/truncated responses
+and markdown. Provider identity
+hashes region/model/prompt/instructions/inference parameters for version tracking.
+Errors use the same-revision fallback, which labels the result as an unconfirmed
+hypothesis. Tests of this protocol do not prove Bedrock availability, explanation
+quality or G5 acceptance.
 
 Adapter regression: `python -m pytest -q tests/test_explanation_bedrock.py`.
+
+The runtime wiring is exercised without AWS credentials. A real Bedrock result
+still requires an AWS account, model access and deployment verification; local
+adapter tests do not prove those gates.

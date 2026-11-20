@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 
-RCA is deterministic/scored correlation over evidence. It is not delegated to the LLM.
+RCA candidate ranking remains deterministic/scored correlation over evidence. An optional LLM may synthesize a human-readable explanation for a ranked candidate from its supporting evidence; it cannot add candidates, change scores or claim confirmation. Without a configured provider or on provider failure, the deterministic hypothesis renderer remains available.
 
 Initial candidate score combines:
 

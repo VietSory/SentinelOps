@@ -38,6 +38,35 @@ data "aws_iam_policy_document" "irsa" {
   }
 }
 
+data "aws_iam_policy_document" "explanation_trust" {
+  source_policy_documents = [data.aws_iam_policy_document.irsa["explanation"].json]
+
+  dynamic "statement" {
+    for_each = length(var.bedrock_trusted_service_account_subjects) > 0 ? [1] : []
+    content {
+      effect  = "Allow"
+      actions = ["sts:AssumeRoleWithWebIdentity"]
+
+      principals {
+        type        = "Federated"
+        identifiers = [aws_iam_openid_connect_provider.cluster.arn]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "${local.oidc_provider_url}:sub"
+        values   = var.bedrock_trusted_service_account_subjects
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "${local.oidc_provider_url}:aud"
+        values   = ["sts.amazonaws.com"]
+      }
+    }
+  }
+}
+
 # --- Telemetry reader: reads observability sources, writes nothing ------------
 
 resource "aws_iam_role" "telemetry_reader" {
@@ -135,28 +164,32 @@ resource "aws_iam_role_policy" "data_worker" {
 
 resource "aws_iam_role" "explanation" {
   name               = "${var.name_prefix}-explanation"
-  assume_role_policy = data.aws_iam_policy_document.irsa["explanation"].json
+  assume_role_policy = data.aws_iam_policy_document.explanation_trust.json
 
   tags = { Workload = "explanation" }
 }
 
-# Empty bedrock_model_ids yields a policy document with no statements, so the
-# role carries no invoke permission until model access is actually granted.
+# Empty Bedrock allowlists yield no invoke permission. Inference profiles require
+# an explicit profile ARN plus every foundation-model ARN in the profile's target
+# regions; never infer the resource set from a profile name.
 data "aws_iam_policy_document" "explanation" {
   dynamic "statement" {
-    for_each = length(var.bedrock_model_ids) > 0 ? [1] : []
+    for_each = length(var.bedrock_model_ids) + length(var.bedrock_resource_arns) > 0 ? [1] : []
 
     content {
-      sid       = "InvokeNamedFoundationModels"
+      sid       = "InvokeExplicitBedrockResources"
       effect    = "Allow"
       actions   = ["bedrock:InvokeModel"]
-      resources = [for id in var.bedrock_model_ids : "arn:aws:bedrock:${var.region}::foundation-model/${id}"]
+      resources = concat(
+        [for id in var.bedrock_model_ids : "arn:aws:bedrock:${var.region}::foundation-model/${id}"],
+        var.bedrock_resource_arns
+      )
     }
   }
 }
 
 resource "aws_iam_role_policy" "explanation" {
-  count = length(var.bedrock_model_ids) > 0 ? 1 : 0
+  count = length(var.bedrock_model_ids) + length(var.bedrock_resource_arns) > 0 ? 1 : 0
 
   name   = "bedrock-invoke"
   role   = aws_iam_role.explanation.id

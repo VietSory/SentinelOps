@@ -110,7 +110,8 @@ test('an unavailable identity adapter is displayed as authentication failure rat
 
 const explanationPage = (id,revision) => ({schema_version:'1.0',incident_id:id,revision,
   generated_at:'2026-01-01T00:00:00Z',provider:'deterministic-facts/v1',fallback:true,
-  payload:{schema_version:'1.0',incident_id:id,summary:'Software fixture, not a verified cause',claims:[]}});
+  payload:{schema_version:'2.0',incident_id:id,summary:'Software fixture, not a verified cause',
+    root_cause:{service:null,score:null,explanation:'No ranked hypothesis.',evidence_refs:[]},claims:[]}});
 
 test('explanation client pins encoded identity/revision and rejects foreign references or provider drift',async () => {
   for (const mutate of [x => x.revision=2,x => x.incident_id='foreign',x => x.payload.incident_id='foreign',
