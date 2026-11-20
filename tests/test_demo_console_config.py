@@ -1,7 +1,7 @@
 """Offline configuration and OOM trigger boundaries; never run kubectl."""
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 
 import pytest
@@ -278,6 +278,138 @@ def test_no_raw_kubectl_stderr_or_credentials_printed(tmp_path, monkeypatch, cap
     with pytest.raises(oom.Blocked):
         oom.Kubectl(config(tmp_path)).run(['get', 'namespace', 'kube-system', '-o', 'json'])
     assert 'private-credential' not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('operation', ['get', 'logs'])
+@pytest.mark.parametrize('failure', ['stderr', 'expired'])
+def test_read_timeout_retries_once_then_returns_the_healthy_response(tmp_path, monkeypatch, capsys,
+                                                                   operation, failure):
+    calls, sleeps = [], []
+    def subprocess_run(command, **kwargs):
+        calls.append((command, kwargs))
+        if len(calls) == 1:
+            if failure == 'expired':
+                raise oom.subprocess.TimeoutExpired(command, kwargs['timeout'], stderr='private-credential')
+            return oom.subprocess.CompletedProcess(command, 1, '',
+                'Unable to connect to the server: i/o timeout; private-credential')
+        return oom.subprocess.CompletedProcess(command, 0, '{"healthy":true}', '')
+    monkeypatch.setattr(oom.subprocess, 'run', subprocess_run)
+    monkeypatch.setattr(oom.time, 'sleep', sleeps.append)
+    kube = oom.Kubectl(config(tmp_path))
+    if operation == 'get':
+        assert kube.get('namespace', 'kube-system', namespace=None) == {'healthy': True}
+    else:
+        assert kube.run(['logs', 'deployment/memory-controller'], json_result=False) == '{"healthy":true}'
+    assert len(calls) == 2 and calls[0][0] == calls[1][0]
+    assert all('--request-timeout=10s' in command and kwargs['timeout'] == 15 for command, kwargs in calls)
+    assert sleeps == [.25] and sum(kwargs['timeout'] for _, kwargs in calls) + sum(sleeps) <= 31
+    output = capsys.readouterr().out
+    assert 'retrying once (2/2)' in output and 'private-credential' not in output
+
+
+@pytest.mark.parametrize('failure', ['stderr', 'expired'])
+def test_read_timeouts_exhaust_exactly_two_attempts(tmp_path, monkeypatch, capsys, failure):
+    calls, sleeps = [], []
+    def subprocess_run(command, **kwargs):
+        calls.append(command)
+        if failure == 'expired':
+            raise oom.subprocess.TimeoutExpired(command, kwargs['timeout'], stderr='private-credential')
+        return oom.subprocess.CompletedProcess(command, 1, '',
+            'net/http: TLS handshake timeout; private-credential')
+    monkeypatch.setattr(oom.subprocess, 'run', subprocess_run)
+    monkeypatch.setattr(oom.time, 'sleep', sleeps.append)
+    with pytest.raises(oom.ReadTimeout, match='read timed out after 2 attempts'):
+        oom.Kubectl(config(tmp_path)).get('namespace', 'kube-system', namespace=None)
+    assert len(calls) == 2 and sleeps == [.25]
+    assert 'private-credential' not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('failure', ['stderr', 'expired'])
+def test_patch_timeout_is_never_retried_or_observed_as_acknowledged(tmp_path, monkeypatch, capsys, failure):
+    cfg, calls, sleeps = config(tmp_path), [], []
+    def subprocess_run(command, **kwargs):
+        calls.append(command)
+        assert command[len(kube.base)] == 'patch'
+        if failure == 'expired':
+            raise oom.subprocess.TimeoutExpired(command, kwargs['timeout'], stderr='private-credential')
+        return oom.subprocess.CompletedProcess(command, 1, '', 'i/o timeout; private-credential')
+    kube = oom.Kubectl(cfg)
+    monkeypatch.setenv('DEMO_CONSOLE_OOM_EXECUTE', '1')
+    monkeypatch.setattr(oom, 'preflight', lambda *args: deployment())
+    monkeypatch.setattr(oom.subprocess, 'run', subprocess_run)
+    monkeypatch.setattr(oom.time, 'sleep', sleeps.append)
+    monkeypatch.setattr(oom, 'observe_oom', lambda *args: pytest.fail('uncertain PATCH must not be acknowledged'))
+    with pytest.raises(oom.Blocked) as exc:
+        oom.run(cfg, kube=kube)
+    assert len(calls) == 1 and sleeps == []
+    assert 'no memory-change PATCH' not in str(exc.value)
+    output = capsys.readouterr().out
+    assert 'Trigger acknowledged' not in output and 'private-credential' not in output
+
+
+def test_non_timeout_read_error_is_not_retried(tmp_path, monkeypatch):
+    calls = []
+    def forbidden(command, **kwargs):
+        calls.append(command)
+        return oom.subprocess.CompletedProcess(command, 1, '', 'Forbidden: denied by RBAC')
+    monkeypatch.setattr(oom.subprocess, 'run', forbidden)
+    monkeypatch.setattr(oom.time, 'sleep', lambda _: pytest.fail('non-timeout error must not back off'))
+    with pytest.raises(oom.Blocked, match='request failed'):
+        oom.Kubectl(config(tmp_path)).get('namespace', 'kube-system', namespace=None)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('phase', ['preflight', 'deployment', 'pods', 'replicasets'])
+def test_read_timeout_message_only_claims_no_patch_before_trigger(tmp_path, monkeypatch, phase):
+    cfg, calls = config(tmp_path), []
+    kube = oom.Kubectl(cfg)
+    triggered = deployment()
+    triggered['metadata']['generation'] += 1
+    triggered['spec']['template']['spec']['containers'][0]['resources']['limits']['memory'] = '64Mi'
+    def subprocess_run(command, **kwargs):
+        operation = command[len(kube.base)]
+        kind = command[len(kube.base) + 1]
+        calls.append((operation, kind))
+        if operation == 'patch':
+            return oom.subprocess.CompletedProcess(command, 0, json.dumps(triggered), '')
+        if kind == 'deployment' and phase in ('pods', 'replicasets'):
+            return oom.subprocess.CompletedProcess(command, 0, json.dumps(triggered), '')
+        if kind == 'pods' and phase == 'replicasets':
+            return oom.subprocess.CompletedProcess(command, 0, json.dumps({'items': pods('64Mi')}), '')
+        raise oom.subprocess.TimeoutExpired(command, kwargs['timeout'])
+    monkeypatch.setenv('DEMO_CONSOLE_OOM_EXECUTE', '1')
+    monkeypatch.setattr(oom.subprocess, 'run', subprocess_run)
+    monkeypatch.setattr(oom.time, 'sleep', lambda _: None)
+    if phase != 'preflight':
+        monkeypatch.setattr(oom, 'preflight', lambda *args: deployment())
+    with pytest.raises(oom.Blocked) as exc:
+        oom.run(cfg, kube=kube)
+    assert ('no memory-change PATCH was sent' in str(exc.value)) == (phase == 'preflight')
+    failed = 'namespace' if phase == 'preflight' else phase
+    expected = [] if phase == 'preflight' else [('patch', 'deployment')]
+    if phase in ('pods', 'replicasets'):
+        expected += [('get', 'deployment')]
+    if phase == 'replicasets':
+        expected += [('get', 'pods')]
+    assert calls == expected + [('get', failed)] * 2
+
+
+def test_controller_configmap_latency_does_not_age_the_latest_log(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    kube, seconds = FakeKube(cfg), [0]
+    now = datetime(2026, 11, 20, tzinfo=timezone.utc)
+    monkeypatch.setattr(oom, 'clock', lambda: now + timedelta(seconds=seconds[0]))
+    get = kube.get
+    def slow_get(kind, *args, **kwargs):
+        result = get(kind, *args, **kwargs)
+        if kind == 'configmap':
+            seconds[0] += 11
+        return result
+    monkeypatch.setattr(kube, 'get', slow_get)
+    assert oom.run(cfg, check=True, kube=kube) == 0
+    assert seconds[0] == 11
+    assert kube.commands[-2] == ('get', 'configmap', cfg.controller['configmap'])
+    assert kube.commands[-1][0] == 'logs'
 
 
 def test_full_spec_patch_goes_to_stdin_never_argv_or_terminal(tmp_path, monkeypatch, capsys):
