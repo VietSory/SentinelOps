@@ -215,6 +215,37 @@ def test_controller_latest_phase_survives_interleaved_nonphase_otel_diagnostics(
     assert oom.validate_controller(cfg,controller(),cm,healthy+'\n'+diagnostics,now=now)=='memory-controller'
 
 
+def test_actual_kubernetes_nanosecond_log_with_measured_61ms_clock_skew_is_fresh(tmp_path):
+    cfg=config(tmp_path)
+    now=datetime.fromisoformat('2026-11-20T19:10:19.088052+00:00')
+    cm={'data':{cfg.controller['key']:json.dumps(cfg.target)}}
+    log='2026-11-20T19:10:19.148966832Z {"phase":"observing","reason":"no-current-oom-at-low-limit"}'
+    assert oom.validate_controller(cfg,controller(),cm,log,now=now)=='memory-controller'
+
+
+@pytest.mark.parametrize('age,accepted',[(-1,True),(-1.000001,False),(10,True),(10.000001,False)])
+def test_controller_log_keeps_one_second_future_and_ten_second_age_bounds(tmp_path,age,accepted):
+    cfg=config(tmp_path)
+    now=datetime(2026,11,21,tzinfo=timezone.utc)
+    cm={'data':{cfg.controller['key']:json.dumps(cfg.target)}}
+    log=(now-timedelta(seconds=age)).isoformat()+' {"phase":"observing","reason":"no-current-oom-at-low-limit"}'
+    if accepted:
+        assert oom.validate_controller(cfg,controller(),cm,log,now=now)=='memory-controller'
+    else:
+        with pytest.raises(oom.Blocked,match='freshly'):
+            oom.validate_controller(cfg,controller(),cm,log,now=now)
+
+
+def test_clock_skew_tolerance_never_accepts_a_newer_pending_phase(tmp_path):
+    cfg=config(tmp_path)
+    now=datetime(2026,11,21,tzinfo=timezone.utc)
+    cm={'data':{cfg.controller['key']:json.dumps(cfg.target)}}
+    old=(now-timedelta(seconds=1)).isoformat()+' {"phase":"observing","reason":"no-current-oom-at-low-limit"}'
+    pending=(now+timedelta(milliseconds=61)).isoformat()+' {"phase":"pending","reason":"oncall-approval-required"}'
+    with pytest.raises(oom.Blocked,match='freshly'):
+        oom.validate_controller(cfg,controller(),cm,old+'\n'+pending,now=now)
+
+
 @pytest.mark.parametrize('phase',['pending','unavailable','blocked','verifying'])
 def test_latest_controller_phase_blocks_despite_an_older_healthy_record(tmp_path,phase):
     cfg=config(tmp_path)

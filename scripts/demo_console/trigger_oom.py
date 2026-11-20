@@ -203,7 +203,9 @@ def validate_controller(config, controller, cm, latest_log, *, now):
             latest_phase = at, state
     try:
         at, state = latest_phase or ('', {})
-        fresh = 0 <= (now - timestamp(at)).total_seconds() <= 10
+        # Operator/node clocks were observed 61ms apart. Allow at most one
+        # second of clock skew; the existing ten-second maximum age is fixed.
+        fresh = -1 <= (now - timestamp(at)).total_seconds() <= 10
     except (TypeError, ValueError):
         fresh = False
     if (not fresh or state != {'phase': 'observing', 'reason': 'no-current-oom-at-low-limit'}):
