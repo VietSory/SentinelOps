@@ -18,6 +18,7 @@ from pathlib import Path
 from sentinelops.contracts import utc_time
 from sentinelops.incidents.rca_replay import group_severity
 from sentinelops.remediation.approvals import APPROVAL_VERSION, PROPOSAL_VERSION, create_slot, read_slot
+from sentinelops.remediation.authority import HEALTH_CONSUMER_LAG, current_health_checkpoint
 from sentinelops.remediation.domain import Blocked, Request, RUNBOOK, image_digest
 from sentinelops.telemetry.core import stable_id, timestamp
 
@@ -82,8 +83,8 @@ class AutoRunbookController:
         if job_id is None:
             raise Blocked('incident-has-no-verified-native-job')
         job, accepted, derived = await self.evidence.verified_evidence(job_id)
+        checkpoint, caught_up = await current_health_checkpoint(self.evidence)
         current = await self.incidents.get(identifier)
-        _, checkpoint = await self.evidence.checkpoint()
         if current['revision'] != snapshot['revision']:
             raise Blocked('incident-revision-changed')
         if (current['context']['lifecycle_stage'] != 'RCA_READY'
@@ -97,8 +98,8 @@ class AutoRunbookController:
             raise Blocked('current-incident-revision-does-not-bind-verified-rca')
         if any(checkpoint['service_states'][s]['availability'] != 'ELIGIBLE' for s in group['affected_services']):
             raise Blocked('current-incident-health-unavailable')
-        if await self.evidence.source.next(checkpoint) is not None:
-            raise Blocked('newer-accepted-health-awaits-consumer')
+        if not caught_up:
+            raise Blocked(HEALTH_CONSUMER_LAG)
         intent = self.evidence.store.read(job['intent_ref'])
         observations = {}
         current_signals = {}
@@ -264,6 +265,7 @@ class AutoRunbookController:
                 continue
             try:
                 await self._current(proposal)
+                approval = self._approval(proposal)
             except Blocked as exc:
                 results.append(self._escalate(proposal, str(exc)))
                 continue

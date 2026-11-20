@@ -458,3 +458,43 @@ def test_verification_failure_escalates_once_without_a_second_or_compensating_pa
         assert (await f.executor.execute(f.request))['phase']=='escalated'
         assert f.kube.calls==[True,False]
     asyncio.run(run())
+
+
+
+@pytest.mark.parametrize('catches_up',[True,False])
+def test_native_authority_waits_for_the_consumer_before_granting_dispatch(monkeypatch,catches_up):
+    async def run():
+        f=setup()
+        class Connection:
+            async def fetchval(self,*args): return 'fixture-accepted-job'
+            async def __aenter__(self): return self
+            async def __aexit__(self,*args): pass
+        class Pool:
+            def acquire(self): return Connection()
+        rca=f.authority.value.rca
+        affected=next(g for g in rca['correlation']['groups'] if g['group_id']==rca['group_id'])['affected_services']
+        async def evidence(*args):
+            return {},{'capture_ref':'capture','result_ref':'result'},{'rca':rca,'deployment_change':asdict(f.authority.value.change)}
+        async def snapshot(*args):
+            return {'revision':2,'context':{'lifecycle_stage':'RCA_READY','availability':'ELIGIBLE','source_refs':['capture','result']},
+                    'payload':{'affected_services':affected}}
+        checks=0
+        async def checkpoint():
+            return None,{'last_bucket_end':timestamp(f.clock()),
+                         'service_states':{service:{'availability':'ELIGIBLE'} for service in affected}}
+        async def newer(state):
+            nonlocal checks
+            checks+=1
+            return {'newer':True} if checks==1 or not catches_up else None
+        if not catches_up:
+            monkeypatch.setattr('sentinelops.remediation.authority.HEALTH_CATCHUP_SECONDS',0)
+        journal=SimpleNamespace(pool=Pool(),source=SimpleNamespace(stream_id=f.recovery.source.stream_id,next=newer),
+            consumer_id='fixture-consumer',verified_evidence=evidence,repository=SimpleNamespace(get=snapshot),
+            checkpoint=checkpoint,store=SimpleNamespace(read=lambda ref:{'capture_version':'continuous-incident-evidence/v6'}),
+            model_registry=SimpleNamespace(available=True))
+        result=await NativeH4Authority(journal).assess(f.request,TARGET,now=f.clock())
+        assert result.dispatch_authority is catches_up
+        assert result.missing_reason==('' if catches_up else 'newer-accepted-health-awaits-consumer')
+        assert checks==(2 if catches_up else 1)
+        assert f.kube.calls==[]
+    asyncio.run(run())

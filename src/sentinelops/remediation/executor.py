@@ -114,10 +114,12 @@ class RollbackExecutor:
             qualify(latest,request,before,good,self.policy,self.rca_policy,now=self.clock())
             if latest.result_ref!=assessment.result_ref or not await self.journal.incident_current(request):
                 raise Blocked('incident-or-rca-changed-before-dispatch')
-            if self.clock()-utc_time(state['facts']['dispatch_started_at'])>timedelta(seconds=self.policy.verification_seconds):
+            if self.authorize is not None: await self.authorize(request)
+            now=self.clock()
+            qualify(latest,request,before,good,self.policy,self.rca_policy,now=now)
+            if now-utc_time(state['facts']['dispatch_started_at'])>timedelta(seconds=self.policy.verification_seconds):
                 raise Blocked('dispatch-expired-before-send')
             self._enabled()  # Recheck immediately before handing the request to transport.
-            if self.authorize is not None: await self.authorize(request)
         except Blocked as exc:
             return self._emit(await self.journal.transition(state['action_id'],state['revision'],'escalated',
                 {**state['facts'],'reason':str(exc),'dispatch_cancelled_before_send':True},release=True))

@@ -343,7 +343,9 @@ def test_fail_closed_records_engineer_without_any_patch(tmp_path, monkeypatch, f
         if failure == 'unknown': c.snapshot['context']['availability'] = 'UNKNOWN'
         if failure == 'no-job': c.evidence.has_job = False
         if failure == 'bad-evidence': c.evidence.error = True
-        if failure == 'backlog': c.evidence.backlog = True
+        if failure == 'backlog':
+            monkeypatch.setattr('sentinelops.remediation.authority.HEALTH_CATCHUP_SECONDS', 0)
+            c.evidence.backlog = True
         if failure == 'unbound': c.snapshot['context']['source_refs'] = []
         if failure == 'abstain': c.f.authority.value.rca['abstained'] = True
         results = await c.controller.tick()
@@ -654,4 +656,39 @@ def test_cli_policy_is_enabled_only_by_explicit_flag(tmp_path, monkeypatch, enab
         monkeypatch.setattr(script, 'RollbackExecutor', executor)
         with pytest.raises(Done): await script.run(args)
         assert pool.closed
+    asyncio.run(run())
+
+
+
+@pytest.mark.parametrize('expires',[False,True])
+def test_approval_waits_for_consumer_and_revalidates_before_dispatch(tmp_path, monkeypatch, expires):
+    async def run():
+        c = fixture(tmp_path, monkeypatch)
+        proposal = (await c.controller.tick())[0]
+        approve(c)
+        checks = []
+        original_next = c.evidence.source.next
+
+        async def source_next(checkpoint):
+            checks.append(checkpoint)
+            if len(checks) == 1:
+                assert read_slot(c.store, 'used', proposal['proposal_id']) is None
+                assert c.f.kube.calls == []
+                if expires:
+                    c.f.time[0] += timedelta(minutes=15)
+                return {'newer_accepted_bucket': True}
+            return await original_next(checkpoint)
+
+        c.evidence.source.next = source_next
+        result = (await c.controller.tick())[-1]
+        assert len(checks) >= 2
+        if expires:
+            assert result['phase'] == 'escalated' and result['reason'] == 'approval-expired'
+            assert c.f.kube.calls == []
+            assert read_slot(c.store, 'used', proposal['proposal_id']) is None
+        else:
+            assert result['phase'] == 'verifying'
+            assert c.f.kube.calls == [True, False]
+            assert read_slot(c.store, 'used', proposal['proposal_id']) is not None
+
     asyncio.run(run())

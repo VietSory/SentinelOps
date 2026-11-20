@@ -6,12 +6,30 @@ No HTTP/LLM/client flag selects or replaces this producer.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.remediation.domain import Blocked, Target, fresh
 from sentinelops.telemetry.core import timestamp
+
+HEALTH_CONSUMER_LAG = 'newer-accepted-health-awaits-consumer'
+HEALTH_CATCHUP_SECONDS = 30
+
+
+async def current_health_checkpoint(journal):
+    """Wait briefly for the scheduled consumer to reach the verified source head."""
+    clock = asyncio.get_running_loop().time
+    deadline = clock() + HEALTH_CATCHUP_SECONDS
+    while True:
+        _, checkpoint = await journal.checkpoint()
+        if await journal.source.next(checkpoint) is None:
+            return checkpoint, True
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return checkpoint, False
+        await asyncio.sleep(min(1, remaining))
 
 
 @dataclass(frozen=True)
@@ -67,6 +85,8 @@ class NativeH4Authority:
             if capture['capture_version'] != 'continuous-incident-evidence/v6' or not (registry and registry.available):
                 reason = 'validated-model-and-physical-deployment-change-required'
             else:
+                state, caught_up = await current_health_checkpoint(self.journal)
+                snapshot = await self.journal.repository.get(request.incident_id)
                 group = next(g for g in result['correlation']['groups'] if g['group_id'] == result['group_id'])
                 affected = group['affected_services']
                 refs = {accepted['capture_ref'], accepted['result_ref']}
@@ -75,8 +95,8 @@ class NativeH4Authority:
                     reason = 'current-incident-revision-does-not-bind-verified-rca'
                 elif any(state['service_states'][service]['availability'] != 'ELIGIBLE' for service in affected):
                     reason = 'current-incident-health-unavailable'
-                elif await self.journal.source.next(state) is not None:
-                    reason = 'newer-accepted-health-awaits-consumer'
+                elif not caught_up:
+                    reason = HEALTH_CONSUMER_LAG
                 else:
                     qualified = True
                     reason = ''
