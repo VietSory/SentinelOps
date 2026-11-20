@@ -76,15 +76,18 @@ class Policy:
     max_surge: int = 0
     cooldown_seconds: int = 600
     verification_seconds: int = 600
-    freshness_seconds: int = 180
+    freshness_seconds: int = 900
     change_window_seconds: int = 600
 
     def __post_init__(self):
+        # The owner chose 900 seconds to give operators time to respond.
+        # Keep 180 valid so historical actions retain their original policy on read.
         if (type(self.enabled) is not bool or self.max_pods != 1 or type(self.max_pods) is not int
             or self.max_surge != 0 or type(self.max_surge) is not int
+            or type(self.freshness_seconds) is not int or self.freshness_seconds not in (180, 900)
             or any(type(getattr(self, k)) is not int or getattr(self, k) != v for k, v in (
                 ('cooldown_seconds', 600), ('verification_seconds', 600),
-                ('freshness_seconds', 180), ('change_window_seconds', 600)))):
+                ('change_window_seconds', 600)))):
             raise ValueError('unsupported payment-rollback/local-v1 bounds')
 
     @property

@@ -1,0 +1,52 @@
+/* The shared filter bar owns control layout, surfaces and responsive wrapping. */
+.incident-filters,
+.incident-filters-controls { display: contents; }
+
+.incident-filters-field {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.incident-filters-field input,
+.incident-filters-field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid var(--baseline);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.incident-filters-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+  color: var(--text);
+}
+
+.incident-filters-summary {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.incident-filters-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.incident-filters-chip { max-width: 100%; min-height: 30px; cursor: pointer; }
+.incident-filters-chip .status-chip__label { overflow-wrap: anywhere; }
+.incident-filters-chip:hover { border-color: var(--baseline); }
+.incident-filters-note { margin: 0 0 8px; font-size: 12px; }
+.incident-filters-note:last-child { margin-bottom: 0; }
+.incident-filters-message { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
+.incident-filters-message strong { color: var(--text-secondary); font-weight: 500; }
+.incident-filters-feedback [hidden] { display: none !important; }
+.incident-filters :disabled { opacity: .55; cursor: not-allowed; }

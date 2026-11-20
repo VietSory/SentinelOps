@@ -68,7 +68,7 @@ test('callback exchanges once, verifies signed nonce/issuer/client and keeps tok
   assert.equal(body.get('grant_type'),'authorization_code'); assert.equal(body.get('code'),'PRIVATE-CODE');
   assert.equal(body.has('client_secret'),false); assert.equal(request.options.headers.Authorization,undefined);
   assert.equal(f.calls[1].url,config.jwks_url);
-  await assert.rejects(() => f.login.complete(callback),/đăng nhập lại/);
+  await assert.rejects(() => f.login.complete(callback),/Sign in again/);
   assert.equal(f.calls.length,2);
 });
 
@@ -88,14 +88,14 @@ test('state, duplicate parameters, provider denial and expired/config-swapped tr
     x => x.callback+'&code=duplicate',x => x.callback+'&error=access_denied',x => x.callback+'#access_token=forged',
     x => x.callback.replace(origin,'https://evil.example')]) {
     const f = fixture(), started = await f.begin();
-    await assert.rejects(() => f.login.complete(modify(started)),/đăng nhập lại/);
+    await assert.rejects(() => f.login.complete(modify(started)),/Sign in again/);
     assert.equal(f.calls.length,0); assert.equal(f.values.size,0);
   }
   for (const patch of [{created_at:now-600001},{created_at:now+6000},{client_id:'other'},
     {redirect_uri:'https://evil.example/ui/callback'},{issuer:'https://evil.example'},{domain:'https://evil.example'}]) {
     const f=fixture(), started=await f.begin();
     f.storage.setItem('sentinelops.pkce.v1',JSON.stringify({...started.transaction,...patch}));
-    await assert.rejects(() => f.login.complete(started.callback),/đăng nhập lại/);
+    await assert.rejects(() => f.login.complete(started.callback),/Sign in again/);
     assert.equal(f.calls.length,0); assert.equal(f.values.size,0);
   }
 });
@@ -104,21 +104,21 @@ test('ID nonce, issuer, audience, expiry or signature mismatch never creates a s
   for (const mutateId of [id => id.nonce='other',id => id.iss='https://evil.example',id => id.aud='other',
     id => id.exp=0,id => id.token_use='access']) {
     const f=fixture({mutateId}), {callback}=await f.begin();
-    await assert.rejects(() => f.login.complete(callback),/đăng nhập lại/); assert.equal(f.values.size,0);
+    await assert.rejects(() => f.login.complete(callback),/Sign in again/); assert.equal(f.values.size,0);
   }
   const f=fixture({mutateTokens:t => t.id_token=t.id_token.slice(0,-5)+'AAAAA'}),{callback}=await f.begin();
-  await assert.rejects(() => f.login.complete(callback),/đăng nhập lại/);
+  await assert.rejects(() => f.login.complete(callback),/Sign in again/);
 });
 
 test('token/provider errors are sanitized, refresh tokens are discarded and pending redirect survives pagehide',async () => {
   const f=fixture({fail:true}),{callback}=await f.begin();
   f.login.suspend(); assert.equal(f.values.size,1);
-  await assert.rejects(() => f.login.complete(callback),e => !e.message.includes('PRIVATE') && /đăng nhập lại/.test(e.message));
+  await assert.rejects(() => f.login.complete(callback),e => !e.message.includes('PRIVATE') && /Sign in again/.test(e.message));
   assert.equal(f.values.size,0);
   for (const mutateTokens of [t => t.token_type='Basic',t => t.expires_in=-1,t => t.access_token='bad',
     t => t.id_token='bad']) {
     const bad=fixture({mutateTokens}),started=await bad.begin();
-    await assert.rejects(() => bad.login.complete(started.callback),/đăng nhập lại/); assert.equal(bad.values.size,0);
+    await assert.rejects(() => bad.login.complete(started.callback),/Sign in again/); assert.equal(bad.values.size,0);
   }
 });
 

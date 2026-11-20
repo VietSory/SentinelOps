@@ -25,8 +25,12 @@ exists in a serving route or command.
 The local policy `payment-rollback/local-v1` binds exact cluster, namespace and
 Deployment UIDs to `sentinelops-b-actions/payment-service`, container `payment`.
 It permits one replica/existing pod, zero surge, no HPA or paused Deployment,
-600-second verification/cooldown, 180-second evidence freshness and a matching
+600-second verification/cooldown, 900-second evidence freshness and a matching
 observed deployment change within 600 seconds before source incident onset.
+The owner chose 900 seconds to give operators time to respond. The validator
+also accepts 180 seconds to read historical actions with their original policy
+and hash; stored actions are not rewritten. Deployment-change receipt uncertainty
+remains capped at 180 seconds, independently of evidence freshness.
 Frozen RCA weights/score/coverage/margin remain unchanged. The adapter uses an
 explicit loopback HTTPS server, CA and private ServiceAccount token; it never
 reads ambient kubeconfig or AWS credentials. JSON Patch tests UID, unmodified
@@ -513,7 +517,7 @@ journal-verified v6 result, an available validated model registry, a matching
 observed change and non-abstained RCA. B can use this producer with the existing
 `RollbackExecutor`; no HTTP/client/provider flag grants this authority. The normal
 known-good approval, enabled policy/kill switch, exact current incident revision,
-180-second freshness, dry-run, durable one-attempt journal, CAS and post-action
+900-second freshness for new policies, dry-run, durable one-attempt journal, CAS and post-action
 verification still apply. Known-good approval must predate the **entire** mutation
 interval. The shipped resume-only worker still creates no new action intents.
 Actual H4 and G6 remain pending real qualified H1/G3/RCA evidence and an observed
@@ -561,7 +565,7 @@ persistent B-owned target in this order:
 2. Approve the known-good image.
 3. Enable the policy.
 4. Deploy and record the bad change.
-5. Let the executor consume the qualified incident within the 180-second freshness bound.
+5. Let the executor consume the qualified incident within the 900-second freshness bound for new policies.
 
 The ordered steps are in [LANE_B_CHECKPOINT §7.5](../delivery/LANE_B_CHECKPOINT.md#75-chuỗi-lệnh-đầucuối-để-gỡ-h1-và-h4).
 

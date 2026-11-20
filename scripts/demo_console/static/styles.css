@@ -1,0 +1,126 @@
+:root {
+  --page: #ffffff;
+  --surface: #ffffff;
+  --subtle: #f5f7fa;
+  --ink: #182230;
+  --secondary: #475467;
+  --line: #dce3ed;
+  --baseline: #a4b2c4;
+  --good: #16724d;
+  --warning: #855200;
+  --critical: #b42318;
+  --blue: #174ea6;
+  --blue-tint: #eef4ff;
+  --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  font: 14px/1.6 system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--page);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+.topbar {
+  min-height: 66px;
+  padding: 12px max(24px, calc((100% - 1132px) / 2));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; font-size: 21px; font-weight: 750; letter-spacing: -1px; }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  margin-right: 8px;
+  color: var(--surface);
+  background: var(--ink);
+  letter-spacing: 0;
+}
+.breadcrumb { color: var(--secondary); font-size: 12px; }
+main { width: min(1180px, 100%); margin: auto; padding: 32px 24px; }
+h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); font-weight: 600; line-height: 1.2; letter-spacing: -1.5px; }
+h2 { font-size: 1.15rem; line-height: 1.35; margin: 0 0 8px; }
+p { margin: 8px 0; }
+.page-heading p, .hint, footer { color: var(--secondary); }
+.context, .hint, footer { font-size: 12px; }
+.warning {
+  background: #fffaeb;
+  border: 1px solid #edcf9d;
+  border-left: 4px solid var(--warning);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin: 24px 0 16px;
+  color: var(--warning);
+}
+.warning p { margin-bottom: 0; }
+.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+#refresh-status { flex: 1; font-size: 12px; color: var(--secondary); }
+.badge {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+  background: var(--blue-tint);
+  color: var(--blue);
+}
+.badge.on, .badge.error { background: #fff2f0; color: var(--critical); }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 22px 0; }
+.card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+}
+.card.active { border-color: var(--warning); }
+.card.recovery.active { border-color: var(--good); }
+.card .description { margin: 0 0 10px; color: var(--secondary); }
+.card .state, pre {
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--subtle);
+  font: 12px/1.6 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.card .state.error { color: var(--critical); }
+.card .match { color: var(--secondary); font-size: 12px; min-height: 1.6em; }
+.card button { margin-top: auto; }
+button {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--blue);
+  color: var(--surface);
+  font: 600 12px/1.4 system-ui, sans-serif;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+button:hover:enabled { border-color: var(--ink); }
+button:focus-visible, summary:focus-visible { outline: 3px solid var(--blue); outline-offset: 4px; }
+button:disabled { background: var(--subtle); color: var(--secondary); border-color: var(--line); cursor: not-allowed; }
+.recovery button:enabled { background: var(--good); }
+.secondary { background: var(--surface); color: var(--ink); border-color: var(--baseline); }
+#result { white-space: pre-wrap; overflow-wrap: anywhere; }
+#result:empty { display: none; }
+#result.error { color: var(--critical); }
+.deployment { padding: 18px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+summary { cursor: pointer; }
+pre { max-height: 340px; overflow: auto; }
+footer { margin-top: 24px; }
+@media (max-width: 950px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) {
+  .topbar { padding-inline: 16px; }
+  main { padding: 24px 16px; }
+  .cards { grid-template-columns: 1fr; }
+  .toolbar { align-items: stretch; flex-direction: column; }
+}

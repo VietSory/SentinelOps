@@ -149,7 +149,7 @@ Nguồn: `src/sentinelops/remediation/authority.py:50`; `src/sentinelops/remedia
 | --- | --- |
 | Enable/kill switch | `Policy.enabled` và callback enable cùng true; mặc định false; kiểm tra lại sát trước transport. |
 | Runbook/target | Chỉ `payment-rollback-known-good/v1`; namespace `sentinelops-b-actions`, Deployment `payment-service`, container `payment`, pin cluster/namespace/Deployment UIDs. |
-| Freshness | RCA as_of, latest health và Deployment observation trong 180 giây, không ở tương lai. |
+| Freshness | RCA as_of, latest health và Deployment observation trong 900 giây với policy mới, không ở tương lai; giữ policy 180 giây để đọc action lịch sử. |
 | Change | Bad change trước onset không quá 600 giây; current image/generation phải khớp; nếu change có uncertainty interval thì cả interval phải được kiểm tra. |
 | Approval | Known-good ledger đúng approver/ref/môi trường/target, tái kiểm chứng raw healthy evidence; approval có trước toàn bộ bad-change interval. |
 | Image | Digest bất biến `@sha256:…`, khác current image và cùng image repository; client không cung cấp image tùy ý. |
@@ -324,7 +324,7 @@ Nguồn: [PRODUCT_SPEC.md](../../docs/architecture/PRODUCT_SPEC.md), §5; [ADR-0
 2. Bucket 12:00–12:01 và 12:01–12:02 có Payment p95 >750 ms, traffic/coverage đủ. Health decision sau watermark của bucket thứ hai có thể ở 12:02:30 và phát `incident_opened`, onset=12:00. Nếu Checkout cũng mở episode phù hợp topology/time thì tham gia group; severity high khi có Checkout, critical chỉ khi Checkout đạt rule 5xx ≥20% hai bucket.
 3. Group membership chốt khi accepted watermark đạt bucket_end 12:04, tương ứng horizon 240 giây từ first onset. `detected_at` là clock chuẩn bị OPEN intent thực tế sau đó, không ghi lùi thành 12:00.
 4. Capture đúng bounded window, change/log/trace/IF có support; RCA không abstain, Payment top, đủ score/coverage/margin. Worker publish `RCA_READY`. Operator có thể đọc explanation nhưng explanation không cấp quyền.
-5. Tích hợp nội bộ được phép tạo Request gắn đúng revision; H4 kiểm tra v6/model/change/current health, executor kiểm tra ledger A, image B/generation `g`, freshness 180 giây, target, enable, lock, cooldown và dry-run. Nếu bất kỳ điều kiện nào fail, dừng nhánh action và ghi reason.
+5. Tích hợp nội bộ được phép tạo Request gắn đúng revision; H4 kiểm tra v6/model/change/current health, executor kiểm tra ledger A, image B/generation `g`, freshness 900 giây với policy mới, target, enable, lock, cooldown và dry-run. Nếu bất kỳ điều kiện nào fail, dừng nhánh action và ghi reason.
 6. Ghi durable intent/dispatch budget rồi chỉ PATCH B→A một lần. Rollout đạt generation `g+1`, pod mới ready; giả sử observer ghi effective_at=12:05:20.
 7. Bucket 12:05–12:06 bị loại vì chồng effective_at. Ba bucket đầy đủ đầu tiên có thể tính là 12:06–12:07, 12:07–12:08, 12:08–12:09; cần đều clear/eligible và đúng latest due accepted bucket lúc quyết định, ví dụ sau 12:09:30. Còn phải quan sát rollout lần cuối và chưa hết 600 giây từ dispatch.
 8. Đủ điều kiện thì action `recovered`; nếu DB down/nguồn dừng/ít traffic/drift hoặc timeout, không báo success và có thể escalated/quarantined. Incident consumer chỉ đóng IER theo bằng chứng source episode recovery và ghi `natural`; không được đọc closure đó thành “controller đã chứng minh causal recovery”.

@@ -121,11 +121,58 @@ def test_policy_rejections_never_dispatch(problem):
         if problem=='abstained': f.authority.value=replace(a,rca=evaluate([],[],{}))
         if problem=='wrong-change': f.authority.value=replace(a,change=replace(a.change,after_image=GOOD))
         if problem=='wrong-generation': f.authority.value=replace(a,change=replace(a.change,after_generation=6))
-        if problem=='stale': f.time[0]+=timedelta(seconds=181)
+        if problem=='stale': f.time[0]+=timedelta(seconds=901)
         if problem=='dryrun': f.kube.deny=True
         if problem=='revision': f.authority.value=replace(a,revision=3)
         result=await f.executor.execute(f.request)
         assert result['phase']=='blocked' and False not in f.kube.calls
+        if problem=='stale': assert result['facts']['reason']=='evidence-stale-or-future'
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('freshness_seconds', [180, 900])
+@pytest.mark.parametrize('age', [-1, 180, 181, 899, 900, 901])
+@pytest.mark.parametrize('source', ['rca', 'health', 'deployment'])
+def test_each_required_observation_obeys_its_policy_freshness(freshness_seconds, age, source):
+    async def run():
+        f=setup()
+        f.executor.policy=replace(f.executor.policy,freshness_seconds=freshness_seconds)
+        # Isolate one observation's age; the other two remain current.
+        if source=='rca': f.time[0]+=timedelta(seconds=age)
+        observed_at=timestamp(f.clock()-timedelta(seconds=age))
+        async def assess(*args,**kwargs):
+            return replace(f.authority.value,
+                latest_health_at=observed_at if source=='health' else timestamp(f.clock()))
+        async def observe():
+            return observation(observed_at=observed_at if source=='deployment' else timestamp(f.clock()))
+        f.authority.assess=assess;f.kube.observe=observe
+        result=await f.executor.execute(f.request)
+        if 0<=age<=freshness_seconds:
+            assert result['phase']=='verifying' and f.kube.calls==[True,False]
+        else:
+            assert result['phase']=='blocked' and f.kube.calls==[]
+            assert result['facts']['reason']=='evidence-stale-or-future'
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('phase', ['prepared', 'verifying'])
+def test_historical_action_cannot_resume_under_a_different_policy(phase):
+    async def run():
+        f=setup();f.executor.policy=replace(f.executor.policy,freshness_seconds=180)
+        if phase=='prepared':
+            f.journal.fail_arm=True
+            with pytest.raises(ConnectionError): await f.executor.execute(f.request)
+            f.journal.fail_arm=False
+        else:
+            await f.executor.execute(f.request)
+        assert f.journal.state['phase']==phase
+        intent=deepcopy(f.journal.state['intent']);calls=list(f.kube.calls)
+        f.executor.policy=replace(f.executor.policy,freshness_seconds=900)
+        result=await f.executor.execute(f.request)
+        assert result['phase']==('blocked' if phase=='prepared' else 'escalated')
+        assert result['facts']['reason']==('prepared-policy-changed' if phase=='prepared' else
+            'inflight-policy-changed-use-original-controller-configuration')
+        assert result['intent']==intent and f.kube.calls==calls
     asyncio.run(run())
 
 

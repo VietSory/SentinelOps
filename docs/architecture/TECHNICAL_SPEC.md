@@ -203,7 +203,7 @@ P95 từ local histogram và AWS log distribution có sai số khác nhau. Sourc
 | Allowed lateness | Local 30 giây; AWS đề xuất 120 giây | Chốt từ source-lag measurement và version theo profile |
 | Minimum feature coverage | 4/5 buckets | Các feature required vẫn phải available theo registry |
 | Minimum traffic | 30 requests/bucket để dùng p95/SLO | Target thử nghiệm; được tune trước freeze, không dùng cho claim production |
-| Maximum current observation age | 180 giây | Chặn auto-action nếu nguồn hiện tại cũ hơn giới hạn; kiểm tra availability ở AWS |
+| Maximum current observation age | 900 giây | Policy mới theo quyết định owner; giữ 180 giây để đọc action lịch sử. Chặn auto-action nếu nguồn hiện tại cũ hơn ngưỡng policy; kiểm tra availability ở AWS |
 
 `observed_at` là thời gian sự kiện/bucket, `available_at` là lúc source có thể cung cấp, `ingested_at` là lúc processor nhận. Inference không được chạy trước feature thực sự available. Finalized bucket không bị sửa âm thầm; late corrections tạo revision riêng cho audit, không backdate alert.
 

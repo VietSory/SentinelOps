@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -16,15 +17,61 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
-from sentinelops.telemetry.core import stable_id
+from sentinelops.telemetry.core import stable_id, timestamp
 
 
-def fixture_envelope(incident, revision, after=0):
+UI_ASSETS = (
+    'app.js','client.js','workspace.js','styles.css',
+    'deeplinks.js','filters.js','summary.js','proposalwatch.js',
+    'deeplinks.css','filters.css','summary.css','proposalwatch.css',
+)
+UI_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+          "img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+FIXTURE_TOKEN = 'fixture-browser-token-not-a-real-secret'*2
+FIXTURE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def fixture_records(now=None):
+    """Shared synthetic feed; a supplied clock keeps local preview filters useful."""
+    now = now or FIXTURE_TIME
+    cases = [
+        ('A', 3, 'escalated', 'high', 5, ['payment-service', 'checkout-service']),
+        ('B', 1, 'incident', 'medium', 35, ['inventory-service']),
+        ('C', 4, 'escalated', 'critical', 80, ['checkout-service']),
+        ('D', 3, 'recovered', 'high', 180, ['payment-service']),
+        ('E', 2, 'recovered', 'medium', 420, ['inventory-service']),
+        ('F', 2, 'incident', 'critical', 720, ['payment-service', 'inventory-service']),
+        ('G', 2, 'degrading', 'high', 1320, ['checkout-service']),
+        ('H', 2, 'recovering', 'low', 1800, ['inventory-service']),
+    ]
+    return [{'incident_id':'INC-FIXTURE-'+name, 'revision':revision, 'state':state,
+             'severity':severity, 'detected_at':timestamp(now-timedelta(minutes=age)),
+             'affected_services':services}
+            for name, revision, state, severity, age, services in cases]
+
+
+def verify_ui_assets(client):
+    for path in ('/ui/', *(f'/ui/assets/{name}' for name in UI_ASSETS)):
+        for method in ('get','head'):
+            response = getattr(client,method)(path)
+            assert response.status_code == 200, f'{method.upper()} {path}: {response.status_code}'
+            expected_type = 'text/html' if path == '/ui/' else 'text/css' if path.endswith('.css') else 'text/javascript'
+            assert response.headers['content-type'].split(';')[0] == expected_type, path
+            assert response.headers['content-security-policy'] == UI_CSP, path
+            assert response.headers['x-content-type-options'] == 'nosniff', path
+    for name in ('index.html','routes.py','private.js','private.css','..%2F..%2Fapi_settings.py'):
+        for method in ('get','head'):
+            response = getattr(client,method)('/ui/assets/'+name)
+            assert response.status_code == 404, name
+    return {'assets_checked':len(UI_ASSETS),'asset_methods':['GET','HEAD'],'strict_csp':True}
+
+
+def fixture_envelope(incident, revision, after=0, *, now=None):
     events = [{'event_id':str(uuid5(NAMESPACE_URL,f'fixture/{incident}/{i}')),'incident_id':incident,'revision':i,'event_type':'incident.revised',
         'lifecycle_stage':'ESCALATED','actor':'fixture-ui-only','reason':'Software fixture, not observed source evidence',
         'recorded_at':'2026-01-01T00:00:00Z'} for i in range(1,revision+1)]
     page = events[:1] if after == 0 and revision>1 else [e for e in events if e['revision']>after]
-    return {'schema_version':'1.0','incident_id':incident,'revision':revision,'recorded_at':'2026-01-01T00:00:00Z',
+    result = {'schema_version':'1.0','incident_id':incident,'revision':revision,'recorded_at':'2026-01-01T00:00:00Z',
         'context':{'availability':'UNKNOWN','lifecycle_stage':'ESCALATED','recovery_source':None,
             'trigger_sources':[{'source':'manual','signal_id':'fixture-ui','emitted_at':'2026-01-01T00:00:00Z',
                                'source_ref':'fixture://ui-only'}],
@@ -36,56 +83,100 @@ def fixture_envelope(incident, revision, after=0):
                 'fact':'<img src=x onerror="window.__evidence_xss=true">','source_ref':'javascript:window.__evidence_xss=true'}]},
         'actor':'fixture-ui-only','reason':'Software fixture, not observed source evidence',
         'timeline':{'events':page,'next_after_revision':page[-1]['revision'] if page and page[-1]['revision']<revision else None}}
+    record = next((row for row in fixture_records(now) if row['incident_id'] == incident), None)
+    if record:
+        result['payload'].update({key:deepcopy(record[key]) for key in
+                                  ('detected_at','state','severity','affected_services')})
+        service = record['affected_services'][0]
+        result['payload']['root_cause_ranking'][0]['service'] = service
+        result['payload']['evidence'][0]['service'] = service
+        stage = {'escalated':'ESCALATED','recovered':'RECOVERED','recovering':'VERIFYING'}.get(record['state'],'OPEN')
+        result['context']['lifecycle_stage'] = stage
+        if record['state'] == 'recovered':
+            result['context'].update(availability='ELIGIBLE', recovery_source='manual')
+        result['context']['trigger_sources'][0]['emitted_at'] = record['detected_at']
+        result['recorded_at'] = record['detected_at']
+        for event in page:
+            event.update(recorded_at=record['detected_at'], lifecycle_stage=stage)
+    if incident == 'INC-FIXTURE-A':
+        # This exact prefix is the UI clock contract, NOT a source-verification claim.
+        result['payload']['evidence'].append({'id':'fixture-rca-clock','type':'timeline','service':None,
+            'observed_at':timestamp((now or FIXTURE_TIME)-timedelta(seconds=30)),
+            'fact':'Source-verified continuous RCA hypotheses; SOFTWARE FIXTURE ONLY, no actual source evidence.',
+            'source_ref':'artifact://manifests/'+'f'*64+'.json'})
+    return result
 
 
-def fixture_explanation(incident, revision):
+def fixture_explanation(incident, revision, *, now=None):
     """Explicit browser contract fixture, never source/model/provider evidence."""
     return {'schema_version':'1.0','incident_id':incident,'revision':revision,
-        'generated_at':'2026-01-01T00:00:00Z','provider':'deterministic-facts/v1','fallback':True,
+        'generated_at':timestamp(now or FIXTURE_TIME),'provider':'deterministic-facts/v1','fallback':True,
         'payload':{'schema_version':'1.0','incident_id':incident,
             'summary':f'Software fixture for revision {revision}; hypotheses are not confirmed causes.',
             'claims':[{'text':'<img src=x onerror="window.__explanation_xss=true">',
                        'evidence_refs':['fixture-evidence-1']}]}}
 
 
-def fixture_actions(incident, revision, cursor=None):
+def fixture_actions(incident, revision, cursor=None, *, now=None):
     reason='<img src=x onerror="window.__action_xss=true">'
+    recorded = timestamp(now or FIXTURE_TIME)
     item={'observation_version':'action-observation/v1','action_id':('2' if cursor else '1')*64,
         'incident_id':incident,'incident_revision':2,'action_revision':3,'runbook':'payment-rollback-known-good/v1',
-        'phase':'escalated','recorded_at':'2026-01-01T00:00:00Z','updated_at':'2026-01-01T00:00:00Z',
+        'phase':'escalated','recorded_at':recorded,'updated_at':recorded,
         'reason':reason,'before_image':'localhost:5001/payment@sha256:'+'b'*64,
         'known_good_image':'localhost:5001/payment@sha256:'+'a'*64,
         'target':{'cluster_uid':'fixture-cluster','namespace':'sentinelops-b-actions','namespace_uid':'fixture-namespace',
                   'deployment':'payment-service','deployment_uid':'fixture-deployment','container':'payment'},
-        'history':[{'revision':i,'phase':phase,'recorded_at':'2026-01-01T00:00:00Z','reason':reason,
+        'history':[{'revision':i,'phase':phase,'recorded_at':recorded,'reason':reason,
                     'event_hash':str(i)*64,'previous_hash':str(i-1)*64 if i>1 else None}
                    for i,phase in enumerate(('prepared','dispatching','escalated'),1)]}
     return {'observation_version':'action-list/v1','incident_id':incident,'incident_revision':revision,
         'items':[item] if revision>=2 else [],'next_cursor':'fixture-actions-2' if revision>=2 and not cursor else None}
 
 
-def fixture_quarantine(action_id):
-    item=fixture_actions('INC-FIXTURE-A',3)['items'][0]
+def fixture_quarantine(action_id, *, now=None):
+    item=fixture_actions('INC-FIXTURE-A',3,now=now)['items'][0]
+    opened = timestamp(now or FIXTURE_TIME)
+    observed = timestamp((now or FIXTURE_TIME)+timedelta(seconds=280))
     payload={'release_version':'manual-quarantine-release/v1','review_ref':'artifact://manifests/'+'d'*64+'.json',
         'action_id':action_id,'action_revision':3,'terminal_event_hash':'3'*64,'target_key':stable_id(item['target']),
-        'opened_at':'2026-01-01T00:00:00Z','observed_at':'2026-01-01T00:04:40Z',
-        'verification_as_of':'2026-01-01T00:04:40Z','last_bucket_end':'2026-01-01T00:04:00Z',
+        'opened_at':opened,'observed_at':observed,
+        'verification_as_of':observed,'last_bucket_end':timestamp((now or FIXTURE_TIME)+timedelta(minutes=4)),
         'before_ref':'artifact://observations/'+'a'*64+'.json','after_ref':'artifact://observations/'+'b'*64+'.json',
         'health_ref':'artifact://manifests/'+'c'*64+'.json','dispatch_authorized':False,'recovery_accepted':False,'ier_mutated':False}
     return {'observation_version':'quarantine-status/v1','action_id':action_id,'action_revision':3,
         'action_phase':'escalated','quarantine_state':'released','resolution':{'status':'RELEASED','resolution_id':'d'*64,
             'action_id':action_id,'operator_actor':'<img src=x onerror=window.__quarantine_xss=true>',
-            'recorded_at':'2026-01-01T00:04:40Z','payload':payload}}
+            'recorded_at':observed,'payload':payload}}
+
+
+def fixture_proposals(now=None):
+    """Synthetic pending review shared by HTTP preview and browser checks.
+
+    Freeze ``now`` for a preview session: polling must not renew its deadline.
+    """
+    now = now or FIXTURE_TIME
+    incident = fixture_envelope('INC-FIXTURE-A',3,now=now)['payload']
+    proposal = {'proposal_version':'runbook-proposal/v1','proposal_id':'a'*64,
+        'incident_id':incident['incident_id'],'incident_revision':3,
+        'runbook_id':'payment-bad-deploy-rollback','catalog_sha256':'c'*64,
+        'executor_runbook':'payment-rollback-known-good/v1','decision':'oncall',
+        'score':.95,'margin':.4,'symptoms':{'severity':incident['severity']},
+        'created_at':timestamp(now-timedelta(seconds=30)),
+        'expires_at':timestamp(now+timedelta(minutes=14)),
+        'current_image':'localhost:5001/payment@sha256:'+'b'*64,
+        'rollback_image':'localhost:5001/payment@sha256:'+'a'*64}
+    return [{'proposal':proposal,'proposal_sha256':stable_id(proposal),'status':'pending',
+        'approval':None,'outcome':None,'current_revision':3,'incident':incident,
+        'review_images':{key:proposal[key] for key in ('current_image','rollback_image')}}]
 
 
 def exercise_fixtures(page, base, output, expect):
-    token = 'fixture-browser-token-not-a-real-secret'*2
+    token = FIXTURE_TOKEN
     outage = {'active':False,'actions':False,'quarantine':False,'explanation':False,'proposals':False,
               'read_scope':False,'expired':False,'identity_provider':False,'model_available':False}
-    records = [{'incident_id':'INC-FIXTURE-A','revision':3,'state':'escalated','severity':'high','detected_at':'2026-01-01T00:00:00Z',
-        'affected_services':['payment-service','checkout-service']},
-        {'incident_id':'INC-FIXTURE-B','revision':1,'state':'incident','severity':'medium','detected_at':'2026-01-01T01:00:00Z',
-        'affected_services':['inventory-service']}]
+    # The two-row subset deliberately exercises pagination and empty state filters.
+    records = fixture_records()[:2]
     def reply(route):
         assert route.request.method == 'GET', 'browser fixtures must not write to the API'
         url = urlsplit(route.request.url); query = parse_qs(url.query)
@@ -128,7 +219,7 @@ def exercise_fixtures(page, base, output, expect):
         if url.path == '/v1/runbook-proposals':
             # Without this the proposals panel reached the real test server and,
             # depending on timing, added a second alert inside #detail-pane.
-            assert route.request.method == 'GET' and query.get('incident_id')
+            assert route.request.method == 'GET' and query.get('limit') == ['100']
             if outage['proposals']:
                 route.fulfill(status=503,json={'code':'proposal_store_unavailable','request_id':'fixture-proposal-outage'});return
             route.fulfill(json={'items':[],'has_more':False});return
@@ -141,7 +232,12 @@ def exercise_fixtures(page, base, output, expect):
     page.route('**/ready',reply);page.route('**/ready/incidents',reply)
     page.route('**/v1/incidents**',reply);page.route('**/v1/actions/**',reply)
     page.route('**/v1/runbook-proposals**',reply)
-    page.goto(base+'/ui/',wait_until='networkidle')
+    page.emulate_media(color_scheme='dark')
+    page.goto(base+'/ui/#lang=vi',wait_until='networkidle')
+    expect(page.locator('html')).to_have_attribute('lang','en')
+    expect(page.locator('html')).to_have_css('color-scheme','light')
+    expect(page.locator('html')).to_have_css('background-color','rgb(255, 255, 255)')
+    expect(page.get_by_role('heading',name='Incident workspace',exact=True)).to_be_visible()
     page.locator('#nav-explanation').click()
     expect(page.locator('#notice')).to_contain_text('Connect to your workspace, then choose an incident')
     expect(page.locator('#api-token')).to_be_focused()
@@ -152,6 +248,13 @@ def exercise_fixtures(page, base, output, expect):
     expect(page.locator('#notice')).to_contain_text('Token was rejected')
     page.locator('#api-token').fill(token); page.get_by_role('button',name='Connect',exact=True).click()
     expect(page.locator('[data-testid=incident-row]')).to_have_count(1)
+    expect(page.locator('.incident-summary__card--loaded dd')).to_have_text('1')
+    expect(page.locator('.incident-summary__metric--high dd')).to_have_text('1')
+    expect(page.locator('#slot-filters .incident-filters')).to_have_count(1)
+    expect(page.locator('#slot-summary .incident-summary')).to_have_count(1)
+    expect(page.locator('#slot-deeplinks .incident-deeplinks')).to_have_count(1)
+    expect(page.locator('#slot-proposalwatch > *')).to_have_count(1)
+    expect(page.locator('#metric-loaded')).to_have_count(0)
     expect(page.locator('#model-status')).to_have_text('Unavailable')
     assert page.locator('#api-token').input_value() == ''
     assert token not in page.locator('body').inner_text()
@@ -159,17 +262,27 @@ def exercise_fixtures(page, base, output, expect):
     page.locator('#nav-actions').click()
     expect(page.locator('#notice')).to_contain_text('Choose an incident from the feed')
     page.locator('#load-more').click(); expect(page.locator('[data-testid=incident-row]')).to_have_count(2)
+    expect(page.locator('.incident-summary__card--loaded dd')).to_have_text('2')
+    search = page.get_by_role('searchbox',name='Search incident ID')
+    search.fill('INC-FIXTURE-B')
+    expect(page.locator('[data-testid=incident-row]')).to_have_count(1)
+    expect(page.get_by_role('button',name='Open INC-FIXTURE-B, revision 1',exact=True)).to_be_visible()
+    search.fill('');expect(page.locator('[data-testid=incident-row]')).to_have_count(2)
+    page.get_by_role('combobox',name='Severity',exact=True).select_option('high')
+    expect(page.locator('[data-testid=incident-row]')).to_have_count(1)
+    page.get_by_role('combobox',name='Severity',exact=True).select_option('')
+    expect(page.locator('[data-testid=incident-row]')).to_have_count(2)
     page.locator('#state-filter').select_option('recovered'); page.get_by_role('button',name='Apply filters').click()
     expect(page.get_by_text('No incidents in this view',exact=True)).to_be_visible()
     page.locator('#state-filter').select_option(''); page.get_by_role('button',name='Apply filters').click()
     page.get_by_role('button',name='Open INC-FIXTURE-A, revision 3',exact=True).click()
     expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
     proposals = page.get_by_test_id('runbook-proposals')
-    expect(proposals).to_contain_text('Không có đề xuất cho revision này.')
+    expect(proposals).to_contain_text('No proposals for this revision.')
     expect(proposals.get_by_role('alert')).to_have_count(0)
     expect(page.get_by_text('Diagnostic qualification not exposed',exact=True)).to_be_visible()
     page.locator('.reference').click()
-    expect(page.locator('.evidence-body p')).to_have_text('<img src=x onerror="window.__evidence_xss=true">')
+    expect(page.locator('details[data-evidence-id="fixture-evidence-1"] .evidence-body p')).to_have_text('<img src=x onerror="window.__evidence_xss=true">')
     assert page.evaluate('window.__evidence_xss') is None
     assert page.locator('#detail-pane img').count() == 0
     assert '1970' not in page.locator('#detail-pane').inner_text()
@@ -186,13 +299,13 @@ def exercise_fixtures(page, base, output, expect):
     outage['explanation']=True;page.get_by_role('button',name='Reload explanation',exact=True).click()
     expect(page.locator('#detail-pane .detail-content [role=alert]')).to_contain_text('Explanation is unavailable')
     # Independent sections can fail together; each assertion must read its own alert.
-    outage['proposals']=True;proposals.get_by_role('button',name='Tải lại đề xuất',exact=True).click()
-    expect(proposals.get_by_role('alert')).to_contain_text('Không đọc được store proposal')
+    outage['proposals']=True;proposals.get_by_role('button',name='Reload proposals',exact=True).click()
+    expect(proposals.get_by_role('alert')).to_contain_text('The proposal store is unavailable')
     expect(page.locator('#detail-pane [role=alert]')).to_have_count(2)
     expect(page.locator('#detail-pane .detail-content [role=alert]')).to_contain_text('Explanation is unavailable')
-    outage['proposals']=False;proposals.get_by_role('button',name='Tải lại đề xuất',exact=True).click()
+    outage['proposals']=False;proposals.get_by_role('button',name='Reload proposals',exact=True).click()
     expect(proposals.get_by_role('alert')).to_have_count(0)
-    expect(proposals).to_contain_text('Không có đề xuất cho revision này.')
+    expect(proposals).to_contain_text('No proposals for this revision.')
     expect(page.locator('.explanation-summary')).to_have_count(0)
     expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
     outage['explanation']=False;page.get_by_role('button',name='Load explanation',exact=True).click()
@@ -237,6 +350,7 @@ def exercise_fixtures(page, base, output, expect):
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     page.get_by_role('button',name='Open INC-FIXTURE-A, revision 3',exact=True).click()
     expect(page.locator('#revision-input')).to_have_value('3')
+    expect(page.locator('#detail-title')).to_be_focused()
     expect(page.locator('#detail-title')).to_be_in_viewport()
     page.get_by_role('button',name='Explanation',exact=True).click()
     expect(page.locator('.explanation-summary')).to_contain_text('revision 3')
@@ -251,11 +365,13 @@ def exercise_fixtures(page, base, output, expect):
     page.screenshot(path=str(output/'fixture-actions-mobile.png'),full_page=True)
     outage['active'] = True; page.locator('#refresh').click()
     expect(page.locator('#list-error')).to_contain_text('unavailable')
+    expect(page.locator('.incident-summary__card--loaded dd')).to_have_text('—')
     expect(page.locator('#store-status')).to_have_text('Unavailable')
     page.locator('#disconnect').click()
     expect(page.locator('#connect-title')).to_be_visible()
     assert page.locator('[data-testid=incident-row]').count() == 0
     assert page.locator('#detail-title').count() == 0
+    expect(page.locator('#slot-proposalwatch > *')).to_have_count(0)
     outage['active'] = False
     outage['model_available'] = True  # Readiness fixture only: no scores or approved model are fabricated.
     for problem, notice in (('identity_provider',None),('read_scope','cannot read incidents'),('expired','Token was rejected')):
@@ -276,6 +392,7 @@ def exercise_fixtures(page, base, output, expect):
             expect(page.locator('[data-testid=incident-row]')).to_have_count(0)
             expect(page.locator('#detail-title')).to_have_count(0)
             expect(page.locator('.explanation-summary')).to_have_count(0)
+            expect(page.locator('#slot-proposalwatch > *')).to_have_count(0)
         else:
             expect(page.locator('#readiness-error')).to_contain_text('Authentication is unavailable')
             expect(page.locator('#store-status')).to_have_text('Unknown')
@@ -373,6 +490,8 @@ def main():
     if parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or not parsed.port or parsed.path not in ('','/') or parsed.query or parsed.fragment or parsed.username is not None:
         raise ValueError('browser verification requires the explicit loopback API origin')
     args.output.mkdir(parents=True,exist_ok=False)
+    with httpx.Client(base_url=args.base_url,trust_env=False) as client:
+        asset_checks = verify_ui_assets(client)
     if 'PLAYWRIGHT_NODEJS_PATH' not in os.environ and shutil.which('node'):
         os.environ['PLAYWRIGHT_NODEJS_PATH'] = shutil.which('node')
     from playwright.sync_api import sync_playwright, expect
@@ -388,7 +507,7 @@ def main():
                 os.environ.get('SENTINELOPS_OPERATOR_TOKEN') or os.environ.get('SENTINELOPS_API_TOKEN') or
                 args.token_file.read_text().strip(),expect)
             if errors: raise ValueError('browser emitted unhandled script errors')
-            result.update(status='PASS',page_errors=errors,
+            result.update(status='PASS',page_errors=errors,asset_checks=asset_checks,
                 verifier_commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
                 verifier_worktree_dirty=bool(subprocess.check_output(['git','status','--porcelain'])))
             (args.output/'verification.json').write_text(json.dumps(result,indent=2)+'\n')

@@ -35,8 +35,9 @@ class ReviewJournal:
         return deepcopy(result)
 
 
-async def fixture(tmp_path):
-    f=setup();await f.executor.execute(f.request)
+async def fixture(tmp_path, *, freshness_seconds=900):
+    f=setup();f.executor.policy=replace(f.executor.policy,freshness_seconds=freshness_seconds)
+    await f.executor.execute(f.request)
     await f.journal.transition(f.journal.state['action_id'],f.journal.state['revision'],'escalated',f.journal.state['facts'])
     f.journal.state['last_event_hash']='e'*64
     journal=ReviewJournal(f);journal.dispatch=f.clock();f.time[0]+=timedelta(seconds=600)
@@ -50,9 +51,10 @@ async def fixture(tmp_path):
     return f,journal,review
 
 
-def test_two_observations_and_current_health_release_only_the_claim_with_idempotent_retry(tmp_path):
+@pytest.mark.parametrize('freshness_seconds', [180, 900])
+def test_two_observations_and_current_health_release_only_the_claim_with_idempotent_retry(tmp_path, freshness_seconds):
     async def run():
-        f,j,review=await fixture(tmp_path);before=deepcopy(f.journal.state)
+        f,j,review=await fixture(tmp_path,freshness_seconds=freshness_seconds);before=deepcopy(f.journal.state)
         opened=await review.open(before['action_id'])
         assert j.active and j.calls==[]
         pending=await review.release(opened['review_ref'],key='review-idempotency-0001')

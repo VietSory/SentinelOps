@@ -89,6 +89,25 @@ def test_known_good_must_predate_entire_observed_mutation_interval(offset):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize('interval_seconds', [180, 181])
+def test_receipt_uncertainty_stays_capped_at_180_with_900_second_freshness(interval_seconds):
+    from sentinelops.contracts import utc_time
+    async def run():
+        f=executor_fixture();assessment=f.authority.value
+        assert f.executor.policy.freshness_seconds==900
+        upper=utc_time(assessment.change.observed_at)
+        bounded=replace(assessment,change=replace(assessment.change,
+            not_before=timestamp(upper-timedelta(seconds=interval_seconds))))
+        before=await f.kube.observe();good=await f.executor.registry.resolve(f.request,TARGET,now=f.clock())
+        good=replace(good,approved_at=timestamp(upper-timedelta(seconds=300)))
+        if interval_seconds==180:
+            qualify(bounded,f.request,before,good,f.executor.policy,POLICY,now=f.clock())
+        else:
+            with pytest.raises(Blocked,match='^deployment-change-interval-not-qualified$'):
+                qualify(bounded,f.request,before,good,f.executor.policy,POLICY,now=f.clock())
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize('version,model,abstained,availability,projected,newer,reason',[
     ('continuous-incident-evidence/v6',True,False,'ELIGIBLE',True,False,None),
     ('continuous-incident-evidence/v6',True,False,'UNKNOWN',True,False,'current-incident-health-unavailable'),

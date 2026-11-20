@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Fault console · SentinelOps</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand"><span class="brand-mark" aria-hidden="true">S</span>SentinelOps</span>
+    <span class="breadcrumb">Developer tools / Fault console</span>
+  </header>
+  <main>
+    <div class="page-heading">
+      <h1>Fault console</h1>
+      <p>Monitor fault modes for Payment and Inventory and run authorized development scenarios.</p>
+      <p class="context">Expected target: EKS <strong>sentinelops-dev</strong> · context <strong>sentinelops-demo</strong> · namespace <strong>sentinelops-b-actions</strong></p>
+    </div>
+    <aside class="warning" role="note">
+      <strong>Development only. Fault injection disrupts live services.</strong>
+      <p>Verify the cluster and namespace of your port-forward before enabling actions. The console cannot verify the cluster from a URL.</p>
+    </aside>
+    <section class="toolbar" aria-label="Connection and action mode">
+      <strong id="mode" class="badge">Checking configuration…</strong>
+      <span id="refresh-status" role="status">Reading current fault modes…</span>
+      <button id="refresh" type="button" class="secondary">Refresh</button>
+    </section>
+    <p class="hint">Refreshes every 5 seconds. The “healthy” fault mode applies to the instance reached by the request. Check image, pod and service health separately.</p>
+    <p id="result" role="status" aria-live="polite"></p>
+    <section id="cards" class="cards" aria-label="Fault scenarios" aria-busy="true"></section>
+    <section class="deployment" aria-labelledby="deployment-title">
+      <h2 id="deployment-title">Image deployment</h2>
+      <p id="deployment-status">Script status unavailable.</p>
+      <p class="hint">Keep the console open while the script runs. Verify service recovery separately from the script exit code and log.</p>
+      <details><summary>Latest script log (up to 8 KiB)</summary><pre id="deployment-log">No log output yet.</pre></details>
+    </section>
+    <footer>Local access at 127.0.0.1 · No sign-in · Runbook: scripts/demo_console/README.md</footer>
+  </main>
+</body>
+</html>

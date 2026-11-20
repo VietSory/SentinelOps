@@ -1,0 +1,132 @@
+/* Incident presentation; chips and disclosures use the shared shell utilities. */
+#incident-list { container-type: inline-size; }
+#incident-list .incident-queue { gap: 5px; padding: 8px 12px; }
+#incident-list .incident-link--compact {
+  --incident-severity: var(--baseline);
+  position: relative;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "heading time" "services services" "badges badges";
+  gap: 5px 8px;
+  padding: 9px 10px 9px 14px;
+  border-radius: 8px;
+  color: var(--text);
+}
+#incident-list .incident-link--compact::before {
+  content: "";
+  position: absolute;
+  inset: 6px auto 6px 0;
+  width: 4px;
+  border-radius: 0 3px 3px 0;
+  background: var(--incident-severity);
+}
+#incident-list [data-severity=low] { --incident-severity: var(--good); }
+#incident-list [data-severity=medium] { --incident-severity: var(--warning); }
+#incident-list [data-severity=high] { --incident-severity: var(--serious); }
+#incident-list [data-severity=critical] { --incident-severity: var(--critical); }
+#incident-list .incident-link--compact.selected {
+  box-shadow: none;
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+#incident-list .queue-heading { grid-area: heading; justify-content: flex-start; min-width: 0; }
+#incident-list .queue-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+#incident-list .queue-chevron { margin-left: auto; font-size: 17px; }
+#incident-list .row-time {
+  grid-area: time;
+  align-self: center;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+#incident-list .row-services { grid-area: services; gap: 4px; }
+#incident-list .queue-badges { grid-area: badges; gap: 5px; align-items: center; }
+.incident-service {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--subtle);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.incident-services-unknown { color: var(--text-secondary); font-size: 11px; }
+
+.incident-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 10px 0; }
+.detail-header .incident-title-row h2 { flex: 1 1 220px; min-width: 0; margin: 0; font-size: clamp(18px, 2vw, 24px); }
+.incident-title-row #slot-deeplinks { flex: 0 1 auto; min-width: 0; margin-left: auto; }
+.incident-essentials { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 20px; margin: 14px 0 0; }
+.incident-essentials > div { min-width: 0; }
+.incident-essentials dt { margin-bottom: 4px; color: var(--text-secondary); font-size: 11px; }
+.incident-essentials dd { margin: 0; color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.incident-affected-services { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.incident-essentials time { display: block; }
+.incident-essentials time + time { margin-top: 2px; color: var(--text-secondary); font-size: 11px; }
+.detail-header .revision-controls { margin-top: 12px; }
+
+#slot-deeplinks:has(.incident-deeplinks[hidden]) { display: none; }
+.incident-deeplinks { color: var(--text); }
+.incident-deeplinks[hidden] { display: none; }
+.incident-deeplinks-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.incident-deeplinks-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  max-width: 100%;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.incident-deeplinks-link:hover { border-color: var(--accent); background: var(--subtle); }
+.incident-deeplinks-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.incident-deeplinks-menu { position: relative; }
+.incident-deeplinks-menu > summary { list-style: none; cursor: pointer; }
+.incident-deeplinks-menu > summary::-webkit-details-marker { display: none; }
+.incident-deeplinks-options {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  gap: 4px;
+  width: min(280px, 74vw);
+  max-height: 260px;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.incident-deeplinks-options .incident-deeplinks-link { justify-content: flex-start; text-align: left; font-weight: 500; }
+
+@container (min-width: 560px) {
+  #incident-list .incident-link--compact {
+    grid-template-columns: minmax(130px, 1fr) minmax(100px, 1fr) auto auto;
+    grid-template-areas: "heading services badges time";
+    align-items: center;
+    gap: 10px;
+  }
+}
+@media (max-width: 480px) {
+  .incident-essentials { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .incident-title-row #slot-deeplinks { margin-left: 0; }
+  .incident-deeplinks-link { min-height: 36px; }
+}

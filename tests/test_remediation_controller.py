@@ -12,6 +12,7 @@ import pytest
 
 from sentinelops.remediation import controller as module
 from sentinelops.remediation import matching as real_matching
+from sentinelops.contracts import utc_time
 from sentinelops.incidents.rca_replay import group_severity as original_group_severity
 from sentinelops.remediation.controller import AutoRunbookController
 from sentinelops.remediation.domain import Blocked, RUNBOOK
@@ -221,9 +222,9 @@ def test_approval_invalidates_revision_target_ledger_and_expiry(tmp_path, monkey
         expected_calls = [] if timing == 'before-execute' else [True]
         assert c.f.kube.calls == expected_calls
         if timing == 'before-patch':
-            # RCA freshness may reject first when the clock advances by TTL;
+            # Dispatch's 600-second deadline rejects before the approval hook;
             # the controller's durable approval outcome still reports expiry.
-            assert results[-1]['facts']['reason'] == ('evidence-stale-or-future' if change == 'expired' else expected)
+            assert results[-1]['facts']['reason'] == ('dispatch-expired-before-send' if change == 'expired' else expected)
             assert results[-1]['facts']['dispatch_cancelled_before_send'] is True
         assert read_slot(c.store, 'approval', proposal['proposal_id']) == receipt
         assert c.store.read('artifact://manifests/' + stable_id(proposal) + '.json') == proposal
@@ -501,6 +502,9 @@ def test_restart_cancels_prepared_intent_and_rejects_corrupt_decision(tmp_path, 
 def test_approval_failures_cannot_dispatch(tmp_path, monkeypatch, problem):
     async def run():
         c = fixture(tmp_path, monkeypatch)
+        # RCA is already 2 seconds old when proposed, so it can become stale
+        # while the proposal is still within its independent 900-second TTL.
+        if problem == 'stale': c.f.time[0] += timedelta(seconds=2)
         proposal = (await c.controller.tick())[0]
         pid = proposal['proposal_id']
         approve(c, 'reject' if problem == 'reject' else 'approve')
@@ -521,14 +525,18 @@ def test_approval_failures_cannot_dispatch(tmp_path, monkeypatch, problem):
         if problem == 'revision': c.snapshot['revision'] += 1
         if problem == 'severity': c.snapshot['payload']['severity'] = 'high'
         if problem == 'decision': c.controller.catalog['catalog_version'] = 'changed'
-        if problem == 'stale': c.f.time[0] += timedelta(seconds=181)
+        if problem == 'stale': c.f.time[0] += timedelta(seconds=899)
         if problem == 'decision':
             async def changed(snapshot): return c.controller._engineer('changed')
             monkeypatch.setattr(c.controller, '_decide', changed)
         results = await c.controller.tick()
         assert c.f.kube.calls == []
         if problem == 'expired': assert results[0]['reason'] == 'approval-expired'
-        if problem == 'stale': assert results[0]['reason'] == 'approval-after-evidence-freshness'
+        if problem == 'stale':
+            assert c.f.clock() < utc_time(proposal['expires_at'])
+            assert (c.f.clock() - utc_time(c.f.authority.value.rca['as_of'])).total_seconds() == 901
+            assert results[0]['reason'] == 'approval-after-evidence-freshness'
+            assert c.f.journal.state['facts']['reason'] == 'evidence-stale-or-future'
         await AutoRunbookController(**c.kwargs).tick()
         assert c.f.kube.calls == []
     asyncio.run(run())

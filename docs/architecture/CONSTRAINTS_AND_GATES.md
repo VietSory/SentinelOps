@@ -112,7 +112,7 @@ Severity policy đề xuất: `critical` khi Checkout ≥20% 5xx trong hai eligi
 | Correlation window | 120s với dependency/trace/change support | G4 development, trước holdout |
 | RCA weights | 0.25 anomaly + 0.20 time + 0.25 dependency + 0.15 log + 0.15 change | G4 development, trước holdout |
 | Action eligibility | RCA ≥0.75, top-2 margin ≥0.15, evidence/policy đủ | G6 development, trước final demo/evaluation |
-| Action freshness | Latest required observation ≤180s | G6/G7; nếu source lag không đáp ứng thì block |
+| Action freshness | Latest required observation ≤900s | Policy mới theo quyết định owner; giữ 180s để đọc action lịch sử; G6/G7 block nếu source lag vượt ngưỡng policy |
 | Verify | Ba post-action eligible buckets liên tiếp, timeout 10m | G6 |
 | Cooldown/attempt | 10m; một auto-attempt/incident/target | G6 |
 | Random seed | 42 cho primary reproducibility; supplementary seeds ghi riêng | G2/G3 |
