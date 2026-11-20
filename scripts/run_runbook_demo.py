@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import asyncpg
 
-from sentinelops.remediation.domain import Policy, Target, image_digest
+from sentinelops.remediation.domain import KubernetesUnavailable, Policy, Target, image_digest
 from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.kubernetes import LocalKubernetes
 from sentinelops.remediation.reader import ActionReader
@@ -45,9 +45,16 @@ RUNBOOK_ID = 'payment-bad-deploy-rollback'
 async def wait_for(read, accept, *, timeout, poll, clock, sleep):
     deadline = clock() + timeout
     while True:
-        value = await read()
-        if accept(value):
-            return value
+        try:
+            value = await read()
+        except KubernetesUnavailable:
+            # A rolling Deployment can change between the ReplicaSet and Pod reads, which the
+            # client reports as unavailable. Retry until the deadline; re-raise only then.
+            if deadline - clock() <= 0:
+                raise
+        else:
+            if accept(value):
+                return value
         remaining = deadline - clock()
         if remaining <= 0:
             raise TimeoutError('runbook demo evidence deadline exceeded')

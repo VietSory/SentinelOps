@@ -529,3 +529,34 @@ def test_fault_wait_uses_inflight_inventory_validation(tmp_path):
     asyncio.run(backend.deployment())
     asyncio.run(backend.deployment(inflight=True))
     assert calls == [{'before_dispatch': True}, {'before_dispatch': False}]
+
+
+def test_wait_for_retries_transient_kubernetes_unavailable_then_succeeds():
+    # A rolling Deployment makes observe() report KubernetesUnavailable between reads;
+    # the demo must keep waiting instead of aborting right after its own PATCH.
+    from sentinelops.remediation.domain import KubernetesUnavailable
+    from scripts.run_runbook_demo import wait_for
+    calls, t = [], [0.0]
+    async def read():
+        calls.append(1)
+        if len(calls) < 3:
+            raise KubernetesUnavailable('deployment-changed-during-inventory-retry-snapshot')
+        return {'status': 'CHANGE_OBSERVED'}
+    async def sleep(seconds):
+        t[0] += seconds
+    value = asyncio.run(wait_for(read, lambda v: v['status'] == 'CHANGE_OBSERVED', timeout=30, poll=2,
+                                 clock=lambda: t[0], sleep=sleep))
+    assert value == {'status': 'CHANGE_OBSERVED'} and len(calls) == 3
+
+
+def test_wait_for_reraises_kubernetes_unavailable_at_the_deadline():
+    from sentinelops.remediation.domain import KubernetesUnavailable
+    from scripts.run_runbook_demo import wait_for
+    t = [0.0]
+    async def read():
+        raise KubernetesUnavailable('kubernetes-transport-unavailable')
+    async def sleep(seconds):
+        t[0] += seconds
+    with pytest.raises(KubernetesUnavailable):
+        asyncio.run(wait_for(read, lambda v: True, timeout=6, poll=2, clock=lambda: t[0], sleep=sleep))
+    assert t[0] >= 6
