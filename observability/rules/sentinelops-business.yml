@@ -1,6 +1,6 @@
 # Reusable HTTP business metrics, aggregated across routes and replicas by service.
 # These describe the current window, not the health worker's persistent SLO state.
-# Dashboard availability SLO: 0.995 (99.5%); p95 latency SLO: 1000 ms.
+# Dashboard availability SLO: 0.995 (99.5%); p95 latency SLO: 750 ms, matching configs/slo_health_policy.json.
 # Success means non-5xx, consistent with the existing request-counter error ratio.
 # RETENTION LIMIT: EKS Prometheus uses emptyDir, currently with only ~3h of data;
 # a restart loses its history. Windows are limited to 6h (never 24h) because of

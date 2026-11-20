@@ -6,6 +6,7 @@ accepts recovery, writes an IER, or grants permission to execute an action.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import re
 
@@ -44,17 +45,27 @@ def validate_current_support(verdict, *, source, environment, effective_at, as_o
         raise Blocked('invalid-recovery-verdict') from None
 
 
+@dataclass
+class _VerifiedRecoveryPrefix:
+    """An in-process checkpoint created only by replaying pre-action ledger rows."""
+
+    effective_at: datetime
+    checkpoint: dict | None = None
+    verified_batches: int = 0
+    latest_receipt: datetime | None = None
+
+
 async def verify_post_action_health(
     source: HealthLedgerReader, *, effective_at: datetime, as_of: datetime,
     expected_environment: str, max_batches: int = 128, require_current: bool = False,
+    _prefix: _VerifiedRecoveryPrefix | None = None,
 ) -> dict:
     """Reproduce a bounded, deterministic verification at an explicit cutoff.
 
-Always begin at the source origin: no caller-supplied cursor/streak can skip raw
-verification or carry healthy pre-action observations into the result. A future
-controller may persist a separately verified checkpoint; this v1 does not.
-Database/artifact failures propagate so an executor cannot mistake them for
-healthy observations. Exceeding the read budget is explicitly inconclusive.
+The first verification for an action begins at the origin. The executor can
+reuse its own verified pre-action prefix in the same process. Every post-action
+bucket is re-read and reproduced at each cutoff. Database/artifact failures
+propagate. Exceeding the read budget is explicitly inconclusive.
 """
     # timestamp rejects naive/non-UTC clocks rather than silently converting.
     effective = utc_time(timestamp(effective_at))
@@ -70,6 +81,12 @@ healthy observations. Exceeding the read budget is explicitly inconclusive.
     policy_hash = stable_id(source.policy)
     support, checkpoint, last_end = [], None, None
     reason = 'awaiting-post-action-telemetry'
+    verified_batches = 0
+    if (_prefix is not None and _prefix.effective_at == effective and _prefix.checkpoint is not None
+        and _prefix.latest_receipt <= available_by and _prefix.verified_batches <= max_batches):
+        checkpoint = _prefix.checkpoint
+        last_end = utc_time(checkpoint['last_bucket_end'])
+        verified_batches = _prefix.verified_batches
 
     def result(status, why):
         return {
@@ -83,7 +100,7 @@ healthy observations. Exceeding the read budget is explicitly inconclusive.
             'recovery_accepted': False,
         }
 
-    for _ in range(max_batches):
+    for _ in range(verified_batches, max_batches):
         verified = await source.next(checkpoint)
         if verified is None:
             break
@@ -99,12 +116,19 @@ healthy observations. Exceeding the read budget is explicitly inconclusive.
             raise ValueError('verification source skipped, duplicated or reordered a bucket')
         # Receipt time, not just event time, determines whether evidence was
         # available to this decision. Late evidence cannot cure a timed-out run.
-        if end > available_by or at(row['recorded_at']) > available_by:
+        recorded_at = at(row['recorded_at'])
+        if end > available_by or recorded_at > available_by:
             break
         checkpoint = {'last_bucket_end': batch['bucket_end'],
             'last_batch_ref': row['manifest_ref'], 'service_states': verified['service_states'],
             'source': {'health_stream_id': source.stream_id}}
         last_end = end
+        verified_batches += 1
+        if (_prefix is not None and _prefix.effective_at == effective
+            and end <= effective and verified_batches > _prefix.verified_batches):
+            _prefix.checkpoint = checkpoint
+            _prefix.verified_batches = verified_batches
+            _prefix.latest_receipt = max(_prefix.latest_receipt or recorded_at, recorded_at)
         if end - timedelta(seconds=60) < effective:
             # Exclude the entire bucket that overlaps the action, even when
             # its health decision or recovery_confirmed event came afterwards.

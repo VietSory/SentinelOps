@@ -19,7 +19,7 @@ from sentinelops.incidents.rca import validate_policy
 from sentinelops.remediation.authority import qualify
 from sentinelops.remediation.domain import ActionConflict, Blocked, KubernetesUnavailable, Request, RUNBOOK
 from sentinelops.remediation.registry import deployment_from_projection
-from sentinelops.remediation.verification import verify_post_action_health, validate_current_support
+from sentinelops.remediation.verification import _VerifiedRecoveryPrefix, verify_post_action_health, validate_current_support
 from sentinelops.telemetry.core import stable_id, timestamp
 
 logger=logging.getLogger('sentinelops-remediation')
@@ -28,11 +28,14 @@ logger=logging.getLogger('sentinelops-remediation')
 class LedgerRecovery:
     def __init__(self,source,target,*,environment='local'):
         self.source,self.target,self.environment=source,target,environment
+        self._prefix=None
 
     async def verify(self,*,effective_at,now,target):
         if target!=self.target: raise Blocked('recovery-health-target-mismatch')
+        if self._prefix is None or self._prefix.effective_at != effective_at:
+            self._prefix=_VerifiedRecoveryPrefix(effective_at)
         return await verify_post_action_health(self.source,effective_at=effective_at,as_of=now,
-            expected_environment=self.environment,max_batches=10000,require_current=True)
+            expected_environment=self.environment,max_batches=10000,require_current=True,_prefix=self._prefix)
 
 
 class RollbackExecutor:

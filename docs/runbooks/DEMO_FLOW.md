@@ -401,7 +401,7 @@ k logs deployment/remediation-controller -c remediation-controller --since=10m -
 k get deployments
 ```
 
-4. Chờ **3 bucket khỏe/eligible** được chấp nhận sau action; verifier có deadline **600 giây**. Kiểm incident hồi phục/đóng, action `recovered` và `telemetry_verified` nếu đã thực thi. Phân biệt image Ready, hết 5xx, SLO theo cửa sổ và kết quả verifier; budget 6h không bắt buộc trở lại 100% ngay.
+4. Chờ **3 bucket khỏe/eligible** được chấp nhận sau action; verifier chỉ dùng telemetry trong **600 giây từ `effective_at`**, còn executor có **1200 giây từ dispatch** để hoàn tất source read và ghi outcome. Kiểm incident hồi phục/đóng, action `recovered` và `telemetry_verified` nếu đã thực thi. Phân biệt image Ready, hết 5xx, SLO theo cửa sổ và kết quả verifier; budget 6h không bắt buộc trở lại 100% ngay.
 5. Ghi lại giờ T0/gỡ lỗi, incident ID/revision, proposal ID, `RCA.as_of`, approval/outcome/action, image cuối và ảnh Grafana/trace của lượt vừa chạy. Giữ artifact, log, PVC và lịch sử; không xóa receipt/checkpoint để làm sạch demo.
 6. Khi đã xác nhận hồi phục, Ctrl-C **đúng các terminal port-forward** đã mở, logout UI/Grafana trên máy trình chiếu. Giữ traffic ở baseline **2 replica**, không scale về 0 theo thói quen; không tắt policy hay teardown cluster như một bước dọn màn hình.
 

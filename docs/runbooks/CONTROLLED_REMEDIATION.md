@@ -25,12 +25,16 @@ exists in a serving route or command.
 The local policy `payment-rollback/local-v1` binds exact cluster, namespace and
 Deployment UIDs to `sentinelops-b-actions/payment-service`, container `payment`.
 It permits one replica/existing pod, zero surge, no HPA or paused Deployment,
-600-second verification/cooldown, 900-second evidence freshness and a matching
+a 1,200-second executor verification budget, 600-second verifier telemetry window
+and cooldown, 900-second evidence freshness and a matching
 observed deployment change within 600 seconds before source incident onset.
+The executor budget includes time to finish source reads after health-ledger
+commit lag; it does not enlarge the verifier's window after action effectiveness.
 The owner chose 900 seconds to give operators time to respond. The validator
-also accepts 180 seconds to read historical actions with their original policy
-and hash; stored actions are not rewritten. Deployment-change receipt uncertainty
-remains capped at 180 seconds, independently of evidence freshness.
+also accepts 180-second freshness and a 600-second executor budget to read
+historical actions with their original policy and hash; stored actions are not
+rewritten. Deployment-change receipt uncertainty remains capped at 180 seconds,
+independently of evidence freshness.
 Frozen RCA weights/score/coverage/margin remain unchanged. The adapter uses an
 explicit loopback HTTPS server, CA and private ServiceAccount token; it never
 reads ambient kubeconfig or AWS credentials. JSON Patch tests UID, unmodified
@@ -320,6 +324,15 @@ changed resourceVersion, invalidating the original patch's CAS preconditions.
 It cannot release a pending/healthy/unrelated incident, select an arbitrary image
 or pretend an old request was delivered exactly once.
 
+If later rollouts superseded that generation, the operator can supply
+`--superseding-generation N` before the subcommand in both calls. Pin the exact
+currently observed generation. This path requires the original successful patch
+receipt and ready rollout at the original next generation in the verified
+action audit. It also requires the same Deployment identity and approved
+known-good image at the pinned later generation. Both observations, the
+three-bucket proof and the release transaction use the usual checks. A rollout
+or pod change during the review blocks release.
+
 Opening records a content-addressed Deployment observation and review card under
 a separate owned B store; writing into/above/below the original source root is
 rejected. Release requires a second matching generation/image/pod/imageID
@@ -352,6 +365,9 @@ python -m scripts.review_payment_quarantine \
 After inspecting the opening card and letting the required real observations
 accumulate, repeat the global arguments with
 `release --review-ref artifact://manifests/REVIEW_SHA256.json --idempotency-key STABLE_OPERATOR_KEY`.
+The optional `--wait` keeps a single process until release or review expiry.
+It replays the pre-action ledger once, then reproduces eligible buckets and
+checks the live Deployment again at each cutoff.
 `PENDING`, `INCONCLUSIVE` or `BLOCKED` means the claim stays held. There is no
 force, actor override, approval boolean, arbitrary-image or automatic-release flag.
 
@@ -369,8 +385,8 @@ The DB function enforces ACL, shape/time/CAS and atomic receipt rules; it cannot
 authenticate remote Kubernetes/telemetry by itself. Live/raw semantic checks are
 performed by the controlled CLI, and checksums are not authentication of a hostile
 operator. Do not expose the resolver function as a public endpoint. Other image,
-generation, replacement-target or unresolved cases remain quarantined for a
-separately reviewed operator procedure; do not delete a target/history row.
+generation without the required original rollout proof, replacement-target or
+unresolved cases remain quarantined for a separately reviewed operator procedure; do not delete a target/history row.
 
 `GET /v1/actions/{id}/quarantine` exposes strict
 [`quarantine-status/v1`](../../contracts/quarantine-status.schema.json) with its own
@@ -611,7 +627,9 @@ operator's behalf. Pause shared-host trials while lane A is acquiring data.
 
 For an authorized trial, use the existing harness ordering and guards: observed
 bad change, current H4/revision/freshness checks, durable intent, one rollback,
-then the unchanged three eligible post-action buckets/600-second verification.
+then the unchanged three eligible post-action buckets in the verifier's 600-second
+telemetry window; the executor has 1,200 seconds from dispatch to finish the read
+and commit its outcome.
 In the failed-verify case, retain escalation, quarantine and its complete audit;
 never redeploy the bad image to manufacture a recovery. Retain a control DB with
 pending audit under the existing cleanup guard. No AWS, holdout or model/threshold

@@ -46,7 +46,7 @@ def test_armed_but_unsent_crash_never_dispatches_and_eventually_quarantines():
         await f.journal.arm(state['action_id'],state['revision'])
         worker=resume(f)
         assert (await worker.tick())['phase']=='dispatching'
-        f.time[0]+=timedelta(seconds=601)
+        f.time[0]+=timedelta(seconds=1201)
         assert (await worker.tick())['status']=='QUARANTINED'
         assert (await worker.tick())['status']=='QUARANTINED'
         assert f.kube.calls==[True]

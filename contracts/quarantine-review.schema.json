@@ -16,6 +16,7 @@
     "before_ref":{"type":"string","pattern":"^artifact://observations/[0-9a-f]{64}\\.json$"},
     "health_stream_id":{"$ref":"#/$defs/hash"},
     "health_policy_sha256":{"$ref":"#/$defs/hash"},
+    "superseding_generation":{"type":"integer","minimum":1},
     "environment":{"type":"string","minLength":1,"maxLength":64}
   },
   "$defs":{"hash":{"type":"string","pattern":"^[0-9a-f]{64}$"}}

@@ -99,13 +99,17 @@ class QuarantineJournal:
 
 
 class QuarantineReview:
-    def __init__(self,journal,kubernetes,recovery,store,target,*,clock=lambda:datetime.now(timezone.utc)):
+    def __init__(self,journal,kubernetes,recovery,store,target,*,superseding_generation=None,
+                 clock=lambda:datetime.now(timezone.utc)):
         if recovery.target!=target:
             raise ValueError('quarantine source/target mismatch')
         original=recovery.source.store.root
         if store.root==original or store.root in original.parents or original in store.root.parents:
             raise ValueError('review store must be separate from original health source')
+        if superseding_generation is not None and (type(superseding_generation) is not int or superseding_generation < 1):
+            raise ValueError('superseding generation must be a positive integer')
         self.journal,self.kube,self.recovery,self.store,self.target,self.clock=journal,kubernetes,recovery,store,target,clock
+        self.superseding_generation=superseding_generation
         self.counter=metrics.get_meter('sentinelops-remediation').create_counter('sentinelops_quarantine_review_observations_total')
 
     def _emit(self,result,operation):
@@ -133,12 +137,32 @@ class QuarantineReview:
         before.validate(policy)
         image=evidence['known_good']['image']
         rollback_patch(before,image)  # Pure validation; never calls transport.
-        return state,before,image,policy
+        generation=before.generation+1
+        if self.superseding_generation is not None:
+            self._require_original_rollout(state['facts'],before,image,policy,context['dispatch_at'])
+            if self.superseding_generation <= generation:
+                raise Blocked('quarantine-superseding-generation-must-follow-original-rollout')
+            generation=self.superseding_generation
+        return state,before,image,policy,generation
 
-    def _ready(self,current,before,image,policy,*,check_freshness=True):
+    def _require_original_rollout(self,facts,before,image,policy,dispatch_at):
+        receipt=facts.get('patch_receipt')
+        rollout=facts.get('ready_rollout')
+        if (not isinstance(receipt,dict) or not isinstance(rollout,dict)
+            or receipt.get('target')!=self.target.key or receipt.get('image')!=image
+            or receipt.get('generation')!=before.generation+1
+            or not receipt.get('resource_version') or receipt['resource_version']==before.resource_version
+            or not receipt.get('observed_at') or not rollout.get('observed_at')
+            or rollout['observed_at']!=facts.get('effective_at')
+            or not dispatch_at <= utc_time(receipt['observed_at']) <= utc_time(rollout['observed_at'])):
+            raise Blocked('quarantine-original-rollout-proof-required')
+        settled=deployment_from_projection({'observation_version':'payment-deployment/v1','observation':rollout})
+        self._ready(settled,before,image,policy,before.generation+1,check_freshness=False)
+
+    def _ready(self,current,before,image,policy,generation,*,check_freshness=True):
         current.validate(policy,before_dispatch=False)
         if check_freshness: fresh(current.observed_at,self.clock(),180)
-        if (current.generation!=before.generation+1 or current.resource_version==before.resource_version
+        if (current.generation!=generation or current.resource_version==before.resource_version
             or not current.ready_for(image,prior_generation=before.generation,old_pods=[p.uid for p in before.pods])):
             raise Blocked('quarantine-known-good-rollout-not-settled')
 
@@ -152,14 +176,16 @@ class QuarantineReview:
     async def _open(self,action_id):
         await self.journal.check_ready()
         context=await self.journal.context(action_id)
-        state,before,image,policy=self._scope(context)
-        current=await self.kube.observe();self._ready(current,before,image,policy)
+        state,before,image,policy,generation=self._scope(context)
+        current=await self.kube.observe();self._ready(current,before,image,policy,generation)
         snapshot=self.store.write('observations',{'observation_version':'payment-deployment/v1','observation':current.projection()})
         body={'review_version':'manual-quarantine-review/v1','action_id':action_id,'action_revision':state['revision'],
               'terminal_event_hash':state['last_event_hash'],'intent_hash':stable_id(state['intent']),
               'target_key':self.target.key,'opened_at':current.observed_at,'before_ref':snapshot,
               'health_stream_id':self.recovery.source.stream_id,'health_policy_sha256':stable_id(self.recovery.source.policy),
               'environment':self.recovery.environment}
+        if self.superseding_generation is not None:
+            body['superseding_generation']=generation
         body['review_id']=stable_id(body)
         validate_payload('quarantine-review.schema.json',body)
         return {'status':'REVIEW_OPENED','review_ref':self.store.write('manifests',body),'review':body,
@@ -180,12 +206,14 @@ class QuarantineReview:
         if review['review_id']!=stable_id({k:v for k,v in review.items() if k!='review_id'}):
             raise Blocked('quarantine-review-integrity-mismatch')
         if review['target_key']!=self.target.key: raise Blocked('quarantine-review-target-mismatch')
+        if review.get('superseding_generation')!=self.superseding_generation:
+            raise Blocked('quarantine-review-generation-mode-mismatch')
         args={'action_id':review['action_id'],'revision':review['action_revision'],'event_hash':review['terminal_event_hash'],
               'review_ref':review_ref,'key':key}
         existing=await self.journal.find(**args)
         if existing: return existing
         context=await self.journal.context(review['action_id'])
-        state,before,image,policy=self._scope(context)
+        state,before,image,policy,generation=self._scope(context)
         if (review['action_revision']!=state['revision'] or review['terminal_event_hash']!=state['last_event_hash']
             or review['intent_hash']!=stable_id(state['intent']) or review['target_key']!=self.target.key
             or review['health_stream_id']!=self.recovery.source.stream_id
@@ -195,8 +223,8 @@ class QuarantineReview:
         fresh(review['opened_at'],self.clock(),600)
         initial=deployment_from_projection(self.store.read(review['before_ref']))
         if initial.observed_at!=review['opened_at']: raise Blocked('quarantine-review-opening-clock-mismatch')
-        self._ready(initial,before,image,policy,check_freshness=False)
-        current=await self.kube.observe();self._ready(current,before,image,policy)
+        self._ready(initial,before,image,policy,generation,check_freshness=False)
+        current=await self.kube.observe();self._ready(current,before,image,policy,generation)
         if (current.generation!=initial.generation or current.image!=initial.image
             or {(p.uid,p.image_id) for p in current.pods}!={(p.uid,p.image_id) for p in initial.pods}):
             raise Blocked('quarantine-rollout-changed-during-review')
@@ -207,14 +235,15 @@ class QuarantineReview:
         if verdict['status']!='telemetry_verified': raise Blocked('unknown-quarantine-health-verdict')
         ends=validate_current_support(verdict,source=self.recovery.source,environment=self.recovery.environment,
                                       effective_at=review['opened_at'],as_of=cutoff)
-        final=await self.kube.observe();self._ready(final,before,image,policy)
+        final=await self.kube.observe();self._ready(final,before,image,policy,generation)
         if (final.generation!=initial.generation or final.image!=initial.image
             or {(p.uid,p.image_id) for p in final.pods}!={(p.uid,p.image_id) for p in initial.pods}):
             raise Blocked('quarantine-rollout-changed-during-review')
         completed=self.clock()
         fresh(review['opened_at'],completed,600)
         expected=datetime.fromtimestamp(int((completed-timedelta(seconds=30)).timestamp())//60*60,timezone.utc)
-        if ends[-1]!=expected: return {'status':'PENDING','review_ref':review_ref,'released':False}
+        if ends[-1]!=expected or completed-cutoff>=timedelta(seconds=30):
+            return {'status':'PENDING','review_ref':review_ref,'released':False}
         after_ref=self.store.write('observations',{'observation_version':'payment-deployment/v1','observation':final.projection()})
         payload={'release_version':'manual-quarantine-release/v1','review_ref':review_ref,
             'action_id':state['action_id'],'action_revision':state['revision'],'terminal_event_hash':state['last_event_hash'],

@@ -222,9 +222,9 @@ def test_approval_invalidates_revision_target_ledger_and_expiry(tmp_path, monkey
         expected_calls = [] if timing == 'before-execute' else [True]
         assert c.f.kube.calls == expected_calls
         if timing == 'before-patch':
-            # Dispatch's 600-second deadline rejects before the approval hook;
-            # the controller's durable approval outcome still reports expiry.
-            assert results[-1]['facts']['reason'] == ('dispatch-expired-before-send' if change == 'expired' else expected)
+            # Fifteen minutes remains inside the 1200-second executor budget,
+            # so the immediate approval hook reports the expired approval.
+            assert results[-1]['facts']['reason'] == expected
             assert results[-1]['facts']['dispatch_cancelled_before_send'] is True
         assert read_slot(c.store, 'approval', proposal['proposal_id']) == receipt
         assert c.store.read('artifact://manifests/' + stable_id(proposal) + '.json') == proposal

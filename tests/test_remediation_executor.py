@@ -245,10 +245,45 @@ def test_ready_deployment_without_telemetry_times_out_and_no_bad_image_compensat
     async def run():
         f=setup();sent=await f.executor.execute(f.request)
         assert (await f.executor.reconcile(sent['action_id']))['phase']=='verifying'
-        f.time[0]+=timedelta(seconds=600)
+        f.time[0]+=timedelta(seconds=1200)
         result=await f.executor.reconcile(sent['action_id'])
         assert result['phase']=='escalated' and f.kube.calls.count(False)==1
         assert result['facts']['reason']=='verification-timeout-target-quarantined'
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('verification_seconds,expected_phase,expected_reason', [
+    (1200, 'recovered', None),
+    (600, 'escalated', 'verification-expired-during-source-read'),
+])
+def test_ledger_commit_lag_around_750_seconds_uses_the_persisted_executor_budget(
+        verification_seconds, expected_phase, expected_reason):
+    async def run():
+        f=setup()
+        f.executor.policy=replace(f.executor.policy,verification_seconds=verification_seconds)
+        sent=await f.executor.execute(f.request)
+        await f.executor.reconcile(sent['action_id'])  # Persist rollout effectiveness at dispatch time.
+        f.time[0]+=timedelta(seconds=590)
+        original=f.recovery.verify
+        delayed=[False]
+        async def verify(**kwargs):
+            verdict=await original(**kwargs)
+            if verdict['status']=='telemetry_verified' and not delayed[0]:
+                delayed[0]=True
+                f.time[0]+=timedelta(seconds=155)
+            return verdict
+        f.recovery.verify=verify
+        result=await f.executor.reconcile(sent['action_id'])
+        if verification_seconds==1200 and result['phase']=='verifying':
+            # A minute boundary crossed during the slow read, so the next read
+            # must re-establish current support before recovery is committed.
+            result=await f.executor.reconcile(sent['action_id'])
+        assert delayed==[True]
+        assert (f.clock()-AS_OF).total_seconds()==745
+        assert result['phase']==expected_phase
+        assert result['facts'].get('reason')==expected_reason
+        if expected_phase=='recovered':
+            assert result['facts']['telemetry']['status']=='telemetry_verified'
     asyncio.run(run())
 
 
@@ -414,7 +449,7 @@ def test_verification_failure_escalates_once_without_a_second_or_compensating_pa
         elif failure=='telemetry-inconclusive':
             f.time[0]+=timedelta(minutes=4)
         elif failure not in ('hpa-after-dispatch','scaled-after-dispatch'):
-            f.time[0]+=timedelta(seconds=600)
+            f.time[0]+=timedelta(seconds=1200)
         result=await f.executor.reconcile(sent['action_id'])
         assert result['phase']=='escalated' and result['facts']['reason']
         assert f.kube.calls==[True,False]

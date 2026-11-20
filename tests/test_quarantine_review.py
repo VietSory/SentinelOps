@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from sentinelops.contracts import validate_payload
+from sentinelops.contracts import utc_time, validate_payload
 from sentinelops.remediation.domain import ActionConflict, Blocked
 from sentinelops.remediation.executor import LedgerRecovery
 from sentinelops.remediation.quarantine import QuarantineReview
@@ -172,4 +172,78 @@ def test_review_artifacts_must_not_be_written_into_the_original_source(tmp_path)
         f,j,review=await fixture(tmp_path)
         with pytest.raises(ValueError,match='separate'):
             QuarantineReview(j,f.kube,f.recovery,ArtifactStore(tmp_path/'original-source'/'review'),review.target)
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('problem',[None,'missing-receipt','missing-rollout','wrong-action-target',
+                                    'unready-original','wrong-generation','changed-generation','mode-mismatch'])
+def test_explicit_superseding_generation_requires_original_and_stable_current_rollouts(tmp_path,problem):
+    async def run():
+        f,j,review=await fixture(tmp_path)
+        state=f.journal.state
+        original=await f.kube.observe()
+        facts=state['facts']
+        facts.update(effective_at=original.observed_at,ready_rollout=original.projection(),
+                     patch_receipt={'target':review.target.key,'image':original.image,
+                                    'generation':original.generation,'resource_version':'patch-rv',
+                                    'observed_at':original.observed_at})
+        if problem=='missing-receipt':
+            del facts['patch_receipt']
+        if problem=='missing-rollout':
+            del facts['ready_rollout']
+        if problem=='wrong-action-target':
+            facts['patch_receipt']['target']='another-target'
+        if problem=='unready-original':
+            facts['ready_rollout']['ready_replicas']=0
+        observe=f.kube.observe
+        generation=original.generation+4
+        async def superseded():
+            value=await observe()
+            return replace(value,generation=generation,observed_generation=generation,resource_version='superseding-rv')
+        f.kube.observe=superseded
+        selected=generation+1 if problem=='wrong-generation' else generation
+        operator=QuarantineReview(j,f.kube,f.recovery,review.store,review.target,
+                                  superseding_generation=selected,clock=f.clock)
+        if problem in ('missing-receipt','missing-rollout','wrong-action-target','unready-original','wrong-generation'):
+            with pytest.raises(Blocked):
+                await operator.open(state['action_id'])
+            assert j.active and not j.calls
+            return
+
+        opened=await operator.open(state['action_id'])
+        assert opened['review']['superseding_generation']==selected
+        f.time[0]+=timedelta(minutes=4)
+        if problem=='changed-generation':
+            generation+=1
+        resolver=review if problem=='mode-mismatch' else operator
+        if problem:
+            with pytest.raises(Blocked):
+                await resolver.release(opened['review_ref'],key='superseding-idempotency-0001')
+            assert j.active and not j.calls
+        else:
+            released=await resolver.release(opened['review_ref'],key='superseding-idempotency-0001')
+            assert released['status']=='RELEASED' and not j.active
+            assert f.journal.state['phase']=='escalated' and f.kube.calls==[]
+    asyncio.run(run())
+
+
+def test_late_source_read_remains_pending_without_writing_a_receipt(tmp_path):
+    async def run():
+        f,j,review=await fixture(tmp_path)
+        opened=await review.open(f.journal.state['action_id'])
+        f.time[0]=f.time[0].replace(second=42,microsecond=0)+timedelta(minutes=5)
+        verify=f.recovery.verify
+
+        async def delayed(**kwargs):
+            result=await verify(**kwargs)
+            for bucket in result['support']:
+                for field in ('bucket_end','recorded_at'):
+                    bucket[field]=timestamp(utc_time(bucket[field])+timedelta(minutes=1))
+            f.time[0]+=timedelta(seconds=30)
+            return result
+
+        f.recovery.verify=delayed
+        result=await review.release(opened['review_ref'],key='stale-cutoff-0001')
+        assert result['status']=='PENDING' and j.active and j.calls==[]
+
     asyncio.run(run())

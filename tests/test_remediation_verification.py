@@ -185,3 +185,38 @@ def test_current_recovery_requires_latest_due_bucket_not_a_stopped_source(tmp_pa
     assert [item['bucket_end'] for item in verdict['support']] == [timestamp(START+timedelta(minutes=i)) for i in (2,3,4)]
     stopped = check(source, minutes=6, require_current=True)
     assert stopped['status'] == 'pending' and stopped['reason'] == 'awaiting-current-accepted-health-bucket'
+
+
+def test_recovery_reuses_only_its_verified_pre_action_prefix(tmp_path):
+    from sentinelops.remediation.executor import LedgerRecovery
+
+    async def run():
+        source = RawLedgerFixture(tmp_path, [0] * 9)
+        target = object()
+        recovery = LedgerRecovery(source, target, environment='fixture')
+        effective = START + timedelta(minutes=3, seconds=8)
+        latest = START + timedelta(minutes=8, seconds=40)
+        next_batch = source.next
+        cursors = []
+
+        async def observed(checkpoint=None):
+            cursors.append(checkpoint['last_bucket_end'] if checkpoint else None)
+            return await next_batch(checkpoint)
+
+        source.next = observed
+        pending = await recovery.verify(effective_at=effective, now=effective + timedelta(minutes=2), target=target)
+        assert pending['status'] == 'pending' and cursors[0] is None
+        cursors.clear()
+        verified = await recovery.verify(effective_at=effective, now=latest, target=target)
+        assert cursors[0] == timestamp(START + timedelta(minutes=3))
+        assert verified == await verify_post_action_health(source, effective_at=effective,
+            as_of=latest, expected_environment='fixture', require_current=True)
+        assert verified['status'] == 'telemetry_verified'
+
+        batch = source.store.read(source.rows[-1]['manifest_ref'])
+        raw = source.store.root / batch['current_raw_refs'][0].removeprefix('artifact://')
+        raw.write_text('{}')
+        with pytest.raises(ValueError, match='checksum'):
+            await recovery.verify(effective_at=effective, now=latest, target=target)
+
+    asyncio.run(run())
