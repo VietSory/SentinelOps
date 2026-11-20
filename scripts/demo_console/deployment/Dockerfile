@@ -8,7 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HOME=/tmp \
     DEMO_CONSOLE_ENABLE_FAULTS=false \
-    DEMO_CONSOLE_DEPLOY_SCRIPT=""
+    DEMO_CONSOLE_DEPLOY_SCRIPT="" \
+    DEMO_CONSOLE_OOM_SCRIPT="" \
+    DEMO_CONSOLE_ENABLE_OOM=false
 WORKDIR /opt/sentinelops
 COPY scripts/demo_console/deployment/requirements.txt /tmp/console-requirements.txt
 RUN python -m pip install --no-cache-dir -r /tmp/console-requirements.txt
