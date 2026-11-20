@@ -25,10 +25,14 @@ ghi AWS dưới đây là runbook để người được giao triển khai sau 
   Health check lần lượt `/health` và `/grafana/api/health`, HTTP 200. Node security
   group thực tế là EKS cluster SG; chỉ thêm hai NodePort từ SG ALB.
 - ALB mặc định 403; chỉ `/ui`, `/ui/*`, `/v1/*` tới API/UI và `/grafana`,
-  `/grafana/*` tới Grafana. Rule deny ưu tiên 1 chặn các segment `internal`,
-  `docs`, `redoc`, `openapi.json`, `metrics`, `prometheus`, `jaeger` kể cả dưới
-  prefix được phép. CloudFront Function chặn thêm encoding `%`, backslash,
-  `//`, `.`/`..` và các đường ngoài allowlist. Không public Prometheus/Jaeger,
+  `/grafana/*` tới Grafana. Rule deny chặn các segment `internal`, `docs`,
+  `redoc`, `openapi.json`, `metrics`, `prometheus`, `jaeger` kể cả dưới prefix
+  được phép. Ngoại lệ duy nhất là GET/HEAD tới các asset frontend Jaeger
+  `/grafana/public/plugins/jaeger/{module.js,plugin.json,img/*.svg,img/*.png}`;
+  đây là plugin tích hợp của Grafana, không phải API Jaeger. CloudFront Function
+  và ALB chỉ mở các file này; direct Jaeger/query endpoints vẫn bị 403. Function
+  cũng chặn encoding `%`, backslash, `//`, `.`/`..` và đường ngoài allowlist.
+  Không public Prometheus/Jaeger API,
   không proxy trực tiếp `/internal/faults` hay docs của service.
 - Mọi behavior dùng managed `CachingDisabled` + `AllViewer`: forward Host,
   Authorization, cookies và query OAuth nguyên vẹn. Không cache API/UI/Grafana.

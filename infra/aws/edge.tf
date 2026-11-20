@@ -142,7 +142,7 @@ resource "aws_lb_listener" "edge" {
 resource "aws_lb_listener_rule" "edge_deny" {
   count        = var.edge_enabled ? 1 : 0
   listener_arn = aws_lb_listener.edge[0].arn
-  priority     = 1
+  priority     = 2
   action {
     type = "fixed-response"
     fixed_response {
@@ -154,6 +154,33 @@ resource "aws_lb_listener_rule" "edge_deny" {
   condition {
     path_pattern {
       regex_values = ["^/(.*/)?(internal|docs|redoc|openapi[.]json|metrics|prometheus|jaeger)(/.*)?$"]
+    }
+  }
+}
+
+# Grafana's built-in Jaeger datasource plugin loads several static assets below
+# this prefix. Keep only GET/HEAD plugin assets available; Jaeger APIs stay denied.
+resource "aws_lb_listener_rule" "edge_allow_grafana_jaeger_module" {
+  count        = var.edge_enabled ? 1 : 0
+  listener_arn = aws_lb_listener.edge[0].arn
+  priority     = 1
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.edge["grafana"].arn
+  }
+  condition {
+    path_pattern {
+      values = [
+        "/grafana/public/plugins/jaeger/module.js",
+        "/grafana/public/plugins/jaeger/plugin.json",
+        "/grafana/public/plugins/jaeger/img/*.svg",
+        "/grafana/public/plugins/jaeger/img/*.png",
+      ]
+    }
+  }
+  condition {
+    http_request_method {
+      values = ["GET", "HEAD"]
     }
   }
 }
@@ -198,10 +225,12 @@ resource "aws_cloudfront_function" "edge_paths" {
   code    = <<-JS
     function handler(event) {
       var uri = event.request.uri;
+      var grafanaJaegerAsset = (event.request.method === 'GET' || event.request.method === 'HEAD') &&
+        /^\/grafana\/public\/plugins\/jaeger\/(module\.js|plugin\.json|img\/[^/]+\.(svg|png))$/.test(uri);
       // Reject ambiguous encodings/traversal before CloudFront normalization
       // and origin routing can disagree. OAuth query parameters are untouched.
       if (/[%%\\]/.test(uri) || uri.indexOf('//') !== -1 || /(^|\/)\.{1,2}(\/|$)/.test(uri) ||
-          /(^|\/)(internal|docs|redoc|openapi\.json|metrics|prometheus|jaeger)(\/|$)/i.test(uri) ||
+          (!grafanaJaegerAsset && /(^|\/)(internal|docs|redoc|openapi\.json|metrics|prometheus|jaeger)(\/|$)/i.test(uri)) ||
           !/^(\/ui(\/|$)|\/v1\/|\/grafana(\/|$))/.test(uri)) {
         return {statusCode: 403, statusDescription: 'Forbidden', headers: {'cache-control': {value: 'no-store'}}};
       }

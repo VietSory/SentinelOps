@@ -576,7 +576,8 @@ def assert_edge(blocks: dict[str, dict]) -> list[str]:
         if key.startswith('aws_lb.') and key != 'aws_lb.edge':
             raise ValueError('edge permits only the declared internal ALB')
         if key.startswith(('aws_lb_listener.', 'aws_lb_listener_rule.')) and key not in {
-                'aws_lb_listener.edge', 'aws_lb_listener_rule.edge_deny', 'aws_lb_listener_rule.edge_allow'}:
+                'aws_lb_listener.edge', 'aws_lb_listener_rule.edge_deny',
+                'aws_lb_listener_rule.edge_allow_grafana_jaeger_module', 'aws_lb_listener_rule.edge_allow'}:
             raise ValueError('edge permits only the declared deny/default and allow path rules')
         if key.startswith(('aws_vpc_security_group_ingress_rule.', 'aws_security_group_rule.')):
             assignments = _assignments(body)
@@ -612,11 +613,35 @@ def assert_edge(blocks: dict[str, dict]) -> list[str]:
     listener = blocks['aws_lb_listener.edge']['body']
     require('aws_lb_listener.edge', 'type', '"fixed-response"')
     require('aws_lb_listener.edge', 'status_code', '"403"')
-    require('aws_lb_listener_rule.edge_deny', 'priority', '1')
+    require('aws_lb_listener_rule.edge_deny', 'priority', '2')
     require('aws_lb_listener_rule.edge_deny', 'type', '"fixed-response"')
     require('aws_lb_listener_rule.edge_deny', 'status_code', '"403"')
     require('aws_lb_listener_rule.edge_deny', 'regex_values',
             '["^/(.*/)?(internal|docs|redoc|openapi[.]json|metrics|prometheus|jaeger)(/.*)?$"]')
+    require('aws_lb_listener_rule.edge_allow_grafana_jaeger_module', 'priority', '1')
+    require('aws_lb_listener_rule.edge_allow_grafana_jaeger_module', 'count', 'var.edge_enabled ? 1 : 0')
+    require('aws_lb_listener_rule.edge_allow_grafana_jaeger_module', 'type', '"forward"')
+    require('aws_lb_listener_rule.edge_allow_grafana_jaeger_module', 'target_group_arn',
+            'aws_lb_target_group.edge["grafana"].arn')
+    jaeger_path = _child_blocks(blocks['aws_lb_listener_rule.edge_allow_grafana_jaeger_module']['body'], 'condition')
+    configured_jaeger_assets = []
+    for condition in jaeger_path:
+        if 'path_pattern' not in condition:
+            continue
+        values = re.search(r'\bvalues\s*=\s*\[([\s\S]*?)\]', condition)
+        if values:
+            configured_jaeger_assets.extend(re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', values.group(1)))
+    expected_jaeger_values = [
+        '/grafana/public/plugins/jaeger/module.js',
+        '/grafana/public/plugins/jaeger/plugin.json',
+        '/grafana/public/plugins/jaeger/img/*.svg',
+        '/grafana/public/plugins/jaeger/img/*.png',
+    ]
+    if configured_jaeger_assets != expected_jaeger_values:
+        raise ValueError('only named Grafana Jaeger plugin frontend assets may bypass the Jaeger API path guard')
+    if not any(_assignments(condition).get('values') == ['["GET", "HEAD"]']
+               for condition in jaeger_path if 'http_request_method' in condition):
+        raise ValueError('only GET/HEAD may load Grafana Jaeger plugin assets')
     require('aws_lb_listener_rule.edge_allow', 'for_each', 'var.edge_enabled ? local.edge_paths : {}')
     require('aws_lb_listener_rule.edge_allow', 'type', '"forward"')
     require('aws_lb_listener_rule.edge_allow', 'values', 'each.value')
@@ -669,7 +694,7 @@ def assert_edge(blocks: dict[str, dict]) -> list[str]:
     return ['edge default-off; private ALB, VPC-origin-only ingress, HTTPS-only uncached allowlisted routes; NodePort/ASG binding']
 
 
-EDGE_FUNCTION_SHA256 = '4553e790c83fd5f7c4d86108fde9abe3f2eb2968d69ebd4c225eb618b461b05b'
+EDGE_FUNCTION_SHA256 = 'b62066fb57afd6aa0f9cc0f66d36be7d3f9037cef0b19780058675849f9efe42'
 
 
 def assert_grants_no_authority(root: Path = ROOT) -> list[str]:
