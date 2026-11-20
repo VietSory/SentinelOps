@@ -85,6 +85,9 @@ def test_subpath_cognito_only_login_and_least_privilege():
     assert 'issuer_url' not in oauth  # Unsupported by Grafana 12.2.0.
     assert config['plugins'].getboolean('preinstall_disabled')
     assert config['live'].getint('max_connections') == 0
+    assert not config['snapshots'].getboolean('enabled')
+    assert not config['snapshots'].getboolean('external_enabled')
+    assert not config['public_dashboards'].getboolean('enabled')
 
 
 def test_credentials_are_required_secret_references_and_never_rendered():

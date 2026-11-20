@@ -293,3 +293,55 @@ def test_new_epoch_root_updates_all_readers_and_probes_without_moving_mounts():
     assert root not in json.dumps(original)
     with pytest.raises(ValueError):
         wire.health_epoch(original, '/artifacts/health/../elsewhere')
+
+
+def test_rwo_claim_is_pinned_to_the_consumer_node():
+    docs = wire.render(rendering(storage_class='gp2', access_mode='ReadWriteOnce',
+                                 colocate_with='remediation-controller'))
+    pvc, _, job = docs
+    assert pvc['spec']['accessModes'] == ['ReadWriteOnce']
+    term, = job['spec']['template']['spec']['affinity']['podAffinity']['requiredDuringSchedulingIgnoredDuringExecution']
+    assert term == {'labelSelector': {'matchLabels': {'app': 'remediation-controller'}},
+                    'topologyKey': 'kubernetes.io/hostname'}
+
+
+@pytest.mark.parametrize('changes', [
+    dict(storage_class='gp2', access_mode='ReadWriteOnce'),
+    dict(access_mode='ReadWriteOnce', colocate_with='remediation-controller'),
+    dict(storage_class='efs', colocate_with='remediation-controller'),
+    dict(storage_class='gp2', access_mode='ReadWriteOnce', colocate_with='Bad_Label')])
+def test_rwo_requires_a_class_and_a_valid_colocation(changes):
+    with pytest.raises(ValueError):
+        wire.render(rendering(**changes))
+
+
+def test_wrapper_forwards_policy_and_controller_trusts_rds_ca():
+    from tests.test_aws_demo_render import inputs
+    from scripts.aws_demo import render_all
+    images, terraform, runtime = inputs()
+    runtime.update(model_claim='model-de38fc6b', model_release_ref=rendering().release_ref, policy_enabled=True)
+    docs = render_all.render(images, terraform, runtime)['40-workers.yaml']
+    controller = next(d for d in docs if d['kind'] == 'Deployment' and d['metadata']['name'] == 'remediation-controller')
+    container = controller['spec']['template']['spec']['containers'][0]
+    assert '--policy-enabled' in container['args']
+    assert {'name': 'PGSSLROOTCERT', 'value': '/etc/sentinelops/tls/ca-bundle.crt'} in container['env']
+    runtime.pop('policy_enabled')
+    docs = render_all.render(images, terraform, runtime)['40-workers.yaml']
+    controller = next(d for d in docs if d['kind'] == 'Deployment' and d['metadata']['name'] == 'remediation-controller')
+    assert '--policy-enabled' not in controller['spec']['template']['spec']['containers'][0]['args']
+
+
+def test_new_epoch_root_skips_the_demo_ui_sidecar():
+    # --demo-ui adds an operator-ui container with a command and HTTP probes only;
+    # the epoch rewrite must leave it alone and still move every health reader.
+    from scripts import render_worker_manifests as worker
+    from tests.test_worker_manifests import IMAGE, PARAMETERS
+    original = worker.render(IMAGE, **PARAMETERS, demo_ui=True)
+    controller = next(d for d in original if d['kind'] == 'Deployment' and d['metadata']['name'] == 'remediation-controller')
+    assert len(controller['spec']['template']['spec']['containers']) == 2
+    root = '/artifacts/health/model-de38fc6b-20261119'
+    docs = wire.health_epoch(original, root)
+    controller = next(d for d in docs if d['kind'] == 'Deployment' and d['metadata']['name'] == 'remediation-controller')
+    main, sidecar = controller['spec']['template']['spec']['containers']
+    assert main['args'][main['args'].index('--source-store') + 1] == root
+    assert root not in json.dumps(sidecar)

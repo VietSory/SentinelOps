@@ -24,7 +24,7 @@ from control_job import EXPIRES, MIGRATIONS
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 RUNTIME_NAME = "sentinelops/dev/control-runtime"
-LOGIN_ACTIONS = ("runtime", "action-runtime")
+LOGIN_ACTIONS = ("runtime", "action-runtime", "action-read")
 
 
 def command(argv, payload=None):
@@ -137,6 +137,13 @@ def execute(args):
             raise ValueError("demo exception expired")
         if kubectl(args, "get", "secret", "remediation-runtime", "--ignore-not-found", "-o", "name").strip():
             raise ValueError("remediation-runtime already exists; review before replacing")
+    if args.action == "action-read":
+        if args.namespace != "sentinelops-b-actions":
+            raise ValueError("action-read requires sentinelops-b-actions namespace")
+        if datetime.now(timezone.utc) >= EXPIRES:
+            raise ValueError("demo exception expired")
+        if kubectl(args, "get", "secret", "remediation-read", "--ignore-not-found", "-o", "name").strip():
+            raise ValueError("remediation-read already exists; review before replacing")
     if args.action == "runtime":
         if datetime.now(timezone.utc) >= EXPIRES:
             raise ValueError("demo exception expired")
@@ -177,6 +184,11 @@ def execute(args):
                    "sentinelops_control?sslmode=verify-full")
             # Fresh create only: never replace live action credentials or write Secrets Manager.
             apply(args, secret_document(args, "remediation-runtime", {"action-database-url": dsn}), create=True)
+        if args.action == "action-read":
+            password = values["runtime-password"]
+            dsn = (f"postgresql://control_action_reader:{quote(password, safe='')}@{args.host}:5432/"
+                   "sentinelops_control?sslmode=verify-full")
+            apply(args, secret_document(args, "remediation-read", {"action-read-database-url": dsn}), create=True)
         if args.action == "runtime":
             password = values["runtime-password"]
             endpoint = f"postgresql://{args.host}:5432/sentinelops_control?sslmode=verify-full"
@@ -197,10 +209,18 @@ def execute(args):
     except Exception:
         if runtime_attempted:
             try:
-                run_job(args, master_name, config_name, action="disable")
-                print("Runtime failure: both demo logins disabled and their sessions terminated", file=sys.stderr)
+                if args.action == "action-read":
+                    run_job(args, master_name, config_name, action="disable-read")
+                    print("Reader failure: reader login disabled; worker/controller logins untouched", file=sys.stderr)
+                else:
+                    run_job(args, master_name, config_name, action="disable")
+                    print("Runtime failure: all demo logins disabled and their sessions terminated", file=sys.stderr)
             except Exception:
-                print("URGENT: revoke both demo logins manually using the disable command in the runbook", file=sys.stderr)
+                if args.action == "action-read":
+                    # Never fall back to the general disable: it revokes the live worker/controller logins.
+                    print("URGENT: revoke the reader login with `control.py disable-read`; leave other logins", file=sys.stderr)
+                else:
+                    print("URGENT: revoke both demo logins manually using the disable command in the runbook", file=sys.stderr)
         raise
     finally:
         # If Job deletion failed, these may also fail: report the non-secret names for manual cleanup.
@@ -213,7 +233,7 @@ def execute(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "runtime", "action-runtime", "sync-runtime", "disable"))
+    parser.add_argument("action", choices=("bootstrap", "runtime", "action-runtime", "action-read", "sync-runtime", "disable", "disable-read"))
     parser.add_argument("--host", required=True, help="Terraform control_database_endpoint")
     parser.add_argument("--image", required=True, help="Terraform image_repository_urls[control-plane] + @sha256:...")
     parser.add_argument("--namespace", default="sentinelops-b-actions")

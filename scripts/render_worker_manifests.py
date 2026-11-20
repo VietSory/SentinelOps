@@ -274,7 +274,9 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                         'envFrom': [{'configMapRef': {'name': CONFIG}}], 'env': [
                             {'name': 'CONTROL_DATABASE_URL', 'valueFrom': {'secretKeyRef': {
                                 'name': 'control-runtime', 'key': 'database-url', 'optional': False}}},
-                            {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'}],
+                            {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
+                            # asyncpg verify-full reads the root CA from here, not SSL_CERT_FILE.
+                            {'name': 'PGSSLROOTCERT', 'value': '/etc/sentinelops/tls/ca-bundle.crt'}],
                         'securityContext': dict(hardening), 'volumeMounts': mounts,
                         'resources': {'requests': {'cpu': '100m', 'memory': '256Mi'},
                                       'limits': {'cpu': '1', 'memory': '1Gi'}}}], 'volumes': volumes}}}})
@@ -361,6 +363,8 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
     env = [{'name': 'SENTINELOPS_KUBERNETES_REMOTE_SERVER', 'value': server},
         {'name': 'SENTINELOPS_ENV', 'value': environment},
         {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
+        # asyncpg verify-full reads the root CA from here, not from SSL_CERT_FILE.
+        {'name': 'PGSSLROOTCERT', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
         *[{'name': name, 'valueFrom': {'secretKeyRef': {'name': 'remediation-runtime', 'key': key}}}
           for name, key in (('SENTINELOPS_ACTION_DATABASE_URL', 'action-database-url'),
               ('SENTINELOPS_KNOWN_GOOD_LEDGER_REF', 'known-good-ledger-ref'),
@@ -386,6 +390,7 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
             {'name': 'SENTINELOPS_ENABLE_DEMO', 'value': 'false'},
             {'name': 'SENTINELOPS_RUNBOOK_PROPOSAL_STORE', 'value': '/artifacts/remediation'},
             {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
+            {'name': 'PGSSLROOTCERT', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
             *[{'name': variable, 'valueFrom': {'secretKeyRef': {'name': secret, 'key': key,
                                                             'optional': False}}}
               for variable, secret, key in (
@@ -394,14 +399,21 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
         probe = {'exec': {'command': ['python', '-c',
             'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health",timeout=2).read()']},
             'periodSeconds': 10, 'timeoutSeconds': 3}
+        ui_mounts = [{'name': 'tmp', 'mountPath': '/tmp'},
+            {'name': 'database-ca', 'mountPath': '/etc/sentinelops/tls', 'readOnly': True},
+            {'name': 'remediation-artifacts', 'mountPath': '/artifacts/remediation'}]
+        if model_claim:
+            # The API reports model availability from the same release the controller
+            # uses (api_settings reads SENTINELOPS_MODEL_STORE/_RELEASE_REF).
+            ui_env += [{'name': 'SENTINELOPS_MODEL_STORE', 'value': '/models'},
+                       {'name': 'SENTINELOPS_MODEL_RELEASE_REF', 'value': model_release_ref}]
+            ui_mounts.append({'name': 'models', 'mountPath': '/models', 'readOnly': True})
         ui = [{'name': 'operator-ui', 'image': image, 'imagePullPolicy': 'IfNotPresent',
             'command': ['python', '-c', ui_bootstrap], 'env': ui_env,
             'envFrom': [{'configMapRef': {'name': 'sentinelops-api-runtime', 'optional': False}}],
             'ports': [{'name': 'http', 'containerPort': 8000}],
             'securityContext': dict(hardening),
-            'volumeMounts': [{'name': 'tmp', 'mountPath': '/tmp'},
-                {'name': 'database-ca', 'mountPath': '/etc/sentinelops/tls', 'readOnly': True},
-                {'name': 'remediation-artifacts', 'mountPath': '/artifacts/remediation'}],
+            'volumeMounts': ui_mounts,
             'startupProbe': {**probe, 'failureThreshold': 30},
             'readinessProbe': probe, 'livenessProbe': probe,
             'resources': {'requests': {'cpu': '50m', 'memory': '128Mi'},

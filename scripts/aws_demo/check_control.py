@@ -185,6 +185,63 @@ class OfflineChecks(unittest.TestCase):
         self.assertEqual(actions, ["action-runtime", "disable"])
         self.assertNotIn("remediation-runtime", [doc["metadata"]["name"] for doc in documents])
 
+    def test_action_read_publishes_reader_dsn_and_failure_disables_only_reader(self):
+        for publication_fails in (False, True):
+            with self.subTest(publication_fails=publication_fails):
+                args = self.args(action="action-read", runtime_secret_arn=None)
+                actions, documents = [], []
+                def fake_aws(_args, *operation, data=None):
+                    if operation == ("sts", "get-caller-identity"):
+                        return json.dumps({"Account": "123456789012"})
+                    return json.dumps({"SecretString": json.dumps({"username": "control_bootstrap", "password": "m"})})
+                def fake_apply(_args, doc, **kwargs):
+                    documents.append(doc)
+                    if doc["metadata"]["name"] == "remediation-read" and publication_fails:
+                        raise RuntimeError("publication unavailable")
+                def fake_job(*_a, **kwargs):
+                    actions.append(kwargs.get("action", "action-read"))
+                with patch.object(control, "aws", side_effect=fake_aws), patch.object(control, "kubectl", return_value=""), \
+                     patch.object(control, "apply", side_effect=fake_apply), patch.object(control, "run_job", side_effect=fake_job), \
+                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    if publication_fails:
+                        with self.assertRaises(RuntimeError):
+                            control.execute(args)
+                    else:
+                        control.execute(args)
+                self.assertEqual(actions, ["action-read", "disable-read"] if publication_fails else ["action-read"])
+                if not publication_fails:
+                    doc = documents[-1]
+                    self.assertEqual(doc["metadata"]["name"], "remediation-read")
+                    dsn = control.base64.b64decode(doc["data"]["action-read-database-url"]).decode()
+                    self.assertEqual(unquote(urlsplit(dsn).username), "control_action_reader")
+                    self.assertEqual(parse_qs(urlsplit(dsn).query), {"sslmode": ["verify-full"]})
+
+    def test_failed_reader_recovery_points_only_to_disable_read(self):
+        args = self.args(action="action-read", runtime_secret_arn=None)
+        def fake_aws(_args, *operation, data=None):
+            if operation == ("sts", "get-caller-identity"):
+                return json.dumps({"Account": "123456789012"})
+            return json.dumps({"SecretString": json.dumps({"username": "control_bootstrap", "password": "m"})})
+        actions = []
+        def fake_job(*_a, **kwargs):
+            actions.append(kwargs.get("action", "action-read"))
+            raise RuntimeError("job failed")
+        err = io.StringIO()
+        with patch.object(control, "aws", side_effect=fake_aws), patch.object(control, "kubectl", return_value=""), \
+             patch.object(control, "apply"), patch.object(control, "run_job", side_effect=fake_job), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            with self.assertRaises(RuntimeError):
+                control.execute(args)
+        self.assertEqual(actions, ["action-read", "disable-read"])
+        self.assertIn("control.py disable-read", err.getvalue())
+        self.assertNotIn("disable command in the runbook", err.getvalue())
+
+    def test_reader_disable_never_touches_live_logins(self):
+        statements = control_job.disable_statements(("control_action_reader",))
+        self.assertTrue(all("control_writer" not in s and "control_action_writer" not in s for s in statements))
+        with self.assertRaises(ValueError):
+            control_job.disable_statements(("control_owner",))
+
     def test_action_runtime_refuses_existing_secret_or_other_namespace(self):
         for overrides in ({"existing": True}, {"namespace": "sentinelops"}):
             with self.subTest(overrides=overrides):
@@ -392,6 +449,45 @@ def postgres_fixture(image):
         if login(control_job.runtime_privileges_sql(action_role), role=action_role) != "f":
             raise RuntimeError("SET-only owner membership was accepted")
         sql("REVOKE control_owner FROM control_action_writer", user="control_bootstrap")
+        # The demo driver's SELECT-only login: grants run as the owner, then the production
+        # privilege query and ActionReader's own write check must both accept it.
+        reader = "control_action_reader"
+        # Before the grants the reader cannot even resolve sentinel_control tables.
+        login(control_job.runtime_privileges_sql(reader), success=False, role=reader)
+        sql("SET ROLE control_owner; " + "; ".join(control_job.READER_GRANTS) + "; RESET ROLE;", user="control_bootstrap")
+        if login(control_job.runtime_privileges_sql(reader), role=reader) != "t":
+            raise RuntimeError("reader privilege boundary differs")
+        if login("SELECT count(*) FROM sentinel_control.incidents", role=reader) != "1":
+            raise RuntimeError("reader cannot read incidents")
+        if login("""SELECT coalesce(bool_or(has_table_privilege(c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES')
+                OR has_any_column_privilege(c.oid,'INSERT,UPDATE,REFERENCES')),false)
+                FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname IN ('sentinel_control','sentinel_remediation') AND c.relkind IN ('r','p')""",
+                 role=reader) != "f":
+            raise RuntimeError("ActionReader write check would reject the reader")
+        for forbidden in ("UPDATE sentinel_control.incidents SET lifecycle_stage='closed'",
+                          "DELETE FROM sentinel_remediation.events", "SET ROLE control_owner",
+                          "INSERT INTO sentinel_remediation.targets(target_key) VALUES(repeat('9',64))"):
+            login(forbidden, success=False, role=reader)
+        function = "sentinel_remediation.release_quarantine(TEXT,INTEGER,TEXT,TEXT,TEXT,JSONB)"
+        sql(f"SET ROLE control_owner; GRANT EXECUTE ON FUNCTION {function} TO control_action_reader; RESET ROLE;",
+            user="control_bootstrap")
+        if login(control_job.runtime_privileges_sql(reader), role=reader) != "f":
+            raise RuntimeError("reader able to release quarantine was accepted")
+        sql(f"SET ROLE control_owner; REVOKE EXECUTE ON FUNCTION {function} FROM control_action_reader; RESET ROLE;",
+            user="control_bootstrap")
+        sql("SET ROLE control_owner; GRANT UPDATE ON sentinel_control.incidents TO control_action_reader; RESET ROLE;",
+            user="control_bootstrap")
+        if login(control_job.runtime_privileges_sql(reader), role=reader) != "f":
+            raise RuntimeError("unsafe reader privileges were accepted")
+        sql("SET ROLE control_owner; REVOKE UPDATE ON sentinel_control.incidents FROM control_action_reader; RESET ROLE;",
+            user="control_bootstrap")
+        for statement in control_job.disable_statements((reader,)):
+            sql(statement, user="control_bootstrap")
+        login("SELECT 1", success=False, role=reader)
+        if login("SELECT current_user", role="control_action_writer") != "control_action_writer":
+            raise RuntimeError("reader-only disable revoked the action writer")
+        sql(control_job.runtime_login_sql(reader, password), user="control_bootstrap")
         # pg_signal_backend models the RDS master's non-superuser termination capability.
         sessions = []
         try:
@@ -405,7 +501,8 @@ def postgres_fixture(image):
                 session.stdin.close()
             for _ in range(50):
                 if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN "
-                       "('control_writer','control_action_writer') AND wait_event='PgSleep'") == "2":
+                       "('control_writer','control_action_writer','control_action_reader') "
+                       "AND wait_event='PgSleep'") == "3":
                     break
                 time.sleep(0.1)
             else:
@@ -423,10 +520,10 @@ def postgres_fixture(image):
         for role in control_job.RUNTIME_ROLES.values():
             login("SELECT 1", success=False, role=role)
         if sql("SELECT bool_and(NOT rolcanlogin AND rolpassword IS NULL) FROM pg_authid "
-               "WHERE rolname IN ('control_writer','control_action_writer')") != "t":
+               "WHERE rolname IN ('control_writer','control_action_writer','control_action_reader')") != "t":
             raise RuntimeError("disable did not clear both credentials")
         if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN "
-               "('control_writer','control_action_writer')") != "0":
+               "('control_writer','control_action_writer','control_action_reader')") != "0":
             raise RuntimeError("runtime sessions remain")
         print(json.dumps({"postgres_image": image, "status": "PASS", "core_versions": [1, 2, 3],
             "remediation_versions": [1, 2], "restricted_master": True, "scram_auth": True,
