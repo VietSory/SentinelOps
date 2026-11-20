@@ -320,17 +320,29 @@ class MemoryController:
                 'Proposed memory limit: 64Mi -> 256Mi; image unchanged.' if verified_oom else
                 'Bounded manual memory recovery: 64Mi -> 256Mi; image unchanged. '
                 'OOM cause and failed-pod evidence are not established by this recovery approval.')
+        evidence = [{'id': OOM_EVIDENCE_ID if verified_oom else 'manual-memory-recovery',
+            'type': 'log', 'service': NAME, 'observed_at': proposal['created_at'],
+            'source_ref': source_ref, 'fact': fact}]
+        triggers = [{'source': 'kubernetes' if verified_oom else 'manual',
+            'signal_id': proposal['proposal_id'], 'emitted_at': proposal['created_at'], 'source_ref': source_ref}]
+        if current:
+            # A manual recovery adds provenance; it must not erase the genuine
+            # evidence or original trigger supporting an already stored RCA.
+            referenced = {ref for candidate in ranking for ref in candidate['evidence_refs']}
+            evidence.extend(deepcopy(item) for item in current['payload']['evidence']
+                            if item['id'] in referenced and item['id'] != evidence[0]['id'])
+            references = list(dict.fromkeys(current['context']['source_refs'] + references))
+            original = deepcopy(current['context']['trigger_sources'])
+            identities = {(item['source'], item['signal_id']) for item in original}
+            triggers = original + [item for item in triggers if (item['source'], item['signal_id']) not in identities]
         payload = {'schema_version': '1.0', 'incident_id': proposal['incident_id'],
             'detected_at': proposal['created_at'], 'state': state, 'severity': 'high',
             'affected_services': [NAME], 'service_signals': [], 'root_cause_ranking': ranking,
-            'evidence': [{'id': OOM_EVIDENCE_ID if verified_oom else 'manual-memory-recovery',
-                'type': 'log', 'service': NAME, 'observed_at': proposal['created_at'],
-                'source_ref': source_ref, 'fact': fact}]}
+            'evidence': evidence}
         context = {'availability': availability, 'source_refs': references,
             'config_refs': ['config://' + RUNBOOK] + ([OOM_RCA_RULE] if ranking else []),
             'recovery_source': ('manual' if manual else 'action') if state in ('recovering', 'recovered') else None,
-            'trigger_sources': [{'source': 'kubernetes' if verified_oom else 'manual',
-                'signal_id': proposal['proposal_id'], 'emitted_at': proposal['created_at'], 'source_ref': source_ref}]}
+            'trigger_sources': triggers}
         return await self.incidents.write(IncidentWrite(payload, stage, current['revision'] if current else 0,
             'oom-' + proposal['proposal_id'][:32] + '-' + stage, 'pod-memory-demo-controller',
             ('verified-kubernetes-oom-' if verified_oom else 'manual-memory-recovery-') + stage.lower(), context))
@@ -437,14 +449,6 @@ class MemoryController:
                 self._enabled()
                 if self.clock() >= utc_time(proposal['expires_at']):
                     raise Blocked('oom-demo-approval-expired-before-dispatch')
-                # Persist consumed approval and intent BEFORE the only mutation.
-                used = {'proposal_id': proposal['proposal_id'], 'approval_sha256': stable_id(receipt),
-                        'runbook': RUNBOOK, 'before': observed, 'claimed_at': timestamp(self.clock())}
-                if manual:
-                    used['approval_mode'] = mode
-                approvals.create_slot(self.store, 'used', proposal['proposal_id'], used)
-                state = self._save(state, phase='dispatching', dispatches=1, before=observed,
-                    deadline=timestamp(self.clock() + timedelta(minutes=5)), reason='approved-memory-limit-change')
                 rca = await self._incident(proposal, 'RCA_READY', expected_revision=proposal['incident_revision'])
                 planned = await self._incident(proposal, 'MITIGATION_PLANNED', expected_revision=rca['revision'])
                 mitigating = await self._incident(proposal, 'MITIGATING', state='recovering',
@@ -469,6 +473,16 @@ class MemoryController:
                 self._enabled()
                 if self.clock() >= utc_time(proposal['expires_at']):
                     raise Blocked('oom-demo-approval-expired-before-dispatch')
+                # Incident preparation can fail without ever attempting PATCH.
+                # Claim the approval and persist send intent only after those
+                # writes and the final fresh policy/CAS/kill/expiry checks.
+                used = {'proposal_id': proposal['proposal_id'], 'approval_sha256': stable_id(receipt),
+                        'runbook': RUNBOOK, 'before': observed, 'claimed_at': timestamp(self.clock())}
+                if manual:
+                    used['approval_mode'] = mode
+                approvals.create_slot(self.store, 'used', proposal['proposal_id'], used)
+                state = self._save(state, phase='dispatching', dispatches=1, before=observed,
+                    deadline=timestamp(self.clock() + timedelta(minutes=5)), reason='approved-memory-limit-change')
                 await self.kube.patch(observed, dry_run=False)
                 state = self._save(state, phase='verifying', reason='waiting-for-replacement-pod')
             elif state['phase'] == 'dispatching':
