@@ -206,6 +206,37 @@ def test_controller_stale_log_and_disabled_policy_are_blocked(tmp_path):
         oom.validate_controller(cfg, dep, cm, old, now=oom.clock())
 
 
+def test_controller_latest_phase_survives_interleaved_nonphase_otel_diagnostics(tmp_path):
+    cfg=config(tmp_path)
+    now=datetime(2026,11,21,tzinfo=timezone.utc)
+    cm={'data':{cfg.controller['key']:json.dumps(cfg.target)}}
+    healthy=(now-timedelta(seconds=2)).isoformat()+' {"phase":"observing","reason":"no-current-oom-at-low-limit"}'
+    diagnostics=now.isoformat()+' ERROR OTLP metric exporter unavailable\n'+now.isoformat()+' {"severity":"error","component":"otlp"}'
+    assert oom.validate_controller(cfg,controller(),cm,healthy+'\n'+diagnostics,now=now)=='memory-controller'
+
+
+@pytest.mark.parametrize('phase',['pending','unavailable','blocked','verifying'])
+def test_latest_controller_phase_blocks_despite_an_older_healthy_record(tmp_path,phase):
+    cfg=config(tmp_path)
+    now=datetime(2026,11,21,tzinfo=timezone.utc)
+    cm={'data':{cfg.controller['key']:json.dumps(cfg.target)}}
+    healthy=(now-timedelta(seconds=2)).isoformat()+' {"phase":"observing","reason":"no-current-oom-at-low-limit"}'
+    latest=now.isoformat()+' '+json.dumps({'phase':phase,'reason':'not-idle'})
+    diagnostics=now.isoformat()+' exporter diagnostic without controller phase'
+    with pytest.raises(oom.Blocked,match='freshly'):
+        oom.validate_controller(cfg,controller(),cm,healthy+'\n'+latest+'\n'+diagnostics,now=now)
+
+
+def test_only_stale_controller_phase_with_fresh_sdk_diagnostics_remains_blocked(tmp_path):
+    cfg=config(tmp_path)
+    now=datetime(2026,11,21,tzinfo=timezone.utc)
+    cm={'data':{cfg.controller['key']:json.dumps(cfg.target)}}
+    old=(now-timedelta(seconds=11)).isoformat()+' {"phase":"observing","reason":"no-current-oom-at-low-limit"}'
+    fresh=now.isoformat()+' OTLP exporter retrying'
+    with pytest.raises(oom.Blocked,match='freshly'):
+        oom.validate_controller(cfg,controller(),cm,old+'\n'+fresh,now=now)
+
+
 def test_real_oom_reason_and_new_termination_clock_required(tmp_path, monkeypatch, capsys):
     cfg = config(tmp_path)
     kube = FakeKube(cfg)

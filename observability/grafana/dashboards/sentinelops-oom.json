@@ -1,0 +1,1026 @@
+{
+  "uid": "sentinelops-oom",
+  "title": "SentinelOps — OOM: tài nguyên và khôi phục",
+  "description": "Quan sát riêng workload OOM demo: memory limit, Pod Ready, restart, OOMKilled và tiến trình xử lý thực tế. Dữ liệu thiếu hoặc quá 20 giây là UNKNOWN; không thay thế HTTP SLO, không tái dựng lịch sử cũ, không phê duyệt hay thực thi remediation.",
+  "tags": [
+    "sentinelops",
+    "oom-demo",
+    "kubernetes"
+  ],
+  "timezone": "utc",
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Incident workspace",
+      "type": "link",
+      "url": "/ui/",
+      "targetBlank": true
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "OOM demo — phạm vi và cách đọc",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Workload cố định:** `sentinelops-b-actions / sentinelops-oom-demo / oom-demo`. Nguồn là quan sát Kubernetes của OOM controller, xuất OTLP qua Collector hiện có. **RAM là giới hạn cấu hình, không phải lượng RAM đang dùng.**\n\nLượt bơm OOM đổi giới hạn **256 MiB → 64 MiB**; khôi phục đưa về **256 MiB**. Ready, restart và OOM là bằng chứng tài nguyên riêng; HTTP SLO của Checkout/Payment/Inventory có thể vẫn xanh khi chúng không bị ảnh hưởng.\n\n**Thiếu dữ liệu, quan sát từ tương lai hoặc quá 20 giây = UNKNOWN**, lịch sử để trống. Chỉ có lịch sử từ khi exporter chạy; không tái dựng sự kiện cũ. [Mở Incident workspace](/ui/) để xem incident/proposal và quyết định của người trực. Dashboard chỉ đọc, không tự phê duyệt hay thực thi."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Độ tin cậy quan sát",
+      "description": "OBSERVED chỉ có nghĩa là vừa nhận được quan sát Kubernetes hợp lệ, không khẳng định workload khỏe. 0, mất series hoặc quá 20 giây là UNKNOWN.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "Kubernetes ≤ 20 giây",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "UNKNOWN",
+                  "color": "orange",
+                  "index": 0
+                },
+                "1": {
+                  "text": "OBSERVED",
+                  "color": "blue",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Giới hạn RAM hiện tại",
+      "description": "Giới hạn memory của Deployment được đọc từ Kubernetes. 64 MiB là giới hạn bơm lỗi; 256 MiB là giới hạn khôi phục. Không đo memory usage.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sentinelops_oom_demo_memory_limit_bytes{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} and on(namespace, workload, container) (sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "memory limit",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "67108864": {
+                  "text": "64 MiB — giới hạn bơm lỗi",
+                  "color": "red",
+                  "index": 0
+                },
+                "268435456": {
+                  "text": "256 MiB — giới hạn khôi phục",
+                  "color": "blue",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Pod hiện tại có Ready?",
+      "description": "Ready là trạng thái Pod thực tế tại lần quan sát mới nhất; không dùng thay cho xác minh khôi phục đầy đủ của controller.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sentinelops_oom_demo_pod_ready{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} and on(namespace, workload, container) (sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "Pod Ready",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NOT READY",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "READY",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "orange",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "OOM đã quan sát",
+      "description": "Counter các lần OOMKilled mà controller đã quan sát và chống đếm trùng. Phạm vi phiên exporter; có thể reset khi exporter khởi động lại; không đếm mọi sự kiện Kubernetes trong quá khứ.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sentinelops_oom_demo_oom_observed_events_total{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} and on(namespace, workload, container) (sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "Sự kiện đã quan sát",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Giới hạn RAM theo thời gian",
+      "description": "Giới hạn cấu hình thực tế 256 → 64 → 256 MiB. Khoảng trống là thiếu quan sát mới, không phải 0 byte.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sentinelops_oom_demo_memory_limit_bytes{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} and on(namespace, workload, container) (sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "memory limit",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "last",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "bytes",
+            "showPoints": "never"
+          },
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Pod Ready theo thời gian",
+      "description": "1 = READY; 0 = NOT READY. Dữ liệu quá 20 giây để trống. Pod mới có thể Ready trước khi đủ cửa sổ xác minh khôi phục.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sentinelops_oom_demo_pod_ready{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} and on(namespace, workload, container) (sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "Pod hiện tại",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "last",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "",
+            "showPoints": "never"
+          },
+          "min": 0,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "NOT READY",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "READY",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Restart của Pod hiện tại",
+      "description": "Gauge restartCount của Pod đang được theo dõi; reset tự nhiên về 0 khi Pod được thay thế. Không dùng rate/increase; không phải tổng restart của Deployment.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sentinelops_oom_demo_restarts{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} and on(namespace, workload, container) (sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "Restart — Pod hiện tại",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "last",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "",
+            "showPoints": "never"
+          },
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Sự kiện OOM đã quan sát theo thời gian",
+      "description": "Counter chống đếm trùng trong phiên exporter; đường giảm có thể là exporter khởi động lại. Không suy ra OOM từ HTTP 5xx hoặc ngược lại.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sentinelops_oom_demo_oom_observed_events_total{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} and on(namespace, workload, container) (sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "OOMKilled đã quan sát",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "last",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "axisPlacement": "left",
+            "axisLabel": "",
+            "showPoints": "never"
+          },
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "state-timeline",
+      "title": "Tiến trình xử lý OOM của controller",
+      "description": "Chỉ vẽ phase đang hoạt động từ controller với quan sát Kubernetes còn mới. PENDING chờ người trực; RECOVERED chỉ xuất hiện sau xác minh thật, sau đó có thể quay về OBSERVING. Không có dữ liệu là UNKNOWN.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sentinelops_oom_demo_phase{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "{{phase}}",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "showValue": "always",
+        "mergeValues": true,
+        "rowHeight": 0.8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "spanNulls": false,
+            "lineWidth": 0,
+            "fillOpacity": 85
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "Đang ở trạng thái này",
+                  "color": "blue",
+                  "index": 0
+                }
+              }
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "observing"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đang quan sát"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "waiting"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đang chờ OOM"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pending"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Chờ người trực quyết định"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dispatching"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đang thực thi khôi phục"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "verifying"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đang xác minh khôi phục"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "recovered"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đã khôi phục"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "blocked"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Bị chặn"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "escalated"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đã chuyển cấp"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rejected"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đã từ chối"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "expired"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đã hết hạn"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unavailable"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Không có quan sát hợp lệ"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Kết quả xử lý gần nhất",
+      "description": "Lịch sử phase kết thúc gần nhất do controller thực sự phát ra; đây không phải phase hiện tại và không chứng minh workload hiện vẫn khỏe. Chưa có kết quả trong phiên thì UNKNOWN.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sentinelops_oom_demo_last_terminal_phase{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "{{phase}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "observing"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đang quan sát"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "waiting"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đang chờ OOM"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pending"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Chờ người trực quyết định"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "dispatching"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đang thực thi khôi phục"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "verifying"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đang xác minh khôi phục"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "recovered"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đã khôi phục"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "blocked"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Bị chặn"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "escalated"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đã chuyển cấp"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rejected"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đã từ chối"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "expired"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Đã hết hạn"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unavailable"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Không có quan sát hợp lệ"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Thời điểm kết quả gần nhất",
+      "description": "Thời điểm thực sự ghi nhận phase kết thúc gần nhất trong phiên exporter. Chỉ hiển thị khi quan sát workload hiện tại còn mới; chưa có thì UNKNOWN.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "(sentinelops_oom_demo_last_terminal_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} * 1000) and on(namespace, workload, container) (sentinelops_oom_demo_observation_available{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} == 1) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} >= 0) and on(namespace, workload, container) (time() - sentinelops_oom_demo_last_observed_unixtime_seconds{namespace=\"sentinelops-b-actions\",workload=\"sentinelops-oom-demo\",container=\"oom-demo\"} <= 20)",
+          "legendFormat": "Kết quả gần nhất · UTC",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "wideLayout": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso",
+          "noValue": "UNKNOWN — thiếu quan sát mới",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

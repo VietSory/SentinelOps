@@ -16,6 +16,17 @@ TARGET = {'cluster_uid': 'cluster-id', 'namespace_uid': 'namespace-id',
           'deployment_uid': 'workload-id', 'image': IMAGE}
 
 
+def test_optional_metrics_use_only_the_existing_private_collector_and_no_new_authority():
+    endpoint='http://otel-collector.sentinelops-b-actions.svc.cluster.local:4317'
+    docs,patch=render_controller(controller(),TARGET,SIDECAR_IMAGE,metrics_otlp_endpoint=endpoint)
+    sidecar=next(p['value'] for p in patch if p['path']=='/spec/template/spec/containers/-')
+    assert sidecar['args'][-2:]==['--metrics-otlp-endpoint',endpoint]
+    assert '--policy-enabled' not in sidecar['args']
+    assert not any(d.get('kind') in ('Service','ServiceMonitor','ClusterRole') for d in docs)
+    with pytest.raises(ValueError,match='not allowlisted'):
+        render_controller(controller(),TARGET,SIDECAR_IMAGE,metrics_otlp_endpoint='http://outside.invalid:4317')
+
+
 def controller():
     mounts = [{'name': 'tmp', 'mountPath': '/tmp'},
               {'name': 'credentials', 'mountPath': '/credentials', 'readOnly': True},

@@ -31,12 +31,18 @@ DATASOURCE_UID = 'sentinelops-prometheus'
 GUARDED_METRIC = 'sentinelops_worker_source_available'
 DECIDED_RULE = 'sentinelops:worker_source_available:decided'
 GUARD_TOKENS = ('sentinelops_worker_has_local_decision', DECIDED_RULE)
+OOM_DASHBOARD = 'sentinelops-oom.json'
+OOM_SCOPE = '{namespace="sentinelops-b-actions",workload="sentinelops-oom-demo",container="oom-demo"}'
+OOM_OBSERVED = 'sentinelops_oom_demo_last_observed_unixtime_seconds'
+OOM_AVAILABLE = 'sentinelops_oom_demo_observation_available'
 
 
 def exported_metric_names() -> set[str]:
     """The Prometheus-exported names, taken from the existing evidence module."""
     from scripts.worker_metrics_evidence import NAMES
+    from sentinelops.remediation.pod_memory_metrics import EXPORTED_METRIC_NAMES
     names = set(NAMES.values())
+    names.update(EXPORTED_METRIC_NAMES)
     # Incident-worker instruments, exported with the same suffix rules.
     names |= {'sentinelops_incident_has_local_progress', 'sentinelops_incident_groups_total',
               'sentinelops_rca_abstentions_total'}
@@ -70,7 +76,49 @@ def queries(dashboard: dict) -> list[tuple[dict, str]]:
 
 
 def referenced_metrics(expression: str) -> set[str]:
-    return set(re.findall(r'\bsentinelops[a-z0-9_:]*\b', expression))
+    # Label strings are not series names (the fixed OOM workload includes the
+    # word sentinelops). Keep unknown identifiers outside strings detectable.
+    unquoted = re.sub(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`[^`]*`', '', expression)
+    return set(re.findall(r'\bsentinelops[a-z0-9_:]*\b', unquoted))
+
+
+def assert_oom_observations_are_guarded(all_dashboards: dict[str, dict]) -> list[str]:
+    """Current OOM state requires a fresh, identity-scoped real observation."""
+    board = all_dashboards.get(OOM_DASHBOARD)
+    if board is None:
+        raise ValueError('expected the dedicated OOM dashboard')
+    checked, presented = 0, set()
+    age = 'time() - '+OOM_OBSERVED+OOM_SCOPE
+    for panel, expression in queries(board):
+        metrics = referenced_metrics(expression)
+        presented.update(metrics)
+        for metric in metrics:
+            if not metric.startswith('sentinelops_oom_demo_') or metric+OOM_SCOPE not in expression:
+                raise ValueError('OOM panel '+repr(panel['title'])+' must use the fixed workload scope')
+        if age+' >= 0' not in expression or age+' <= 20' not in expression:
+            raise ValueError('OOM panel '+repr(panel['title'])+' must reject stale and future observations')
+        availability_panel = panel['id'] == 2 and metrics == {OOM_AVAILABLE, OOM_OBSERVED}
+        if not availability_panel and OOM_AVAILABLE+OOM_SCOPE+' == 1' not in expression:
+            raise ValueError('OOM panel '+repr(panel['title'])+' must require observation availability')
+        if re.search(r'\bor\b|\bvector\s*\(', expression):
+            raise ValueError('OOM panels must not replace missing observations with a value')
+        if 'sentinelops_oom_demo_restarts' in metrics and re.search(r'\b(?:rate|increase|irate)\s*\(', expression):
+            raise ValueError('OOM restarts is a current-Pod gauge, not a counter')
+        if panel['type'] == 'stat':
+            if any(target.get('instant') is not True or target.get('range', False)
+                   for target in panel['targets']):
+                raise ValueError('OOM stat panels must read the current instant')
+            if panel.get('options', {}).get('reduceOptions', {}).get('calcs') != ['last']:
+                raise ValueError('OOM stat panels must not carry the last non-null observation forward')
+        elif panel.get('fieldConfig', {}).get('defaults', {}).get('custom', {}).get('spanNulls') is not False:
+            raise ValueError('OOM histories must leave missing observations as gaps')
+        checked += 1
+    required = {f'sentinelops_oom_demo_{name}' for name in (
+        'memory_limit_bytes', 'pod_ready', 'restarts', 'oom_observed_events_total', 'phase',
+        'observation_available', 'last_observed_unixtime_seconds')}
+    if not required <= presented:
+        raise ValueError('OOM dashboard must include resource, readiness, restart, event and phase evidence')
+    return [f'{checked} OOM queries require fixed identity and observations no older than 20s; absent data stays UNKNOWN']
 
 
 def assert_queries_resolve(all_dashboards: dict[str, dict], known: set[str]) -> list[str]:
@@ -277,6 +325,7 @@ def exercise(output: Path | None, base_url: str | None) -> dict:
     checks: list[str] = []
     checks += assert_queries_resolve(all_dashboards, known)
     checks += assert_source_availability_is_guarded(all_dashboards)
+    checks += assert_oom_observations_are_guarded(all_dashboards)
     checks += assert_missing_data_is_not_healthy(all_dashboards)
     checks += assert_single_axis(all_dashboards)
     checks += assert_legend_present(all_dashboards)

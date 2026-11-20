@@ -18,14 +18,16 @@ from scripts.check_grafana_dashboards import (
     DASHBOARDS, GRAFANA, PROJECT, assert_console_is_not_production_auth, assert_legend_present,
     assert_missing_data_is_not_healthy, assert_provisioned_read_only, assert_queries_resolve,
     assert_single_axis, assert_source_availability_is_guarded, dashboards, exported_metric_names,
-    recording_rule_names)
+    recording_rule_names, assert_oom_observations_are_guarded)
 
 KNOWN = exported_metric_names() | recording_rule_names()
 WORKERS = 'sentinelops-workers.json'
+OOM = 'sentinelops-oom.json'
 DASHBOARD_UIDS = {
     'sentinelops-incidents.json': 'sentinelops-incidents',
     'sentinelops-slo.json': 'sentinelops-slo',
     WORKERS: 'sentinelops-workers',
+    OOM: 'sentinelops-oom',
 }
 
 
@@ -43,11 +45,12 @@ def test_real_console_satisfies_every_guard():
     assert set(all_dashboards) == set(DASHBOARD_UIDS)
     checks = (assert_queries_resolve(all_dashboards, KNOWN)
               + assert_source_availability_is_guarded(all_dashboards)
+              + assert_oom_observations_are_guarded(all_dashboards)
               + assert_missing_data_is_not_healthy(all_dashboards)
               + assert_single_axis(all_dashboards) + assert_legend_present(all_dashboards)
               + assert_provisioned_read_only(all_dashboards) + assert_console_is_not_production_auth())
-    # Guards aggregate over all three dashboards; provisioning emits three checks.
-    assert len(checks) == 6 + 3
+    # Guards cover all four dashboards; provisioning emits three checks.
+    assert len(checks) == 7 + 3
 
 
 def test_dashboard_declares_its_limits():
@@ -57,6 +60,89 @@ def test_dashboard_declares_its_limits():
     scope = panel(dashboards(), 'Scope')['options']['content'].lower()
     assert 'missing data is unknown, never healthy' in scope
     assert 'no panel grants model activation or remediation authority' in scope
+
+
+def oom_panel(board, id):
+    return next(item for item in board[OOM]['panels'] if item['id'] == id)
+
+
+def test_oom_metric_catalog_and_scope_are_real_and_explicit():
+    from sentinelops.remediation.pod_memory_metrics import EXPORTED_METRIC_NAMES, FRESH_SECONDS
+    oom = dashboards()[OOM]
+    assert FRESH_SECONDS == 20
+    metrics = set().union(*(checker.referenced_metrics(expr) for _, expr in checker.queries(oom)))
+    assert metrics == set(EXPORTED_METRIC_NAMES)
+    scope = oom_panel(dashboards(), 1)['options']['content']
+    for phrase in ('không phải lượng RAM đang dùng', '256 MiB → 64 MiB', 'UNKNOWN', '/ui/'):
+        assert phrase in scope
+    assert not any('sentinelops_http_' in expr for _, expr in checker.queries(oom))
+    assert oom_panel(dashboards(), 11)['options']['textMode'] == 'name'
+
+
+@pytest.mark.parametrize('quoted', ['"sentinelops-b-actions"', "'sentinelops-oom-demo'", '`sentinelops_fake_metric`',
+                                    '"escaped \\\"sentinelops_fake_metric\\\""'])
+def test_metric_names_inside_label_strings_are_not_series(quoted):
+    assert checker.referenced_metrics('sentinelops_worker_ready{namespace='+quoted+'}') == {
+        'sentinelops_worker_ready'}
+
+
+def test_quoted_workload_does_not_hide_an_unknown_real_metric(board):
+    oom_panel(board, 3)['targets'][0]['expr'] += ' + sentinelops_typo_metric'
+    with pytest.raises(ValueError, match='unknown series: sentinelops_typo_metric'):
+        assert_queries_resolve(board, KNOWN)
+
+
+@pytest.mark.parametrize('old,new,error', [
+    (' <= 20', ' <= 120', 'stale and future'),
+    (' >= 0', ' >= -1', 'stale and future'),
+    (checker.OOM_AVAILABLE+checker.OOM_SCOPE+' == 1',
+     checker.OOM_AVAILABLE+checker.OOM_SCOPE+' >= 0', 'require observation availability'),
+    ('workload="sentinelops-oom-demo"', 'workload="payment"', 'fixed workload scope'),
+])
+def test_oom_observation_guard_rejects_stale_future_unavailable_or_wrong_target(board, old, new, error):
+    target = oom_panel(board, 3)['targets'][0]
+    target['expr'] = target['expr'].replace(old, new)
+    with pytest.raises(ValueError, match=error):
+        assert_oom_observations_are_guarded(board)
+
+
+def test_oom_missing_data_cannot_be_filled_with_zero(board):
+    oom_panel(board, 3)['targets'][0]['expr'] += ' or vector(0)'
+    with pytest.raises(ValueError, match='replace missing observations'):
+        assert_oom_observations_are_guarded(board)
+
+
+def test_oom_current_pod_restart_gauge_cannot_be_treated_as_counter(board):
+    target = oom_panel(board, 8)['targets'][0]
+    metric = 'sentinelops_oom_demo_restarts'+checker.OOM_SCOPE
+    target['expr'] = target['expr'].replace(metric, 'increase('+metric+'[1m])')
+    with pytest.raises(ValueError, match='current-Pod gauge'):
+        assert_oom_observations_are_guarded(board)
+
+
+@pytest.mark.parametrize('field,value', [('instant', False), ('range', True)])
+def test_oom_current_state_cannot_read_a_historical_range(board, field, value):
+    oom_panel(board, 3)['targets'][0][field] = value
+    with pytest.raises(ValueError, match='current instant'):
+        assert_oom_observations_are_guarded(board)
+
+
+def test_oom_current_state_cannot_carry_forward_a_stale_last_non_null_value(board):
+    oom_panel(board, 3)['options']['reduceOptions']['calcs'] = ['lastNotNull']
+    with pytest.raises(ValueError, match='last non-null'):
+        assert_oom_observations_are_guarded(board)
+
+
+def test_oom_history_cannot_connect_unknown_gaps(board):
+    oom_panel(board, 6)['fieldConfig']['defaults']['custom']['spanNulls'] = True
+    with pytest.raises(ValueError, match='missing observations as gaps'):
+        assert_oom_observations_are_guarded(board)
+
+
+def test_oom_dashboard_cannot_drop_all_actual_restart_evidence(board):
+    board[OOM]['panels'] = [p for p in board[OOM]['panels'] if p['id'] != 8]
+    with pytest.raises(ValueError, match='resource, readiness, restart, event and phase'):
+        assert_oom_observations_are_guarded(board)
 
 
 def test_misspelled_metric_is_rejected(board):
@@ -177,7 +263,7 @@ def test_provisioning_binds_are_individual_read_only_files():
         *(f'./observability/grafana/dashboards/{name}:/var/lib/grafana/dashboards/{name}:ro'
           for name in DASHBOARD_UIDS),
     }
-    assert len(binds) == 5
+    assert len(binds) == 6
     assert set(binds) == expected
     for mount in binds:
         source, _, mode = mount.split(':')
@@ -253,7 +339,9 @@ def test_runtime_verification_interpolates_every_dashboard_query_without_mutatin
     boards, evaluated = running_grafana(monkeypatch)
     original = copy.deepcopy(boards)
     result = checker.verify_running('http://grafana.invalid', boards)
-    assert result['expressions_evaluated_on_prometheus'] == len(evaluated) == 51
+    assert result['expressions_evaluated_on_prometheus'] == len(evaluated) == 62
+    assert sum(len(checker.queries(board)) for board in boards.values()) == len(evaluated)
+    assert any('sentinelops_oom_demo_memory_limit_bytes' in expression for expression in evaluated)
     for metric in ('sentinelops_incident_groups_total', 'sentinelops_rca_abstentions_total'):
         assert f'sum by (environment) (increase({metric}[1h]))' in evaluated
     assert boards == original

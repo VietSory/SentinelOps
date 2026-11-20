@@ -50,9 +50,13 @@ def render_rbac(*, node_names=()):
     return docs
 
 
-def render(controller, target, image, *, enabled=False, node_names=(), reader_image=None):
+def render(controller, target, image, *, enabled=False, node_names=(), reader_image=None,
+           metrics_otlp_endpoint=None):
     """Return (ConfigMap/RBAC documents, race-guarded controller JSON patch)."""
     image_digest(image)
+    if metrics_otlp_endpoint is not None:
+        from sentinelops.remediation.pod_memory_metrics import metrics_endpoint
+        metrics_otlp_endpoint = metrics_endpoint(metrics_otlp_endpoint)
     if enabled and not reader_image:
         raise ValueError('enabled OOM policy requires an explicitly reviewed compatible reader image')
     if reader_image is not None:
@@ -98,7 +102,8 @@ def render(controller, target, image, *, enabled=False, node_names=(), reader_im
         'args': ['--target', '/etc/sentinelops/oom/target.json', '--store', '/artifacts/remediation',
                  '--token-file', '/credentials/token', '--ca-file', '/credentials/ca.crt',
                  '--kill-switch', '/artifacts/remediation/KILL_SWITCH', '--server', SERVER]
-                + (['--policy-enabled'] if enabled else []),
+                + (['--policy-enabled'] if enabled else [])
+                + (['--metrics-otlp-endpoint', metrics_otlp_endpoint] if metrics_otlp_endpoint else []),
         'env': database_env + [
             {'name': 'SENTINELOPS_ENV', 'value': 'aws-dev'},
             {'name': 'SENTINELOPS_KUBERNETES_REMOTE_SERVER', 'value': SERVER},
@@ -146,12 +151,13 @@ def main():
     parser.add_argument('--reader-image',
                         help='Reviewed reader compatibility image digest; required with --policy-enabled')
     parser.add_argument('--policy-enabled', action='store_true')
+    parser.add_argument('--metrics-otlp-endpoint', help='Optional allowlisted observation-only OTLP endpoint')
     parser.add_argument('--node-name', action='append', default=[], help='Allow get only these observed node names')
     parser.add_argument('--output-dir', type=Path, required=True)
     args = parser.parse_args()
     docs, patch = render(json.loads(args.controller.read_text()), json.loads(args.target.read_text()),
                          args.image, enabled=args.policy_enabled, node_names=args.node_name,
-                         reader_image=args.reader_image)
+                         reader_image=args.reader_image, metrics_otlp_endpoint=args.metrics_otlp_endpoint)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with (args.output_dir / 'oom-policy.yaml').open('x') as stream:
         yaml.safe_dump_all(docs, stream, sort_keys=False)

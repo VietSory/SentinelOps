@@ -187,10 +187,26 @@ def validate_controller(config, controller, cm, latest_log, *, now):
         raise Blocked('controller target argument is not mapped to the bound ConfigMap')
     # The worker emits one JSON state every two seconds. An active/old proposal
     # must finish before another trigger. Readiness alone cannot establish this.
-    at, _, body = latest_log.strip().partition(' ')
-    state = json.loads(body)
-    if (not 0 <= (now - timestamp(at)).total_seconds() <= 10
-        or state != {'phase': 'observing', 'reason': 'no-current-oom-at-low-limit'}):
+    latest_phase = None
+    # SDK/exporter diagnostics can interleave with the controller's JSON. Only
+    # ignore non-phase diagnostics: the latest controller phase (including an
+    # error, pending proposal or stale record) must still fail closed.
+    for line in latest_log.splitlines()[-30:]:
+        at, separator, body = line.partition(' ')
+        if not separator:
+            continue
+        try:
+            state = json.loads(body)
+        except ValueError:
+            continue
+        if isinstance(state, dict) and 'phase' in state:
+            latest_phase = at, state
+    try:
+        at, state = latest_phase or ('', {})
+        fresh = 0 <= (now - timestamp(at)).total_seconds() <= 10
+    except (TypeError, ValueError):
+        fresh = False
+    if (not fresh or state != {'phase': 'observing', 'reason': 'no-current-oom-at-low-limit'}):
         raise Blocked('memory controller is not freshly observing an idle baseline')
     return container['name']
 
@@ -221,7 +237,7 @@ def controller_preflight(config, kube):
         raise Blocked('memory controller entrypoint missing')
     cm = kube.get('configmap', config.controller['configmap'])
     logs = kube.run(['logs', 'deployment/' + config.controller['deployment'], '-n', NAMESPACE,
-                     '-c', candidates[0]['name'], '--tail=1', '--timestamps=true'], json_result=False)
+                     '-c', candidates[0]['name'], '--tail=30', '--timestamps=true'], json_result=False)
     validate_controller(config, controller, cm, logs, now=clock())
 
 
