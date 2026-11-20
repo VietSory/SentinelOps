@@ -64,6 +64,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "root_cause_ranking": {
+            "$ref": "https://sentinelops.local/contracts/incident-evidence-record.schema.json#/properties/root_cause_ranking"
           }
         }
       }

@@ -39,12 +39,7 @@ export function RemediationView({
 }: RemediationViewProps) {
   const { locale, isEn } = useLocale();
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
-  const [selectedId, setSelectedId] = React.useState<string>(() => {
-    const match = focusIncidentId
-      ? remediations.find((r) => r.incidentId === focusIncidentId)
-      : undefined;
-    return match?.id ?? remediations[0]?.id ?? '';
-  });
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
 
   const defaultReasonVi =
     'Đã kiểm tra Trace bottleneck Payment → Payment DB và Deployment Receipt v2.8.4. Đồng ý rollback về bản Known-Good v2.8.3.';
@@ -65,15 +60,29 @@ export function RemediationView({
     });
   }, [isEn]);
 
-  const focusedProposalId = remediations.find((r) => r.incidentId === focusIncidentId)?.id;
+  const selectedProposal = remediations.find((proposal) => proposal.id === selectedId);
+  const activeProposal = selectedProposal
+    ?? remediations.find((proposal) => proposal.incidentId === focusIncidentId)
+    ?? remediations[0];
+  const fallbackIncidentId = selectedProposal ? undefined : activeProposal?.incidentId;
+  const hasMissingSelection = selectedId !== null && !selectedProposal;
+  const reportFallback = React.useEffectEvent((incidentId: string) => {
+    onSelectionChange?.(incidentId);
+  });
   React.useEffect(() => {
-    if (focusedProposalId) setSelectedId(focusedProposalId);
-  }, [focusedProposalId]);
+    if (hasMissingSelection) setSelectedId(null);
+  }, [hasMissingSelection]);
+  React.useEffect(() => {
+    if (live && fallbackIncidentId && fallbackIncidentId !== focusIncidentId) {
+      reportFallback(fallbackIncidentId);
+    }
+  }, [live, fallbackIncidentId, focusIncidentId]);
 
-  const activeProposal =
-    remediations.find((r) => r.id === selectedId) ?? remediations[0];
+  const selectProposal = (proposal: RemediationProposal) => {
+    setSelectedId(proposal.id);
+    if (live) onSelectionChange?.(proposal.incidentId);
+  };
 
-  React.useEffect(()=>{if(live&&activeProposal)onSelectionChange?.(activeProposal.incidentId);},[live,activeProposal?.incidentId]);
   const filteredHistory = React.useMemo(() => {
     return remediations.filter((r) => {
       if (statusFilter === 'all') return true;
@@ -210,7 +219,7 @@ export function RemediationView({
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setSelectedId(item.id)}
+                    onClick={() => selectProposal(item)}
                     className={cn(
                       'w-full text-left rounded-xl border p-3.5 transition-all cursor-pointer space-y-2',
                       selected

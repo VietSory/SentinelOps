@@ -38,6 +38,39 @@ def test_unconfigured_incident_endpoint_never_echoes_as_a_successful_write():
     assert response.json()["code"]=="authentication_unavailable"
 
 
+def test_incident_list_projects_current_and_legacy_rankings():
+    ranked_payload = json.loads((ROOT / "samples" / "incident-evidence-record.sample.json").read_text(encoding="utf-8"))
+    rds, payment = ranked_payload["root_cause_ranking"]
+    ranked_payload["root_cause_ranking"] = [{**payment, "score": 0.648}, {**rds, "score": 0.4}]
+    unranked_payload = {**ranked_payload, "incident_id": "unranked", "root_cause_ranking": []}
+
+    legacy_payload = {**ranked_payload, "incident_id": "legacy"}
+    legacy_payload.pop("root_cause_ranking")
+
+    class ListOnlyRepository:
+        async def check_ready(self):
+            pass
+
+        async def list_current(self, **kwargs):
+            return [
+                {"incident_id": ranked_payload["incident_id"], "revision": 3, "payload": ranked_payload},
+                {"incident_id": unranked_payload["incident_id"], "revision": 1, "payload": unranked_payload},
+                {"incident_id": legacy_payload["incident_id"], "revision": 1, "payload": legacy_payload},
+            ]
+
+    token = "x" * 32
+    local = TestClient(create_app(Settings(api_token=token), repository=ListOnlyRepository()))
+    response = local.get("/v1/incidents", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [(item["incident_id"], item["revision"], item["root_cause_ranking"]) for item in items] == [
+        (ranked_payload["incident_id"], 3, ranked_payload["root_cause_ranking"]),
+        (unranked_payload["incident_id"], 1, []),
+        (legacy_payload["incident_id"], 1, []),
+    ]
+    assert all("evidence" not in item for item in items)
+
+
 def test_default_api_fails_closed_without_models_and_disables_demo():
     payload = json.loads((ROOT/"samples/feature-window.sample.json").read_text())
     assert client.post("/v1/detect",json=payload).status_code==503

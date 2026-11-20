@@ -117,7 +117,8 @@ export interface LiveVisualBinding {
 export default function App({live}: {live?:LiveVisualBinding}) {
   const { locale, setLocale, isEn } = useLocale();
   const [section, setSection] = React.useState<NavSection>('dashboard');
-  const [selectedIncidentId, setSelectedIncidentId] = React.useState<string>(live ? '' : 'INC-2026-1048');
+  const [demoIncidentId, setDemoIncidentId] = React.useState('INC-2026-1048');
+  const selectedIncidentId = live?.selectedId ?? demoIncidentId;
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
   const [overrides, setOverrides] = React.useState<Record<string, RemediationOverride>>({});
   const timersRef = React.useRef<number[]>([]);
@@ -242,12 +243,16 @@ export default function App({live}: {live?:LiveVisualBinding}) {
     };
   }, [locale, isEn, overrides, live]);
 
-  React.useEffect(()=>{
-    if(live?.connected && incidents.length && !incidents.some(i=>i.id===selectedIncidentId) && !remediations.some(r=>r.incidentId===selectedIncidentId)){
-      setSelectedIncidentId(incidents[0].id);live.onSelect(incidents[0].id);
-    }
-  },[live?.connected,incidents,remediations,selectedIncidentId]);
-  const selectIncident=(id:string)=>{setSelectedIncidentId(id);live?.onSelect(id);};
+  const initialLiveIncidentId = live?.connected && !live.selectedId ? incidents[0]?.id : undefined;
+  const selectLiveIncident = live?.onSelect;
+  React.useEffect(() => {
+    if (initialLiveIncidentId) selectLiveIncident?.(initialLiveIncidentId);
+  }, [initialLiveIncidentId, selectLiveIncident]);
+
+  const selectIncident = (id: string) => {
+    if (live) live.onSelect(id);
+    else setDemoIncidentId(id);
+  };
   const demoMutated = Object.keys(overrides).length > 0;
 
   const navigate = (next: NavSection, incidentId?: string) => {
@@ -323,7 +328,9 @@ export default function App({live}: {live?:LiveVisualBinding}) {
   const pendingRemediationsCount = remediations.filter((r) => r.status === 'pending').length;
 
   const currentIncident =
-    incidents.find((i) => i.id === selectedIncidentId) ?? incidents[0];
+    incidents.find((i) => i.id === selectedIncidentId) ?? (live?.selectedId ? undefined : incidents[0]);
+  const incidentUnavailable = Boolean(live?.selectedId && !currentIncident) &&
+    (section === 'incident-detail' || section === 'evidence' || section === 'rca');
   const currentIncidentRemediation = remediations.find(
     (r) => r.incidentId === currentIncident?.id,
   );
@@ -557,7 +564,11 @@ export default function App({live}: {live?:LiveVisualBinding}) {
             {live?.notice}
             {live?.connected && <div className="mb-4 flex flex-wrap gap-3"><Button variant="secondary" size="sm" onClick={live.onRefresh}>{isEn?'Refresh live data':'Làm mới dữ liệu'}</Button><a className="text-sm text-orange-700 underline self-center" href="/ui/demo/">{isEn?'Original simulation':'Bản mô phỏng gốc'}</a></div>}
             {!live?.connected && live ? live.gate : <>
-            {live && !incidents.length && section!=='dashboard' ? <div className="rounded-xl border bg-white p-8 text-slate-500">{isEn?'No incidents in the loaded feed.':'Chưa có incident trong danh sách đã tải.'}</div> :
+            {incidentUnavailable ? (
+              <div className="rounded-xl border bg-white p-8 text-slate-500" role="status">
+                {isEn ? `Incident ${selectedIncidentId} is missing from the loaded feed.` : `Sự cố ${selectedIncidentId} chưa có trong danh sách đã tải.`}
+              </div>
+            ) : live && !incidents.length && section!=='dashboard' ? <div className="rounded-xl border bg-white p-8 text-slate-500">{isEn?'No incidents in the loaded feed.':'Chưa có incident trong danh sách đã tải.'}</div> :
             <AnimatePresence mode="wait">
               <motion.div
                 key={section === 'incident-detail' ? `detail-${currentIncident?.id || ''}` : section}
@@ -584,7 +595,7 @@ export default function App({live}: {live?:LiveVisualBinding}) {
                   />
                 )}
 
-                {section === 'incident-detail' && (
+                {section === 'incident-detail' && currentIncident && (
                   <IncidentDetailView
                     incident={currentIncident}
                     remediation={currentIncidentRemediation}
@@ -621,7 +632,7 @@ export default function App({live}: {live?:LiveVisualBinding}) {
                     onReject={handleRejectRemediation}
                     onOpenIncident={openIncident}
                     live={Boolean(live)}
-                    onSelectionChange={live?selectIncident:undefined}
+                    onSelectionChange={live?.onSelect}
                   />
                 )}
                 {section==='remediation' && live && <div className="mt-6 space-y-6">{live.reviewPanel}{live.journal}</div>}
