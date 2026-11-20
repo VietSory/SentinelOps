@@ -99,11 +99,11 @@ export function IncidentDetailView({
             </span>
           </div>
 
-          <div>
-            <h2 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900">
+          <div className="min-w-0">
+            <h2 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 break-words [overflow-wrap:anywhere]">
               {incident.title}
             </h2>
-            <p className="mt-2 text-sm leading-relaxed text-slate-700 max-w-4xl">
+            <p className="mt-2 text-sm leading-relaxed text-slate-700 max-w-4xl break-words [overflow-wrap:anywhere]">
               {incident.shortSummaryVi}
             </p>
           </div>
@@ -134,8 +134,8 @@ export function IncidentDetailView({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <Card accent="orange" className="lg:col-span-7">
           <CardHeader>
-            <div>
-              <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
                 <Badge tone="orange">Root Cause Analysis</Badge>
                 {incident.rcaAbstained ? (
                   <Badge tone="neutral">
@@ -157,19 +157,19 @@ export function IncidentDetailView({
           </CardHeader>
           <CardContent className="space-y-4">
             {incident.rcaAbstained ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3.5 text-sm text-amber-950">
+              <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3.5 text-sm text-amber-950 break-words [overflow-wrap:anywhere]">
                 {incident.rcaAbstainReasonVi}
               </div>
             ) : (
               incident.hypotheses[0] && (
-                <p className="text-sm text-slate-700 leading-relaxed">
+                <p className="text-sm text-slate-700 leading-relaxed break-words [overflow-wrap:anywhere]">
                   {incident.hypotheses[0].descriptionVi}
                 </p>
               )
             )}
 
             <div className="space-y-1.5">
-              <div className="flex justify-between text-xs font-medium text-slate-600 tabular-nums">
+              <div className="flex flex-wrap justify-between gap-2 text-xs font-medium text-slate-600 tabular-nums">
                 <span>{isEn ? 'Confidence Score' : 'Mức độ tin cậy (Confidence)'}</span>
                 <strong className="text-orange-700">{formatNumber(incident.rcaConfidence,1,locale)}%</strong>
               </div>
@@ -179,7 +179,7 @@ export function IncidentDetailView({
                     'h-full rounded-full transition-all',
                     incident.rcaAbstained ? 'bg-slate-400' : 'bg-orange-600',
                   )}
-                  style={{ width: `${formatNumber(incident.rcaConfidence,1,locale)}%` }}
+                  style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(incident.rcaConfidence) ? incident.rcaConfidence : 0))}%` }}
                 />
               </div>
             </div>
@@ -196,10 +196,10 @@ export function IncidentDetailView({
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-slate-700 leading-relaxed">{incident.impactVi}</p>
+            <p className="text-sm text-slate-700 leading-relaxed break-words [overflow-wrap:anywhere]">{incident.impactVi}</p>
 
             <div className="grid grid-cols-2 gap-3 tabular-nums">
-              <div className="rounded-xl border border-orange-200/80 bg-orange-50/50 p-3">
+              <div className="min-w-0 rounded-xl border border-orange-200/80 bg-orange-50/50 p-3">
                 <span className="block text-[11px] font-medium text-slate-500">Latency p95</span>
                 <strong className="text-lg font-bold text-orange-700">
                   {formatNumber(incident.metricsSnapshot.p95LatencyMs, 0, locale)} ms
@@ -274,27 +274,27 @@ export function IncidentDetailView({
                 <div
                   key={ev.id}
                   className={cn(
-                    'rounded-xl border p-4 space-y-2',
+                    'min-w-0 rounded-xl border p-4 space-y-2',
                     ev.highlight
                       ? 'border-orange-200 bg-orange-50/40'
                       : 'border-slate-200 bg-white',
                   )}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0 flex flex-wrap items-center gap-2">
                       <Badge tone={ev.severity === 'critical' ? 'critical' : ev.severity === 'warning' ? 'high' : 'neutral'}>
                         {ev.category.toUpperCase()}
                       </Badge>
-                      <span className="text-xs font-semibold text-slate-700">{ev.service}</span>
+                      <span className="text-xs font-semibold text-slate-700 break-words">{ev.service}</span>
                     </div>
                     {ev.metricBadge && (
-                      <span className="font-mono text-[11px] font-semibold text-orange-700 bg-white border border-orange-200 px-2 py-0.5 rounded">
+                      <span className="max-w-full break-all font-mono text-[11px] font-semibold text-orange-700 bg-white border border-orange-200 px-2 py-0.5 rounded">
                         {ev.metricBadge}
                       </span>
                     )}
                   </div>
-                  <p className="text-sm font-semibold text-slate-900">{ev.title}</p>
-                  <p className="text-xs text-slate-600 leading-relaxed">{ev.annotationVi}</p>
+                  <p className="text-sm font-semibold text-slate-900 break-words [overflow-wrap:anywhere]">{ev.title}</p>
+                  <p className="text-xs text-slate-600 leading-relaxed break-words [overflow-wrap:anywhere]">{ev.annotationVi}</p>
                 </div>
               ))}
             </div>
@@ -343,12 +343,12 @@ export function IncidentDetailView({
           <CardContent className="space-y-4">
             {remediation ? (
               <>
-                <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
+                <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-semibold text-slate-900">{remediation.runbookName}</p>
-                    <span className="font-mono text-xs text-slate-500">{remediation.runbookId}</span>
+                    <p className="font-semibold text-slate-900 break-words [overflow-wrap:anywhere]">{remediation.runbookName}</p>
+                    <span className="font-mono text-xs text-slate-500 break-all">{remediation.runbookId}</span>
                   </div>
-                  <p className="text-sm text-slate-600 leading-relaxed">{remediation.summaryVi}</p>
+                  <p className="text-sm text-slate-600 leading-relaxed break-words [overflow-wrap:anywhere]">{remediation.summaryVi}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
@@ -412,18 +412,18 @@ export function IncidentDetailView({
                       ev.highlight ? 'bg-orange-500' : 'bg-slate-400',
                     )}
                   />
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-slate-900">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-900 break-words [overflow-wrap:anywhere]">
                       {ev.stage}{' '}
                       <span className="font-mono font-normal text-slate-400">· rev {ev.revision}</span>
                     </span>
-                    <span className="text-[11px] text-slate-400 tabular-nums">
+                    <span className="text-[11px] text-slate-400 tabular-nums shrink-0">
                       {formatDateTime(ev.time, locale)}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-600 leading-relaxed">{ev.summaryVi}</p>
-                  <p className="mt-0.5 text-[11px] text-slate-400 inline-flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3 text-slate-400" /> {ev.actor}
+                  <p className="mt-1 text-xs text-slate-600 leading-relaxed break-words [overflow-wrap:anywhere]">{ev.summaryVi}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-400 inline-flex items-center gap-1 break-all">
+                    <CheckCircle2 className="h-3 w-3 shrink-0 text-slate-400" /> {ev.actor}
                   </p>
                 </li>
               ))}

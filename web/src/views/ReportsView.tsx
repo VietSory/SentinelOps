@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge, SeverityBadge, StatusBadge } from '@/components/ui/badge';
+import { INCIDENTS_PER_PAGE, Pagination } from '@/components/ui/pagination';
 import { getReportTrends } from '@/data';
 import { formatDateTime, formatNumber } from '@/lib/utils';
 import { useLocale } from '@/i18n/LocaleContext';
@@ -40,14 +41,31 @@ export function ReportsView({
   const [period, setPeriod] = React.useState<'daily' | 'weekly'>('daily');
   const [serviceFilter, setServiceFilter] = React.useState<'' | ServiceName>('');
   const [envFilter, setEnvFilter] = React.useState<'' | EnvironmentName>('');
+  const [historyPage, setHistoryPage] = React.useState(1);
+
+  React.useEffect(() => {
+    setHistoryPage(1);
+  }, [serviceFilter, envFilter]);
 
   const scopedIncidents = React.useMemo(() => {
     return incidents.filter((inc) => {
       if (serviceFilter && !inc.services.includes(serviceFilter)) return false;
       if (envFilter && inc.environment !== envFilter) return false;
       return true;
-    });
+    }).sort((first, second) =>
+      Date.parse(second.detectedAt || second.startedAt) - Date.parse(first.detectedAt || first.startedAt),
+    );
   }, [incidents, serviceFilter, envFilter]);
+
+  const totalHistoryPages = Math.max(1, Math.ceil(scopedIncidents.length / INCIDENTS_PER_PAGE));
+  const safeHistoryPage = Math.min(historyPage, totalHistoryPages);
+  React.useEffect(() => {
+    if (historyPage > totalHistoryPages) setHistoryPage(totalHistoryPages);
+  }, [historyPage, totalHistoryPages]);
+  const pagedScopedIncidents = React.useMemo(() => {
+    const start = (safeHistoryPage - 1) * INCIDENTS_PER_PAGE;
+    return scopedIncidents.slice(start, start + INCIDENTS_PER_PAGE);
+  }, [scopedIncidents, safeHistoryPage]);
 
   const avg = (values: number[]) => {const finite=values.filter(Number.isFinite);return finite.length?finite.reduce((sum,v)=>sum+v,0)/finite.length:live?NaN:0;};
 
@@ -346,19 +364,20 @@ export function ReportsView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {scopedIncidents.map((inc) => (
+                {pagedScopedIncidents.map((inc) => (
                   <tr
                     key={inc.id}
+                    data-testid="live-incident-row"
                     onClick={() => onOpenIncident(inc.id)}
                     className="cursor-pointer transition-colors hover:bg-orange-50/45"
                   >
-                    <th scope="row" className="px-4 py-3 text-left font-normal">
-                      <span className="font-mono text-xs font-semibold text-orange-700">
+                    <th scope="row" className="min-w-0 px-4 py-3 text-left font-normal max-w-md">
+                      <span className="block max-w-full break-all font-mono text-xs font-semibold text-orange-700">
                         {inc.id}
                       </span>
-                      <p className="font-semibold text-slate-900 line-clamp-1">{inc.title}</p>
+                      <p className="font-semibold text-slate-900 line-clamp-1 break-words [overflow-wrap:anywhere]">{inc.title}</p>
                     </th>
-                    <td data-label="Service" className="px-4 py-3 text-slate-700 font-medium">
+                    <td data-label="Service" className="px-4 py-3 text-slate-700 font-medium break-words">
                       {inc.services.join(', ')}
                     </td>
                     <td data-label="Severity" className="px-4 py-3">
@@ -369,7 +388,7 @@ export function ReportsView({
                     </td>
                     <td
                       data-label="MTTD / MTTI / MTTR"
-                      className="px-4 py-3 text-right font-mono text-xs text-slate-700 tabular-nums"
+                      className="px-4 py-3 text-right font-mono text-xs text-slate-700 tabular-nums whitespace-nowrap"
                     >
                       {formatNumber(inc.timingsMin.mttd,1,locale)}{shortMin} · {formatNumber(inc.timingsMin.mtti,1,locale)}{shortMin} ·{' '}
                       {inc.timingsMin.mttr !== null
@@ -387,6 +406,13 @@ export function ReportsView({
               </tbody>
             </table>
           </div>
+          <Pagination
+            currentPage={safeHistoryPage}
+            totalItems={scopedIncidents.length}
+            pageSize={INCIDENTS_PER_PAGE}
+            onPageChange={setHistoryPage}
+            className="mt-3 rounded-b-xl border border-slate-200 bg-white"
+          />
         </CardContent>
       </Card>
     </div>

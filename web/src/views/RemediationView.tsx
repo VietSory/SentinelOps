@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge, Keyword, RemediationBadge } from '@/components/ui/badge';
 import { NativeDialog } from '@/components/ui/dialog';
+import { INCIDENTS_PER_PAGE, Pagination } from '@/components/ui/pagination';
 import { cn, formatDateTime } from '@/lib/utils';
 import { useLocale } from '@/i18n/LocaleContext';
 import type { RemediationProposal, RemediationStatus } from '@/types/sentinelops';
@@ -40,6 +41,11 @@ export function RemediationView({
   const { locale, isEn } = useLocale();
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [historyPage, setHistoryPage] = React.useState(1);
+
+  React.useEffect(() => {
+    setHistoryPage(1);
+  }, [statusFilter]);
 
   const defaultReasonVi =
     'Đã kiểm tra Trace bottleneck Payment → Payment DB và Deployment Receipt v2.8.4. Đồng ý rollback về bản Known-Good v2.8.3.';
@@ -93,6 +99,16 @@ export function RemediationView({
       return true;
     });
   }, [remediations, statusFilter]);
+
+  const totalHistoryPages = Math.max(1, Math.ceil(filteredHistory.length / INCIDENTS_PER_PAGE));
+  const safeHistoryPage = Math.min(historyPage, totalHistoryPages);
+  React.useEffect(() => {
+    if (historyPage > totalHistoryPages) setHistoryPage(totalHistoryPages);
+  }, [historyPage, totalHistoryPages]);
+  const pagedHistory = React.useMemo(() => {
+    const start = (safeHistoryPage - 1) * INCIDENTS_PER_PAGE;
+    return filteredHistory.slice(start, start + INCIDENTS_PER_PAGE);
+  }, [filteredHistory, safeHistoryPage]);
 
   const pendingCount = remediations.filter((r) => r.status === 'pending').length;
   const successCount = remediations.filter((r) => r.status === 'success').length;
@@ -212,7 +228,7 @@ export function RemediationView({
             </div>
 
             <div className="space-y-2.5">
-              {filteredHistory.map((item) => {
+              {pagedHistory.map((item) => {
                 const selected = activeProposal?.id === item.id;
                 const isFailed = item.status === 'failed';
                 return (
@@ -221,7 +237,7 @@ export function RemediationView({
                     type="button"
                     onClick={() => selectProposal(item)}
                     className={cn(
-                      'w-full text-left rounded-xl border p-3.5 transition-all cursor-pointer space-y-2',
+                      'w-full min-w-0 text-left rounded-xl border p-3.5 transition-all cursor-pointer space-y-2',
                       selected
                         ? 'border-orange-500 bg-orange-50/55 ring-1 ring-orange-200'
                         : isFailed
@@ -235,17 +251,26 @@ export function RemediationView({
                       </span>
                       <RemediationBadge status={item.status} />
                     </div>
-                    <p className="text-sm font-semibold text-slate-900 line-clamp-2">
+                    <p className="text-sm font-semibold text-slate-900 line-clamp-2 break-words [overflow-wrap:anywhere]">
                       {item.runbookName}
                     </p>
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 tabular-nums">
-                      <span>{item.incidentId}</span>
-                      <span>{formatDateTime(item.createdAt, locale)}</span>
+                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] text-slate-500 tabular-nums">
+                      <span className="min-w-0 break-all font-mono">{item.incidentId}</span>
+                      <span className="shrink-0">{formatDateTime(item.createdAt, locale)}</span>
                     </div>
                   </button>
                 );
               })}
             </div>
+            <Pagination
+              currentPage={safeHistoryPage}
+              totalItems={filteredHistory.length}
+              pageSize={INCIDENTS_PER_PAGE}
+              onPageChange={setHistoryPage}
+              itemLabelVi="đề xuất"
+              itemLabelEn="proposals"
+              className="px-0 pb-0"
+            />
           </CardContent>
         </Card>
 
@@ -269,7 +294,7 @@ export function RemediationView({
                   </div>
                   <CardTitle className="text-lg pt-1">{activeProposal.runbookName}</CardTitle>
                   <CardDescription>
-                    Runbook: <code className="font-mono text-slate-700">{activeProposal.runbookId}</code> ·{' '}
+                    Runbook: <code className="font-mono text-slate-700 break-all">{activeProposal.runbookId}</code> ·{' '}
                     {live?(isEn?'Runbook match: ':'Điểm khớp runbook: '):(isEn ? 'RCA Confidence: ' : 'Độ tin cậy RCA: ')}
                     <strong className="text-orange-700">{Number.isFinite(activeProposal.confidence)?`${activeProposal.confidence}%`:(isEn?'Not provided':'Chưa có điểm')}</strong>
                   </CardDescription>
@@ -278,21 +303,23 @@ export function RemediationView({
                 <Button
                   variant="secondary"
                   size="sm"
+                  title={activeProposal.incidentId}
+                  className="max-w-full min-w-0"
                   onClick={() => onOpenIncident(activeProposal.incidentId)}
                 >
-                  {activeProposal.incidentId}
-                  <ArrowUpRight className="h-3.5 w-3.5" />
+                  <span className="truncate">{activeProposal.incidentId}</span>
+                  <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
                 </Button>
               </CardHeader>
 
               <CardContent className="space-y-5">
-                <p className="text-sm text-slate-700 leading-relaxed">
+                <p className="text-sm text-slate-700 leading-relaxed break-words [overflow-wrap:anywhere]">
                   {activeProposal.summaryVi}
                 </p>
 
                 {activeProposal.currentImage && activeProposal.rollbackImage && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-white p-4">
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-[11px] font-semibold uppercase tracking-wide text-red-600">
                         {isEn ? 'Current Image (Faulty)' : 'Image hiện tại (Gây lỗi)'}
                       </span>
@@ -300,7 +327,7 @@ export function RemediationView({
                         {activeProposal.currentImage}
                       </code>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
                         {isEn ? 'Target Image (Known-Good)' : 'Image mục tiêu (Known-Good)'}
                       </span>
@@ -334,8 +361,8 @@ export function RemediationView({
                       >
                         <div className="mt-0.5">{stepIcon(step.status)}</div>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-semibold text-slate-900">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-sm font-semibold text-slate-900 break-words [overflow-wrap:anywhere]">
                               {step.order}. {step.title}
                             </span>
                             {step.durationSec !== undefined && (
@@ -422,7 +449,7 @@ export function RemediationView({
                 )}
 
                 {activeProposal.approvedBy && (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 text-xs text-slate-600 space-y-1">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 text-xs text-slate-600 space-y-1 break-words [overflow-wrap:anywhere]">
                     <div>
                       {isEn ? 'Decision by ' : 'Quyết định bởi '}
                       <strong className="text-slate-900">{activeProposal.approvedBy}</strong>{' '}
@@ -487,7 +514,7 @@ export function RemediationView({
                     ) : (
                       <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
                     )}
-                    <span>{activeProposal.verificationSummaryVi}</span>
+                    <span className="min-w-0 break-words [overflow-wrap:anywhere]">{activeProposal.verificationSummaryVi}</span>
                   </div>
                 )}
 

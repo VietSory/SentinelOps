@@ -23,7 +23,7 @@ export function Card({
   return (
     <div
       className={cn(
-        'rounded-xl border shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
+        'min-w-0 max-w-full rounded-xl border shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
         accentStyles[accent],
         interactive &&
           'transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_-12px_rgba(15,23,42,0.14)] hover:border-orange-300/80',
@@ -44,7 +44,7 @@ export function CardHeader({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-start justify-between gap-3 px-5 pt-5 pb-3',
+        'min-w-0 flex flex-wrap items-start justify-between gap-3 px-5 pt-5 pb-3 [&>*]:min-w-0',
         className,
       )}
       {...props}
@@ -61,7 +61,7 @@ export function CardTitle({
 }: React.HTMLAttributes<HTMLHeadingElement>) {
   return (
     <h3
-      className={cn('text-base font-semibold tracking-tight text-slate-900', className)}
+      className={cn('text-base font-semibold tracking-tight text-slate-900 break-words [overflow-wrap:anywhere]', className)}
       {...props}
     >
       {children}
@@ -75,7 +75,7 @@ export function CardDescription({
   ...props
 }: React.HTMLAttributes<HTMLParagraphElement>) {
   return (
-    <p className={cn('text-xs text-slate-500 mt-0.5', className)} {...props}>
+    <p className={cn('text-xs text-slate-500 mt-0.5 break-words [overflow-wrap:anywhere]', className)} {...props}>
       {children}
     </p>
   );
@@ -87,7 +87,7 @@ export function CardContent({
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn('px-5 pb-5', className)} {...props}>
+    <div className={cn('min-w-0 px-5 pb-5', className)} {...props}>
       {children}
     </div>
   );

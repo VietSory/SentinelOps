@@ -50,18 +50,18 @@ export function RcaView({
     <div className="space-y-6">
       <Card className="p-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {isEn ? 'Root Cause Analysis Target' : 'Chọn sự cố để xem Phân tích nguyên nhân'}
             </p>
-            <p className="text-xs text-slate-500 mt-0.5">{incident.title}</p>
+            <p className="text-xs text-slate-500 mt-0.5 break-words [overflow-wrap:anywhere]">{incident.title}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 flex flex-wrap items-center gap-2">
             <select
               aria-label={isEn ? 'Select incident for RCA' : 'Chọn sự cố để xem RCA'}
               value={incident.id}
               onChange={(e) => onSelectIncident(e.target.value)}
-              className="h-9 min-w-[270px] max-w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 hover:border-orange-300"
+              className="h-9 min-w-0 w-full sm:w-auto sm:min-w-[270px] max-w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 hover:border-orange-300"
             >
               {orderedIncidents.map((inc) => (
                 <option key={inc.id} value={inc.id}>
@@ -79,24 +79,24 @@ export function RcaView({
       <Card accent={incident.rcaAbstained ? 'none' : 'orange'}>
         <div className="p-6 space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="space-y-2 max-w-3xl">
+            <div className="min-w-0 space-y-2 max-w-3xl">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={incident.rcaAbstained ? 'neutral' : 'orange'}>
                   {incident.rcaAbstained
                     ? isEn ? 'RCA Abstained · Safety Guard' : 'RCA Abstained · Chế độ bảo vệ an toàn'
                     : isEn ? 'Primary Suspected Root Cause (#1)' : 'Root Cause nghi ngờ chính (#1)'}
                 </Badge>
-                <span className="text-xs font-semibold text-slate-500">
+                <span className="text-xs font-semibold text-slate-500 break-words">
                   {isEn ? 'Primary service: ' : 'Service trọng tâm: '}
                   <strong className="text-slate-900">{incident.primaryService}</strong>
                 </span>
               </div>
 
-              <h2 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900">
+              <h2 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 break-words [overflow-wrap:anywhere]">
                 {incident.suspectedRootCause}
               </h2>
 
-              <p className="text-sm leading-relaxed text-slate-700">
+              <p className="text-sm leading-relaxed text-slate-700 break-words [overflow-wrap:anywhere]">
                 {incident.rcaAbstained
                   ? incident.rcaAbstainReasonVi
                   : incident.hypotheses[0]?.descriptionVi || incident.shortSummaryVi}
@@ -143,7 +143,7 @@ export function RcaView({
                 <motion.div
                   key={`conf-${incident.id}`}
                   initial={{ width: 0 }}
-                  animate={{ width: Number.isFinite(incident.rcaConfidence) ? `${incident.rcaConfidence}%` : '0%' }}
+                  animate={{ width: `${Math.max(0, Math.min(100, Number.isFinite(incident.rcaConfidence) ? incident.rcaConfidence : 0))}%` }}
                   transition={{ duration: 0.45, ease: 'easeOut' }}
                   className={cn(
                     'h-full rounded-full',
@@ -177,7 +177,7 @@ export function RcaView({
                 <motion.div
                   key={`cov-${incident.id}`}
                   initial={{ width: 0 }}
-                  animate={{ width: Number.isFinite(incident.rcaCoverage) ? `${incident.rcaCoverage}%` : '0%' }}
+                  animate={{ width: `${Math.max(0, Math.min(100, Number.isFinite(incident.rcaCoverage) ? incident.rcaCoverage : 0))}%` }}
                   transition={{ duration: 0.45, ease: 'easeOut' }}
                   className={cn(
                     'h-full rounded-full',
@@ -265,8 +265,8 @@ export function RcaView({
                       </span>
                     </div>
 
-                    <p className="mt-2 text-sm font-semibold text-slate-900">{hyp.title}</p>
-                    <p className="mt-1 text-xs text-slate-600 leading-relaxed">{hyp.descriptionVi}</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900 break-words [overflow-wrap:anywhere]">{hyp.title}</p>
+                    <p className="mt-1 text-xs text-slate-600 leading-relaxed break-words [overflow-wrap:anywhere]">{hyp.descriptionVi}</p>
 
                     <div className="mt-3 h-2 w-full rounded-full bg-slate-100 overflow-hidden">
                       <div
@@ -274,7 +274,7 @@ export function RcaView({
                           'h-full rounded-full transition-all',
                           hyp.isPrimary ? 'bg-orange-500' : 'bg-slate-400',
                         )}
-                        style={{ width: `${hyp.confidence}%` }}
+                        style={{ width: `${Math.max(0, Math.min(100, Number.isFinite(hyp.confidence) ? hyp.confidence : 0))}%` }}
                       />
                     </div>
 
@@ -282,7 +282,7 @@ export function RcaView({
                       {hyp.signalsUsed.map((sig) => (
                         <span
                           key={sig}
-                          className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600"
+                          className="max-w-full break-all rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600"
                         >
                           {sig}
                         </span>
@@ -320,20 +320,20 @@ export function RcaView({
                 linkedEvidence.map((ev) => (
                   <div
                     key={ev.id}
-                    className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-1"
+                    className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-1"
                   >
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <Badge tone={ev.severity === 'critical' ? 'critical' : 'high'}>
                         {ev.category.toUpperCase()}
                       </Badge>
                       {ev.metricBadge && (
-                        <span className="font-mono text-[11px] font-semibold text-orange-700">
+                        <span className="max-w-full break-all font-mono text-[11px] font-semibold text-orange-700">
                           {ev.metricBadge}
                         </span>
                       )}
                     </div>
-                    <p className="text-xs font-semibold text-slate-900">{ev.title}</p>
-                    <p className="text-xs text-slate-600 leading-relaxed">{ev.annotationVi}</p>
+                    <p className="text-xs font-semibold text-slate-900 break-words [overflow-wrap:anywhere]">{ev.title}</p>
+                    <p className="text-xs text-slate-600 leading-relaxed break-words [overflow-wrap:anywhere]">{ev.annotationVi}</p>
                   </div>
                 ))
               )}
@@ -371,17 +371,17 @@ export function RcaView({
                           <AlertTriangle className="h-3.5 w-3.5 text-orange-600" />
                         )}
                       </span>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-bold text-slate-900">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-slate-900 break-words [overflow-wrap:anywhere]">
                           {isEn ? `Step ${step.step}` : `Bước ${step.step}`}: {step.stage}
                         </span>
-                        <span className="font-mono text-[11px] text-slate-400">
+                        <span className="font-mono text-[11px] text-slate-400 shrink-0">
                           {/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/.test(step.time)
                             ? formatVietnamStamp(step.time, locale)
                             : `${step.time} (GMT+7)`}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-slate-600 leading-relaxed">{step.summaryVi}</p>
+                      <p className="mt-1 text-xs text-slate-600 leading-relaxed break-words [overflow-wrap:anywhere]">{step.summaryVi}</p>
                     </li>
                   ))}
                 </ol>

@@ -4,6 +4,7 @@ import { ConfidenceBadge, incidentConfidence } from '@/components/ai/ConfidenceB
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge, SeverityBadge, StatusBadge } from '@/components/ui/badge';
+import { INCIDENTS_PER_PAGE, Pagination } from '@/components/ui/pagination';
 import { cn, formatDateTime, formatRelativeMinutes } from '@/lib/utils';
 import { useLocale } from '@/i18n/LocaleContext';
 import type {
@@ -31,6 +32,11 @@ export function IncidentsView({ incidents, onOpenIncident }: IncidentsViewProps)
   const [timeRange, setTimeRange] = React.useState<TimeRange>('all');
   const [environment, setEnvironment] = React.useState<'' | EnvironmentName>('');
   const [remediationFilter, setRemediationFilter] = React.useState<RemediationFilter>('all');
+  const [page, setPage] = React.useState(1);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [search, severity, status, service, timeRange, environment, remediationFilter]);
 
   const hasActiveFilters = Boolean(
     search.trim() ||
@@ -82,6 +88,16 @@ export function IncidentsView({ incidents, onOpenIncident }: IncidentsViewProps)
       Date.parse(second.detectedAt || second.startedAt) - Date.parse(first.detectedAt || first.startedAt),
     );
   }, [incidents, search, severity, status, service, environment, remediationFilter, timeRange]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / INCIDENTS_PER_PAGE));
+  const safePage = Math.min(page, totalPages);
+  React.useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+  const pagedIncidents = React.useMemo(() => {
+    const start = (safePage - 1) * INCIDENTS_PER_PAGE;
+    return filtered.slice(start, start + INCIDENTS_PER_PAGE);
+  }, [filtered, safePage]);
 
   const selectClass =
     'h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 transition-colors hover:border-slate-300 focus:border-orange-500';
@@ -245,12 +261,13 @@ export function IncidentsView({ incidents, onOpenIncident }: IncidentsViewProps)
               </Button>
             </div>
           ) : (
-            <div
-              tabIndex={0}
-              role="region"
-              aria-label={isEn ? 'Filtered incidents list' : 'Danh sách sự cố đã lọc'}
-              className="table-wrapper"
-            >
+            <>
+              <div
+                tabIndex={0}
+                role="region"
+                aria-label={isEn ? 'Filtered incidents list' : 'Danh sách sự cố đã lọc'}
+                className="table-wrapper"
+              >
               <table className="ops-data-table responsive-stack text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -267,12 +284,12 @@ export function IncidentsView({ incidents, onOpenIncident }: IncidentsViewProps)
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.map((inc) => {
+                  {pagedIncidents.map((inc) => {
                     const isActive = inc.status !== 'recovered' && !inc.resolvedAt;
                     return (
                       <tr
                         key={inc.id}
-                      data-testid="live-incident-row"
+                        data-testid="live-incident-row"
                         onClick={() => onOpenIncident(inc.id)}
                         className={cn(
                           'group cursor-pointer transition-colors hover:bg-orange-50/50',
@@ -280,7 +297,7 @@ export function IncidentsView({ incidents, onOpenIncident }: IncidentsViewProps)
                           isActive && inc.severity === 'critical' && 'bg-red-50/45',
                         )}
                       >
-                        <th scope="row" className="px-5 py-4 text-left font-normal max-w-md">
+                        <th scope="row" className="min-w-0 px-5 py-4 text-left font-normal max-w-md">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="max-w-full break-all font-mono text-xs font-bold text-orange-700">
                               {inc.id}
@@ -294,10 +311,10 @@ export function IncidentsView({ incidents, onOpenIncident }: IncidentsViewProps)
                               </Badge>
                             )}
                           </div>
-                          <p className="mt-1 font-semibold text-slate-900 group-hover:text-orange-700 transition-colors">
+                          <p className="mt-1 font-semibold text-slate-900 break-words [overflow-wrap:anywhere] group-hover:text-orange-700 transition-colors">
                             {inc.title}
                           </p>
-                          <p className="mt-0.5 text-xs text-slate-500 line-clamp-2">
+                          <p className="mt-0.5 text-xs text-slate-500 line-clamp-2 break-words [overflow-wrap:anywhere]">
                             {inc.shortSummaryVi}
                           </p>
                         </th>
@@ -307,7 +324,7 @@ export function IncidentsView({ incidents, onOpenIncident }: IncidentsViewProps)
                             {inc.services.map((svc) => (
                               <span
                                 key={svc}
-                                className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-700"
+                                className="max-w-full break-all rounded-md border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-700"
                               >
                                 {svc}
                               </span>
@@ -322,10 +339,10 @@ export function IncidentsView({ incidents, onOpenIncident }: IncidentsViewProps)
                           </div>
                         </td>
 
-                        <td data-label={isEn ? 'Root Cause' : 'Nguyên nhân'} className="px-4 py-4 align-top max-w-xs">
+                        <td data-label={isEn ? 'Root Cause' : 'Nguyên nhân'} className="min-w-0 px-4 py-4 align-top max-w-xs">
                           <div className="min-w-0 space-y-1.5">
                             <ConfidenceBadge {...incidentConfidence(inc)} />
-                            <p className="break-words text-xs font-medium leading-relaxed text-slate-800">
+                            <p className="break-words [overflow-wrap:anywhere] text-xs font-medium leading-relaxed text-slate-800">
                               {inc.suspectedRootCause}
                             </p>
                           </div>
@@ -360,6 +377,13 @@ export function IncidentsView({ incidents, onOpenIncident }: IncidentsViewProps)
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={safePage}
+              totalItems={filtered.length}
+              pageSize={INCIDENTS_PER_PAGE}
+              onPageChange={setPage}
+            />
+            </>
           )}
         </CardContent>
       </Card>

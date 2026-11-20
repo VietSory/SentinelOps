@@ -64,9 +64,9 @@ function EvidenceCard({ item }: { item: EvidenceItem }) {
         type="button"
         onClick={() => setExpanded((prev) => !prev)}
         aria-expanded={expanded}
-        className="w-full text-left px-4 py-3.5 flex items-start justify-between gap-3 hover:bg-white/70 cursor-pointer"
+        className="w-full text-left px-4 py-3.5 flex flex-wrap sm:flex-nowrap items-start justify-between gap-3 hover:bg-white/70 cursor-pointer"
       >
-        <div className="flex items-start gap-2.5 min-w-0">
+        <div className="flex items-start gap-2.5 min-w-0 flex-1">
           <span className="mt-1 text-slate-400 shrink-0">
             {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </span>
@@ -92,13 +92,13 @@ function EvidenceCard({ item }: { item: EvidenceItem }) {
                 {formatDateTime(item.observedAt, locale)}
               </span>
             </div>
-            <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-            <p className="text-xs text-slate-700 leading-relaxed">{item.annotationVi}</p>
+            <p className="text-sm font-semibold text-slate-900 break-words [overflow-wrap:anywhere]">{item.title}</p>
+            <p className="text-xs text-slate-700 leading-relaxed break-words [overflow-wrap:anywhere]">{item.annotationVi}</p>
           </div>
         </div>
 
         {item.metricBadge && (
-          <span className="shrink-0 rounded-lg border border-orange-200 bg-white px-2.5 py-1 font-mono text-xs font-semibold text-orange-700">
+          <span className="max-w-full break-all shrink-0 rounded-lg border border-orange-200 bg-white px-2.5 py-1 font-mono text-xs font-semibold text-orange-700">
             {item.metricBadge}
           </span>
         )}
@@ -113,8 +113,8 @@ function EvidenceCard({ item }: { item: EvidenceItem }) {
             transition={{ duration: 0.18 }}
             className="overflow-hidden border-t border-slate-200/70 bg-white"
           >
-            <div className="p-4 space-y-3">
-              <pre className="rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-800 whitespace-pre-wrap break-words leading-relaxed">
+            <div className="min-w-0 p-4 space-y-3">
+              <pre className="max-w-full overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-800 whitespace-pre-wrap break-words [overflow-wrap:anywhere] leading-relaxed">
                 {item.detail}
               </pre>
 
@@ -123,10 +123,10 @@ function EvidenceCard({ item }: { item: EvidenceItem }) {
                   {Object.entries(item.metadata).map(([k, v]) => (
                     <div
                       key={k}
-                      className="rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2"
+                      className="min-w-0 rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2"
                     >
-                      <span className="block text-[11px] text-slate-500">{k}</span>
-                      <span className="text-xs font-semibold text-slate-900">{v}</span>
+                      <span className="block text-[11px] text-slate-500 break-words [overflow-wrap:anywhere]">{k}</span>
+                      <span className="block text-xs font-semibold text-slate-900 break-words [overflow-wrap:anywhere]">{v}</span>
                     </div>
                   ))}
                 </div>
@@ -206,22 +206,22 @@ export function EvidenceTraceView({
     <div className="space-y-6">
       <Card className="p-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {isEn ? 'Selected Incident' : 'Chọn Incident để soi Evidence & Trace'}
             </p>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 mt-0.5 break-words [overflow-wrap:anywhere]">
               {incident.title}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 flex flex-wrap items-center gap-2">
             <select
               aria-label={isEn ? 'Select incident to inspect evidence' : 'Chọn sự cố cần xem Evidence'}
               value={incident.id}
               onChange={(e) => onSelectIncident(e.target.value)}
-              className="h-9 min-w-[270px] max-w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 hover:border-orange-300"
+              className="h-9 min-w-0 w-full sm:w-auto sm:min-w-[270px] max-w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-900 hover:border-orange-300"
             >
-              {incidents.slice(0, 5).map((inc) => (
+              {incidents.map((inc) => (
                 <option key={inc.id} value={inc.id}>
                   {inc.id} · {inc.primaryService} ({inc.severity.toUpperCase()})
                 </option>
@@ -240,18 +240,18 @@ export function EvidenceTraceView({
         >
           {highlightedEvidence.slice(0, 3).map((ev) => (
             <Card key={ev.id} accent={ev.severity === 'critical' ? 'red' : 'orange'} className="p-4">
-              <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <Badge tone={ev.severity === 'critical' ? 'critical' : 'high'}>
                   {ev.category.toUpperCase()} · {ev.service}
                 </Badge>
                 {ev.metricBadge && (
-                  <span className="font-mono text-[11px] font-bold text-orange-700">
+                  <span className="max-w-full break-all font-mono text-[11px] font-bold text-orange-700">
                     {ev.metricBadge}
                   </span>
                 )}
               </div>
-              <p className="text-sm font-bold text-slate-900">{ev.title}</p>
-              <p className="mt-1.5 text-xs text-slate-700 leading-relaxed">{ev.annotationVi}</p>
+              <p className="text-sm font-bold text-slate-900 break-words [overflow-wrap:anywhere]">{ev.title}</p>
+              <p className="mt-1.5 text-xs text-slate-700 leading-relaxed break-words [overflow-wrap:anywhere]">{ev.annotationVi}</p>
             </Card>
           ))}
         </section>
@@ -277,7 +277,7 @@ export function EvidenceTraceView({
               )}
             </CardDescription>
           </div>
-          <div className="flex items-center gap-3 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" /> {live?(isEn?'No recorded span error':'Chưa ghi nhận lỗi span'):(isEn ? 'Healthy' : 'Ổn định')}
             </span>
