@@ -7,6 +7,113 @@ const severityBands = [
   ['unknown','Unknown','neutral','?'],
 ];
 
+const incidentSeverity = {low:'Thấp',medium:'Trung bình',high:'Cao',critical:'Nghiêm trọng'};
+const incidentState = {degrading:'Đang suy giảm',incident:'Sự cố',recovering:'Đang phục hồi',recovered:'Đã phục hồi',escalated:'Đã leo thang'};
+const finite = value => typeof value === 'number' && Number.isFinite(value);
+const decimal = (value, digits = 2) => value.toFixed(digits).replace('.',',');
+const shortService = value => value.replace(/-service$/,'');
+const parsedFact = (item, key) => {
+  if (typeof item?.fact !== 'string') return null;
+  const match = item.fact.match(new RegExp(`(?:^|[;:]\\s*|\\s)${key}=([0-9]+(?:\\.[0-9]+)?)(?=;|$)`));
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+};
+const evidenceScore = (evidence, key) => {
+  for (const item of evidence) {
+    if (item?.type !== 'model' || typeof item.service !== 'string') continue;
+    const value = parsedFact(item,key);
+    if (value !== null) return {service:item.service,value};
+  }
+  return null;
+};
+
+/** Client-only, deterministic incident synopsis. Every number comes from the IER or loaded action state. */
+export function incidentSummaryLines(payload = {}, loaded = {}) {
+  const lines = [];
+  const services = Array.isArray(payload.affected_services) ?
+    payload.affected_services.filter(value => typeof value === 'string' && value) : [];
+  if (services.length) lines.push(`Dịch vụ bị ảnh hưởng: ${services.join(', ')}`);
+
+  const severity = incidentSeverity[payload.severity];
+  const state = incidentState[payload.state];
+  if (severity || state) lines.push(`Mức độ/trạng thái: ${[severity,state].filter(Boolean).join(' · ')}`);
+
+  const ranking = Array.isArray(payload.root_cause_ranking) ? payload.root_cause_ranking : [];
+  const likely = ranking.find(item => typeof item?.service === 'string' && finite(item.score));
+  if (likely) lines.push(`Nguyên nhân nhiều khả năng: ${likely.service} (điểm ${decimal(likely.score)})`);
+
+  const evidence = Array.isArray(payload.evidence) ? payload.evidence : [];
+  const server = evidence.find(item => item?.type === 'trace' &&
+    (!likely || item.service === likely.service) && parsedFact(item,'server_duration_ns') !== null);
+  const serverNs = parsedFact(server,'server_duration_ns');
+  if (serverNs !== null) {
+    const database = evidence.find(item => item?.type === 'trace' &&
+      ['rds','postgres','postgresql'].includes(item.service) && parsedFact(item,'postgresql_client_duration_ns') !== null);
+    const databaseNs = parsedFact(database,'postgresql_client_duration_ns');
+    const root = server.service || likely?.service;
+    lines.push(`Bằng chứng chính: trace cho thấy ${root} xử lý ~${decimal(serverNs/1_000_000,serverNs%1_000_000 ? 1 : 0)} ms${
+      databaseNs === null ? '' : ` trong khi DB ~${decimal(databaseNs/1_000_000,databaseNs%1_000_000 ? 1 : 0)} ms`}`);
+  }
+
+  const model = new Map();
+  for (const signal of Array.isArray(payload.service_signals) ? payload.service_signals : []) {
+    if (typeof signal?.service !== 'string') continue;
+    model.set(signal.service,{
+      anomaly:finite(signal.anomaly_score) ? signal.anomaly_score : null,
+      risk:finite(signal.degradation_risk) ? signal.degradation_risk : null,
+    });
+  }
+  const riskFact = evidenceScore(evidence,'risk_score');
+  const anomalyFact = evidenceScore(evidence,'anomaly_score');
+  if (riskFact) {
+    const entry = model.get(riskFact.service) || {risk:null,anomaly:null};
+    if (entry.risk === null) entry.risk = riskFact.value;
+    model.set(riskFact.service,entry);
+  }
+  if (anomalyFact) {
+    const entry = model.get(anomalyFact.service) || {risk:null,anomaly:null};
+    if (entry.anomaly === null) entry.anomaly = anomalyFact.value;
+    model.set(anomalyFact.service,entry);
+  }
+  const risk = [...model].find(([,value]) => value.risk !== null);
+  const anomaly = risk && risk[1].anomaly !== null ? [risk[0],risk[1].anomaly] :
+    [...model].map(([name,value]) => [name,value.anomaly]).find(([,value]) => value !== null);
+  if (risk || anomaly) {
+    const parts = [];
+    if (risk) parts.push(`XGBoost rủi ro ${decimal(risk[1].risk)}`);
+    if (anomaly) parts.push(`Isolation Forest bất thường ${decimal(anomaly[1])}`);
+    const sameService = risk && anomaly && risk[0] === anomaly[0];
+    if (sameService) parts[parts.length-1] += ` (${shortService(risk[0])})`;
+    else {
+      if (risk) parts[0] += ` (${shortService(risk[0])})`;
+      if (anomaly) parts[parts.length-1] += ` (${shortService(anomaly[0])})`;
+    }
+    lines.push(`Model: ${parts.join('; ')}`);
+  }
+
+  const actions = Array.isArray(loaded.actions?.items) ? loaded.actions.items : null;
+  const proposals = Array.isArray(loaded.proposals) ? loaded.proposals : null;
+  if (actions?.length) {
+    const action = actions[0];
+    lines.push(`Trạng thái xử lý: ${action.runbook || 'action'} · pha ${action.phase}`);
+  } else if (proposals) {
+    const proposal = proposals.find(item => item?.status === 'pending') || proposals[0];
+    if (!proposal) {
+      const hasDeploymentChange = evidence.some(item => item?.type === 'change');
+      lines.push(hasDeploymentChange ? 'Cần engineer xử lý (chưa có đề xuất hành động)' :
+        'Cần engineer xử lý (không có bằng chứng thay đổi deployment để rollback)');
+    } else {
+      const rollback = String(proposal.proposal?.runbook_id || proposal.proposal?.executor_runbook || '').includes('rollback');
+      const action = rollback ? 'rollback' : 'runbook';
+      const status = {pending:'chờ duyệt',approved:'đã được duyệt',consumed:'đã chuyển cho controller',
+        engineer:'đã chuyển engineer',expired:'đã hết hạn',stale:'không còn mới',not_yet_valid:'chưa có hiệu lực'}[proposal.status] || proposal.status;
+      lines.push(`Hướng xử lý: đề xuất ${action} ${status}`);
+    }
+  }
+  return lines.slice(0,6);
+}
+
 const timestamp = value => typeof value === 'string' && value.trim() ? Date.parse(value) : NaN;
 const date = value => new Date(value).toLocaleString('en-US',{
   timeZone:'UTC',year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,

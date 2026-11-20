@@ -2,7 +2,7 @@ import {Workspace, proposalRemaining} from './workspace.js';
 import {CognitoLogin, IncidentClient} from './client.js';
 import {mount as mountDeeplinks} from './deeplinks.js';
 import {mount as mountFilters} from './filters.js';
-import {mount as mountSummary} from './summary.js';
+import {incidentSummaryLines, mount as mountSummary} from './summary.js';
 import {mount as mountProposalwatch} from './proposalwatch.js';
 
 const loginCallback = location.pathname === '/ui/callback' ? location.href : null;
@@ -259,6 +259,19 @@ function helpDisclosure(title, ...content) {
   const summary = node('summary'), icon = node('span','i','info-icon'); icon.setAttribute('aria-hidden','true');
   summary.append(icon,node('span',title));
   item.append(summary,body); return item;
+}
+function deterministicSummary(payload, state) {
+  const item = node('section',null,'deterministic-summary');
+  item.setAttribute('aria-labelledby','deterministic-summary-title');
+  const heading = node('div',null,'deterministic-summary__heading');
+  const title = node('h3','Tóm tắt'); title.id = 'deterministic-summary-title';
+  heading.append(title,node('span','Tổng hợp xác định từ dữ liệu · không dùng AI'));
+  const list = node('ul');
+  for (const line of incidentSummaryLines(payload,{proposals:state.proposals,actions:state.actions})) {
+    list.append(node('li',line));
+  }
+  item.append(heading,list);
+  return item;
 }
 function overview(detail) {
   const target = node('div'), payload = detail.payload, context = detail.context;
@@ -568,7 +581,7 @@ function renderDetail(state) {
   input.id = 'revision-input'; label.htmlFor = input.id; form.append(label,input);
   const go = node('button','View','button secondary'); go.type = 'submit'; form.append(go,button('Latest revision',() => openIncident(detail.incident_id)));
   form.addEventListener('submit',event => { event.preventDefault(); if (form.reportValidity()) openIncident(detail.incident_id,Number(input.value)); });
-  header.append(form); target.append(header);
+  header.append(form); target.append(header,deterministicSummary(payload,state));
   const tabs = node('div',null,'tabs'); tabs.setAttribute('role','group'); tabs.setAttribute('aria-label','Incident sections');
   for (const [key,label] of [['overview','Overview'],['evidence',`Evidence (${payload.evidence.length})`],['timeline','Timeline'],['explanation','Explanation'],['actions','Actions']]) {
     const item = button(label,() => openSection(key),`tab ${tab === key ? 'active' : ''}`);

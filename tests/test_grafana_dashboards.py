@@ -207,6 +207,25 @@ def test_dashboard_file_is_valid_json_and_uniquely_identified():
     assert len(datasource['datasources']) == 1
 
 
+def test_slo_dashboard_p95_thresholds_match_the_health_policy():
+    policy = json.loads((PROJECT/'configs/slo_health_policy.json').read_text())
+    slo = dashboards()['sentinelops-slo.json']
+    p95_panels = [item for item in slo['panels'] if any(
+        'http_latency_p95' in target.get('expr', '') for target in item.get('targets', []))]
+    assert len(p95_panels) == 6
+    for item in p95_panels:
+        values = [step['value'] for step in item['fieldConfig']['defaults']['thresholds']['steps']
+                  if step['value'] is not None]
+        assert values[-1] == policy['latency_ms'], item['title']
+        assert '1000 ms' not in (item['title'] + ' ' + item.get('description', ''))
+    assert 'ngưỡng p95 latency 750 ms' in slo['description']
+    # Success-rate targets remain independent from the incident latency policy.
+    success = [item for item in slo['panels'] if 'Success Rate' in item.get('title', '')]
+    assert len(success) == 3
+    assert all([step['value'] for step in item['fieldConfig']['defaults']['thresholds']['steps'][1:]] == [.995,.997]
+               for item in success)
+
+
 def running_grafana(monkeypatch, query_response=None):
     boards, evaluated = dashboards(), []
     by_uid = {board['uid']: board for board in boards.values()}
