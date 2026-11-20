@@ -1,0 +1,231 @@
+@import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+
+@theme {
+  --font-sans: "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --color-brand-50: #fff7ed;
+  --color-brand-100: #ffedd5;
+  --color-brand-200: #fed7aa;
+  --color-brand-300: #fdba74;
+  --color-brand-400: #fb923c;
+  --color-brand-500: #f97316;
+  --color-brand-600: #ea580c;
+  --color-brand-700: #c2410c;
+}
+
+:root {
+  --surface-page: #fafafb;
+  --surface-card: #ffffff;
+  --surface-subtle: #f4f5f7;
+  --border-subtle: #e6e8ee;
+  --border-strong: #d0d5dd;
+  --ink-primary: #0f172a;
+  --ink-secondary: #475569;
+  --ink-muted: #64748b;
+  --accent-orange: #ea580c;
+  --accent-orange-bright: #f97316;
+  --accent-orange-tint: #fff7ed;
+  color-scheme: light;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--surface-page);
+  color: var(--ink-primary);
+  margin: 0;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Native <dialog> modal scroll containment & styling (scoped to [open]) */
+dialog:modal {
+  overscroll-behavior: contain;
+  margin: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  max-width: min(560px, calc(100vw - 2rem));
+  width: 100%;
+  overflow: visible;
+}
+
+dialog::backdrop {
+  background: rgb(15 23 42 / 48%);
+  backdrop-filter: blur(3px);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+/* Accessible single-row tablist with shape-based active underline */
+.ops-tablist {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-snap-type: inline proximity;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ops-tablist::-webkit-scrollbar {
+  display: none;
+}
+
+.ops-tab {
+  position: relative;
+  flex: none;
+  scroll-snap-align: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--ink-secondary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 150ms ease;
+}
+
+.ops-tab:hover {
+  color: var(--ink-primary);
+}
+
+.ops-tab[aria-selected="true"] {
+  color: var(--accent-orange);
+}
+
+.ops-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  border-block-end: 2.5px solid var(--accent-orange);
+  border-radius: 2px 2px 0 0;
+}
+
+.ops-tab:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent-orange);
+  outline-offset: 2px;
+}
+
+/* Responsive data table with sticky header and container-query stacked layout */
+.table-wrapper {
+  overflow: auto;
+  max-inline-size: 100%;
+  container-type: inline-size;
+  border-radius: 0.75rem;
+}
+
+.table-wrapper:focus-visible {
+  outline: 2px solid var(--accent-orange);
+  outline-offset: 2px;
+}
+
+.ops-data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.ops-data-table thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+  background: #f8fafc;
+}
+
+@container (width < 640px) {
+  .ops-data-table.responsive-stack,
+  .ops-data-table.responsive-stack thead,
+  .ops-data-table.responsive-stack tbody,
+  .ops-data-table.responsive-stack tr,
+  .ops-data-table.responsive-stack th,
+  .ops-data-table.responsive-stack td {
+    display: block;
+  }
+
+  .ops-data-table.responsive-stack thead {
+    display: none;
+  }
+
+  .ops-data-table.responsive-stack tbody tr {
+    margin-block-end: 0.75rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: 0.75rem;
+    background: #ffffff;
+    padding: 0.75rem;
+  }
+
+  .ops-data-table.responsive-stack tbody th[scope="row"] {
+    padding: 0 0 0.5rem 0;
+    border-bottom: 1px solid var(--border-subtle);
+    margin-bottom: 0.5rem;
+  }
+
+  .ops-data-table.responsive-stack tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.35rem 0;
+    border: 0;
+  }
+
+  .ops-data-table.responsive-stack tbody td[data-label]::before {
+    content: attr(data-label);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--ink-muted);
+    flex-shrink: 0;
+  }
+}
+
+/* Subtle pulse opted-in only when reduced motion is not requested */
+.status-pulse {
+  position: relative;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .status-pulse::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 9999px;
+    border: 2px solid currentColor;
+    opacity: 0;
+    animation: gentle-ping 2.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+}
+
+@keyframes gentle-ping {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.55;
+  }
+  75%, 100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+/* React Flow polish for light white-orange SaaS aesthetic */
+.react-flow__attribution {
+  display: none;
+}
+.react-flow__controls {
+  box-shadow: 0 4px 12px rgb(15 23 42 / 8%);
+  border: 1px solid #e6e8ee;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
