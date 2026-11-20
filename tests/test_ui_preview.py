@@ -38,6 +38,12 @@ def test_preview_uses_real_ui_router_and_shipped_assets_with_explicit_warning(pr
     assert len(page.content) == int(page.headers['content-length'])
     for name in ASSET_NAMES:
         assert client.get('/ui/assets/'+name).content == (ASSETS/name).read_bytes()
+    proposal_sources = [client.get('/ui/assets/'+name).text
+                        for name in ('app.js','proposalwatch.js')]
+    proposal_assets = ''.join(proposal_sources)
+    assert all('`Expires ${expiryTime(' in source for source in proposal_sources)
+    assert 'proposal-countdown' not in proposal_assets
+    assert 's remaining' not in proposal_assets
     assert 'DỮ LIỆU GIẢ' in client.get('/').text
     assert fixtures.FIXTURE_TOKEN in client.get('/').text
     assert client.get('/ui', follow_redirects=False).headers['location'] == '/ui/'

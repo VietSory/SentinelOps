@@ -304,7 +304,7 @@ sequenceDiagram
       E->>K: Observe rollout đúng digest, generation mới, old pods đã thay
       E->>V: 3 whole eligible clear buckets sau effective_at, latest due accepted
       V-->>E: telemetry_verified hoặc pending / inconclusive
-      alt Rollout và telemetry verified trong 600 giây
+      alt Telemetry thuộc cửa sổ 600 giây từ effective_at và executor hoàn tất trong 1200 giây từ dispatch
         E->>J: recovered, telemetry_verified và verification refs
       else Timeout, drift hoặc inconclusive
         E->>J: escalated, giữ target quarantine theo journal

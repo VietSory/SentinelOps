@@ -77,10 +77,17 @@ def fixture_envelope(incident, revision, after=0, *, now=None):
                                'source_ref':'fixture://ui-only'}],
             'source_refs':['fixture://ui-only'],'config_refs':['fixture://ui-only']},
         'payload':{'schema_version':'1.0','incident_id':incident,'detected_at':'2026-01-01T00:00:00Z','state':'escalated',
-            'severity':'high','affected_services':['payment-service','checkout-service'],'service_signals':[],
+            'severity':'high','affected_services':['payment-service','checkout-service'],
+            'service_signals':[{'service':'checkout-service','anomaly_score':.99,'degradation_risk':.97}],
             'root_cause_ranking':[{'service':'payment-service','score':.4,'evidence_refs':['fixture-evidence-1']}],
             'evidence':[{'id':'fixture-evidence-1','type':'log','service':'payment-service','observed_at':None,
-                'fact':'<img src=x onerror="window.__evidence_xss=true">','source_ref':'javascript:window.__evidence_xss=true'}]},
+                'fact':'<img src=x onerror="window.__evidence_xss=true">','source_ref':'javascript:window.__evidence_xss=true'},
+                {'id':'fixture-payment-trace','type':'trace','service':'payment-service','observed_at':None,
+                 'fact':'server_duration_ns=955000000; sum_observed_direct_client_duration_ns=5000000',
+                 'source_ref':'fixture://ui-only'},
+                {'id':'fixture-db-trace','type':'trace','service':'rds','observed_at':None,
+                 'fact':'postgresql_client_duration_ns=5000000; reference_server_duration_ns=960000000',
+                 'source_ref':'fixture://ui-only'}]},
         'actor':'fixture-ui-only','reason':'Software fixture, not observed source evidence',
         'timeline':{'events':page,'next_after_revision':page[-1]['revision'] if page and page[-1]['revision']<revision else None}}
     record = next((row for row in fixture_records(now) if row['incident_id'] == incident), None)
@@ -174,7 +181,9 @@ def fixture_proposals(now=None):
 def exercise_fixtures(page, base, output, expect):
     token = FIXTURE_TOKEN
     outage = {'active':False,'actions':False,'quarantine':False,'explanation':False,'proposals':False,
-              'read_scope':False,'expired':False,'identity_provider':False,'model_available':False}
+              'proposal_expired':False,'read_scope':False,'expired':False,
+              'identity_provider':False,'model_available':False}
+    proposal_now = datetime.now(timezone.utc).replace(microsecond=0)
     # The two-row subset deliberately exercises pagination and empty state filters.
     records = fixture_records()[:2]
     def reply(route):
@@ -222,7 +231,12 @@ def exercise_fixtures(page, base, output, expect):
             assert route.request.method == 'GET' and query.get('limit') == ['100']
             if outage['proposals']:
                 route.fulfill(status=503,json={'code':'proposal_store_unavailable','request_id':'fixture-proposal-outage'});return
-            route.fulfill(json={'items':[],'has_more':False});return
+            rows = fixture_proposals(proposal_now)
+            if query.get('incident_id') not in (None,['INC-FIXTURE-A']): rows = []
+            if rows and outage['proposal_expired']:
+                rows[0]['proposal']['expires_at'] = timestamp(proposal_now-timedelta(seconds=1))
+                rows[0]['status'] = 'expired'
+            route.fulfill(json={'items':rows,'has_more':False});return
         if url.path.endswith('/quarantine'):
             assert route.request.method=='GET'
             if outage['quarantine']:
@@ -254,6 +268,13 @@ def exercise_fixtures(page, base, output, expect):
     expect(page.locator('#slot-summary .incident-summary')).to_have_count(1)
     expect(page.locator('#slot-deeplinks .incident-deeplinks')).to_have_count(1)
     expect(page.locator('#slot-proposalwatch > *')).to_have_count(1)
+    proposal_expiry = fixture_proposals(proposal_now)[0]['proposal']['expires_at']
+    expiry_text = page.evaluate("value => 'Expires '+new Date(value).toLocaleTimeString('en-GB', "
+                                "{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})",
+                                proposal_expiry)
+    expect(page.locator('#slot-proposalwatch').get_by_text(expiry_text,exact=True)).to_be_visible()
+    expect(page.locator('#slot-proposalwatch').get_by_text('Pending',exact=True)).to_be_visible()
+    assert 'remaining' not in page.locator('#slot-proposalwatch').inner_text()
     expect(page.locator('#metric-loaded')).to_have_count(0)
     expect(page.locator('#model-status')).to_have_text('Unavailable')
     assert page.locator('#api-token').input_value() == ''
@@ -277,8 +298,30 @@ def exercise_fixtures(page, base, output, expect):
     page.locator('#state-filter').select_option(''); page.get_by_role('button',name='Apply filters').click()
     page.get_by_role('button',name='Open INC-FIXTURE-A, revision 3',exact=True).click()
     expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
+    summary = page.locator('.deterministic-summary')
+    expect(summary.get_by_role('heading',name='Tóm tắt',exact=True)).to_be_visible()
+    expect(summary).to_contain_text('Tổng hợp xác định từ dữ liệu · không dùng AI')
+    expect(summary.get_by_role('listitem')).to_have_count(6)
+    expect(summary).to_contain_text('payment-service xử lý ~955 ms trong khi DB ~5 ms')
+    expect(summary).to_contain_text('XGBoost rủi ro 0,97; Isolation Forest bất thường 0,99 (checkout)')
+    expect(summary).to_contain_text('Hướng xử lý: đề xuất rollback chờ duyệt')
     proposals = page.get_by_test_id('runbook-proposals')
-    expect(proposals).to_contain_text('No proposals for this revision.')
+    expect(proposals.get_by_text(expiry_text,exact=True)).to_be_visible()
+    expect(proposals.get_by_text('Pending',exact=True)).to_be_visible()
+    expect(proposals.get_by_role('button',name='Approve',exact=True)).to_be_enabled()
+    expect(proposals.get_by_role('button',name='Reject',exact=True)).to_be_enabled()
+    assert 'left to approve' not in proposals.inner_text() and 'remaining' not in proposals.inner_text()
+    outage['proposal_expired']=True;proposals.get_by_role('button',name='Reload proposals',exact=True).click()
+    expired_at = timestamp(proposal_now-timedelta(seconds=1))
+    expired_text = page.evaluate("value => 'Expires '+new Date(value).toLocaleTimeString('en-GB', "
+                                 "{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})",
+                                 expired_at)
+    expect(proposals.get_by_text(expired_text,exact=True)).to_be_visible()
+    expect(proposals.get_by_text('Expired',exact=True)).to_be_visible()
+    expect(proposals.get_by_role('button',name='Approve',exact=True)).to_be_disabled()
+    expect(proposals.get_by_role('button',name='Reject',exact=True)).to_be_disabled()
+    outage['proposal_expired']=False;proposals.get_by_role('button',name='Reload proposals',exact=True).click()
+    expect(proposals.get_by_text(expiry_text,exact=True)).to_be_visible()
     expect(proposals.get_by_role('alert')).to_have_count(0)
     expect(page.get_by_text('Diagnostic qualification not exposed',exact=True)).to_be_visible()
     page.locator('.reference').click()
@@ -305,7 +348,7 @@ def exercise_fixtures(page, base, output, expect):
     expect(page.locator('#detail-pane .detail-content [role=alert]')).to_contain_text('Explanation is unavailable')
     outage['proposals']=False;proposals.get_by_role('button',name='Reload proposals',exact=True).click()
     expect(proposals.get_by_role('alert')).to_have_count(0)
-    expect(proposals).to_contain_text('No proposals for this revision.')
+    expect(proposals.get_by_text(expiry_text,exact=True)).to_be_visible()
     expect(page.locator('.explanation-summary')).to_have_count(0)
     expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
     outage['explanation']=False;page.get_by_role('button',name='Load explanation',exact=True).click()
@@ -373,7 +416,8 @@ def exercise_fixtures(page, base, output, expect):
     assert page.locator('#detail-title').count() == 0
     expect(page.locator('#slot-proposalwatch > *')).to_have_count(0)
     outage['active'] = False
-    outage['model_available'] = True  # Readiness fixture only: no scores or approved model are fabricated.
+    # Readiness state only; the explicit synthetic incident scores remain software fixtures, not proof of model approval.
+    outage['model_available'] = True
     for problem, notice in (('identity_provider',None),('read_scope','cannot read incidents'),('expired','Token was rejected')):
         page.locator('#api-token').fill(token);page.get_by_role('button',name='Connect',exact=True).click()
         expect(page.locator('[data-testid=incident-row]')).to_have_count(1)
@@ -403,12 +447,12 @@ def exercise_fixtures(page, base, output, expect):
         assert token not in page.locator('body').inner_text()
     return {'scope':'fixture-browser-software-test-not-source-or-research-evidence',
         'checks':['authentication','pagination','filters','revision-pinning','timeline-pagination','model-unavailable',
-                  'unknown-context','XSS-safe-facts-and-references','missing-timestamp','mobile-layout','store-outage','logout-clears-data',
+                  'unknown-context','deterministic-incident-summary','XSS-safe-facts-and-references','missing-timestamp','mobile-layout','store-outage','logout-clears-data',
                   'read-only-action-audit','action-pagination','action-revision-scope','action-outage','XSS-safe-action-reason',
                   'manual-quarantine-receipt-not-recovery','quarantine-outage','quarantine-keyboard-focus','XSS-safe-operator-identity',
                   'explanation-revision-pinning','explanation-fallback','explanation-outage-clears-text',
                   'explanation-reference-navigation','XSS-safe-explanation','explanation-keyboard-focus',
-                  'empty-runbook-proposals','independent-proposal-and-explanation-outages',
+                  'static-proposal-expiry','expiry-blocks-proposal-decisions','independent-proposal-and-explanation-outages',
                   'protected-session-heartbeat','permission-loss-clears-private-data','expired-token-clears-private-data',
                   'identity-provider-outage-keeps-records-unknown-readiness','configured-model-availability']}
 

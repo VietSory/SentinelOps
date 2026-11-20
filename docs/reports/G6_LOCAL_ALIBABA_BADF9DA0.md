@@ -4,8 +4,11 @@ Release `artifact://manifests/3966e75e…3730.json` (bundle `badf9da0`, G3 accep
 with conditions, D-22). Operator: Claude, delegated by the owner for these trials.
 Each trial runs on a new owned kind cluster from a clean checkout. The known-good
 ledger is approved before the bad image is deployed. Native H4 grants dispatch
-authority, then rollback runs, then the 600 s executor verification decides the
-terminal outcome. Summary: `scripts/summarize_g6_trials.py` (receipts only).
+authority, then rollback runs, then the executor's **then-current 600 s budget**
+decides the terminal outcome. This report preserves the historical trial policy;
+new policies use a 1,200 s executor budget while the verifier telemetry window
+remains 600 s from `effective_at`. Summary: `scripts/summarize_g6_trials.py`
+(receipts only).
 
 ## Golden path (Q-09: ≥ 9/10 recovered for this release, no pooling)
 
@@ -110,7 +113,7 @@ gate decision and full-system evidence requirements remain separate.
 The rollback was dispatched at 08:31:40Z. The harness then scaled the in-cluster
 commerce PostgreSQL to zero. Payment needs the database to start and to pass
 `/ready`, so the rolled-back pod never became healthy. The executor escalated when
-the 600 s verification window expired, and the target stays quarantined for operator
+its historical 600 s budget expired, and the target stays quarantined for operator
 review. The harness change `927a3e8` (retry source outages only during the injected
 outage) was in place but not exercised: no `incident-source-unavailable` event
 occurred.

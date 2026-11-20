@@ -480,7 +480,7 @@ Durable action claim + per-target lock, unique idempotency key và attempt budge
 
 Patch trả thành công → `verifying`, chưa phải `recovered`. Verify yêu cầu Deployment ready đúng image và ba completed post-action buckets liên tiếp có đủ traffic, latency/error dưới SLO recovery thresholds. Chỉ dùng samples thuộc sau action-effective time; dữ liệu trước action không được tính vào verify.
 
-Verification timeout đề xuất 10 phút, cooldown 10 phút, một automatic attempt/incident/target. Thiếu telemetry hoặc không đủ traffic làm verification inconclusive; hết timeout phải escalate. Timeout/cloud lag được tính trong report.
+Verifier chỉ dùng telemetry trong cửa sổ 10 phút từ action `effective_at`; executor có budget 20 phút từ dispatch để hoàn tất verification, bao gồm độ trễ commit/read health ledger. Cooldown vẫn 10 phút và chỉ một automatic attempt/incident/target. Thiếu telemetry hoặc không đủ traffic làm verification inconclusive; hết budget executor phải escalate. Timeout/cloud lag được tính trong report.
 
 Nếu runbook rollback không phục hồi, giữ known-good state và escalate; không tự redeploy known-bad image để reverse action. `rolled_back` trong RemediationAction chỉ dùng khi một compensating runbook được phê duyệt thật sự đã chạy, không dùng như từ đồng nghĩa "image patch thành công".
 

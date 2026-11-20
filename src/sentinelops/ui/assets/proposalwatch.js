@@ -6,7 +6,10 @@ const terminal = new Set(['approved', 'consumed', 'engineer']);
 const secondsUntil = (deadline, now) => Math.max(0, Math.ceil((deadline - now) / 1000));
 const timestamp = value => typeof value === 'string' ? Date.parse(value) : NaN;
 const displayTime = value => new Date(value).toLocaleString('en-GB', {hour12:false});
-const duration = seconds => `${String(Math.floor(seconds / 60)).padStart(2,'0')}:${String(seconds % 60).padStart(2,'0')}`;
+const expiryTime = value => new Date(value).toLocaleTimeString('en-GB', {
+  hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false,
+});
+const statusLabel = status => terminal.has(status) ? 'Decision recorded' : labels[status];
 
 function validate(body, incidentId) {
   if (!Array.isArray(body?.items) || typeof body.has_more !== 'boolean' || body.items.length > 100) {
@@ -117,7 +120,7 @@ export function mount(root, ctx) {
   const coverage = create('p', 'status-chip proposalwatch-warning');
   coverage.hidden = true;
   const explanation = create('p', 'proposalwatch-meta',
-    'Review window estimate = earlier of proposal expiry and RCA time + 900 seconds. The server also checks current evidence and revision.');
+    'Approval can close at proposal expiry or when RCA evidence reaches its 900-second freshness limit. The server also checks current evidence and revision.');
   const list = create('div', 'proposalwatch-list');
   const empty = create('p', 'proposalwatch-empty', 'Waiting for the first successful check.');
   const history = create('details','proposalwatch-history'); history.hidden = true;
@@ -178,9 +181,8 @@ export function mount(root, ctx) {
     const state = timing(entry.row, entry.rca, Date.now());
     try {
       const notification = new window.Notification('New runbook proposal', {
-        body:`${entry.row.proposal.incident_id}: ${labels[state.status]}. ` +
-          (state.remaining === null ? `TTL ${state.ttl}s; RCA review window unknown.` :
-            `Review window estimate ${state.remaining}s; TTL ${state.ttl}s.`),
+        body:`${entry.row.proposal.incident_id}: ${statusLabel(state.status)}. ` +
+          `Expires ${expiryTime(timestamp(entry.row.proposal.expires_at))}.`,
         tag:`sentinelops-proposal-${entry.row.proposal.proposal_id}`,
       });
       notifications.add(notification);
@@ -208,13 +210,7 @@ export function mount(root, ctx) {
     titlebar.append(title, badge);
     const identity = create('p', 'proposalwatch-meta');
     const discovered = create('p', 'proposalwatch-discovered');
-    const countdown = create('p', 'proposalwatch-countdown');
-    const countdownLabel = create('span','proposalwatch-countdown-label');
-    const countdownValue = create('strong','proposalwatch-countdown-value');
-    countdownValue.setAttribute('aria-hidden','true');
-    const countdownAccessible = create('span','sr-only');
-    countdown.append(countdownLabel,countdownValue,countdownAccessible);
-    const ttl = create('p', 'proposalwatch-meta');
+    const expiry = create('p', 'proposalwatch-meta');
     const clocks = create('p', 'proposalwatch-meta');
     const reason = create('p', 'proposalwatch-reason');
     const reasonDetail = create('p','proposalwatch-meta');
@@ -222,7 +218,7 @@ export function mount(root, ctx) {
     const details = create('details','help-disclosure proposalwatch-details');
     const detailsToggle = create('summary',null,'Proposal details');
     const detailsBody = create('div','help-disclosure__body');
-    detailsBody.append(identity,discovered,ttl,clocks,reasonDetail,receipt);
+    detailsBody.append(identity,discovered,clocks,reasonDetail,receipt);
     details.append(detailsToggle,detailsBody);
     const actions = create('div', 'proposalwatch-controls');
     const review = ctx.onReview ? button('Open incident →') : null;
@@ -231,9 +227,9 @@ export function mount(root, ctx) {
     if (review) actions.append(review);
     actions.append(acknowledge);
     actions.append(details);
-    card.append(titlebar,countdown,reason,actions);
+    card.append(titlebar,expiry,reason,actions);
     const entry = {row, rca:NaN, firstSeen, isNew, card, title, badge, identity, discovered,
-      countdown,countdownLabel,countdownValue,countdownAccessible,ttl,clocks,reason,reasonDetail,receipt,review,acknowledge};
+      expiry,clocks,reason,reasonDetail,receipt,review,acknowledge};
     acknowledge.addEventListener('click', () => {
       entry.isNew = false;
       updateCard(entry, Date.now());
@@ -260,36 +256,20 @@ export function mount(root, ctx) {
     const row = entry.row;
     const proposal = row.proposal;
     const state = timing(row, entry.rca, now);
-    const urgency = state.status === 'pending' ?
-      state.remaining === null ? 'unknown' : state.remaining <= 60 ? 'critical' :
-        state.remaining <= 180 ? 'serious' : 'warning' : state.status === 'expired' ? 'critical' :
+    const urgency = state.status === 'pending' ? 'warning' : state.status === 'expired' ? 'critical' :
         state.status === 'stale' ? 'serious' : 'neutral';
     entry.card.dataset.urgency = urgency;
     entry.card.dataset.status = state.status;
     entry.card.dataset.new = String(entry.isNew);
     entry.title.textContent = `${proposal.incident_id} · ${proposal.runbook_id}`;
     const badgeStatus = state.status === 'approved' ? 'good' : state.status === 'not_yet_valid' || state.status === 'engineer' ? 'warning' :
-      urgency === 'unknown' ? 'neutral' : urgency;
-    const badgeLabel = `${labels[state.status]}${state.status === 'pending' && urgency === 'critical' ? ' · Urgent' :
-      state.status === 'pending' && urgency === 'serious' ? ' · Ending soon' : ''}`;
+      urgency;
+    const badgeLabel = statusLabel(state.status);
     setStatus(entry.badge,badgeLabel,badgeStatus,{good:'✓',warning:'!',serious:'!!',critical:'×',neutral:'?'}[badgeStatus]);
     entry.identity.textContent = `Proposal ${proposal.proposal_id} · revision ${proposal.incident_revision}`;
     entry.discovered.textContent = `${entry.isNew ? 'NEW · ' : ''}Created ${displayTime(timestamp(proposal.created_at))} · ` +
       `First seen ${displayTime(entry.firstSeen)} (this watch session)`;
-    const countdownText = terminal.has(state.status) ? 'Decision recorded' :
-      state.status === 'expired' ? 'Expired · 0s remaining' : state.status === 'stale' ? 'Stale · review blocked' :
-      state.status === 'not_yet_valid' ? 'Not yet valid · waiting for server confirmation' :
-      state.futureRca ? 'Review window unavailable · RCA time is in the future' :
-      state.remaining === null ? 'Review window unknown · RCA timestamp unavailable' :
-      state.remaining === 0 ? 'RCA freshness elapsed · 0s remaining' :
-      `Review window estimate: ${state.remaining}s remaining${urgency === 'critical' ? ' · Urgent' : urgency === 'serious' ? ' · Ending soon' : ''}`;
-    const running = state.status === 'pending' && !state.futureRca && state.remaining !== null && state.remaining > 0;
-    entry.countdownLabel.textContent = running ? 'Review window estimate:' : countdownText;
-    entry.countdownValue.textContent = running ? duration(state.remaining) : state.status === 'pending' && state.remaining === null ? '—' : '';
-    entry.countdownValue.hidden = !entry.countdownValue.textContent;
-    entry.countdownAccessible.textContent = running ? `${state.remaining}s remaining` : '';
-    entry.countdown.hidden = state.status !== 'pending';
-    entry.ttl.textContent = `Proposal TTL: ${state.ttl}s remaining · expires ${displayTime(timestamp(proposal.expires_at))}`;
+    entry.expiry.textContent = `Expires ${expiryTime(timestamp(proposal.expires_at))}`;
     entry.clocks.textContent = Number.isFinite(entry.rca) ?
       `RCA time: ${displayTime(entry.rca)} · freshness limit ${displayTime(entry.rca + 900000)} (900s)` :
       'The RCA clock is unavailable. The proposal TTL alone does not establish the usable approval window.';
@@ -428,7 +408,7 @@ export function mount(root, ctx) {
       empty.textContent = 'No proposals returned by the server.';
       connection.dataset.state = 'connected';
       connectionDetail.textContent = `Last successful check: ${displayTime(now)} · polling every ${interval / 1000}s. ` +
-        'Countdowns use the local clock; background tabs may delay alerts.';
+        'Expiry and review safeguards use the local clock; background tabs may delay alerts.';
       connection.title = connectionDetail.textContent;
       updateLayout(now);
       announceNew();

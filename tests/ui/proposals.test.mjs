@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {IncidentClient, ApiFailure} from '../../src/sentinelops/ui/assets/client.js';
 import {Workspace, proposalRemaining} from '../../src/sentinelops/ui/assets/workspace.js';
+
+const appSource = readFileSync(new URL('../../src/sentinelops/ui/assets/app.js',import.meta.url),'utf8');
+const watchSource = readFileSync(new URL('../../src/sentinelops/ui/assets/proposalwatch.js',import.meta.url),'utf8');
 
 const row = () => ({proposal:{proposal_version:'runbook-proposal/v1',proposal_id:'a'.repeat(64),
   incident_id:'INC-a&b',incident_revision:2,runbook_id:'rollback',score:.95,margin:.3,
@@ -62,14 +66,26 @@ test('a controller consuming or escalating an approval before the reply keeps th
   }
 });
 
-test('countdown reaches zero at expiry and prevents an expired decision',async () => {
+test('proposal expiry blocks a decision without relying on countdown text',async () => {
   const r = row(), expiry = Date.parse(r.proposal.expires_at);
-  assert.equal(proposalRemaining(r,expiry-61000),61);
+  assert.equal(proposalRemaining(r,expiry-1),1);
   assert.equal(proposalRemaining(r,expiry),0); assert.equal(proposalRemaining(r,expiry+1000),0);
   let sent = 0;
   const w = await workspace({decideProposal:async () => {sent++;}});
   w.state.proposals[0].proposal.expires_at='2020-01-01T00:00:00Z';
   await w.decideProposal(r.proposal.proposal_id,'approve','reviewed'); assert.equal(sent,0);
+});
+
+test('proposal displays use a static local expiry and contain no ticking copy',() => {
+  for (const source of [appSource,watchSource]) {
+    assert.match(source,/`Expires \$\{expiryTime\(/);
+    for (const removed of ['proposal-countdown','Review window estimate','Proposal TTL:',
+      's remaining','left to approve','Approval window expired','Ending soon','Urgent']) {
+      assert.equal(source.includes(removed),false,removed);
+    }
+  }
+  assert.match(watchSource,/statusLabel\(state\.status\)/);
+  assert.match(watchSource,/'Decision recorded'/);
 });
 
 test('duplicate clicks send one decision; rejection displays engineer and cannot be approved again',async () => {

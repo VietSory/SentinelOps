@@ -1,7 +1,7 @@
 {
   "uid": "sentinelops-slo",
   "title": "SentinelOps — SLO / SLA",
-  "description": "Theo dõi SLO/SLA HTTP của checkout-service, payment-service và inventory-service: Success Rate ≥ 99,5% (request không trả 5xx) và p95 latency < 1000 ms. Gauge trạng thái dùng 5 phút; biểu đồ success có cửa sổ 5 phút, 1 giờ, 6 giờ; error budget dùng rule 6 giờ với ngân sách lỗi 0,5%. GIỚI HẠN RETENTION: Prometheus trên EKS sentinelops-dev lưu emptyDir, hiện chỉ có khoảng 3 giờ lịch sử và mất dữ liệu khi restart. Khoảng xem mặc định là 3 giờ; mọi cửa sổ bị giới hạn bởi retention và phần lịch sử thực sự còn lưu, nhất là rule 6 giờ. Đây là SLI và budget trượt, chưa phải bằng chứng SLA đủ kỳ. Thiếu dữ liệu/lưu lượng là CHƯA CÓ DỮ LIỆU, không mặc định đạt SLO. Hai ô sự cố/RCA cuối là số phát sinh trong khoảng thời gian đang xem (increase(), bỏ qua lần đặt lại khi worker khởi động lại), chỉ hiển thị nếu có series.",
+  "description": "Theo dõi SLO/SLA HTTP của checkout-service, payment-service và inventory-service: Success Rate ≥ 99,5% (request không trả 5xx) và ngưỡng p95 latency 750 ms, cùng latency_ms trong configs/slo_health_policy.json. Gauge trạng thái dùng 5 phút; biểu đồ success có cửa sổ 5 phút, 1 giờ, 6 giờ; error budget dùng rule 6 giờ với ngân sách lỗi 0,5%. GIỚI HẠN RETENTION: Prometheus trên EKS sentinelops-dev lưu emptyDir, hiện chỉ có khoảng 3 giờ lịch sử và mất dữ liệu khi restart. Khoảng xem mặc định là 3 giờ; mọi cửa sổ bị giới hạn bởi retention và phần lịch sử thực sự còn lưu, nhất là rule 6 giờ. Đây là SLI và budget trượt, chưa phải bằng chứng SLA đủ kỳ. Thiếu dữ liệu/lưu lượng là CHƯA CÓ DỮ LIỆU, không mặc định đạt SLO. Hai ô sự cố/RCA cuối là số phát sinh trong khoảng thời gian đang xem (increase(), bỏ qua lần đặt lại khi worker khởi động lại), chỉ hiển thị nếu có series.",
   "tags": [
     "sentinelops",
     "slo",
@@ -37,7 +37,7 @@
       "id": 1,
       "type": "row",
       "title": "Trạng thái SLO",
-      "description": "Mỗi service: Success Rate ≥ 99,5% và p95 < 1000 ms, trên cửa sổ 5 phút. Vàng cảnh báo gần ngưỡng; thiếu dữ liệu không phải đạt SLO.",
+      "description": "Mỗi service: Success Rate ≥ 99,5% và ngưỡng p95 750 ms, trên cửa sổ 5 phút. Health worker ghi nhận vi phạm khi p95 > 750 ms; thiếu dữ liệu không phải đạt SLO.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -153,8 +153,8 @@
     {
       "id": 3,
       "type": "gauge",
-      "title": "checkout-service — p95 · mục tiêu hiển thị < 1000 ms (ngưỡng sự cố 750 ms)",
-      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
+      "title": "checkout-service — p95 · ngưỡng 750 ms",
+      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Mốc màu đỏ đặt tại 750 ms, cùng latency_ms của chính sách; health worker ghi nhận vi phạm khi p95 > 750 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -221,12 +221,8 @@
                 "value": null
               },
               {
-                "color": "yellow",
-                "value": 800
-              },
-              {
                 "color": "red",
-                "value": 1000
+                "value": 750
               }
             ]
           }
@@ -351,8 +347,8 @@
     {
       "id": 5,
       "type": "gauge",
-      "title": "payment-service — p95 · mục tiêu hiển thị < 1000 ms (ngưỡng sự cố 750 ms)",
-      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
+      "title": "payment-service — p95 · ngưỡng 750 ms",
+      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Mốc màu đỏ đặt tại 750 ms, cùng latency_ms của chính sách; health worker ghi nhận vi phạm khi p95 > 750 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -419,12 +415,8 @@
                 "value": null
               },
               {
-                "color": "yellow",
-                "value": 800
-              },
-              {
                 "color": "red",
-                "value": 1000
+                "value": 750
               }
             ]
           }
@@ -549,8 +541,8 @@
     {
       "id": 7,
       "type": "gauge",
-      "title": "inventory-service — p95 · mục tiêu hiển thị < 1000 ms (ngưỡng sự cố 750 ms)",
-      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Xanh < 800 ms; vàng từ 800 đến dưới 1000 ms; đỏ ≥ 1000 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
+      "title": "inventory-service — p95 · ngưỡng 750 ms",
+      "description": "p95 latency trên cửa sổ histogram 5 phút, gộp route và replica theo service. Mốc màu đỏ đặt tại 750 ms, cùng latency_ms của chính sách; health worker ghi nhận vi phạm khi p95 > 750 ms. Histogram đã có đơn vị ms, không nhân thêm 1000. Lọc NaN khi không có lưu lượng; thiếu dữ liệu không phải latency bằng 0. Telemetry không còn cập nhật trong 2 phút: CHƯA CÓ DỮ LIỆU.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -617,12 +609,8 @@
                 "value": null
               },
               {
-                "color": "yellow",
-                "value": 800
-              },
-              {
                 "color": "red",
-                "value": 1000
+                "value": 750
               }
             ]
           }
@@ -865,7 +853,7 @@
       "id": 11,
       "type": "timeseries",
       "title": "Latency · p50 / p95 / p99",
-      "description": "checkout-service: p50, p95, p99 từ histogram trên cùng cửa sổ 5 phút, một trục ms. Đường đỏ nét đứt tại 1000 ms là giới hạn SLO dành cho p95; p50/p99 giúp đối chiếu phân bố. Dữ liệu histogram đã là ms. NaN khi không có request được lọc, không bù thành 0.",
+      "description": "checkout-service: p50, p95, p99 từ histogram trên cùng cửa sổ 5 phút, một trục ms. Đường đỏ nét đứt tại 750 ms là giới hạn SLO dành cho p95, khớp chính sách sự cố; p50/p99 giúp đối chiếu phân bố. Dữ liệu histogram đã là ms. NaN khi không có request được lọc, không bù thành 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -956,7 +944,7 @@
               },
               {
                 "color": "red",
-                "value": 1000
+                "value": 750
               }
             ]
           }
@@ -1198,7 +1186,7 @@
       "id": 15,
       "type": "timeseries",
       "title": "Latency · p50 / p95 / p99",
-      "description": "payment-service: p50, p95, p99 từ histogram trên cùng cửa sổ 5 phút, một trục ms. Đường đỏ nét đứt tại 1000 ms là giới hạn SLO dành cho p95; p50/p99 giúp đối chiếu phân bố. Dữ liệu histogram đã là ms. NaN khi không có request được lọc, không bù thành 0.",
+      "description": "payment-service: p50, p95, p99 từ histogram trên cùng cửa sổ 5 phút, một trục ms. Đường đỏ nét đứt tại 750 ms là giới hạn SLO dành cho p95, khớp chính sách sự cố; p50/p99 giúp đối chiếu phân bố. Dữ liệu histogram đã là ms. NaN khi không có request được lọc, không bù thành 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -1289,7 +1277,7 @@
               },
               {
                 "color": "red",
-                "value": 1000
+                "value": 750
               }
             ]
           }
@@ -1531,7 +1519,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "Latency · p50 / p95 / p99",
-      "description": "inventory-service: p50, p95, p99 từ histogram trên cùng cửa sổ 5 phút, một trục ms. Đường đỏ nét đứt tại 1000 ms là giới hạn SLO dành cho p95; p50/p99 giúp đối chiếu phân bố. Dữ liệu histogram đã là ms. NaN khi không có request được lọc, không bù thành 0.",
+      "description": "inventory-service: p50, p95, p99 từ histogram trên cùng cửa sổ 5 phút, một trục ms. Đường đỏ nét đứt tại 750 ms là giới hạn SLO dành cho p95, khớp chính sách sự cố; p50/p99 giúp đối chiếu phân bố. Dữ liệu histogram đã là ms. NaN khi không có request được lọc, không bù thành 0.",
       "datasource": {
         "type": "prometheus",
         "uid": "sentinelops-prometheus"
@@ -1622,7 +1610,7 @@
               },
               {
                 "color": "red",
-                "value": 1000
+                "value": 750
               }
             ]
           }
