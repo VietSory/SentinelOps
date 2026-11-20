@@ -71,6 +71,24 @@ def test_rejects_invalid_narrative(narrative):
     assert_rejected(envelope(), mutate_response)
 
 
+def test_accepts_three_line_narrative_with_numbers_from_referenced_fact():
+    source = envelope()
+    source["payload"]["evidence"][0]["fact"] = "Ghi nhận 752/752 yêu cầu chậm hoặc lỗi 5xx."
+    narrative = (
+        "Vấn đề: rds xử lý yêu cầu chậm hoặc trả lỗi.\n"
+        "Bằng chứng: 752/752 yêu cầu chậm hoặc lỗi 5xx.\n"
+        "Chưa chắc chắn: Chưa rõ vì sao yêu cầu chậm. Nên xem log cùng thời điểm."
+    )
+
+    def mutate_response(request, response):
+        response["root_cause"]["explanation"] = narrative
+
+    result, _ = run_fake_provider(source, mutate_response)
+    assert result["fallback"] is False
+    assert result["payload"]["root_cause"]["explanation"] == narrative
+    assert "E-001" in result["payload"]["root_cause"]["evidence_refs"]
+
+
 def test_narrative_names_another_service_only_through_a_selected_card():
     narrative = "RDS may be related to PAYMENT-SERVICE failures."
 

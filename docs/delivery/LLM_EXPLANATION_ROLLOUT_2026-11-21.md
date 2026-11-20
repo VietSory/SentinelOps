@@ -26,6 +26,19 @@ Responses API với `text.format` kiểu `json_schema`.
 
 | 27 | patch 18:05:49Z, rollout xong 18:06:17Z | `sha256:b06898f7db41848b26cd83d74e831c586eac09e9fcf7f5f0875a1e35fe92a851` (`git-eb8a276`) | `scripts/aws_demo/deploy_llm_explanation.sh`, dry-run rồi `LLM_DEPLOY_EXECUTE=1` |
 
+| 28 | patch 18:15:12Z, rollout xong 18:15:40Z | `sha256:8f490f103de896f0aabb1780c8a1f054d3b74021051961b1722dad0208ca6b93` (`git-63c465d-liveui`) | như revision 27 |
+
+Revision 27 làm mất UI React song ngữ đang chạy ở revision 24: lớp UI đó được
+dựng bằng `web/deployment/Dockerfile.live` chồng lên image control-plane, từ
+workspace chưa commit, nên không có trong image build từ repo. Revision 28 lấy
+image `git-eb8a276` của merge `63c465d` làm gốc và chép nguyên lớp UI từ image
+revision 24 (`index.html`, bundle React, `demo_routes.py`, `demo_site/`,
+`live_observability.py`, `routes.py` đã vá, hook `install_live_observability`
+trong `api.py`), giữ `app.js`, `client.js`, `styles.css` và validator mới. Sau
+rollout `/ui/` phục vụ lại UI React, `/ui/demo/` trả 200 và explanation trong Pod
+vẫn `fallback=false`. Lớp UI React vẫn chưa nằm trong repo; lần build từ repo
+tiếp theo phải dựng lại lớp này, nếu không sẽ mất UI một lần nữa.
+
 Revision 25 và 26 build từ cây chưa commit. Revision 27 build từ commit
 `eb8a276` (cây sạch, label `org.opencontainers.image.revision` = SHA đầy đủ) và là
 bản đang chạy. Các commit `main` merge sau đó (`ad38f14`, `37bd5d1`, `454c51c`)
