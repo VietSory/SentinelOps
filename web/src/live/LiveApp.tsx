@@ -54,7 +54,6 @@ function Proposal({row,state,engine,now,isEn,memoryReview}: {row:Row,state:Row,e
     <Facts items={items}/>
     {pending&&<p className="text-sm font-semibold text-orange-700">{isEn?'Time remaining':'Thời gian còn lại'}: {Math.floor(remaining/60)}:{String(remaining%60).padStart(2,'0')}</p>}
     {!current&&row.status==='pending'&&<Notice>{isEn?'Incident revision advanced. Reload the current incident.':'Incident đã có revision mới. Hãy tải lại incident hiện tại.'}</Notice>}
-    {!complete&&<Notice>{isEn?'Complete pinned change evidence is required before approval. You can reject for engineer review.':'Cần đủ bằng chứng thay đổi được ghim trước khi duyệt. Có thể từ chối để chuyển kỹ sư.'}</Notice>}
     {!state.canApprove&&<Notice>{isEn?'Read-only session: remediation.approve permission is required.':'Phiên chỉ đọc: cần quyền remediation.approve để quyết định.'}</Notice>}
     {row.approval&&<Raw value={row.approval}/>}
     {row.memory_action&&<Notice error={['blocked','escalated'].includes(row.memory_action.phase)}>{isEn?'Recovery: ':'Hồi phục: '}{row.memory_action.phase} · {row.memory_action.reason}</Notice>}
@@ -62,7 +61,7 @@ function Proposal({row,state,engine,now,isEn,memoryReview}: {row:Row,state:Row,e
     <p className="text-xs text-slate-500">{isMemory?
       (isEn?'Based on the OOMKilled observed by Kubernetes. The controller rechecks the pod, image and memory limit before execution.':'Dựa trên OOMKilled do Kubernetes ghi nhận. Controller kiểm tra lại đúng pod, image và giới hạn RAM trước khi thực thi.'):
       (isEn?'Approval records a human decision. The controller still checks evidence freshness, target, quarantine and recovery telemetry.':'Duyệt ghi nhận quyết định của người trực. Controller tiếp tục kiểm tra tuổi bằng chứng, target, quarantine và telemetry hồi phục.')}</p>
-    {row.status==='pending'&&<form onSubmit={e=>e.preventDefault()} className="space-y-3"><label className="block text-sm font-medium">{isEn?'Decision reason':'Lý do quyết định'}<textarea aria-label={isEn?'Decision reason':'Lý do quyết định'} value={reason} onChange={e=>setReason(e.target.value)} maxLength={2000} rows={2} className="block w-full mt-2 rounded-lg border border-slate-300 p-3"/></label><div className="flex flex-wrap gap-3"><Button disabled={!canDecide||!complete||!reason.trim()} onClick={()=>void decision('approve')}>{isEn?'Approve':'Duyệt'}</Button><Button variant="secondary" disabled={!canDecide||!reason.trim()} onClick={()=>void decision('reject')}>{isEn?'Reject':'Từ chối'}</Button></div></form>}
+    <form onSubmit={e=>e.preventDefault()} className="space-y-3"><label className="block text-sm font-medium">{isEn?'Decision reason':'Lý do quyết định'}<textarea aria-label={isEn?'Decision reason':'Lý do quyết định'} value={reason} onChange={e=>setReason(e.target.value)} maxLength={2000} rows={2} className="block w-full mt-2 rounded-lg border border-slate-300 p-3"/></label><div className="flex flex-wrap gap-3"><Button disabled={!canDecide||!complete||!reason.trim()} onClick={()=>void decision('approve')}>{isEn?'Approve':'Duyệt'}</Button><Button variant="secondary" disabled={!canDecide||!reason.trim()} onClick={()=>void decision('reject')}>{isEn?'Reject':'Từ chối'}</Button></div></form>
   </Card>;
 }
 

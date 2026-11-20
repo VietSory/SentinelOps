@@ -49,7 +49,6 @@ TEMPLATE = '''function FUNCTION({row,state,engine,now,isEn}) {
     JSX.jsx(FACTS,{items}),
     pending&&JSX.jsxs('p',{className:'text-sm font-semibold text-orange-700',children:[label('Thời gian còn lại','Time remaining'),': ',Math.floor(remaining/60),':',String(remaining%60).padStart(2,'0')]}),
     !current&&row.status==='pending'&&JSX.jsx(CALLOUT,{children:label('Incident đã có revision mới. Hãy tải lại incident hiện tại.','Incident revision advanced. Reload the current incident.')}),
-    !complete&&JSX.jsx(CALLOUT,{children:label('Cần đủ bằng chứng thay đổi được ghim trước khi duyệt. Có thể từ chối để chuyển kỹ sư.','Complete pinned change evidence is required before approval. You can reject for engineer review.')}),
     !state.canApprove&&JSX.jsx(CALLOUT,{children:label('Phiên chỉ đọc: cần quyền remediation.approve để quyết định.','Read-only session: remediation.approve permission is required.')}),
     row.approval&&JSX.jsx(RECEIPT,{value:row.approval}),
     row.memory_action&&JSX.jsxs(CALLOUT,{error:['blocked','escalated'].includes(row.memory_action.phase),children:[label('Hồi phục: ','Recovery: '),row.memory_action.phase,' · ',row.memory_action.reason]}),
@@ -57,7 +56,7 @@ TEMPLATE = '''function FUNCTION({row,state,engine,now,isEn}) {
     JSX.jsx('p',{className:'text-xs text-slate-500',children:isMemory?
       label('Dựa trên OOMKilled do Kubernetes ghi nhận. Controller kiểm tra lại đúng pod, image và giới hạn RAM trước khi thực thi.','Based on the OOMKilled observed by Kubernetes. The controller rechecks the pod, image and memory limit before execution.'):
       label('Duyệt ghi nhận quyết định của người trực. Controller tiếp tục kiểm tra tuổi bằng chứng, target, quarantine và telemetry hồi phục.','Approval records a human decision. The controller still checks evidence freshness, target, quarantine and recovery telemetry.')}),
-    row.status==='pending'&&JSX.jsxs('form',{onSubmit:event=>event.preventDefault(),className:'space-y-3',children:[
+    JSX.jsxs('form',{onSubmit:event=>event.preventDefault(),className:'space-y-3',children:[
       JSX.jsxs('label',{className:'block text-sm font-medium',children:[label('Lý do quyết định','Decision reason'),
         JSX.jsx('textarea',{'aria-label':label('Lý do quyết định','Decision reason'),value:reason,onChange:event=>setReason(event.target.value),maxLength:2000,rows:2,className:'block w-full mt-2 rounded-lg border border-slate-300 p-3'})]}),
       JSX.jsxs('div',{className:'flex flex-wrap gap-3',children:[

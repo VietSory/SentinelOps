@@ -136,7 +136,7 @@ await Promise.resolve();
 console.log(JSON.stringify({buttons:buttons.map(n=>({disabled:n.props.disabled,label:n.props.children})),
 facts:nodes.find(n=>n.type==='FACTS').props.items,dates,decisions,
 badge:nodes.find(n=>n.type==='BADGE').props,forms:nodes.filter(n=>n.type==='form').length,
-paragraphs:nodes.filter(n=>n.type==='p').length}));
+paragraphs:nodes.filter(n=>n.type==='p').length,notices:nodes.filter(n=>n.type==='CALLOUT').map(n=>n.props.children)}));
 """
     return node(code)
 
@@ -184,9 +184,15 @@ def test_pending_guard_remains_closed_without_current_authorized_window(mutation
 
 
 @pytest.mark.parametrize("status", ["recovered", "blocked", "escalated"])
-def test_terminal_memory_review_displays_without_decision_controls(status):
+def test_terminal_memory_review_keeps_visible_disabled_decision_controls(status):
     result = render_case(status=status)
-    assert result["forms"] == 0
-    assert result["buttons"] == []
+    assert result["forms"] == 1
+    assert result["buttons"] == [{"disabled": True, "label": "Approve"}, {"disabled": True, "label": "Reject"}]
     assert result["decisions"] == []
     assert result["badge"]["tone"] == ("success" if status == "recovered" else "neutral")
+
+
+def test_missing_evidence_keeps_approve_visible_without_blocking_explanation():
+    result = render_case(mutation="row.review_change=null;")
+    assert result["buttons"][0] == {"disabled": True, "label": "Approve"}
+    assert result["notices"] == []
