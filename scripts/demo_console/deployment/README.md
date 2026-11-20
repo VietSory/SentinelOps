@@ -7,9 +7,9 @@ qua `kubectl port-forward` tới pod; không có Service, Ingress hoặc CloudFr
 
 Image chỉ chứa console, fault request contract và bốn runtime dependency trực tiếp
 đã pin version. Không có kubectl/AWS CLI/credential/script B7/B9, không mount
-Secret/PVC hoặc token ServiceAccount, không cấp RBAC. Nút deploy image hỏng giữ
-trạng thái chưa cấu hình. Đây là deployment giao diện chỉ đọc; chưa phải xác nhận
-demo bơm lỗi hoạt động trên cụm.
+Secret/PVC hoặc token ServiceAccount, không cấp RBAC. Nút deploy image hỏng và
+OOM giữ trạng thái chưa cấu hình. Mặc định chỉ đọc; renderer có opt-in rõ ràng
+cho bảy thao tác HTTP có sẵn, không mở quyền thay Deployment.
 
 ## Build và render để review
 
@@ -35,6 +35,12 @@ python scripts/demo_console/deployment/render.py \
 
 Renderer từ chối tag hoặc digest không hợp lệ. Kiểm lại manifest, image digest,
 namespace/context trước khi người điều phối apply. Đường chuẩn bị review:
+
+Để chuẩn bị một phiên dev đã được phép bơm lỗi HTTP, thêm `--enable-faults`
+vào lệnh render. Flag chỉ đặt `DEMO_CONSOLE_ENABLE_FAULTS=true`; cả
+`DEMO_CONSOLE_DEPLOY_SCRIPT` và `DEMO_CONSOLE_OOM_SCRIPT` vẫn rỗng. Backend và
+terminal phải hiển thị riêng khả năng của từng nút; không coi global gate bật
+là deploy/OOM đã sẵn sàng. Chưa chạy fault nào chỉ vì render/apply manifest.
 
 ```sh
 AWS_PROFILE=console kubectl --context sentinelops-demo \
@@ -67,8 +73,10 @@ Service port thực trước apply. Nếu endpoint faults tắt, UI phải hiể
 không tự bật biến môi trường trên business pods. Fault state thuộc từng pod:
 Service có nhiều replica sẽ không đại diện trạng thái toàn deployment.
 
-Không bật `DEMO_CONSOLE_ENABLE_FAULTS` trong vòng rollout đầu. Trước phiên bơm lỗi
-thật cần kiểm target, trạng thái baseline, một replica mỗi service, đường phục hồi
-và kiểm độc lập các guards. Với B7/B9, dùng console local theo README cấp trên sau
-khi review script đầy đủ; image này không có quyền thay Deployment. Không thêm
-credential/RBAC hoặc mount script tùy tiện để mở nút deploy image.
+Trước phiên bơm lỗi thật cần kiểm target, trạng thái baseline, một replica mỗi
+service, đường phục hồi và kiểm độc lập các guards. Hậu kiểm rollout bằng GET
+`/api/status`: gate theo lựa chọn render; Payment/Inventory đọc được trạng thái;
+runner deploy/OOM chưa cấu hình và idle; terminal ban đầu chưa có thao tác.
+Với B7/B9 và OOM, dùng console trên máy operator theo README cấp trên sau khi
+review script/dependency và đường hồi phục đầy đủ. Image này không có quyền
+thay Deployment. Không thêm credential/RBAC hoặc mount script tùy tiện để mở nút.

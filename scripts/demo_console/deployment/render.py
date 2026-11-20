@@ -7,7 +7,7 @@ import json
 import re
 
 
-def render(image: str) -> dict:
+def render(image: str, *, enable_faults: bool = False) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[a-f0-9]{64}", image):
         raise ValueError("--image must be a registry image pinned by sha256 digest")
     namespace = "sentinelops-b-actions"
@@ -55,8 +55,10 @@ def render(image: str) -> dict:
                                 "name": name, "image": image,
                                 "imagePullPolicy": "IfNotPresent",
                                 "env": [
-                                    {"name": "DEMO_CONSOLE_ENABLE_FAULTS", "value": "false"},
+                                    {"name": "DEMO_CONSOLE_ENABLE_FAULTS", "value": "true" if enable_faults else "false"},
                                     {"name": "DEMO_CONSOLE_DEPLOY_SCRIPT", "value": ""},
+                                    {"name": "DEMO_CONSOLE_OOM_SCRIPT", "value": ""},
+                                    {"name": "DEMO_CONSOLE_ENABLE_OOM", "value": "false"},
                                     {"name": "DEMO_CONSOLE_PORT", "value": "8765"},
                                     {"name": "DEMO_CONSOLE_PAYMENT_URL", "value": "http://payment-service:8000"},
                                     {"name": "DEMO_CONSOLE_INVENTORY_URL", "value": "http://inventory-service:8000"},
@@ -89,9 +91,11 @@ def render(image: str) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", required=True)
+    parser.add_argument("--enable-faults", action="store_true",
+                        help="Enable only HTTP fault controls for an authorized dev session; script runners stay unconfigured")
     args = parser.parse_args()
     try:
-        manifest = render(args.image)
+        manifest = render(args.image, enable_faults=args.enable_faults)
     except ValueError as exc:
         parser.error(str(exc))
     print(json.dumps(manifest, indent=2))

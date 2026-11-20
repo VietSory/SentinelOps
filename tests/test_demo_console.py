@@ -87,11 +87,11 @@ def test_every_mutation_disabled_by_default(action):
         assert calls == []
 
 
-def test_status_always_reads_each_service_and_contains_eight_real_actions():
+def test_status_always_reads_each_service_and_contains_nine_real_actions():
     with console() as (client, states, calls):
         first = client.get("/api/status").json()
         assert first["enabled"] is False
-        assert len(first["actions"]) == 8
+        assert len(first["actions"]) == 9
         assert first["deployment"]["configured"] is False
         assert first["services"]["payment"]["mode"] == "healthy"
         states["payment"].update(mode="latency", delay_ms=2000)

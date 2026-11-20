@@ -16,7 +16,7 @@
   <main>
     <div class="page-heading">
       <h1>Fault console</h1>
-      <p>Monitor fault modes for Payment and Inventory and run authorized development scenarios.</p>
+      <p>Run development fault scenarios for Payment, Inventory and the isolated OOM workload.</p>
       <p class="context">Expected target: EKS <strong>sentinelops-dev</strong> · context <strong>sentinelops-demo</strong> · namespace <strong>sentinelops-b-actions</strong></p>
     </div>
     <aside class="warning" role="note">
@@ -31,11 +31,21 @@
     <p class="hint">Refreshes every 5 seconds. The “healthy” fault mode applies to the instance reached by the request. Check image, pod and service health separately.</p>
     <p id="result" role="status" aria-live="polite"></p>
     <section id="cards" class="cards" aria-label="Fault scenarios" aria-busy="true"></section>
-    <section class="deployment" aria-labelledby="deployment-title">
-      <h2 id="deployment-title">Image deployment</h2>
-      <p id="deployment-status">Script status unavailable.</p>
-      <p class="hint">Keep the console open while the script runs. Verify service recovery separately from the script exit code and log.</p>
-      <details><summary>Latest script log (up to 8 KiB)</summary><pre id="deployment-log">No log output yet.</pre></details>
+    <section class="execution" aria-labelledby="terminal-title">
+      <div class="terminal-heading">
+        <div>
+          <p class="eyebrow">Execution terminal</p>
+          <h2 id="terminal-title">Commands and output</h2>
+        </div>
+        <span class="read-only-label">Read only</span>
+      </div>
+      <div class="runner-statuses">
+        <p id="deployment-status">Image deployment: script status unavailable.</p>
+        <p id="oom-status">Isolated OOM: script status unavailable.</p>
+      </div>
+      <p id="terminal-status" class="terminal-status" role="status">Waiting for the execution journal…</p>
+      <pre id="terminal-output" tabindex="0" aria-label="Executed commands and script output">No commands have run in this console session.</pre>
+      <p class="hint">Shows requests and commands reported by the server, with results and latest script output. Refreshes every 5 seconds. Recovery still needs its own evidence.</p>
     </section>
     <footer>Local access at 127.0.0.1 · No sign-in · Runbook: scripts/demo_console/README.md</footer>
   </main>

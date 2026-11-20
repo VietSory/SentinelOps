@@ -6,13 +6,13 @@ Backend chỉ bind `127.0.0.1`, một worker, không có xác thực. Không đ�
 không mở tunnel ra Internet hoặc public ingress; chạy bằng entrypoint dưới đây,
 không đổi host qua uvicorn CLI.
 
-## Trạng thái triển khai ngày 19/11/2026
+## Mốc triển khai ngày 19/11/2026 và cấu hình hiện hành
 
 Console đã được deploy riêng thành `fault-console` trên EKS `sentinelops-dev`,
 namespace `sentinelops-b-actions`; xem [receipt rollout](../../docs/delivery/FAULT_CONSOLE_DEPLOY_2026-11-19.md)
 và [hướng dẫn deployment](deployment/README.md).
 Truy cập qua port-forward **http://127.0.0.1:8765**; backend vẫn bind loopback.
-**Bản đang deploy chỉ đọc, mọi thao tác OFF**: `DEMO_CONSOLE_ENABLE_FAULTS=false`,
+**Bản bàn giao ngày 19/11 chỉ đọc, mọi thao tác OFF**: `DEMO_CONSOLE_ENABLE_FAULTS=false`,
 `DEMO_CONSOLE_DEPLOY_SCRIPT` rỗng, runner chưa cấu hình và idle. Không có runner
 B7/B9 trong image, không mount token ServiceAccount/credential, không có
 Service/Ingress hoặc quyền RBAC cho console.
@@ -24,9 +24,11 @@ GET `/api/status` lúc **14:18:49 UTC** xác nhận gate tắt, không busy,
 Payment/Inventory trả `healthy`, delay 0; đây chỉ là trạng thái fault của các
 endpoint được đọc, không phải bằng chứng sức khỏe nghiệp vụ/toàn bộ pod.
 
-Giữ nguyên bản triển khai chỉ đọc. Các ví dụ bật thao tác và B7/B9 bên dưới dành
-cho phiên local được review, cho phép riêng; không áp dụng để mở nút trong pod
-console. B9 mới có kiểm thử offline, chưa có bằng chứng E2E và chưa có watchdog
+Trạng thái hiện tại phải đọc từ `/api/status`, không suy ra từ mốc bàn giao trên.
+Renderer có `--enable-faults` để mở bảy thao tác HTTP trong phiên dev đã được
+cho phép, vẫn giữ loopback và không thêm quyền Kubernetes. B7/B9 và OOM có runner
+riêng; nút chưa đủ cấu hình phải bị khóa và hiển thị lý do. B9 mới có kiểm thử
+offline, chưa có bằng chứng E2E và chưa có watchdog
 độc lập; khi controller không rollback, B9 báo URGENT và từ chối fallback PATCH,
 không bảo đảm tự phục hồi. Chưa dùng nút deploy B9 cho đến khi owner chốt quyền
 rollback độc quyền và đường khôi phục.
@@ -78,12 +80,108 @@ DEMO_CONSOLE_ENABLE_FAULTS=true .venv/bin/python -B -m scripts.demo_console
 | `DEMO_CONSOLE_INVENTORY_URL` | `http://127.0.0.1:18082`; quy tắc tương tự |
 | `DEMO_CONSOLE_PORT` | `8765`; chỉ thay port, không thay địa chỉ bind |
 | `DEMO_CONSOLE_DEPLOY_SCRIPT` | Rỗng; đường dẫn tuyệt đối đến script Bash B7 hoặc B9 đã được operator review |
+| `DEMO_CONSOLE_OOM_SCRIPT` | Rỗng; đường dẫn tuyệt đối đến Bash wrapper kích hoạt OOM của workload demo riêng |
+| `DEMO_CONSOLE_ENABLE_OOM` | `false`; gate riêng của nút OOM, chỉ bật sau khi workload/controller và adapter đã được kiểm tra |
 
-Tám thẻ: payment trễ 950/2000 ms, payment 503, inventory trễ 950 ms,
-inventory 503, cả hai 503, khôi phục cả hai, deploy image hỏng.
+Chín thẻ: payment trễ 950/2000 ms, payment 503, inventory trễ 950 ms,
+inventory 503, cả hai 503, khôi phục cả hai, deploy image hỏng và OOM.
 Nguồn contract: `services/common/faults.py`, `services/payment/app.py`,
 `services/inventory/app.py`. Chỉ có `healthy`, `latency`, `error`; không có mode image.
 Mode `error` làm API nghiệp vụ trả 503. `healthy` đặt delay về 0 khi khôi phục.
+
+## Terminal lệnh và kết quả
+
+Khung **Commands and output** bên dưới các thẻ hiển thị request/lệnh thực sự
+được backend gửi, kết quả HTTP, trạng thái chưa rõ khi mất phản hồi, log runner
+và mã thoát. HTTP faults dùng HTTPX; dòng request trong terminal không có nghĩa
+backend tạo thêm một process `curl`. Không có ô nhập lệnh shell tùy ý.
+Nhật ký lệnh giữ tối đa 200 bản ghi trong bộ nhớ; log từng runner tối đa 8 KiB
+được hiển thị, đã lọc credential và ký tự điều khiển. Poll `/api/status` không
+tạo thêm nhật ký thực thi. Nhật ký này phục vụ quan sát phiên, không thay durable
+incident/action receipts hoặc chứng minh dịch vụ đã hồi phục.
+
+## Kịch bản OOM đang chuẩn bị
+
+OOM dùng **Deployment `sentinelops-oom-demo` riêng** trong
+`sentinelops-b-actions`, container `oom-demo`, một replica, image pin digest.
+Workload cấp phát hữu hạn 128 MiB; baseline limit 256Mi và trigger giảm limit
+về 64Mi. Đây không phải HTTP fault mode của Payment/Inventory. Console không
+tạo workload hoặc tự tăng RAM để hồi phục: controller OOM riêng phải quan sát
+`OOMKilled`, tạo proposal, nhận **Approve** trên Operator UI rồi mới đổi
+64Mi → 256Mi theo policy đã triển khai.
+
+Adapter `trigger_oom.py` chạy trên **máy operator có kubectl**, qua wrapper
+`trigger_oom.sh`. Nó yêu cầu identity đã kiểm chứng của cluster, namespace,
+Deployment, image và controller. File JSON cấu hình có hình dạng sau; thay
+mọi giá trị minh họa bằng đúng metadata triển khai đã review, không dùng tên
+controller như bằng chứng nó đã tồn tại:
+
+```json
+{
+  "target": {
+    "cluster_uid": "ACTUAL_KUBE_SYSTEM_NAMESPACE_UID",
+    "namespace_uid": "ACTUAL_DEMO_NAMESPACE_UID",
+    "deployment_uid": "ACTUAL_OOM_DEPLOYMENT_UID",
+    "image": "YOUR_REGISTRY/control-plane@sha256:ACTUAL_64_HEX_DIGEST",
+    "namespace": "sentinelops-b-actions",
+    "deployment": "sentinelops-oom-demo",
+    "container": "oom-demo"
+  },
+  "controller": {
+    "deployment": "YOUR_OOM_CONTROLLER_DEPLOYMENT",
+    "uid": "ACTUAL_CONTROLLER_DEPLOYMENT_UID",
+    "configmap": "YOUR_CONTROLLER_TARGET_CONFIGMAP",
+    "key": "target.json"
+  }
+}
+```
+
+`target` trùng chính xác JSON `MemoryTarget` mà OOM controller đọc. Controller
+phải có đúng một container chạy `python -m scripts.run_pod_memory_demo` hoặc
+script `/.../run_pod_memory_demo.py`, args `--policy-enabled --target /target/target.json`
+cùng các args store/token/CA/server/kill-switch hiện có. ConfigMap được chỉ
+định chứa key `target.json` là JSON của **riêng object `target`**, mount
+read-only tại `/target`, không dùng subPath. Adapter xác minh đúng đường mount,
+UID, image pin digest, replica và readiness; dòng JSON state mới nhất của
+controller phải là `observing/no-current-oom-at-low-limit`, tối đa 10 giây.
+Proposal pending, controller chưa chạy, cooldown hoặc cấu hình không khớp đều
+chặn trigger. Việc cấu hình này không triển khai controller thay cho công việc OOM.
+
+Trước khi nối nút, kiểm tra bằng đường chỉ đọc:
+
+```sh
+export DEMO_CONSOLE_OOM_CONFIG=/absolute/path/to/oom-console-config.json
+export DEMO_CONSOLE_KUBECONFIG=/absolute/path/to/reviewed-kubeconfig
+export DEMO_CONSOLE_KUBE_CONTEXT=sentinelops-demo
+python3 -B -m scripts.demo_console.trigger_oom --check
+```
+
+Chỉ sau khi workload/controller đã sẵn sàng và kiểm tra trên đạt:
+
+```sh
+export DEMO_CONSOLE_OOM_SCRIPT=/absolute/path/to/repo/scripts/demo_console/trigger_oom.sh
+export DEMO_CONSOLE_ENABLE_OOM=true
+export DEMO_CONSOLE_OOM_EXECUTE=1
+DEMO_CONSOLE_ENABLE_FAULTS=true .venv/bin/python -B -m scripts.demo_console
+```
+
+Nút OOM chỉ kích hoạt wrapper sau khi bấm xác nhận. Adapter kiểm cluster/namespace
+UID, image/resources/replicas/owner, không có HPA và node không MemoryPressure;
+PATCH dùng test UID/resourceVersion/generation/toàn bộ spec rồi chỉ thay memory
+256Mi → 64Mi. Không gửi lại PATCH khi kết quả chưa rõ. Nó chờ tối đa khoảng
+120 giây cộng timeout các lần đọc đang dở để tìm termination mới có
+`reason=OOMKilled`, exit137, Pod UID và đúng ReplicaSet owner. Exit137 riêng lẻ
+không đủ. Timeout trả UNKNOWN; exit0 chỉ chứng minh đã thấy OOM, không chứng minh
+recovery. Không có fallback tăng RAM hoặc tự bấm Approve. File lock mặc định
+`/tmp/sentinelops-oom-trigger.lock` ngăn hai wrapper OOM chạy đồng thời trên cùng
+máy; đổi bằng `DEMO_CONSOLE_OOM_LOCK_FILE` khi cần một path tuyệt đối được quản lý.
+Toàn bộ PATCH được truyền qua stdin; terminal chỉ hiện argv thật và tóm tắt CAS/RAM
+để không phát tán environment/annotation có thể nằm trong spec Kubernetes.
+
+Image EKS mỏng hiện không có kubectl hoặc credential cho adapter này. Khi chỉ
+rollout console HTTP, giữ `DEMO_CONSOLE_OOM_SCRIPT` rỗng. Muốn chạy OOM từ pod
+phải có bản đóng gói/dependency và quyền target được review riêng; không mount
+kubeconfig admin vào console để mở nút.
 
 ## Script deploy image ngoài repo
 
