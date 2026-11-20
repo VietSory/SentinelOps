@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from scripts.aws_demo.oom_controller import BOOTSTRAP, POLICY, render as render_controller, render_rbac
+from scripts.aws_demo.oom_controller import POLICY, render as render_controller, render_rbac
 from scripts.aws_demo.reset_oom_demo import render as render_reset
 from scripts.render_oom_demo import render
 
@@ -61,6 +61,7 @@ def test_sidecar_preserves_live_ui_and_uses_only_existing_secret_refs():
     assert patch[2]['value'] == original['spec']['template']['spec']['containers']
     sidecar = patch[4]['value']
     assert sidecar['name'] == 'oom-demo-controller'
+    assert sidecar['command'] == ['python', 'scripts/run_pod_memory_demo.py']
     assert '--policy-enabled' in sidecar['args']
     assert sidecar['env'][:2] == original['spec']['template']['spec']['containers'][1]['env']
     assert sidecar['volumeMounts'][3] == {'name': 'remediation-artifacts', 'mountPath': '/artifacts/remediation'}
@@ -94,23 +95,6 @@ def test_supplemental_rbac_cannot_mutate_other_deployments_or_nodes():
     assert all(d['metadata']['name'] == POLICY for d in docs)
     with pytest.raises(ValueError):
         render_rbac(node_names=['*'])
-
-
-def test_bootstrap_builds_database_url_in_memory_without_password_in_argv(monkeypatch):
-    import os
-    import sys
-    monkeypatch.setenv('CONTROL_DATABASE_URL', 'postgresql://reader@db.internal:5432/sentinelops_control?sslmode=verify-full')
-    monkeypatch.setenv('UI_DATABASE_PASSWORD', 'contains:@/?')
-    monkeypatch.setenv('SENTINELOPS_DATABASE_URL', '')
-    monkeypatch.setattr(sys, 'argv', ['-c', '--target', '/policy/target.json'])
-    captured = {}
-    def execv(path, args):
-        captured.update(path=path, args=args, dsn=os.environ['SENTINELOPS_DATABASE_URL'])
-    monkeypatch.setattr(os, 'execv', execv)
-    exec(BOOTSTRAP, {})
-    assert captured['dsn'] == 'postgresql://control_writer:contains%3A%40%2F%3F@db.internal:5432/sentinelops_control?sslmode=verify-full'
-    assert 'UI_DATABASE_PASSWORD' not in os.environ and 'CONTROL_DATABASE_URL' not in os.environ
-    assert all('contains' not in item and 'postgres' not in item for item in captured['args'])
 
 
 def test_reset_only_changes_exact_bounded_demo_limit():

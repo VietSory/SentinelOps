@@ -22,15 +22,6 @@ SERVER = 'https://kubernetes.default.svc'
 CONTROLLER = 'remediation-controller'
 SIDECAR = 'oom-demo-controller'
 POLICY = 'sentinelops-oom-demo-policy'
-BOOTSTRAP = '''import os, sys
-from urllib.parse import urlsplit, urlunsplit, quote
-p = urlsplit(os.environ.pop("CONTROL_DATABASE_URL"))
-password = os.environ.pop("UI_DATABASE_PASSWORD")
-if p.scheme not in ("postgres", "postgresql") or p.path != "/sentinelops_control" or not p.hostname or p.query != "sslmode=verify-full":
-    raise SystemExit("verified control database configuration is required")
-os.environ["SENTINELOPS_DATABASE_URL"] = urlunsplit(p._replace(netloc="control_writer:" + quote(password, safe="") + "@" + p.netloc.rsplit("@", 1)[-1]))
-os.execv(sys.executable, [sys.executable, "-u", "scripts/run_pod_memory_demo.py"] + sys.argv[1:])
-'''
 
 
 def render_rbac(*, node_names=()):
@@ -96,7 +87,7 @@ def render(controller, target, image, *, enabled=False, node_names=()):
     digest = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
     sidecar = {
         'name': SIDECAR, 'image': image, 'imagePullPolicy': 'IfNotPresent',
-        'workingDir': '/opt/sentinelops', 'command': ['python', '-c', BOOTSTRAP],
+        'workingDir': '/opt/sentinelops', 'command': ['python', 'scripts/run_pod_memory_demo.py'],
         'args': ['--target', '/etc/sentinelops/oom/target.json', '--store', '/artifacts/remediation',
                  '--token-file', '/credentials/token', '--ca-file', '/credentials/ca.crt',
                  '--kill-switch', '/artifacts/remediation/KILL_SWITCH', '--server', SERVER]
@@ -106,6 +97,7 @@ def render(controller, target, image, *, enabled=False, node_names=()):
             {'name': 'SENTINELOPS_KUBERNETES_REMOTE_SERVER', 'value': SERVER},
             {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
             {'name': 'PGSSLROOTCERT', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
+            {'name': 'PYTHONUNBUFFERED', 'value': '1'},
             {'name': 'PYTHONDONTWRITEBYTECODE', 'value': '1'}],
         'securityContext': {'readOnlyRootFilesystem': True, 'allowPrivilegeEscalation': False,
                             'capabilities': {'drop': ['ALL']}},

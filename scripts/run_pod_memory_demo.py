@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 import signal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import asyncpg
 import httpx
@@ -16,13 +16,30 @@ from sentinelops.remediation.pod_memory import KubernetesMemory, MemoryControlle
 from sentinelops.telemetry.store import ArtifactStore
 
 
-async def run(args):
-    dsn = os.environ.get('SENTINELOPS_DATABASE_URL', '')
+def database_url(environ=None):
+    """Resolve runtime credentials in RAM, before opening any database socket."""
+    environ = os.environ if environ is None else environ
+    dsn = environ.get('SENTINELOPS_DATABASE_URL', '')
+    if not dsn:
+        base = environ.pop('CONTROL_DATABASE_URL', '')
+        password = environ.pop('UI_DATABASE_PASSWORD', '')
+        parsed = urlsplit(base)
+        if (not password or parsed.scheme not in ('postgres', 'postgresql') or not parsed.hostname
+            or parsed.path != '/sentinelops_control' or parsed.query != 'sslmode=verify-full'
+            or parsed.fragment):
+            raise ValueError('verified control database Secret configuration is required')
+        dsn = urlunsplit(parsed._replace(netloc='control_writer:' + quote(password, safe='')
+                                         + '@' + parsed.netloc.rsplit('@', 1)[-1]))
     parsed = urlsplit(dsn)
     if (parsed.scheme not in ('postgres', 'postgresql') or not parsed.hostname
-        or parsed.path != '/sentinelops_control'
+        or parsed.path != '/sentinelops_control' or parsed.fragment
         or parsed.hostname != '127.0.0.1' and parsed.query != 'sslmode=verify-full'):
         raise ValueError('explicit control runtime database with remote verified TLS is required')
+    return dsn
+
+
+async def run(args):
+    dsn = database_url()
     target = MemoryTarget(**json.loads(args.target.read_text()))
     pool = await asyncpg.create_pool(dsn, min_size=0, max_size=2, command_timeout=5, timeout=5)
     kube = KubernetesMemory(target, server=args.server, token_file=args.token_file, ca_file=args.ca_file)
