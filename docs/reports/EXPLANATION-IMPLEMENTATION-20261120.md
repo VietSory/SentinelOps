@@ -4,7 +4,66 @@
 **Branch:** `fix/demo-wait-transient`
 **Phạm vi:** gửi evidence và giả thuyết root cause hiện có tới LLM, nhận lời giải thích bằng ngôn ngữ tự nhiên, kiểm tra đầu ra rồi hiển thị cho người trực duyệt.
 
+## Cập nhật 21/11/2026
+
+OpenAI Responses chính chủ thay thế gateway Xingchi. DNS không còn là blocker
+cho lần gọi từ local. Khi bật Responses, công cụ triển khai mặc định dùng base URL
+`https://api.openai.com/v1`. Cấu hình API local vẫn cần URL, model và key cùng nhau.
+Actor header là tùy chọn cho gateway tương thích cần header này. Với OpenAI chính
+chủ, để `SENTINELOPS_LLM_ACTOR_AUTHORIZATION` unset.
+(`scripts/aws_demo/deploy_llm_explanation.sh:33`, `scripts/aws_demo/deploy_llm_explanation.sh:116`,
+`src/sentinelops/api_settings.py:54`)
+
+Adapter dùng `text.format.type=json_schema` với schema object và `strict: false`.
+OpenAI đã trả HTTP 400 khi request dùng `json_object` mà input không chứa chữ `json`.
+Ứng dụng tiếp tục kiểm tra cấu trúc và liên kết evidence cục bộ.
+(`.herdr/out/pr-body.md:20`, `src/sentinelops/explanations/openai_compatible.py:14`,
+`src/sentinelops/explanations/service.py:205`)
+
+Theo kết quả bàn giao, lượt gọi OpenAI thật từ **local** dùng model `gpt-6.1-sol`
+với fixture `samples/incident-envelope.sample.json` trả `fallback=false`, provider
+`openai-responses/v1`, root cause `rds`, RCA score `0.91` và refs `E-001`, `E-002`,
+`E-003`. ID provider trong wrapper API có hậu tố digest. Kết quả explanation trên
+EKS vẫn cần xác minh.
+(`docs/delivery/LLM_EXPLANATION_ROLLOUT_2026-11-21.md:21`,
+`samples/incident-envelope.sample.json:39`, `src/sentinelops/explanations/openai_compatible.py:139`)
+
+### Các nhóm lỗi đã vá sau review
+
+- **Grounding và lọc dữ liệu.** Mở rộng lọc hostname/IP và mẫu bí mật ở fact gửi
+  đi và narrative nhận về. Validator từ chối narrative rỗng, số đếm và phần trăm
+  thiếu evidence, tên service không phù hợp và các mẫu khẳng định nhân quả quá
+  mức. Ca tráo metric vẫn là `xfail` vì đối chiếu token chưa kiểm được ngữ nghĩa.
+  (`/tmp/sentinelops-xp-base/.herdr/out/xp-sec.md:11`, `.herdr/out/xp-adv-fix.md:9`,
+  `.herdr/out/xp-adv-fix.md:18`)
+- **Transport và credential.** Giới hạn byte khi đọc stream thô và từ chối nội dung
+  nén trước khi đọc. Kiểm tra ký tự hợp lệ trong key, loại output phản chiếu
+  credential và kiểm tra refusal hoặc trạng thái message chưa hoàn tất ngay cả
+  khi response có `output_text`. (`/tmp/sentinelops-xp-base/.herdr/out/xp-sec.md:16`,
+  `/tmp/sentinelops-xp-base/.herdr/out/xp-logic.md:5`, `.herdr/out/xp-fix2.md:3`)
+- **Fallback, circuit breaker và vòng đời runtime.** Fallback ngay nếu hết card sau
+  lọc. Timeout khi chờ slot giữ nguyên bộ đếm lỗi provider. Lifespan dọn runtime
+  khi mở control pool lỗi. Bedrock giữ tác vụ khởi tạo dùng chung để shutdown vẫn
+  đóng được client tạo sau khi request bị hủy.
+  (`/tmp/sentinelops-xp-base/.herdr/out/xp-logic.md:6`, `.herdr/out/xp-adv-fix.md:16`,
+  `.herdr/out/xp-fix3.md:3`)
+- **UI và fixture.** Tách nhãn và kiểu hiển thị cho AI, deterministic fallback và
+  abstention. Card abstention hiện `No AI root cause`. Giữ ngắt dòng và bẻ chuỗi
+  dài. Fixture dùng payload `2.0` có `root_cause` với response envelope `1.0`.
+  Báo cáo UI ghi sandbox chặn vòng browser fixture trước khi mở Chrome.
+  (`/tmp/sentinelops-xp-base/.herdr/out/xp-ui.md:10`,
+  `/tmp/sentinelops-xp-base/.herdr/out/xp-ui.md:19`, `.herdr/out/xp-fix-ui.md:5`,
+  `.herdr/out/xp-fix-ui.md:16`)
+- **Hồi quy API.** Thêm ca mock kiểm tra remap refs cho claims và RCA, fallback khi
+  transport hoặc output lỗi, `503` khi kết quả đã render có ref ngoài revision
+  và từ chối bật hai provider cùng lúc. Báo cáo API ghi hai ca lọc chạy qua và
+  lượt toàn tệp dừng tại `TestClient`. (`.herdr/out/xp-api-tests.md:3`,
+  `.herdr/out/xp-api-tests.md:12`)
+
 ## Kết quả chính
+
+Các phần dưới đây ghi lại hiện trạng và phép thử ngày 20/11/2026. Xem mục cập nhật
+21/11/2026 để biết cấu hình và kết quả hiện hành.
 
 Đã hoàn thiện luồng local end-to-end ở mức code:
 
@@ -40,7 +99,7 @@ Adapter thực hiện:
 - chỉ chấp nhận Responses có `status=completed`;
 - từ chối JSON lỗi, duplicate key, `NaN`, refusal/incomplete output và output vượt giới hạn.
 
-Cấu hình local đã đặt theo thông tin được cung cấp:
+Cấu hình local ngày 20/11/2026 dưới đây đã được thay thế bằng OpenAI chính chủ:
 
 - Base URL: `https://api.xingchiapi.com/v1`
 - Model: `gpt-6.1-sol`

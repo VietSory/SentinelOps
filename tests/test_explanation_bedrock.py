@@ -124,6 +124,67 @@ def test_runtime_uses_a_bounded_async_boundary_and_closes_the_client(monkeypatch
     assert calls == [{"modelId": "model"}, "closed"]
 
 
+@pytest.mark.parametrize("reuse_client", [False, True], ids=["close-pending-client", "reuse-pending-client"])
+def test_runtime_retains_client_created_after_request_cancellation(monkeypatch, reuse_client):
+    calls = []
+
+    class Client:
+        def converse(self, **kwargs):
+            calls.append("converse")
+            return {"ok": True}
+
+        def close(self):
+            calls.append("closed")
+
+    async def scenario():
+        runtime = Boto3BedrockRuntime("us-east-1")
+        worker_started = asyncio.Event()
+        release_worker = asyncio.Event()
+        workers = []
+
+        def create_client():
+            calls.append("create")
+            return Client()
+
+        async def run_in_worker(operation, *args, **kwargs):
+            if operation is not create_client:
+                return operation(*args, **kwargs)
+
+            async def worker():
+                worker_started.set()
+                await release_worker.wait()
+                return create_client()
+
+            task = asyncio.create_task(worker())
+            workers.append(task)
+            return await asyncio.shield(task)
+
+        monkeypatch.setattr(runtime, "_create_client", create_client)
+        monkeypatch.setattr("sentinelops.explanations.bedrock.asyncio.to_thread", run_in_worker)
+        first_request = asyncio.create_task(runtime.converse(modelId="model"))
+        try:
+            await asyncio.wait_for(worker_started.wait(), timeout=5)
+            first_request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first_request
+
+            operation = asyncio.create_task(runtime.converse(modelId="model") if reuse_client else runtime.close())
+            await asyncio.sleep(0)
+            assert not operation.done()
+        finally:
+            release_worker.set()
+            await asyncio.gather(*workers)
+
+        result = await operation
+        if reuse_client:
+            assert result == {"ok": True}
+            await runtime.close()
+
+    asyncio.run(scenario())
+    expected = ["create", "converse", "closed"] if reuse_client else ["create", "closed"]
+    assert calls == expected
+
+
 def test_runtime_provider_returns_the_provider_and_its_lifecycle():
     runtime, provider = bedrock_runtime_provider(region="us-east-1", model_id="configured.model-v1")
     assert isinstance(runtime, Boto3BedrockRuntime)

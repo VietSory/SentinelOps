@@ -126,18 +126,18 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
     @asynccontextmanager
     async def lifespan(app):
         pool = action_pool = None
-        if repository is not None:
-            app.state.incident_repository = repository
-        elif settings.control_database_url:
-            # Lazy connections allow liveness during a source outage. Each use
-            # rechecks readiness, so a restored DB can recover without restart.
-            try:
-                pool = await asyncpg.create_pool(settings.control_database_url,min_size=0,max_size=10,
-                                                command_timeout=5,timeout=5)
-                app.state.incident_repository = IncidentRepository(pool)
-            except (ValueError,*STORE_ERRORS):
-                logger.error("control_store_configuration_invalid")
         try:
+            if repository is not None:
+                app.state.incident_repository = repository
+            elif settings.control_database_url:
+                # Lazy connections allow liveness during a source outage. Each use
+                # rechecks readiness, so a restored DB can recover without restart.
+                try:
+                    pool = await asyncpg.create_pool(settings.control_database_url,min_size=0,max_size=10,
+                                                    command_timeout=5,timeout=5)
+                    app.state.incident_repository = IncidentRepository(pool)
+                except (ValueError,*STORE_ERRORS):
+                    logger.error("control_store_configuration_invalid")
             if action_reader is None and settings.action_database_url:
                 try:
                     action_pool = await asyncpg.create_pool(settings.action_database_url,min_size=0,max_size=4,

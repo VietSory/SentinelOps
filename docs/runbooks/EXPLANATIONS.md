@@ -145,3 +145,54 @@ Adapter regression: `python -m pytest -q tests/test_explanation_bedrock.py`.
 The runtime wiring is exercised without AWS credentials. A real Bedrock result
 still requires an AWS account, model access and deployment verification; local
 adapter tests do not prove those gates.
+
+## Bật trên EKS dev
+
+Dùng `kubectl` và `jq` với `AWS_PROFILE=console`, current context
+`sentinelops-demo` và namespace `sentinelops-b-actions`. Owner tạo trước Secret
+`sentinelops-llm` có khóa `SENTINELOPS_LLM_API_KEY` qua quy trình quản lý bí mật
+của môi trường. Script chỉ kiểm tra tên khóa và gắn `secretKeyRef` bắt buộc vào
+`operator-ui`.
+
+Chuẩn bị `IMAGE` là image `operator-ui` đã push, dạng `repo@sha256:<digest>`,
+`MODEL` là ID model được cấp quyền truy cập, và `STATE_DIR` là đường dẫn đến một
+thư mục riêng cho lượt deploy. Chạy kiểm tra trước rồi mới bật chế độ ghi:
+
+```bash
+AWS_PROFILE=console LLM_DEPLOY_EXECUTE=0 bash scripts/aws_demo/deploy_llm_explanation.sh \
+  --image "$IMAGE" --llm-model "$MODEL" --state-dir "$STATE_DIR"
+AWS_PROFILE=console LLM_DEPLOY_EXECUTE=1 bash scripts/aws_demo/deploy_llm_explanation.sh \
+  --image "$IMAGE" --llm-model "$MODEL" --state-dir "$STATE_DIR"
+```
+
+`--llm-base-url` mặc định là `https://api.openai.com/v1`. Chỉ dùng override
+HTTPS với endpoint được phép nhận API key. Deploy dùng một JSON Patch trên
+Deployment `remediation-controller` để đổi image `operator-ui`, đặt URL, model
+và tham chiếu Secret, đồng thời xóa mục env
+`SENTINELOPS_LLM_ACTOR_AUTHORIZATION` khỏi container nếu có. ConfigMap không
+thuộc phạm vi của patch.
+
+Chế độ ghi lưu `rollback.json` với quyền `0600`. File chứa image cũ và tối đa
+bốn mục env LLM cũ của `operator-ui`, cùng `resourceVersion` và `generation`
+trả về sau patch. Script từ chối deploy nếu tên env chứa `KEY`, `SECRET`,
+`TOKEN` hoặc `AUTHORIZATION` mà mục đó dùng giá trị trực tiếp. Deployment dùng
+`Recreate`, vì vậy rollout có thể làm gián đoạn cả Pod. Script chờ tối đa 300
+giây rồi xác minh các mục env được quản lý và image của cả ba container trong
+Pod sẵn sàng thuộc ReplicaSet vừa rollout.
+Để xác nhận model thực sự được dùng, gọi endpoint explanation bằng yêu cầu đã
+xác thực cho một incident/revision đã biết và kiểm tra `provider` cùng
+`fallback: false`.
+
+Nếu rollout lỗi sau khi patch được xác nhận hoặc cần quay về cấu hình cũ, dùng
+đúng `STATE_DIR` của lượt deploy đó. Rollback khôi phục image và các mục env đã
+lưu bằng một JSON Patch rồi xác minh rollout và Pod. Nếu `generation` đã thay
+đổi, xem lại thay đổi trên Deployment trước khi dùng `rollback --force`. Nếu
+patch chưa được xác nhận, kiểm tra Deployment trước khi quyết định cách khôi
+phục. Script chỉ nhận snapshot có `generation` và `resourceVersion` đã xác nhận.
+
+```bash
+AWS_PROFILE=console LLM_DEPLOY_EXECUTE=0 bash scripts/aws_demo/deploy_llm_explanation.sh \
+  rollback --state-dir "$STATE_DIR"
+AWS_PROFILE=console LLM_DEPLOY_EXECUTE=1 bash scripts/aws_demo/deploy_llm_explanation.sh \
+  rollback --state-dir "$STATE_DIR"
+```

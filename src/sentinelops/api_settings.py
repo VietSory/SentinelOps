@@ -61,13 +61,12 @@ class Settings:
                 raise ValueError("SENTINELOPS_LLM_BASE_URL must be explicit credential-free HTTPS")
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", self.llm_model):
                 raise ValueError("SENTINELOPS_LLM_MODEL must be an explicit model ID")
-            if (not isinstance(self.llm_api_key, str) or not 8 <= len(self.llm_api_key) <= 4096
-                or any(ord(char) < 32 for char in self.llm_api_key)):
+            if (not isinstance(self.llm_api_key, str)
+                or not re.fullmatch(r"[!-~]{8,4096}", self.llm_api_key)):
                 raise ValueError("SENTINELOPS_LLM_API_KEY is invalid")
         if self.llm_actor_authorization is not None and (
             not isinstance(self.llm_actor_authorization, str)
-            or not 1 <= len(self.llm_actor_authorization) <= 256
-            or any(ord(char) < 32 for char in self.llm_actor_authorization)
+            or not re.fullmatch(r"[ -~]{1,256}", self.llm_actor_authorization)
         ):
             raise ValueError("SENTINELOPS_LLM_ACTOR_AUTHORIZATION is invalid")
         if self.llm_actor_authorization is not None and self.llm_base_url is None:

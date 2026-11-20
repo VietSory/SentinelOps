@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from ipaddress import IPv6Address
 import json
 import logging
 import math
@@ -23,24 +24,40 @@ MAX_FACT_BYTES = 4_000
 MAX_ROOT_CAUSE_BYTES = 2_000
 UNSAFE_FACT_PATTERNS = tuple(re.compile(pattern, re.I) for pattern in (
     r"\b(?:password|passwd|secret|token|authorization|api[_ -]?key|access[_ -]?key)\b",
-    r"\bbearer\s+[A-Za-z0-9._~+/=-]{12,}", r"\bAKIA[A-Z0-9]{16}\b",
-    r"https?://", r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}",
+    r"https?://",
     r"\b(?:ignore|disregard)\b.{0,50}\b(?:instructions?|system prompt|rules)\b",
     r"\b(?:reveal|exfiltrate|execute|run)\b.{0,40}\b(?:secret|credential|command|tool)\b",
     r"\b(?:system|developer|assistant|user)\s+(?:message|prompt|instruction|rule)s?\b",
     r"(?:bỏ qua|phớt lờ|tiết lộ).{0,80}(?:chỉ dẫn|quy tắc|prompt|bí mật)",
 ))
+DNS_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
 PII_PATTERNS = tuple(re.compile(pattern, re.I) for pattern in (
     r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}",
     r"(?<![\w])(?:\+\d{8,15}|(?:\+?\d{1,3}[ .-]?)?(?:\(?\d{2,4}\)?[ .-]){2,3}\d{3,4})(?![\w])",
-    r"(?<![\w-])(?:\d{1,3}\.){3}\d{1,3}(?![\w-])",
+    r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])",
     r"\b(?:phone|mobile|telephone)\s*[:=]\s*\S+",
+    rf"(?<![\w.-])(?:(?:{DNS_LABEL}\.){{2,}}[a-z][a-z0-9-]*"
+    rf"|(?:{DNS_LABEL}\.)+(?:internal|local|svc|test|example))(?![\w-]|\.[\w-])",
 ))
+SECRET_PATTERNS = tuple(re.compile(pattern, re.I) for pattern in (
+    r"sk-[A-Za-z0-9_-]{16,}", r"AKIA[0-9A-Z]{16}",
+    r"\bbearer\s+[A-Za-z0-9._~+/-]+=*",
+    r"[A-Za-z0-9+/]{32,}",
+))
+IPV6_CANDIDATE = re.compile(r"(?<![\w:])(?:[0-9a-f]{0,4}:){2,7}[0-9a-f:.]*(?![\w:])", re.I)
 UNSUPPORTED_CAUSALITY_PATTERNS = tuple(re.compile(pattern, re.I) for pattern in (
     r"\b(?:was caused by|were caused by|definitively caused|confirmed root cause|proves? the cause)\b",
+    r"\broot\s+cause\s+is\b",
     r"(?:chắc chắn gây ra|đã xác nhận là nguyên nhân|chứng minh nguyên nhân)",
+    r"chắc\s+chắn\s+\d+(?:[.,]\d+)?\s*%",
 ))
-MEASURED_TOKEN = re.compile(r"\b\d+(?:[.,]\d+)?\s?(?:%|ms|sec(?:ond)?s?|min(?:ute)?s?|hours?|rps|req/s|bytes?|kb|mb|gb)\b", re.I)
+MEASURED_TOKEN = re.compile(
+    r"\b\d+(?:[.,]\d+)?\s*(?:%|(?:ms|sec(?:ond)?s?|min(?:ute)?s?|hours?|rps|req/s|bytes?|kb|mb|gb)\b)", re.I)
+BARE_NUMBER = re.compile(r"(?<![\w.-])[-+]?\d+(?:[.,]\d+)*(?![\w-]|[.,]\d)")
+THOUSANDS_GROUPED = re.compile(r"[1-9]\d{0,2}(?:([.,])\d{3})(?:\1\d{3})*")
+NUMERIC_CONTEXT = re.compile(
+    r"\b(?:in|since|during|from|before|after|year|năm)\s+(?:19|20)[0-9]{2}\b", re.I)
+SERVICE_MENTION = re.compile(r"(?<![\w-])[a-z][a-z0-9-]*(?![\w-])", re.I)
 LOG = logging.getLogger(__name__)
 
 
@@ -82,17 +99,21 @@ class ExplanationProvider:
         if monotonic() < self._open_until:
             raise ProviderFailure("circuit_open")
         generation = self._generation
+        started_invocation = False
         try:
             # Queueing consumes the same total deadline; no hidden unbounded wait.
             async with asyncio.timeout(self.timeout_seconds):
                 async with self._slots:
                     if monotonic() < self._open_until:
                         raise ProviderFailure("circuit_open")
+                    started_invocation = True
                     response = await self.invoke(deepcopy(request))
                     result = _validate_selection(response, request)
         except ProviderFailure:
             raise
         except Exception as exc:
+            if isinstance(exc, TimeoutError) and not started_invocation:
+                raise ProviderFailure("queue_timeout") from None
             self._generation += 1
             self._failures += 1
             if self._failures >= self.failure_threshold:
@@ -109,22 +130,65 @@ class ExplanationProvider:
         return result
 
 
-def _validate_root_cause(value: dict, request: dict) -> dict:
+def _contains_sensitive_content(text: str) -> bool:
+    if any(pattern.search(text) for pattern in (*PII_PATTERNS, *SECRET_PATTERNS)):
+        return True
+    for match in IPV6_CANDIDATE.finditer(text):
+        try:
+            IPv6Address(match.group().rstrip("."))
+        except ValueError:
+            continue
+        return True
+    return False
+
+
+def _numeric_tokens(text: str) -> set[str]:
+    measurements = {token.casefold() for token in MEASURED_TOKEN.findall(text)}
+    remaining = NUMERIC_CONTEXT.sub(" ", MEASURED_TOKEN.sub(" ", text))
+    return measurements | set(BARE_NUMBER.findall(remaining))
+
+
+def _token_forms(token: str) -> set[str]:
+    # Narrative-side only: Vietnamese prose writes 1092 as "1.092". Evidence tokens stay verbatim,
+    # so a decimal fact such as "1.016" never matches an integer narrative "1016".
+    if THOUSANDS_GROUPED.fullmatch(token):
+        return {token, re.sub(r"[.,]", "", token)}
+    return {token}
+
+
+def _request_services(request: dict) -> set[str]:
+    return {*request["affected_services"],
+            *(row["service"] for row in request["service_signals"]),
+            *(row["service"] for row in request["root_cause_hypotheses"]),
+            *(card["service"] for card in request["cards"] if card["service"] is not None)}
+
+
+def _validate_root_cause(value: dict, request: dict, selected_cards: list[dict]) -> dict:
     if (not isinstance(value, dict)
         or set(value) != {"service", "score", "explanation", "evidence_refs"}
         or not isinstance(value["explanation"], str)
-        or not 1 <= len(value["explanation"].encode()) <= MAX_ROOT_CAUSE_BYTES
+        or not value["explanation"].strip()
+        or len(value["explanation"].encode()) > MAX_ROOT_CAUSE_BYTES
         or not isinstance(value["evidence_refs"], list)
         or any(not isinstance(item, str) for item in value["evidence_refs"])
         or len(set(value["evidence_refs"])) != len(value["evidence_refs"])):
         raise ValueError("provider root-cause narrative has an invalid shape")
-    if (any(pattern.search(value["explanation"]) for pattern in (*PII_PATTERNS, *UNSUPPORTED_CAUSALITY_PATTERNS))
-        or value["service"] is None and MEASURED_TOKEN.search(value["explanation"])):
+    narrative = normalize("NFKC", value["explanation"])
+    tokens = _numeric_tokens(narrative)
+    if (_contains_sensitive_content(narrative)
+        or any(pattern.search(narrative) for pattern in UNSUPPORTED_CAUSALITY_PATTERNS)
+        or value["service"] is None and tokens):
         raise ValueError("provider root-cause narrative contains unsupported or sensitive content")
+    services = _request_services(request)
+    mentions = {match.casefold() for match in SERVICE_MENTION.findall(narrative)}
+    def reject_unreferenced_services(allowed: set[str]) -> None:
+        if any(name not in allowed and (name in services or name.endswith("-service")) for name in mentions):
+            raise ValueError("provider root-cause narrative mentions a service outside its evidence")
     hypotheses = {item["service"]: item for item in request["root_cause_hypotheses"]}
     if value["service"] is None:
         if value["score"] is not None or value["evidence_refs"]:
             raise ValueError("provider abstention must omit score and references")
+        reject_unreferenced_services(set())
         return value
     if not isinstance(value["service"], str) or value["service"] not in hypotheses:
         raise ValueError("provider root-cause service is not a ranked hypothesis")
@@ -133,13 +197,17 @@ def _validate_root_cause(value: dict, request: dict) -> dict:
         or value["score"] != hypothesis["score"]):
         raise ValueError("provider root-cause score must copy the ranked hypothesis score")
     hypothesis_refs = set(hypothesis["evidence_refs"])
-    card_refs = {card["card_id"] for card in request["cards"]}
+    card_refs = {card["card_id"] for card in selected_cards}
     refs = set(value["evidence_refs"])
     if not refs or not refs <= hypothesis_refs or not refs <= card_refs:
         raise ValueError("provider root-cause references are outside the ranked evidence cards")
-    allowed_cards = [card for card in request["cards"] if card["card_id"] in refs]
-    allowed_tokens = {token.casefold() for card in allowed_cards for token in MEASURED_TOKEN.findall(card["fact"])}
-    if any(token.casefold() not in allowed_tokens for token in MEASURED_TOKEN.findall(value["explanation"])):
+    # Services may come from any card shown with the explanation; numbers only from the cited cards,
+    # so a model cannot select an extra card to borrow another service's measurements.
+    reject_unreferenced_services({value["service"].casefold(), *(
+        card["service"].casefold() for card in selected_cards if card["service"])})
+    allowed_tokens = {token for card in selected_cards if card["card_id"] in refs
+                      for token in _numeric_tokens(card["fact"])}
+    if any(not _token_forms(token) & allowed_tokens for token in tokens):
         raise ValueError("provider root-cause narrative adds unsupported or sensitive content")
     return value
 
@@ -161,9 +229,8 @@ def _validate_selection(response: dict, request: dict) -> dict:
         raise ValueError("provider selected unknown, duplicate or unbounded cards")
     # Final output retains authoritative source ordering, not a model ranking.
     selected_cards = [card for card in request["cards"] if card["card_id"] in selected]
-    selection_request = {**request, "cards": selected_cards}
     return {"card_ids": [card["card_id"] for card in selected_cards],
-            "root_cause": _validate_root_cause(response["root_cause"], selection_request)}
+            "root_cause": _validate_root_cause(response["root_cause"], request, selected_cards)}
 
 
 def _safe_provider_fact(value: str) -> str | None:
@@ -171,7 +238,8 @@ def _safe_provider_fact(value: str) -> str | None:
         return None
     text = " ".join(normalize("NFKC", value).split())
     if (any(category(char) in {"Cc", "Cf", "Cs"} for char in text)
-        or any(pattern.search(text) for pattern in (*UNSAFE_FACT_PATTERNS, *PII_PATTERNS))):
+        or _contains_sensitive_content(text)
+        or any(pattern.search(text) for pattern in UNSAFE_FACT_PATTERNS)):
         return None
     return text
 
@@ -270,12 +338,9 @@ async def explain_incident(envelope: dict, *, provider: ExplanationProvider | No
     if provider is not None:
         if not isinstance(provider, ExplanationProvider):
             raise ValueError("provider must use the bounded ExplanationProvider adapter")
-        services = [*request["affected_services"], *(r["service"] for r in request["service_signals"]),
-                    *(r["service"] for r in request["root_cause_hypotheses"]),
-                    *(r["service"] for r in request["cards"] if r["service"] is not None)]
-        if any(not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", name) for name in services):
+        if any(not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", name) for name in _request_services(request)):
             reason = "unsupported_service_identifier"
-        elif not cards:
+        elif not request["cards"]:
             reason = "no_bounded_cards"
         elif len(json.dumps(request, allow_nan=False).encode()) > MAX_BYTES:
             reason = "request_budget"

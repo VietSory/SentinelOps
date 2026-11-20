@@ -2,7 +2,17 @@
 
 **Status:** Accepted
 
-Amazon Bedrock is used only for human-readable incident explanation.
+OpenAI Responses and Amazon Bedrock are optional providers for human-readable
+incident explanation. Configure at most one provider. Deployment tooling defaults
+the Responses base URL to `https://api.openai.com/v1` when enabled. Local API
+configuration requires the explicit URL, model and key. Leave the optional gateway
+actor header (`SENTINELOPS_LLM_ACTOR_AUTHORIZATION`) unset for direct OpenAI calls.
+
+The Responses adapter requests `text.format.type=json_schema`. OpenAI returned
+HTTP 400 for `json_object` when the input lacked the word `json`. The adapter
+requests an object with `strict: false` and the application validates the output
+and evidence references locally. See `scripts/render_api_manifests.py:46`,
+`src/sentinelops/api_settings.py:54` and `src/sentinelops/explanations/openai_compatible.py:14`.
 
 The LLM:
 

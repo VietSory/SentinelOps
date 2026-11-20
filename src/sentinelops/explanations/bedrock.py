@@ -21,7 +21,11 @@ và các card được chọn. Nếu thiếu evidence, dùng service null, score
 thích rõ chưa đủ bằng chứng. Chỉ diễn giải bằng ngôn ngữ dễ hiểu từ evidence và
 hypothesis đã cho, nêu đây là giả thuyết đang dẫn đầu chứ chưa phải nguyên nhân
 đã xác nhận. Không bịa metric, thời gian, entity hoặc độ chắc chắn; không
-trả tool, action, markdown hay tuyên bố nguyên nhân đã được xác nhận."""
+trả tool, action, markdown hay tuyên bố nguyên nhân đã được xác nhận.
+Chỉ nêu số liệu có trong fact của các card thuộc root_cause.evidence_refs và chỉ
+nêu tên service có trong các card thuộc card_ids; chép số đúng như trong fact,
+không thêm dấu phân cách hàng nghìn. Nếu root_cause.service là null thì không
+nêu số liệu hay tên service nào."""
 
 def _unique_object(pairs):
     result = {}
@@ -43,8 +47,7 @@ class Boto3BedrockRuntime:
         if not isinstance(region, str) or not re.fullmatch(r"[a-z]{2}(?:-[a-z]+)+-[0-9]+", region):
             raise ValueError("explicit Bedrock runtime region required")
         self.region = region
-        self._client = None
-        self._lock = asyncio.Lock()
+        self._client_task = None
         self._calls = set()
         self._call_slots = asyncio.Semaphore(4)
 
@@ -63,12 +66,14 @@ class Boto3BedrockRuntime:
         )
 
     async def _client_or_start(self):
-        if self._client is not None:
-            return self._client
-        async with self._lock:
-            if self._client is None:
-                self._client = await asyncio.to_thread(self._create_client)
-        return self._client
+        if self._client_task is None:
+            self._client_task = asyncio.create_task(asyncio.to_thread(self._create_client))
+            self._client_task.add_done_callback(self._client_started)
+        return await asyncio.shield(self._client_task)
+
+    def _client_started(self, task):
+        if task.cancelled() or task.exception() is not None:
+            self._client_task = None
 
     async def converse(self, **kwargs):
         client = await self._client_or_start()
@@ -94,9 +99,15 @@ class Boto3BedrockRuntime:
         calls = tuple(self._calls)
         if calls:
             await asyncio.gather(*calls, return_exceptions=True)
-        async with self._lock:
-            client, self._client = self._client, None
-        if client is not None:
+        client_task = self._client_task
+        if client_task is None:
+            return
+        try:
+            client = await asyncio.shield(client_task)
+        except Exception:
+            return
+        if self._client_task is client_task:
+            self._client_task = None
             await asyncio.to_thread(client.close)
 
 

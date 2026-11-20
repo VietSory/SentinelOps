@@ -28,7 +28,7 @@ Các giới hạn, gate và mục cần quyết định được quản lý tạ
 | FR-06 | Correlate và quản lý state/persistence | Incident lifecycle events | P7 |
 | FR-07 | RCA deterministic, có abstention | Suspect ranking cùng evidence refs | P7 |
 | FR-08 | IER authoritative, có revisions và semantic validation | Stored/readable IER và audit | P7 |
-| FR-09 | Explanation từ Bedrock, có validation/fallback | GroundedExplanation gắn với IER revision | P8 |
+| FR-09 | Explanation từ OpenAI Responses hoặc Bedrock, có validation/fallback | GroundedExplanation gắn với IER revision | P8 |
 | FR-10 | UI hỗ trợ điều tra và xem action history | Evidence/detail/timeline/explanation views | P8 |
 | FR-11 | Chạy approved Payment rollback có verify | RemediationAction, execution/audit records | P9/P10 |
 | FR-12 | AWS observability/deployment và offline training tái lập | IaC, CloudWatch/X-Ray refs, SageMaker/S3 artefacts | P10 |
@@ -59,7 +59,7 @@ flowchart TD
     CORR & EVIDENCE --> RCA[RCA ranking]
     RCA --> IER[(Versioned Incident Evidence Record)]
     IER --> UI[Operator API / UI]
-    IER --> EXPLAIN[Fact cards / Bedrock / fallback]
+    IER --> EXPLAIN[Fact cards / OpenAI Responses or Bedrock / fallback]
     EXPLAIN --> UI
     IER --> POLICY[Policy / approved runbook]
     POLICY --> ACTION[Remediation controller]
@@ -399,7 +399,7 @@ Nguồn DDL local hiện hành là [schema v1](../../infra/control/002-incident-
 | `incident_consumers`, `incident_consumer_steps`, `incident_consumer_checkpoints` | Unique consumer per stream, ordered bucket/state refs và CAS pointer | Đã có: durable consumer progress |
 | `incident_jobs`, `incident_job_evidence`, `incident_episode_recoveries` | Unique group/job/incident, frozen evidence and recovery refs | Đã có: source-derived groups, one accepted evidence capture và natural recovery |
 | `incident_commands`, `incident_command_receipts` | Unique command/ref and job/expected revision; matching receipt | Đã có: stable retry/idempotency qua IER publication |
-| `explanations` | Incident/revision/provider/prompt identity | Chưa có bảng/provider pipeline; target validated projection/fallback |
+| `explanations` | Incident/revision/provider/prompt identity | API tạo validated projection hoặc fallback khi đọc. Chưa có bảng riêng |
 | `sentinel_remediation.intents/states/events/targets/dispatches` | Action ID/idempotency, target/runbook, CAS và ordered audit | Optional schema riêng, guarded executor/resume-only worker và SELECT-only HTTP; chưa có activated live dispatch hoặc IER action lifecycle |
 | Generic `tasks_outbox` | Task/dedup key, status/lease/attempt | Chưa có generic scheduler contract; local incident outbox/commands ở trên có scope riêng |
 | Database `model_activations` | Environment/service/current bundle + revision | Chưa có bảng; local [model registry](../runbooks/MODEL_PIPELINE.md) đã dùng checksum-pinned artifact release ledger, zero approved models |
@@ -424,7 +424,7 @@ Update current pointer, append version/event và enqueue downstream tasks trong 
 
 | Endpoint | Contract/hành vi | Trạng thái |
 | --- | --- | --- |
-| `GET /health` | Process liveness, độc lập Bedrock | Đã có |
+| `GET /health` | Process liveness, độc lập provider explanation | Đã có |
 | `GET /ready`, `GET /ready/incidents` | Model/control-store readiness tách riêng | Đã có; inference readiness mặc định unavailable khi không có approved model |
 | `POST /v1/detect`, `POST /v1/risk` | Frozen FeatureWindow và DetectionResult/DegradationRiskResult; compatible pinned model | Không có model: 503. Với release Alibaba (ADR-016): **409 `model_requires_stream_history`**, vì model relative cần lịch sử stream v2 đã accept mà một window không mang theo. Kết quả model do incident worker tính, đọc `service_signals` của IER: tìm incident bằng `GET /v1/incidents?service=…` (chỉ trả tóm tắt), rồi `GET /v1/incidents/{id}?revision={revision}`. `/ready` ghi `direct_inference=false`. Không có đường inference thứ hai phía API (owner, 2026-11-09) |
 | `POST /v1/incidents` | Authenticated validated IER import, idempotency/expected revision, exact IER response và revision headers | Đã persist vào control DB; không tự cấp model/action truth |
@@ -433,7 +433,7 @@ Update current pointer, append version/event và enqueue downstream tasks trong 
 | `GET /v1/incidents/{id}` | Current hoặc revision-specific exact IER, ETag/revision headers | Đã có |
 | `GET /v1/incidents/{id}/context` | IncidentEnvelope với bounded/paginated timeline | Đã có; wire fields theo schema, không tự thêm action/explanation fields |
 | `POST /v1/incidents/demo` | Explicit demo-only provenance | Đã có; disabled mặc định, không là model/production evidence |
-| `GET /v1/incidents/{id}/explanation` | GroundedExplanation/provider validation/fallback metadata | Chưa triển khai |
+| `GET /v1/incidents/{id}/explanation` | GroundedExplanation/provider validation/fallback metadata | Đã có API chỉ đọc theo revision (`src/sentinelops/api.py:491`) |
 | `POST /v1/internal/windows` | Authenticated envelope ingress/job ID | Chưa triển khai; continuous workers hiện đọc verified local source ledger trực tiếp |
 | `POST /v1/incidents/{id}/actions` | Server policy/runbook target/approval/dry-run/blast radius | Chưa triển khai; không có public dispatch hoặc client approval override |
 | `GET /v1/actions/{id}`, `GET /v1/incidents/{id}/actions` | Versioned action observation/audit và revision-scoped pages | Có authenticated SELECT-only API và UI; action phases tách strict IER và không tự cấp quyền execute |
@@ -447,6 +447,16 @@ Foundation `POST /v1/incidents` ban đầu echo. [Migration persistence hiện t
 ## 12. Grounded explanation
 
 Input là fact cards từ một IER revision đã validate, chỉ gồm metrics/facts/timestamps/ranking và evidence IDs cần thiết. Không gửi raw request body, credentials, ground truth hoặc nguyên khối log chưa lọc.
+
+Chỉ bật một trong hai provider OpenAI Responses và Bedrock. Khi bật Responses,
+công cụ triển khai mặc định dùng `https://api.openai.com/v1`. Cấu hình API local
+cần khai báo URL, model và key cùng nhau. Chỉ đặt actor header tùy chọn cho gateway
+tương thích cần header này. Với OpenAI chính chủ, để biến
+`SENTINELOPS_LLM_ACTOR_AUTHORIZATION` unset. Adapter dùng `text.format.type=json_schema`
+với schema object và `strict: false` sau khi gặp HTTP 400 từ OpenAI do `json_object`
+yêu cầu input chứa chữ `json`. Ứng dụng kiểm tra schema và liên kết evidence cục bộ.
+Tham chiếu `scripts/render_api_manifests.py:46`, `src/sentinelops/api_settings.py:54`
+và `src/sentinelops/explanations/openai_compatible.py:14`.
 
 Provider trả schema GroundedExplanation gồm AI root-cause narrative. Validator MUST
 kiểm tra shape, service thuộc ranked RCA, refs tồn tại trong hypothesis/cards,
@@ -503,7 +513,7 @@ Phải chứng minh: disabled action; wrong namespace/resource UID; stale/missin
 | Collector | Chỉ nhận OTLP từ workloads trong mạng cho phép; không public exporter/health/admin |
 | Control API/UI | MVP dùng private ingress/port-forward; nếu có public ALB thì auth OIDC và chặn bypass |
 | AI/Data worker | Read telemetry, read approved model, write feature/incident data; không được mutate Kubernetes |
-| Explanation | Bedrock invocation được giới hạn model/region; không có quyền remediation |
+| Explanation | OpenAI Responses dùng endpoint HTTPS đã cấu hình. Bedrock invocation giới hạn model/region. Explanation không có quyền remediation |
 | Controller | Chỉ đọc evidence/policy và patch approved Deployment; không cluster-admin/IAM write/commerce write |
 | Experiment runner | Quyền fault/load sandbox riêng; tách khỏi controller và serving truth access |
 | Secrets | Secret manager/Kubernetes secret mechanism phù hợp; không commit static AWS keys hoặc dùng credentials dev trên AWS |
@@ -512,7 +522,7 @@ Single AWS region/cluster; IaC mô tả network/EKS/RDS/S3/roles, workload manif
 
 Mỗi module emit own metrics: ingestion lag, valid/quarantined records, eligible windows, inference latency/errors, incident count/dedup, evidence validation, explanation fallback, action outcome và worker queue age. Không dùng incident ID/trace ID làm metric labels; giữ trong logs/traces.
 
-Retries có bound/exponential backoff/jitter, checkpoint và dedup keys; poison records vào quarantine với reason. Bedrock hỏng không chặn detection/RCA. Control DB hỏng chặn action nếu không persist audit/lock được. Artifact/schema/model mismatch là lỗi startup/readiness, không fallback thành score healthy.
+Retries có bound/exponential backoff/jitter, checkpoint và dedup keys; poison records vào quarantine với reason. Lỗi provider explanation không chặn detection/RCA. Control DB hỏng chặn action nếu không persist audit/lock được. Artifact/schema/model mismatch là lỗi startup/readiness, không fallback thành score healthy.
 
 Local retention đề xuất 7 ngày cho Prometheus; captures đã freeze được archive riêng. AWS log/trace/S3 retention và chi phí phải chốt ở G0/G7. Report trỏ tới evidence snapshot còn truy cập được; link X-Ray đã hết hạn không đủ cho audit release.
 

@@ -1,19 +1,26 @@
+import asyncio
 from copy import deepcopy
 import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import httpx
 import pytest
 
 from sentinelops.api import create_app
 from sentinelops.api_settings import Settings
 from sentinelops.contracts import validate_payload
-from sentinelops.explanations.service import ExplanationProvider, PROMPT_VERSION
-from tests.test_explanations import selection
+from sentinelops.explanations.openai_compatible import openai_responses_provider
+from sentinelops.explanations.service import ExplanationProvider
 from sentinelops.incidents.domain import IncidentNotFound
+from tests.test_explanations import selection
 
 TOKEN = 'fixture-explanation-token-' + 'x' * 32
 HEADERS = {'Authorization': 'Bearer ' + TOKEN}
+LLM_BASE_URL = 'https://llm.example.test/v1'
+LLM_MODEL = 'fixture-explanation-model'
+LLM_API_KEY = 'fixture-api-key-never-a-real-credential'
+FOREIGN_REF = 'E-OTHER-REVISION'
 
 
 class ReadOnlyRepository:
@@ -40,6 +47,19 @@ def client(repo=None, provider=None):
 
 
 def path(repo): return '/v1/incidents/' + repo.source['incident_id'] + '/explanation'
+
+
+def get_openai_explanation(repo, handler):
+    runtime, provider = openai_responses_provider(
+        base_url=LLM_BASE_URL, model=LLM_MODEL, api_key=LLM_API_KEY,
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        with client(repo, provider) as api:
+            response = api.get(path(repo), headers=HEADERS, params={'revision': repo.source['revision']})
+    finally:
+        asyncio.run(runtime.close())
+    return response, provider.provider_id
 
 
 def test_real_backend_fallback_is_authenticated_pinned_and_read_only_without_models():
@@ -75,6 +95,7 @@ def test_latest_resolution_pins_history_before_a_concurrent_current_revision_adv
     with client(repo) as api:
         result = api.get(path(repo), headers=HEADERS)
     assert result.status_code == 200 and result.json()['revision'] == 1
+    validate_payload('explanation-response.schema.json', result.json())
     assert 'new-revision-only' not in result.text
     assert repo.reads[1][2]['max_revision'] == 1
 
@@ -101,7 +122,6 @@ def test_not_found_and_database_outage_do_not_become_empty_explanations(caplog):
 
 @pytest.mark.parametrize('mode', ['selection', 'failure', 'timeout', 'stale'])
 def test_http_reuses_bounded_provider_and_same_revision_fallback(mode, caplog):
-    import asyncio
     async def invoke(request):
         if mode == 'failure': raise RuntimeError('PRIVATE provider credential')
         if mode == 'timeout': await asyncio.sleep(1)
@@ -112,8 +132,76 @@ def test_http_reuses_bounded_provider_and_same_revision_fallback(mode, caplog):
     with client(repo, provider) as api:
         response = api.get(path(repo) + '?revision=1', headers=HEADERS)
     assert response.status_code == 200
-    assert response.json()['fallback'] == (mode != 'selection')
-    assert response.json()['revision'] == 1 and 'PRIVATE' not in caplog.text
+    body = response.json()
+    validate_payload('explanation-response.schema.json', body)
+    assert body['fallback'] == (mode != 'selection')
+    assert body['revision'] == 1 and 'PRIVATE' not in caplog.text
+
+
+def test_openai_response_maps_selected_cards_to_pinned_evidence():
+    repo = ReadOnlyRepository()
+    requested_cards = []
+
+    def handle(request):
+        provider_input = json.loads(json.loads(request.content)['input'])
+        card_id = provider_input['root_cause_hypotheses'][0]['evidence_refs'][1]
+        requested_cards.append(card_id)
+        output = selection(provider_input, card_ids=[card_id])
+        return httpx.Response(200, json={'status': 'completed', 'output_text': json.dumps(output)})
+
+    response, provider_id = get_openai_explanation(repo, handle)
+    assert response.status_code == 200
+    body = response.json()
+    validate_payload('explanation-response.schema.json', body)
+    assert body['fallback'] is False and body['provider'] == provider_id
+    assert provider_id.startswith('openai-responses/v1/')
+    assert body['revision'] == repo.source['revision']
+    assert response.headers['x-incident-revision'] == str(body['revision'])
+    known = {item['id'] for item in repo.source['payload']['evidence']}
+    expected_ref = repo.source['payload']['root_cause_ranking'][0]['evidence_refs'][1]
+    assert len(requested_cards) == 1 and requested_cards[0] not in known
+    assert expected_ref in known
+    assert [claim['evidence_refs'] for claim in body['payload']['claims']] == [[expected_ref]]
+    assert body['payload']['root_cause']['evidence_refs'] == [expected_ref]
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'upstream-5xx', 'malformed-json', 'malformed-output', 'foreign-ref'])
+def test_openai_failure_falls_back_to_pinned_evidence(failure):
+    repo = ReadOnlyRepository()
+    requests = []
+
+    def handle(request):
+        requests.append(request.url)
+        if failure == 'timeout':
+            raise httpx.ReadTimeout('fixture provider timeout', request=request)
+        if failure == 'upstream-5xx':
+            return httpx.Response(502)
+        if failure == 'malformed-json':
+            return httpx.Response(200, content=b'{')
+        if failure == 'malformed-output':
+            return httpx.Response(200, json={'status': 'completed', 'output_text': '{'})
+        provider_input = json.loads(json.loads(request.content)['input'])
+        output = selection(provider_input)
+        output['root_cause']['evidence_refs'] = [FOREIGN_REF]
+        return httpx.Response(200, json={'status': 'completed', 'output_text': json.dumps(output)})
+
+    response, _ = get_openai_explanation(repo, handle)
+    assert requests == [httpx.URL(LLM_BASE_URL + '/responses')]
+    assert response.status_code == 200
+    body = response.json()
+    validate_payload('explanation-response.schema.json', body)
+    assert body['fallback'] is True and body['provider'] == 'deterministic-facts/v1'
+    assert body['revision'] == repo.source['revision']
+    known = {item['id'] for item in repo.source['payload']['evidence']}
+    referenced = {ref for claim in body['payload']['claims'] for ref in claim['evidence_refs']}
+    referenced.update(body['payload']['root_cause']['evidence_refs'])
+    assert referenced and referenced <= known
+
+
+def test_settings_reject_bedrock_and_openai_together():
+    with pytest.raises(ValueError, match='configure only one explanation provider'):
+        Settings(api_token=TOKEN, bedrock_region='us-east-1', bedrock_model_id='fixture-bedrock-model',
+                 llm_base_url=LLM_BASE_URL, llm_model=LLM_MODEL, llm_api_key=LLM_API_KEY)
 
 
 @pytest.mark.parametrize('mutation', ['identity', 'reference', 'fallback', 'extra', 'shape'])
@@ -122,7 +210,7 @@ def test_backend_contract_drift_is_rejected_as_unavailable(monkeypatch, mutation
     async def drift(envelope, **kwargs):
         result = await explain_incident(envelope)
         if mutation == 'identity': result['payload']['incident_id'] = 'foreign'
-        elif mutation == 'reference': result['payload']['claims'][0]['evidence_refs'] = ['foreign']
+        elif mutation == 'reference': result['payload']['claims'][0]['evidence_refs'] = [FOREIGN_REF]
         elif mutation == 'fallback': result['fallback'] = False
         elif mutation == 'extra': result['revision'] = 999
         else: return None
