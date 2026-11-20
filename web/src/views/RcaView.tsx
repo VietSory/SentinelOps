@@ -143,7 +143,7 @@ export function RcaView({
                 <motion.div
                   key={`conf-${incident.id}`}
                   initial={{ width: 0 }}
-                  animate={{ width: `${formatNumber(incident.rcaConfidence,1,locale)}%` }}
+                  animate={{ width: Number.isFinite(incident.rcaConfidence) ? `${incident.rcaConfidence}%` : '0%' }}
                   transition={{ duration: 0.45, ease: 'easeOut' }}
                   className={cn(
                     'h-full rounded-full',
@@ -170,14 +170,14 @@ export function RcaView({
                     incident.rcaCoverage >= 75 ? 'text-emerald-700' : 'text-amber-700',
                   )}
                 >
-                  {formatNumber(incident.rcaCoverage,1,locale)}%
+                  {Number.isFinite(incident.rcaCoverage) ? `${formatNumber(incident.rcaCoverage,1,locale)}%` : (isEn ? 'Unavailable' : 'Chưa có dữ liệu')}
                 </span>
               </div>
               <div className="h-2.5 w-full rounded-full bg-slate-100 overflow-hidden">
                 <motion.div
                   key={`cov-${incident.id}`}
                   initial={{ width: 0 }}
-                  animate={{ width: `${formatNumber(incident.rcaCoverage,1,locale)}%` }}
+                  animate={{ width: Number.isFinite(incident.rcaCoverage) ? `${incident.rcaCoverage}%` : '0%' }}
                   transition={{ duration: 0.45, ease: 'easeOut' }}
                   className={cn(
                     'h-full rounded-full',
@@ -186,7 +186,9 @@ export function RcaView({
                 />
               </div>
               <p className="text-[11px] text-slate-500">
-                Trace (25%) + Log (15%) + ML Model (25%) + Deployment Receipt (15%+)
+                {incident.source === 'live'
+                  ? (isEn ? 'Coverage recorded by the RCA evaluator for the ranked hypothesis.' : 'Độ phủ do bộ đánh giá RCA ghi nhận cho giả thuyết đứng đầu.')
+                  : 'Trace (25%) + Log (15%) + ML Model (25%) + Deployment Receipt (15%+)'}
               </p>
             </div>
           </div>

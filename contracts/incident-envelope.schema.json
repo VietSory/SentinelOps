@@ -71,6 +71,11 @@
       "minLength": 1,
       "maxLength": 256
     },
+    "rca_coverage": {
+      "type": "object",
+      "maxProperties": 100,
+      "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+    },
     "reason": {
       "type": "string",
       "minLength": 1,

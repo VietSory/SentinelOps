@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.concurrency import run_in_threadpool
 
 from sentinelops.api_http import ApiError, RequestSafetyMiddleware
 from sentinelops.oidc import OidcVerifier, ScopeMissing, TokenRejected, VerifierUnavailable
@@ -26,6 +27,7 @@ from sentinelops.ml.registry import ModelRegistry, ModelUnavailable, Incompatibl
 from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.ui.routes import router as ui_router, ui_index, HEADERS as UI_HEADERS
 from sentinelops.remediation.reader import ActionReader, decode_cursor as decode_action_cursor
+from sentinelops.operator_evidence import rca_coverage
 from sentinelops.remediation.proposal_api import install_routes as install_proposal_routes
 from sentinelops.explanations.service import ExplanationProvider, explain_incident
 from sentinelops.explanations.bedrock import bedrock_runtime_provider
@@ -142,7 +144,8 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
                 try:
                     action_pool = await asyncpg.create_pool(settings.action_database_url,min_size=0,max_size=4,
                                                           command_timeout=5,timeout=5)
-                    app.state.action_reader = ActionReader(action_pool)
+                    health_artifacts = ArtifactStore(settings.health_artifact_store) if settings.health_artifact_store else None
+                    app.state.action_reader = ActionReader(action_pool, health_artifacts=health_artifacts)
                 except (ValueError,*STORE_ERRORS):
                     logger.error("action_reader_configuration_invalid")
             yield
@@ -529,6 +532,10 @@ def create_app(settings: Settings | None = None,*,repository=None,model_registry
         revision_headers(response,stored)
         next_after = events[-1]["revision"] if events and events[-1]["revision"]<stored["revision"] else None
         result = {**stored,"timeline":{"events":events,"next_after_revision":next_after}}
+        if settings.incident_artifact_store:
+            coverage = await run_in_threadpool(rca_coverage, ArtifactStore(settings.incident_artifact_store), stored)
+            if coverage:
+                result["rca_coverage"] = coverage
         validate_payload("incident-envelope.schema.json",result)
         return result
 

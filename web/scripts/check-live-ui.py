@@ -194,7 +194,7 @@ def scenario(browser, width, output_dir, read_only=False):
     incoming = EXPLANATION_CASES[-1][0]
     incoming_visible = False
     proposal=fixture_proposals(now)[0]
-    fixture={'authorize':None,'access':None,'posts':[],'stale':False,'missing':False,'outage':False,'lose_reply':False}
+    fixture={'authorize':None,'access':None,'posts':[],'stale':False,'missing':False,'outage':False,'lose_reply':False,'verified':False}
     errors=[]
     context=browser.new_context(viewport={'width':width,'height':900},service_workers='block',timezone_id='UTC')
     page=context.new_page()
@@ -255,9 +255,25 @@ def scenario(browser, width, output_dir, read_only=False):
             route.fulfill(json={'schema_version':'1.0','items':rows,'next_cursor':None});return
         if path.endswith('/context'):
             incident=path.split('/')[3];revision=int(query.get('revision',[revisions[incident]])[0]);after=int(query.get('after_revision',[0])[0])
-            route.fulfill(json=fixture_envelope(incident,revision,after,now=now));return
+            envelope=fixture_envelope(incident,revision,after,now=now)
+            if envelope['payload']['root_cause_ranking']:
+                service=envelope['payload']['root_cause_ranking'][0]['service']
+                envelope['rca_coverage']={service:0.8}
+            route.fulfill(json=envelope);return
         if path.endswith('/actions'):
             incident=path.split('/')[3];revision=int(query['revision'][0])
+            if fixture['verified']:
+                proposal_body=proposal['proposal']
+                action={'observation_version':'action-observation/v1','incident_id':incident,
+                    'incident_revision':proposal_body['incident_revision'],'action_revision':1,'action_id':'c'*64,
+                    'runbook':'payment-rollback-known-good/v1','phase':'recovered',
+                    'history':[{'revision':1,'phase':'recovered','recorded_at':now.isoformat()}],
+                    'verification':{'status':'telemetry_verified','verified_at':now.isoformat(),
+                        'bucket_ends':[(now-timedelta(minutes=m)).isoformat() for m in (3,2,1)],
+                        'p95_latency_ms':9.28,'error_rate':0}}
+                route.fulfill(json={'observation_version':'action-list/v1','incident_id':incident,
+                    'incident_revision':revision,'items':[action] if incident==proposal_body['incident_id'] else [],
+                    'next_cursor':None});return
             route.fulfill(status=503,json={'code':'action_store_unavailable'});return
         if path.endswith('/explanation'):
             incident = path.split('/')[3]
@@ -387,6 +403,14 @@ def scenario(browser, width, output_dir, read_only=False):
     assert page.locator('img[src="x"]').count()==0 and not page.evaluate('window.__evidence_xss || false')
     nav('Remediation')
     expect(page.get_by_role('alert').filter(has_text='Action history is unavailable')).to_be_visible()
+    if not read_only:
+        fixture['verified']=True
+        page.get_by_role('button',name='Refresh live data',exact=True).click()
+        table=page.get_by_role('region',name='Post-remediation verification table')
+        expect(table.get_by_text('9.28 ms',exact=True)).to_be_visible()
+        expect(table.get_by_text('0%',exact=True)).to_be_visible()
+        nav('Root Cause Analysis')
+        expect(page.get_by_text('80%',exact=True)).to_be_visible()
     page.get_by_role('button',name=re.compile('^vi$',re.I)).click()
     expect(page.get_by_role('button',name='Ngắt kết nối',exact=True)).to_be_visible()
     assert_no_horizontal_overflow(page)

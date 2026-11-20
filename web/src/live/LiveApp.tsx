@@ -113,6 +113,8 @@ export default function LiveApp() {
   const [traceData,setTraceData]=React.useState<Record<string,Row>>({}),[traceError,setTraceError]=React.useState('');
   const traceRun=React.useRef(0);
   const [allProposals,setAllProposals]=React.useState<Row|null>(null), [watchError,setWatchError]=React.useState('');
+  const actionFeedRef=React.useRef<Record<string,Row[]>>({});
+  const [proposalActions,setProposalActions]=React.useState<Row[]>([]);
   const [now,setNow]=React.useState(Date.now());
   const engine=React.useRef<any>(null), login=React.useRef<any>(null), client=React.useRef<any>(null);
   const validProposal=React.useRef<(row:Row)=>boolean>(()=>false);
@@ -128,6 +130,7 @@ export default function LiveApp() {
     client.current=null; login.current?.clear();engine.current?.disconnect();
     setLoadedRows([]);setFeedReady(false);setFeedUpdatedAt(null);setPagesLoading(false);setPagesError('');setRemainingCursor(null);
     setAllProposals(null);
+    actionFeedRef.current={};setProposalActions([]);
   },[]);
   React.useEffect(()=>{
     let disposed=false;
@@ -185,6 +188,41 @@ export default function LiveApp() {
     const listPoll=setInterval(()=>void engine.current?.loadList(),30000);
     return()=>{controller.abort();clearInterval(poll);clearInterval(listPoll);};
   },[state.session,readProposals]);
+
+  React.useEffect(()=>{
+    const activeClient=client.current;
+    if(!state.session||!activeClient||!allProposals)return;
+    const controller=new AbortController();
+    const pending=new Map<string,Row>();
+    for(const row of allProposals.items){
+      const proposal=row.proposal;
+      if(proposal.executor_runbook!=='payment-rollback-known-good/v1'||!['approved','consumed','engineer'].includes(row.status)
+        ||row.approval?.decision!=='approve')continue;
+      const key=explanationKey(proposal.incident_id,proposal.incident_revision);
+      if(!actionFeedRef.current[key]?.some(action=>['recovered','blocked','escalated'].includes(action.phase))){
+        pending.set(key,proposal);
+      }
+    }
+    const entries=[...pending.entries()];
+    async function collect(){
+      for(let offset=0;offset<entries.length;offset+=4){
+        if(controller.signal.aborted||activeClient!==client.current)return;
+        const batch=entries.slice(offset,offset+4);
+        const responses=await Promise.allSettled(batch.map(([,p])=>
+          activeClient.actions(p.incident_id,p.incident_revision,null,controller.signal)));
+        if(controller.signal.aborted||activeClient!==client.current)return;
+        responses.forEach((response,index)=>{
+          if(response.status==='fulfilled'){
+            const [key,proposal]=batch[index];
+            actionFeedRef.current[key]=response.value.items.filter((item:Row)=>item.incident_revision===proposal.incident_revision);
+          }
+        });
+        setProposalActions(Object.values(actionFeedRef.current).flat());
+      }
+    }
+    void collect();
+    return()=>controller.abort();
+  },[allProposals,state.session]);
 
   // Drain all remaining pages from GET /v1/incidents (which returns rows in ascending
   // created_at order) before exposing the merged dataset so newest incidents are never missed.
@@ -481,7 +519,16 @@ export default function LiveApp() {
   React.useEffect(()=>{if(!detail)return;setContexts(old=>({...old,[detail.incident_id]:detail}));void loadTraces();return()=>{traceRun.current++;};},[selectedId,revision,loadTraces]);
   const traces=React.useMemo(()=>Object.fromEntries(Object.entries(traceData).map(([id,result])=>[id,result.items.map((item:Row)=>traceRecord(item,result.association,isEn))])),[traceData,isEn]);
   const proposals=React.useMemo(()=>[...new Map([...(allProposals?.items||[]),...(state.proposals||[])].map((row:Row)=>[row.proposal.proposal_id,row])).values()] as Row[],[allProposals,state.proposals]);
-  const data=React.useMemo(()=>dataset(loadedRows,contexts,overview,traces,proposals,state.actions?.items||[],isEn,explanations),[loadedRows,contexts,overview,traces,proposals,state.actions,isEn,explanations]);
+  const actions=React.useMemo(()=>{
+    const latest=new Map<string,Row>();
+    for(const action of [...proposalActions,...(state.actions?.items||[])]){
+      if(!latest.has(action.action_id)||latest.get(action.action_id)!.action_revision<=action.action_revision){
+        latest.set(action.action_id,action);
+      }
+    }
+    return [...latest.values()];
+  },[proposalActions,state.actions]);
+  const data=React.useMemo(()=>dataset(loadedRows,contexts,overview,traces,proposals,actions,isEn,explanations),[loadedRows,contexts,overview,traces,proposals,actions,isEn,explanations]);
   const selectedExplanation=selectedId&&revision?explanations[explanationKey(selectedId,revision)]:undefined;
   const select=React.useCallback((id:string)=>{
     const wsState=engine.current?.state;
