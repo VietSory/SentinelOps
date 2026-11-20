@@ -589,7 +589,7 @@ def test_safe_reason_never_echoes_library_value_errors():
     from sentinelops.remediation.domain import Blocked
     assert demo.safe_reason(ValueError('regression must be a distinct digest in the known-good image repository'))
     assert demo.safe_reason(Blocked('deployment-change-baseline-mismatch')) == ': deployment-change-baseline-mismatch'
-    for leaky in (ValueError('postgresql://user:password@host/db'),
+    for leaky in (ValueError('postgresql://user:password@host/db'), Blocked('abc-def-123'),
                   ValueError("image: 'https://user:password@host/x' does not match"),
                   Blocked('postgresql://user:password@host/db'), TimeoutError('token=abc')):
         assert demo.safe_reason(leaky) == ''

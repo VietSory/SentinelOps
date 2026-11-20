@@ -502,17 +502,30 @@ def main():
         raise SystemExit('runbook demo failed: ' + type(exc).__name__ + safe_reason(exc)) from None
 
 
-# Fixed guard strings raised by this driver. Library ValueErrors (asyncpg configuration,
-# schema validation) can echo DSNs or rejected values, so only allowlisted text is printed.
-GUARD_MESSAGES = frozenset(re.findall(r"raise (?:ValueError|TimeoutError)\('([^'\\]+)'\)",
-                                      Path(__file__).read_text(encoding='utf-8')))
+# Fixed guard strings. Library ValueErrors (asyncpg configuration, schema validation) can
+# echo DSNs or rejected values, so only literals that appear verbatim in a raise of this
+# driver or of the sentinelops package are printed; anything else prints its class only.
+def _raise_literals(paths, names):
+    pattern = re.compile(r"raise (?:" + "|".join(names) + r")\('([^'\\]+)'\)")
+    found = set()
+    for path in paths:
+        try:
+            found.update(pattern.findall(path.read_text(encoding='utf-8')))
+        except OSError:
+            continue
+    return frozenset(found)
+
+
+import sentinelops as _package
+GUARD_MESSAGES = _raise_literals([Path(__file__)], ('ValueError', 'TimeoutError'))
+DOMAIN_CODES = _raise_literals(Path(_package.__file__).parent.rglob('*.py'), ('Blocked', 'KubernetesUnavailable'))
 TERMINAL_PHASES = ('blocked', 'escalated', 'recovered', 'verifying', 'dispatching', 'prepared')
 
 
 def safe_reason(exc):
     message = str(exc)
     if (message in GUARD_MESSAGES
-            or (isinstance(exc, Blocked) and re.fullmatch(r'[a-z0-9][a-z0-9-]{2,80}', message))
+            or (isinstance(exc, (Blocked, KubernetesUnavailable)) and message in DOMAIN_CODES)
             or message in {'approved action did not recover: ' + phase for phase in TERMINAL_PHASES}):
         return ': ' + message
     return ''
