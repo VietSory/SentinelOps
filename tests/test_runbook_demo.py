@@ -1,5 +1,6 @@
 """Offline orchestration checks; no cloud, kubectl or executor bypass."""
 import asyncio
+import sys
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import json
@@ -560,3 +561,24 @@ def test_wait_for_reraises_kubernetes_unavailable_at_the_deadline():
     with pytest.raises(KubernetesUnavailable):
         asyncio.run(wait_for(read, lambda v: True, timeout=6, poll=2, clock=lambda: t[0], sleep=sleep))
     assert t[0] >= 6
+
+
+def test_cli_reports_the_guard_message_but_not_other_exception_text(monkeypatch, capsys):
+    import scripts.run_runbook_demo as demo
+    monkeypatch.setattr(sys, 'argv', ['run_runbook_demo'] + [a for pair in (
+        ('--regression-image', 'x'), ('--server', 'x'), ('--health-stream', 'x'), ('--ledger-ref', 'x'),
+        ('--approved-by', 'x'), ('--environment', 'dev'), ('--source-store', 'x'), ('--review-store', 'x'), ('--store', 'x'),
+        ('--deployment-change-store', 'x'), ('--target', 'x'), ('--token-file', 'x'), ('--ca-file', 'x'),
+        ('--observer-token-file', 'x'), ('--observer-ca-file', 'x'), ('--kill-switch', 'x')) for a in pair])
+    async def guard(args):
+        raise ValueError('action is missing matching regression evidence')
+    monkeypatch.setattr(demo, 'run', guard)
+    with pytest.raises(SystemExit) as exc:
+        demo.main()
+    assert str(exc.value) == 'runbook demo failed: ValueError: action is missing matching regression evidence'
+    async def other(args):
+        raise RuntimeError('postgresql://user:secret@host/db')
+    monkeypatch.setattr(demo, 'run', other)
+    with pytest.raises(SystemExit) as exc:
+        demo.main()
+    assert str(exc.value) == 'runbook demo failed: RuntimeError'

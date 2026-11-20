@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import asyncpg
 
-from sentinelops.remediation.domain import KubernetesUnavailable, Policy, Target, image_digest
+from sentinelops.remediation.domain import Blocked, KubernetesUnavailable, Policy, Target, image_digest
 from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.kubernetes import LocalKubernetes
 from sentinelops.remediation.reader import ActionReader
@@ -498,6 +498,10 @@ def main():
     args = parser.parse_args()
     try:
         print(json.dumps(asyncio.run(run(args)), ensure_ascii=False, default=str))
+    except (ValueError, TimeoutError, Blocked) as exc:
+        # These carry fixed guard strings from this driver and the domain, never DSNs or tokens;
+        # the operator needs them to know which guard stopped the round.
+        raise SystemExit('runbook demo failed: ' + type(exc).__name__ + ': ' + str(exc)[:300]) from None
     except Exception as exc:
         raise SystemExit('runbook demo failed: ' + type(exc).__name__) from None
 
