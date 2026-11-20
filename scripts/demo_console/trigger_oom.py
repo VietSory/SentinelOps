@@ -29,6 +29,10 @@ class Blocked(ValueError):
     """Precondition failed; no later mutation is allowed."""
 
 
+class ReadTimeout(Blocked):
+    """Both bounded attempts at one read timed out; no mutation was retried."""
+
+
 def clock():
     return datetime.now(timezone.utc)
 
@@ -86,19 +90,34 @@ class Kubectl:
 
     def run(self, args, *, json_result=True, input_json=None):
         command = self.base + args
-        print('$ ' + shlex.join(command), flush=True)
-        try:
-            stdin = ({'input': json.dumps(input_json, separators=(',', ':'))} if input_json is not None
-                     else {'stdin': subprocess.DEVNULL})
-            result = subprocess.run(command, capture_output=True, text=True, timeout=15,
-                                    check=False, **stdin)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise Blocked('kubectl result unavailable; do not retry a PATCH automatically') from exc
-        # CLI stderr can contain credentials from an exec plugin. Never echo it.
-        print('kubectl exit=' + str(result.returncode), flush=True)
-        if result.returncode:
-            raise Blocked('kubectl request failed; inspect operator diagnostics separately')
-        return json.loads(result.stdout) if json_result else result.stdout
+        read_only = bool(args and args[0] in ('get', 'logs') and input_json is None)
+        for attempt in range(2 if read_only else 1):
+            print('$ ' + shlex.join(command), flush=True)
+            try:
+                stdin = ({'input': json.dumps(input_json, separators=(',', ':'))} if input_json is not None
+                         else {'stdin': subprocess.DEVNULL})
+                result = subprocess.run(command, capture_output=True, text=True, timeout=15,
+                                        check=False, **stdin)
+            except subprocess.TimeoutExpired as exc:
+                if not read_only:
+                    raise Blocked('kubectl result UNKNOWN; do not retry a PATCH automatically') from exc
+            except OSError as exc:
+                raise Blocked('kubectl result unavailable; do not retry a PATCH automatically') from exc
+            else:
+                # Exec-plugin stderr may contain credentials. Classify locally;
+                # print only fixed diagnostics, never provider text.
+                print('kubectl exit=' + str(result.returncode), flush=True)
+                if not result.returncode:
+                    return json.loads(result.stdout) if json_result else result.stdout
+                if not read_only or not any(reason in (result.stderr or '').lower() for reason in (
+                    'context deadline exceeded', 'i/o timeout', 'tls handshake timeout',
+                    'client.timeout exceeded', 'timeout awaiting response headers', 'request timed out',
+                    'the server was unable to return a response in the time allotted')):
+                    raise Blocked('kubectl request failed; inspect operator diagnostics separately')
+            if attempt == 1:
+                raise ReadTimeout('Kubernetes read timed out after 2 attempts')
+            print('Kubernetes read timed out; retrying once (2/2).', flush=True)
+            time.sleep(.25)  # At most 2 x 15s subprocess timeouts + 0.25s backoff.
 
     def get(self, kind, name=None, *, namespace=NAMESPACE, selector=None):
         args = ['get', kind] + ([name] if name else [])
@@ -200,9 +219,10 @@ def controller_preflight(config, kube):
                          for a in c.get('command', []) + c.get('args', []))]
     if len(candidates) != 1:
         raise Blocked('memory controller entrypoint missing')
+    cm = kube.get('configmap', config.controller['configmap'])
     logs = kube.run(['logs', 'deployment/' + config.controller['deployment'], '-n', NAMESPACE,
                      '-c', candidates[0]['name'], '--tail=1', '--timestamps=true'], json_result=False)
-    validate_controller(config, controller, kube.get('configmap', config.controller['configmap']), logs, now=clock())
+    validate_controller(config, controller, cm, logs, now=clock())
 
 
 def preflight(config, kube):
@@ -258,6 +278,8 @@ def observe_oom(config, kube, generation, started, *, timeout=120):
         try:
             pods = owned_pods(config, deployment, kube.get('pods', selector='app=' + NAME)['items'],
                               kube.get('replicasets', selector='app=' + NAME)['items'], memory='64Mi')
+        except ReadTimeout:
+            raise  # Exhausted reads must not restart through the rollout-observation loop.
         except Blocked:
             time.sleep(2)
             continue
@@ -288,7 +310,10 @@ def run(config, *, check=False, kube=None):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise Blocked('an OOM trigger is already active') from exc
-        deployment = preflight(config, kube)
+        try:
+            deployment = preflight(config, kube)
+        except ReadTimeout as exc:
+            raise Blocked('Kubernetes read timed out after 2 attempts; no memory-change PATCH was sent') from exc
         if check:
             print('CHECK PASS: bound OOM target/controller at a healthy 256Mi baseline. No PATCH.', flush=True)
             return 0

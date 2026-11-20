@@ -126,6 +126,30 @@ def test_three_rounds_require_ledger_before_deploy_and_observed_recovery(tmp_pat
         assert receipt['demo_mode'] and not receipt['G6_accepted'] and not receipt['q09_eligible']
 
 
+@pytest.mark.parametrize('rounds', [1, 2, 3])
+def test_requested_rounds_stop_after_last_verified_receipt(tmp_path, rounds):
+    receipts, backend, clock = execute(tmp_path, rounds=rounds)
+    assert backend.events == ['known-good', 'deploy'] * rounds
+    assert backend.deployed == list(range(1, rounds + 1))
+    assert clock.sleeps == [demo.COOLDOWN] * (rounds - 1)
+    assert len(receipts) == rounds
+    assert sorted(p.name for p in tmp_path.glob('*.json')) == [f'{n}.json' for n in range(1, rounds + 1)]
+    for number, receipt in enumerate(receipts, 1):
+        assert json.loads((tmp_path / f'{number}.json').read_text()) == receipt
+        assert receipt['phase'] == 'recovered'
+        assert receipt['telemetry']['status'] == 'telemetry_verified'
+        assert receipt['dispatches_after'] - receipt['dispatches_before'] == 1
+
+
+@pytest.mark.parametrize('rounds', [0, -1, 4, True, False, 1.0, '1', None])
+def test_invalid_rounds_fail_before_backend_access(tmp_path, rounds):
+    backend = Backend()
+    with pytest.raises(ValueError, match='demo rounds must be an integer from 1 to 3'):
+        execute(tmp_path, backend, rounds=rounds)
+    assert backend.events == [] and backend.deployed == []
+    assert not list(tmp_path.glob('*.json'))
+
+
 @pytest.mark.parametrize('change', [
     {'score': .79}, {'margin': .14}, {'score': float('nan')}, {'score': float('inf')},
     {'score': True}, {'decision': 'auto'}, {'runbook_id': 'manual'},
@@ -317,9 +341,10 @@ class FailedVerifyBackend(Backend):
         return {'pod_uid': 'replacement', 'mode': 'healthy', 'delay_ms': 0}
 
 
-def test_failed_verify_escalates_after_dispatch_and_cleans_after_verdict(tmp_path):
+@pytest.mark.parametrize('rounds', [1, 2, 3])
+def test_failed_verify_escalates_after_dispatch_and_cleans_after_verdict(tmp_path, rounds):
     backend = FailedVerifyBackend()
-    receipts, _, _ = execute(tmp_path, backend, failed_verify_run=True)
+    receipts, _, clock = execute(tmp_path, backend, failed_verify_run=True, rounds=rounds)
     assert backend.events == ['known-good', 'deploy', 'verifying', 'fault-on', 'escalated', 'fault-off']
     assert not backend.fault_active and backend.deployed == [1]
     receipt, = receipts
@@ -330,6 +355,7 @@ def test_failed_verify_escalates_after_dispatch_and_cleans_after_verdict(tmp_pat
     assert receipt['dispatches_after'] - receipt['dispatches_before'] == 1
     assert receipt['fault']['pod_uid'] == receipt['fault_cleanup']['pod_uid']
     assert receipt['fault']['injected_at'] <= receipt['verdict_observed_at'] <= receipt['fault_cleared_at']
+    assert demo.COOLDOWN not in clock.sleeps
 
 
 @pytest.mark.parametrize('phase,reason', [
@@ -391,8 +417,9 @@ class RejectBackend(Backend):
 
 
 @pytest.mark.parametrize('actor', [None, 'named-oncall'])
-def test_rejection_observes_controller_outcome_with_zero_rollback(tmp_path, capsys, actor):
-    receipts, backend, clock = execute(tmp_path, RejectBackend(), reject_run=True, approve_as=actor)
+@pytest.mark.parametrize('rounds', [1, 2, 3])
+def test_rejection_observes_controller_outcome_with_zero_rollback(tmp_path, capsys, actor, rounds):
+    receipts, backend, clock = execute(tmp_path, RejectBackend(), reject_run=True, approve_as=actor, rounds=rounds)
     receipt, = receipts
     assert receipt['phase'] == 'engineer' and receipt['reason'] == 'approval-rejected'
     assert receipt['dispatches_before'] == receipt['dispatches_after'] == receipt['mutation_count'] == 0
@@ -561,6 +588,86 @@ def test_wait_for_reraises_kubernetes_unavailable_at_the_deadline():
     with pytest.raises(KubernetesUnavailable):
         asyncio.run(wait_for(read, lambda v: True, timeout=6, poll=2, clock=lambda: t[0], sleep=sleep))
     assert t[0] >= 6
+
+
+@pytest.mark.parametrize('round_args,expected', [([], 3), (['--rounds', '1'], 1),
+    (['--rounds', '2'], 2), (['--rounds', '3'], 3)])
+def test_cli_rounds_reach_real_orchestration_without_an_extra_deploy(tmp_path, monkeypatch, capsys,
+                                                                  round_args, expected):
+    # Only external clients are replaced: main -> run -> run_demo stays intact.
+    target = tmp_path / 'target.json'; target.write_text(json.dumps(asdict(TARGET)))
+    policy = tmp_path / 'policy.json'; policy.write_text('{}')
+    backend = Backend(); backend.store = demo.ArtifactStore(tmp_path / 'store')
+    clock, closed = Clock(), []
+
+    async def close():
+        closed.append(True)
+    async def ready():
+        pass
+    async def fetchrow(*args):
+        return {}
+    class Acquire:
+        async def __aenter__(self):
+            return SimpleNamespace(fetchrow=fetchrow)
+        async def __aexit__(self, *args):
+            pass
+    async def create_pool(*args, **kwargs):
+        return SimpleNamespace(acquire=Acquire, close=close)
+
+    monkeypatch.setenv('SENTINELOPS_ACTION_READ_DATABASE_URL',
+                       'postgresql://database.invalid/sentinelops_control?sslmode=verify-full')
+    monkeypatch.setattr(demo.asyncpg, 'create_pool', create_pool)
+    monkeypatch.setattr(demo, 'ActionReader', lambda pool: SimpleNamespace(check_ready=ready))
+    monkeypatch.setattr(demo, 'validate_stream', lambda *args: {
+        'environment': 'dev', 'artifact_root_hash': stable_id({'root': str(tmp_path.resolve())})})
+    monkeypatch.setattr(demo, 'HealthLedgerReader', lambda *args, **kwargs: object())
+    monkeypatch.setattr(demo, 'KnownGoodRegistry', lambda *args, **kwargs: object())
+    monkeypatch.setattr(demo, 'LocalKubernetes', lambda *args, **kwargs: SimpleNamespace(close=close))
+    monkeypatch.setattr(demo, 'Backend', lambda *args, **kwargs: backend)
+    run_demo = demo.run_demo
+    async def timed_run_demo(*args, **kwargs):
+        return await run_demo(*args, **kwargs, clock=clock, sleep=clock.sleep, now=clock.now)
+    monkeypatch.setattr(demo, 'run_demo', timed_run_demo)
+    arguments = [('regression-image', BAD), ('server', 'https://cluster.invalid'),
+        ('health-stream', 'stream'), ('ledger-ref', 'ledger'), ('approved-by', 'operator'),
+        ('environment', 'dev'), ('source-store', str(tmp_path)), ('review-store', str(tmp_path)),
+        ('store', str(tmp_path / 'store')), ('deployment-change-store', str(tmp_path)),
+        ('target', str(target)), ('health-policy', str(policy)), ('token-file', 'unused'),
+        ('ca-file', 'unused'), ('observer-token-file', 'unused'), ('observer-ca-file', 'unused'),
+        ('kill-switch', str(tmp_path / 'KILL_SWITCH')), ('output', str(tmp_path / 'receipts'))]
+    monkeypatch.setattr(sys, 'argv', ['run_runbook_demo']
+        + [argument for name, value in arguments for argument in ('--' + name, value)] + round_args)
+
+    demo.main()
+
+    receipts = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert backend.events == ['known-good', 'deploy'] * expected
+    assert backend.deployed == list(range(1, expected + 1))
+    assert clock.sleeps == [demo.COOLDOWN] * (expected - 1)
+    assert len(receipts) == expected and len(closed) == 3
+    for number, receipt in enumerate(receipts, 1):
+        assert json.loads((tmp_path / 'receipts' / f'{number}.json').read_text()) == receipt
+        assert receipt['phase'] == 'recovered'
+        assert receipt['telemetry']['status'] == 'telemetry_verified'
+        assert receipt['dispatches_after'] - receipt['dispatches_before'] == 1
+    assert not (tmp_path / 'receipts' / f'{expected + 1}.json').exists()
+
+
+@pytest.mark.parametrize('rounds', ['0', '-1', '4', '1.5', 'true'])
+def test_cli_rejects_invalid_rounds_before_running(monkeypatch, rounds):
+    monkeypatch.setattr(sys, 'argv', ['run_runbook_demo'] + [a for pair in (
+        ('--regression-image', 'x'), ('--server', 'x'), ('--health-stream', 'x'), ('--ledger-ref', 'x'),
+        ('--approved-by', 'x'), ('--environment', 'dev'), ('--source-store', 'x'), ('--review-store', 'x'), ('--store', 'x'),
+        ('--deployment-change-store', 'x'), ('--target', 'x'), ('--token-file', 'x'), ('--ca-file', 'x'),
+        ('--observer-token-file', 'x'), ('--observer-ca-file', 'x'), ('--kill-switch', 'x'),
+        ('--rounds', rounds)) for a in pair])
+    called = []
+    async def run(args):
+        called.append(args)
+    monkeypatch.setattr(demo, 'run', run)
+    with pytest.raises(SystemExit) as exc:
+        demo.main()
+    assert exc.value.code == 2 and called == []
 
 
 def test_cli_reports_the_guard_message_but_not_other_exception_text(monkeypatch, capsys):

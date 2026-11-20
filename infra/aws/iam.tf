@@ -177,9 +177,9 @@ data "aws_iam_policy_document" "explanation" {
     for_each = length(var.bedrock_model_ids) + length(var.bedrock_resource_arns) > 0 ? [1] : []
 
     content {
-      sid       = "InvokeExplicitBedrockResources"
-      effect    = "Allow"
-      actions   = ["bedrock:InvokeModel"]
+      sid     = "InvokeExplicitBedrockResources"
+      effect  = "Allow"
+      actions = ["bedrock:InvokeModel"]
       resources = concat(
         [for id in var.bedrock_model_ids : "arn:aws:bedrock:${var.region}::foundation-model/${id}"],
         var.bedrock_resource_arns

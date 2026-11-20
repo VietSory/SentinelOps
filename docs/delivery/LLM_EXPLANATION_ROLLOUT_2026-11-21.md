@@ -24,9 +24,12 @@ Responses API với `text.format` kiểu `json_schema`.
 | 25 | rollout xong 2026-11-20T17:44:36Z | `sha256:963a2555fe0d5a92a0612b9d8cd1cacb0c399c95bc0611a834cb2a7d40d9ecbc` | JSON Patch thủ công, có `test` cho `resourceVersion` 746602, tên và image container |
 | 26 | patch 17:52:22Z, rollout xong 17:53:00Z | `sha256:4bfa7193871e7f75a8e8f6cecfa0a1d0fdcf4a2e3b02f584636e453782819113` (`llmfix-3b9a560-a49f33a1`) | `scripts/aws_demo/deploy_llm_explanation.sh`, dry-run rồi `LLM_DEPLOY_EXECUTE=1` |
 
-Revision 26 build từ `3b9a560` cộng các bản vá chưa commit trên nhánh
-`fix/llm-explanation-review`. Image label `org.opencontainers.image.revision` ghi
-`3b9a560…-llmfix-a49f33a1`.
+| 27 | patch 18:05:49Z, rollout xong 18:06:17Z | `sha256:b06898f7db41848b26cd83d74e831c586eac09e9fcf7f5f0875a1e35fe92a851` (`git-eb8a276`) | `scripts/aws_demo/deploy_llm_explanation.sh`, dry-run rồi `LLM_DEPLOY_EXECUTE=1` |
+
+Revision 25 và 26 build từ cây chưa commit. Revision 27 build từ commit
+`eb8a276` (cây sạch, label `org.opencontainers.image.revision` = SHA đầy đủ) và là
+bản đang chạy. Các commit `main` merge sau đó (`ad38f14`, `37bd5d1`, `454c51c`)
+không đổi file nào nằm trong image control-plane.
 
 ## Kiểm chứng
 
@@ -42,20 +45,24 @@ Revision 26 build từ `3b9a560` cộng các bản vá chưa commit trên nhánh
   revision 4: **6/6 lần `fallback=false`**, provider `openai-responses/v1/…`,
   root cause `payment-service`, score `0.647789668398006`, narrative tiếng Việt
   dẫn đúng số `1016`/`1092` từ evidence và ghi rõ chưa phải nguyên nhân đã xác nhận.
+- Revision 27, cùng incident và cách chạy: **3/3 lần `fallback=false`**, provider
+  `openai-responses/v1/…`, root cause `payment-service`, score `0.648`. Trước khi
+  deploy, request thật lấy từ Pod được gọi lại 8 lần với OpenAI từ local: 8/8 qua
+  validator.
 - Incident mới nhất (`INC-OOM-…`, revision 5) không có RCA ranking nên trả
   fallback "Chưa có giả thuyết nguyên nhân gốc rễ…" — đúng thiết kế, không gọi LLM.
 - Kiểm chứng trên chạy trực tiếp trong Pod, không qua route HTTP có OIDC.
   Chưa kiểm bằng trình duyệt có đăng nhập Cognito.
-- Test trên cây của revision 26: `pytest tests/` 3163 passed, 48 skipped,
+- Test trên commit `eb8a276`: `pytest tests/` 3165 passed, 48 skipped,
   1 xfailed (giới hạn đã biết về gán số cho metric); `scripts/validate_contracts.py`
   35 schema, 16 sample, 3 cấu hình; `node --test tests/ui/*.test.mjs` 46/46;
   `scripts.check_operator_ui --fixtures` PASS 34 hạng mục, 0 lỗi trang.
 
 ## Rollback
 
-`rollback.json` của lượt revision 26 (quyền `0600`) đưa `operator-ui` về revision
-25, vẫn bật LLM. File nằm ở scratchpad của phiên làm việc và có thể bị xoá khi
-khởi động lại máy.
+`rollback.json` của lượt revision 27 (quyền `0600`) đưa `operator-ui` về image
+của revision 26, vẫn bật LLM. File nằm ở scratchpad của phiên làm việc và có thể
+bị xoá khi khởi động lại máy.
 
 Để tắt LLM và về đúng trạng thái trước rollout, dùng lịch sử revision của
 Kubernetes (Pod sẽ khởi động lại vì `Recreate`):
@@ -65,12 +72,11 @@ AWS_PROFILE=console kubectl --context sentinelops-demo -n sentinelops-b-actions 
   rollout undo deployment/remediation-controller --to-revision=24
 ```
 
-Nếu có người khác đã rollout revision mới hơn 26, kiểm tra
+Nếu có người khác đã rollout revision mới hơn 27, kiểm tra
 `kubectl rollout history` trước khi undo để không ghi đè thay đổi của họ.
 
 ## Việc owner còn phải làm
 
 - Thu hồi key gateway xingchi cũ, vì key đó đã xuất hiện trong hội thoại.
 - Đặt hạn mức chi tiêu cho project chứa key OpenAI.
-- Commit và mở PR cho nhánh `fix/llm-explanation-review`; image đang chạy được
-  build từ cây chưa commit.
+- Review và merge PR #88 (`fix/llm-explanation-review`).

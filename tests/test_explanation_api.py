@@ -72,6 +72,8 @@ def test_real_backend_fallback_is_authenticated_pinned_and_read_only_without_mod
         body = response.json(); validate_payload('explanation-response.schema.json', body)
         assert body['fallback'] and body['provider'] == 'deterministic-facts/v1'
         assert body['revision'] == 1 and 'chưa phải nguyên nhân được xác nhận' in body['payload']['summary']
+        assert 'chưa được xác minh độc lập' in body['payload']['summary']
+        assert 'không cho phép hành động' in body['payload']['summary']
         assert 'availability=UNKNOWN' in body['payload']['summary']
         known = {e['id'] for e in repo.source['payload']['evidence']}
         assert all(set(c['evidence_refs']) <= known for c in body['payload']['claims'])

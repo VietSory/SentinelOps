@@ -1,4 +1,4 @@
-"""Operator-run three-round Payment runbook demo; never approves a known-good image.
+"""Operator-run Payment runbook demo (three rounds by default); never approves a known-good image.
 
 Requires the controller's durable decision store, original health/review stores,
 an explicit read-only action database DSN in SENTINELOPS_ACTION_READ_DATABASE_URL,
@@ -81,19 +81,21 @@ def approval_command(proposal, store, approved_by='<oncall-name>', *, decision='
 
 
 async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_switch_run=False, approve_as=None,
-                   failed_verify_run=False, reject_run=False,
+                   failed_verify_run=False, reject_run=False, rounds=3,
                    cooldown=COOLDOWN, timeout=1200., poll=10., clock=time.monotonic,
                    sleep=asyncio.sleep, now=lambda: datetime.now(timezone.utc)):
     """All external operations are injectable; receipts require observed evidence."""
     if (not math.isfinite(cooldown) or cooldown < COOLDOWN
         or not math.isfinite(timeout) or timeout <= 0 or not math.isfinite(poll) or not 0 < poll <= 10):
         raise ValueError('invalid demo cooldown/deadline/poll bounds')
+    if type(rounds) is not int or not 1 <= rounds <= 3:
+        raise ValueError('demo rounds must be an integer from 1 to 3')
     output = Path(output)
     if approve_as is not None and (not isinstance(approve_as, str) or not approve_as.strip()):
         raise ValueError('approve-as must name the on-call operator')
     if sum((kill_switch_run, failed_verify_run, reject_run)) > 1:
         raise ValueError('negative demo modes are mutually exclusive')
-    count = 1 if failed_verify_run or reject_run else 3
+    count = 1 if failed_verify_run or reject_run else rounds
     output.mkdir(parents=True, exist_ok=True)
     # Refuse reuse before doing anything that could mutate Payment.
     if any((output / f'{n}.json').exists() for n in range(1, count + 1)):
@@ -457,7 +459,8 @@ async def run(args):
         return await run_demo(Backend(args, pool, kube, registry, observer=observer, source=source,
             fault_kube=fault_kube), output=args.output, kill_switch_run=args.kill_switch_run,
             failed_verify_run=args.failed_verify_run, reject_run=args.reject_run,
-            approve_as=args.approve_as, timeout=args.timeout, poll=args.poll_seconds)
+            approve_as=args.approve_as, rounds=getattr(args, 'rounds', 3),
+            timeout=args.timeout, poll=args.poll_seconds)
     finally:
         try:
             if kube is not None:
@@ -486,6 +489,8 @@ def main():
     parser.add_argument('--output', type=Path, default=Path('artifacts/aws-demo/runs'))
     parser.add_argument('--timeout', type=float, default=1200.)
     parser.add_argument('--poll-seconds', type=float, default=10.)
+    parser.add_argument('--rounds', type=int, choices=(1, 2, 3), default=3,
+                        help='number of rounds (default: 3); reject/failed-verify modes always run once')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--kill-switch-run', action='store_true')
     modes.add_argument('--failed-verify-run', action='store_true')
