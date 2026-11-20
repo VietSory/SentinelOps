@@ -57,12 +57,14 @@ def test_structural_failure_prepares_all_edits_before_any_write(assets, monkeypa
     assert snapshot(assets) == before
 
 
-def test_only_two_scoped_assets_change(assets):
+def test_scoped_bundles_and_canonical_clients_change(assets):
     before = snapshot(assets)
     changed = patcher.apply(assets)
-    assert set(changed) == {"LiveApp-DryBTgPw.js", "App-CYliiKd_.js"}
-    for name in ("client.js", "index.html", "style.css"):
+    assert set(changed) == {"LiveApp-DryBTgPw.js", "App-CYliiKd_.js", "client.js", "workspace.js"}
+    for name in ("index.html", "style.css"):
         assert (assets / name).read_bytes() == before[name]
+    for name in ("client.js", "workspace.js"):
+        assert (assets / name).read_bytes() == (Path(__file__).parents[1] / "src/sentinelops/ui/assets" / name).read_bytes()
     live = (assets / "LiveApp-DryBTgPw.js").read_text()
     assert live.startswith(patcher.IMPORT + 'const preserve="unrelated";')
     assert live.endswith("function Ke(){return 1;}")
@@ -105,6 +107,7 @@ def render_case(*, mutation="", status="pending", can_approve=True):
     review = client[client.index("export const memoryRunbook"):client.index("export function validProposal")].replace("export ", "")
     code = review + "\n" + r"""
 const oomMemoryReview=memoryReview;
+const oomMemoryRecoveryReview=memoryRecoveryReview;
 const nodes=[],dates=[],decisions=[];
 const p={useState:()=>['Operator reviewed the exact target',()=>{}]};
 const r={jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};
@@ -114,7 +117,7 @@ const window={confirm:()=>true};
 const now=Date.parse('2026-11-20T19:00:00Z');
 const image='registry.example/oom-demo@sha256:'+'a'.repeat(64);
 const target={namespace:'sentinelops-b-actions',deployment:'sentinelops-oom-demo',container:'oom-demo',image};
-const row={status:'pending',current_revision:1,proposal_sha256:'b'.repeat(64),proposal:{
+const row={status:'pending',manual_recovery_available:true,current_revision:1,proposal_sha256:'b'.repeat(64),proposal:{
 executor_runbook:memoryRunbook,resource_change:{memory_before:'64Mi',memory_after:'256Mi'},
 cause:'OOMKilled',pod_uid:'owned-pod-uid',target,current_image:image,incident_id:'oom-incident',
 incident_revision:1,runbook_id:'pod-memory-limit-demo/v1',proposal_id:'c'.repeat(64),
@@ -152,9 +155,6 @@ def test_valid_memory_review_uses_current_client_and_preserves_human_decision_ga
 
 @pytest.mark.parametrize("mutation", [
     "row.review_change=null;",
-    "row.proposal.cause='Exit137';",
-    "row.review_change.cause='Exit137';",
-    "row.review_change.pod_uid='different-pod';",
     "row.proposal.target.namespace='other-namespace';",
     "row.proposal.target.deployment='other-deployment';",
     "row.proposal.target.container='other-container';",
@@ -163,7 +163,7 @@ def test_valid_memory_review_uses_current_client_and_preserves_human_decision_ga
     "row.proposal.resource_change.memory_after='512Mi';",
     "row.review_change.memory_before='32Mi';",
 ])
-def test_incomplete_or_mismatched_memory_evidence_never_approves(mutation):
+def test_incomplete_or_mismatched_memory_recovery_bounds_never_approve(mutation):
     result = render_case(mutation=mutation)
     assert result["buttons"][0] == {"disabled": True, "label": "Approve"}
     assert result["buttons"][1] == {"disabled": False, "label": "Reject"}
@@ -178,14 +178,14 @@ def test_incomplete_or_mismatched_memory_evidence_never_approves(mutation):
     "state.canApprove=false;",
 ])
 def test_pending_guard_remains_closed_without_current_authorized_window(mutation):
-    result = render_case(mutation=mutation)
+    result = render_case(mutation="row.manual_recovery_available=false;"+mutation)
     assert all(button["disabled"] for button in result["buttons"])
     assert result["decisions"] == []
 
 
 @pytest.mark.parametrize("status", ["recovered", "blocked", "escalated"])
 def test_terminal_memory_review_keeps_visible_disabled_decision_controls(status):
-    result = render_case(status=status)
+    result = render_case(status=status, mutation="row.manual_recovery_available=false;")
     assert result["forms"] == 1
     assert result["buttons"] == [{"disabled": True, "label": "Approve"}, {"disabled": True, "label": "Reject"}]
     assert result["decisions"] == []
@@ -196,3 +196,17 @@ def test_missing_evidence_keeps_approve_visible_without_blocking_explanation():
     result = render_case(mutation="row.review_change=null;")
     assert result["buttons"][0] == {"disabled": True, "label": "Approve"}
     assert result["notices"] == []
+
+
+@pytest.mark.parametrize("status", ["pending", "expired", "blocked"])
+def test_server_eligible_manual_recovery_does_not_require_oom_evidence(status):
+    result = render_case(status=status, mutation="""
+row.recovery_change={kind:'memory_limit',memory_before:'64Mi',memory_after:'256Mi',
+ namespace:target.namespace,deployment:target.deployment,container:target.container,image};
+row.review_change=null;delete row.proposal.cause;delete row.proposal.pod_uid;
+if(row.status!=='pending')row.proposal.expires_at=new Date(now-1).toISOString();
+""")
+    assert result["buttons"][0] == {"disabled": False, "label": "Approve"}
+    assert result["buttons"][1] == {"disabled": status != "pending", "label": "Reject"}
+    assert [decision[1] for decision in result["decisions"]] == (["approve", "reject"] if status == "pending" else ["approve"])
+    assert [item[1] for item in result["facts"] if item[0] == "Kubernetes failure"] == ["—"]

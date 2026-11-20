@@ -20,22 +20,23 @@ ORIGINAL_HASHES = {
 
 TEMPLATE = '''function FUNCTION({row,state,engine,now,isEn}) {
   const [reason,setReason]=REACT.useState(''), p=row.proposal, images=row.review_images;
-  const memory=oomMemoryReview(row), isMemory=p.executor_runbook==='pod-memory-limit-demo/v1';
+  const evidence=oomMemoryReview(row), recovery=oomMemoryRecoveryReview(row), memory=evidence||recovery, isMemory=p.executor_runbook==='pod-memory-limit-demo/v1';
   const remaining=Math.max(0,Math.ceil((Date.parse(p.expires_at)-now)/1000));
   const current=row.current_revision===p.incident_revision;
   const pending=row.status==='pending'&&remaining>0&&current&&now>=Date.parse(p.created_at);
   const enabled=pending&&state.canApprove&&!state.decisionLoading;
-  const complete=isMemory?!!memory:!!(images?.current_image&&images?.rollback_image);
+  const approveEnabled=(isMemory?row.manual_recovery_available===true:pending)&&state.canApprove&&!state.decisionLoading;
+  const complete=isMemory?!!recovery:!!(images?.current_image&&images?.rollback_image);
   const label=(vi,en)=>isEn?en:vi;
   const submit=async decision=>{
-    if(!reason.trim()||!enabled||decision==='approve'&&!complete)return;
+    if(!reason.trim()||!(decision==='approve'?approveEnabled:enabled)||decision==='approve'&&!complete)return;
     if(window.confirm(`${label('Xác nhận','Confirm')} ${decision}: ${p.runbook_id}\\n${p.incident_id} / r${p.incident_revision}\\n${reason.trim()}`))
       await engine.decideProposal(p.proposal_id,decision,reason.trim());
   };
   const items=[[label('Sự cố / revision','Incident / revision'),`${p.incident_id} / r${p.incident_revision}`]];
   if(isMemory)items.push(
-    [label('Nguyên nhân Kubernetes','Kubernetes failure'),memory?.cause||label('Bằng chứng chưa đầy đủ','Incomplete evidence')],
-    [label('Pod gặp lỗi (UID)','Failed pod UID'),memory?.pod_uid],
+    [label('Nguyên nhân Kubernetes','Kubernetes failure'),evidence?.cause||'—'],
+    [label('Pod gặp lỗi (UID)','Failed pod UID'),evidence?.pod_uid],
     [label('Giới hạn RAM','Memory limit'),memory?`${memory.memory_before} → ${memory.memory_after}`:'—'],
     ['Deployment',memory?.deployment],[label('Image giữ nguyên','Image unchanged'),memory?.image],
     [label('Điều kiện hồi phục','Recovery checks'),label('Pod mới Ready, không restart, HTTP ổn định 30 giây','Replacement ready, zero restarts, HTTP healthy for 30 seconds')]);
@@ -54,13 +55,13 @@ TEMPLATE = '''function FUNCTION({row,state,engine,now,isEn}) {
     row.memory_action&&JSX.jsxs(CALLOUT,{error:['blocked','escalated'].includes(row.memory_action.phase),children:[label('Hồi phục: ','Recovery: '),row.memory_action.phase,' · ',row.memory_action.reason]}),
     row.outcome&&!row.memory_action&&JSX.jsxs(CALLOUT,{error:true,children:[row.outcome.phase,': ',row.outcome.reason]}),
     JSX.jsx('p',{className:'text-xs text-slate-500',children:isMemory?
-      label('Dựa trên OOMKilled do Kubernetes ghi nhận. Controller kiểm tra lại đúng pod, image và giới hạn RAM trước khi thực thi.','Based on the OOMKilled observed by Kubernetes. The controller rechecks the pod, image and memory limit before execution.'):
+      label('Duyệt khôi phục RAM cố định 64Mi → 256Mi cho target đã ghim. Controller kiểm tra lại deployment, image và giới hạn RAM trước khi thực thi.','Approve fixed 64Mi → 256Mi memory recovery for the pinned target. The controller rechecks the deployment, image and memory limit before execution.'):
       label('Duyệt ghi nhận quyết định của người trực. Controller tiếp tục kiểm tra tuổi bằng chứng, target, quarantine và telemetry hồi phục.','Approval records a human decision. The controller still checks evidence freshness, target, quarantine and recovery telemetry.')}),
     JSX.jsxs('form',{onSubmit:event=>event.preventDefault(),className:'space-y-3',children:[
       JSX.jsxs('label',{className:'block text-sm font-medium',children:[label('Lý do quyết định','Decision reason'),
         JSX.jsx('textarea',{'aria-label':label('Lý do quyết định','Decision reason'),value:reason,onChange:event=>setReason(event.target.value),maxLength:2000,rows:2,className:'block w-full mt-2 rounded-lg border border-slate-300 p-3'})]}),
       JSX.jsxs('div',{className:'flex flex-wrap gap-3',children:[
-        JSX.jsx(BUTTON,{disabled:!enabled||!complete||!reason.trim(),onClick:()=>void submit('approve'),children:label('Duyệt','Approve')}),
+        JSX.jsx(BUTTON,{disabled:!approveEnabled||!complete||!reason.trim(),onClick:()=>void submit('approve'),children:label('Duyệt','Approve')}),
         JSX.jsx(BUTTON,{variant:'secondary',disabled:!enabled||!reason.trim(),onClick:()=>void submit('reject'),children:label('Từ chối','Reject')})]})]})]});
 }
 '''
@@ -101,7 +102,7 @@ def apply(assets, source):
         component=TEMPLATE
         import re
         component=re.sub(r'\b('+'|'.join(bindings)+r')\b',lambda m:bindings[m[0]],component)
-        text='import {memoryReview as oomMemoryReview} from "./client.js";\n'+text[:start]+component+text[end:]
+        text='import {memoryReview as oomMemoryReview,memoryRecoveryReview as oomMemoryRecoveryReview} from "./client.js";\n'+text[:start]+component+text[end:]
         path.write_text(text)
     # These shared modules are imported by the current live React application.
     for name in ('client.js','workspace.js'):

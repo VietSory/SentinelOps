@@ -1,4 +1,4 @@
-import {ApiFailure, IncidentClient} from './client.js';
+import {ApiFailure, IncidentClient, memoryRecoveryReview} from './client.js';
 
 export const proposalRemaining = (row, now = Date.now()) => Math.max(0,Math.ceil((Date.parse(row.proposal.expires_at)-now)/1000));
 
@@ -96,10 +96,15 @@ export class Workspace {
   }
   async decideProposal(id, decision, reason) {
     const row = this.state.proposals?.find(item => item.proposal.proposal_id === id), client = this.#client;
-    if (!client || !row || !this.state.canApprove || row.status !== 'pending' || !proposalRemaining(row) || this.state.decisionLoading) return;
+    const manual = row && decision === 'approve' && row.manual_recovery_available === true && Boolean(memoryRecoveryReview(row));
+    if (!client || !row || !this.state.canApprove ||
+        (!manual && (row.status !== 'pending' || !proposalRemaining(row))) || this.state.decisionLoading) return;
     this.state.decisionLoading = true; this.state.proposalsError = null; this.emit();
     return this.#run('decision',s => client.decideProposal(row,decision,reason,s),value => {
-      this.state.proposals = this.state.proposals.map(item => item === row ? {...item,...value} : item);
+      this.state.proposals = value.proposal.proposal_id === row.proposal.proposal_id
+        ? this.state.proposals.map(item => item === row ? {...item,...value} : item)
+        : [value,...this.state.proposals.map(item => item === row ? {...item,manual_recovery_available:false} : item)
+          .filter(item => item.proposal.proposal_id !== value.proposal.proposal_id)];
     },error => {
       // A lost response may have persisted a receipt: require a read before any retry.
       this.state.proposals = null; this.state.proposalsError = error;

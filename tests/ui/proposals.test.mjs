@@ -8,7 +8,8 @@ const row = () => ({proposal:{proposal_version:'runbook-proposal/v1',proposal_id
   created_at:'2026-01-01T00:00:00Z',expires_at:'2099-01-01T00:15:00Z'},proposal_sha256:'b'.repeat(64),
   status:'pending',incident:{incident_id:'INC-a&b',severity:'high',root_cause_ranking:[]}});
 const receipt = (value, decision) => ({...value,status:decision === 'reject' ? 'engineer' : 'approved',
-  approval:{decision,approved_by:'server-operator',proposal_sha256:value.proposal_sha256}});
+  approval:{decision,approved_by:'server-operator',proposal_sha256:value.proposal_sha256,
+    ...(decision==='approve'&&value.proposal.executor_runbook===memoryRunbook?{approval_mode:'manual_memory_recovery'}:{})}});
 const deferred = () => {let resolve; const promise = new Promise(r => {resolve=r;}); return {resolve,promise};};
 const client = overrides => ({list:async () => ({items:[],next_cursor:null}),readiness:async () => ({}),
   context:async (id,revision) => ({incident_id:id,revision,payload:{evidence:[]}}),
@@ -21,6 +22,10 @@ const memoryRow = () => {
     target:{namespace:'sentinelops-b-actions',deployment:'sentinelops-oom-demo',container:'oom-demo',image}});
   value.review_change={kind:'memory_limit',cause:'OOMKilled',pod_uid:'failed-pod',memory_before:'64Mi',
     memory_after:'256Mi',image,deployment:'sentinelops-oom-demo',container:'oom-demo'};
+  value.recovery_change={kind:'memory_limit',memory_before:'64Mi',memory_after:'256Mi',image,
+    namespace:'sentinelops-b-actions',deployment:'sentinelops-oom-demo',container:'oom-demo'};
+  value.manual_recovery_available=true;
+  value.current_revision=value.proposal.incident_revision;
   return value;
 };
 async function workspace(overrides={}) {

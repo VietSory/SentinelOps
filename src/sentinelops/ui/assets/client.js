@@ -12,6 +12,17 @@ export function memoryReview(row) {
     typeof target.image === 'string' && /^.+@sha256:[a-f0-9]{64}$/.test(target.image) &&
     review.image === target.image && p.current_image === target.image ? review : null;
 }
+export function memoryRecoveryReview(row) {
+  const p = row?.proposal, review = row?.recovery_change ?? row?.review_change, target = p?.target;
+  return p?.executor_runbook === memoryRunbook && review?.kind === 'memory_limit' &&
+    p.resource_change?.memory_before === '64Mi' && p.resource_change?.memory_after === '256Mi' &&
+    review.memory_before === '64Mi' && review.memory_after === '256Mi' &&
+    target?.namespace === 'sentinelops-b-actions' && target.deployment === 'sentinelops-oom-demo' &&
+    target.container === 'oom-demo' && (review.namespace === undefined || review.namespace === target.namespace) &&
+    review.deployment === target.deployment && review.container === target.container &&
+    typeof target.image === 'string' && /^.+@sha256:[a-f0-9]{64}$/.test(target.image) &&
+    review.image === target.image && p.current_image === target.image ? review : null;
+}
 export function validProposal(row) {
   const p = row?.proposal;
   const memory = p?.executor_runbook === memoryRunbook;
@@ -20,6 +31,8 @@ export function validProposal(row) {
     Number.isSafeInteger(p.incident_revision) && p.incident_revision > 0 &&
     Number.isFinite(Date.parse(p.expires_at)) && Number.isFinite(Date.parse(p.created_at)) &&
     typeof p.runbook_id === 'string' && (memory || Number.isFinite(p.score) && Number.isFinite(p.margin)) &&
+    (row.recovery_change == null || memory && Boolean(memoryRecoveryReview(row))) &&
+    (row.manual_recovery_available === undefined || typeof row.manual_recovery_available === 'boolean') &&
     (memory ? ['pending','approved','engineer','expired','consumed','stale','not_yet_valid',
       'dispatching','verifying','recovered','blocked','escalated','rejected'] :
       ['pending','approved','engineer','expired','consumed','stale','not_yet_valid']).includes(row.status);
@@ -210,15 +223,32 @@ export class IncidentClient {
   async decideProposal(row, decision, reason, signal) {
     if (!validProposal(row) || !['approve','reject'].includes(decision) ||
         typeof reason !== 'string' || !reason.trim() || reason.trim().length > 2000) throw new ApiFailure(0,'invalid_response');
+    const manualMemory = decision === 'approve' && row.proposal.executor_runbook === memoryRunbook;
+    if (manualMemory && (row.manual_recovery_available !== true || !memoryRecoveryReview(row))) throw new ApiFailure(0,'invalid_response');
     const body = await this.get(`/v1/runbook-proposals/${row.proposal.proposal_id}/decision`,signal,
-      {method:'POST',etag:`"${row.proposal_sha256}"`,body:{decision,reason:reason.trim()}});
-    if (!validProposal(body) || body.proposal.proposal_id !== row.proposal.proposal_id ||
-        body.proposal_sha256 !== row.proposal_sha256 || body.approval?.decision !== decision ||
+      {method:'POST',etag:`"${row.proposal_sha256}"`,body:{decision,reason:reason.trim(),
+        ...(manualMemory ? {approval_mode:'manual_memory_recovery'} : {})}});
+    if (!validProposal(body)) throw new ApiFailure(200,'invalid_response');
+    const same = (left,right) => left && right && Object.keys(left).length === Object.keys(right).length &&
+      Object.keys(left).every(key => Object.hasOwn(right,key) && left[key] === right[key]);
+    const boundsMatch = !manualMemory || memoryRecoveryReview(body) && same(body.proposal.target,row.proposal.target) &&
+      same(body.proposal.resource_change,row.proposal.resource_change) && body.proposal.current_image === row.proposal.current_image;
+    const child = manualMemory && body.proposal.proposal_id !== row.proposal.proposal_id &&
+      body.manual_recovery_of === row.proposal.proposal_id && body.proposal.manual_recovery_of === row.proposal.proposal_id &&
+      body.proposal.origin_proposal_sha256 === row.proposal_sha256 && body.proposal.origin_incident_id === row.proposal.incident_id &&
+      Number.isSafeInteger(row.current_revision) && row.current_revision > 0 &&
+      body.proposal.origin_incident_revision === row.current_revision && body.proposal.incident_revision === 1 &&
+      body.proposal.incident_id === `INC-OOM-MANUAL-${body.proposal.proposal_id}` &&
+      Date.parse(body.proposal.expires_at)-Date.parse(body.proposal.created_at) === 15*60*1000 &&
+      Date.parse(body.proposal.expires_at) > Date.now() && Date.parse(body.proposal.created_at) <= Date.now()+1000;
+    if ((!child && (body.proposal.proposal_id !== row.proposal.proposal_id || body.proposal_sha256 !== row.proposal_sha256)) ||
+        !boundsMatch || body.approval?.decision !== decision ||
+        (manualMemory && body.approval?.approval_mode !== 'manual_memory_recovery') ||
         !(decision === 'reject' ? (row.proposal.executor_runbook === memoryRunbook ? ['engineer','rejected'] : ['engineer']) :
           (row.proposal.executor_runbook === memoryRunbook ?
             ['approved','consumed','engineer','dispatching','verifying','recovered','blocked','escalated'] :
             ['approved','consumed','engineer'])).includes(body.status) ||
-        body.approval?.proposal_sha256 !== row.proposal_sha256 || typeof body.approval?.approved_by !== 'string') {
+        body.approval?.proposal_sha256 !== body.proposal_sha256 || typeof body.approval?.approved_by !== 'string') {
       throw new ApiFailure(200,'invalid_response');
     }
     return body;

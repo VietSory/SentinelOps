@@ -2,7 +2,7 @@
 
 The existing image is the source of truth: all three input assets must match
 their reviewed SHA-256 before any file is written.  The API client is checked
-but never changed.  Usage: python scripts/patch_react_oom_review.py ASSETS_DIR
+then replaced with the matching canonical client.  Usage: python scripts/patch_react_oom_review.py ASSETS_DIR
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ ORIGINAL_HASHES = {
     "App-CYliiKd_.js": "d133b2c813842dc0297d60452524804e948e5d6419cb19c17d7e94df1c3e9b4c",
     "client.js": "2e28236d528c31a6032761be4437432d7039938c580ec13e98b1b25f0e1ade57",
 }
-IMPORT = 'import {memoryReview as oomMemoryReview} from "./client.js";\n'
+IMPORT = 'import {memoryReview as oomMemoryReview,memoryRecoveryReview as oomMemoryRecoveryReview} from "./client.js";\n'
 STATUS_RENDERER = 'function Sy({status:e}){const{isEn:t}=vt(),n=jQ[e];return h.jsx(be,{tone:n.tone,dot:!0,children:t?n.en:n.vi})}'
 MEMORY_PHASES = {
     "dispatching": {"vi": "Đang gửi thực thi", "en": "Dispatching", "tone": "orange"},
@@ -51,7 +51,7 @@ def _once(text: str, old: str, new: str) -> str:
 
 
 def prepare(assets: Path) -> dict[str, bytes]:
-    """Validate every original first, then construct both edits in memory."""
+    """Validate every original first, then construct all edits in memory."""
     originals = {}
     for name, expected in ORIGINAL_HASHES.items():
         raw = (assets / name).read_bytes()
@@ -60,6 +60,12 @@ def prepare(assets: Path) -> dict[str, bytes]:
         originals[name] = raw.decode("utf-8")
     if "export function memoryReview(row) {" not in originals["client.js"]:
         raise ValueError("Reviewed memoryReview export is missing")
+    client = (Path(__file__).resolve().parents[1] / "src/sentinelops/ui/assets/client.js").read_bytes()
+    if b"export function memoryRecoveryReview(row) {" not in client or b"approval_mode:'manual_memory_recovery'" not in client:
+        raise ValueError("Canonical manual memory recovery client is missing")
+    workspace = (Path(__file__).resolve().parents[1] / "src/sentinelops/ui/assets/workspace.js").read_bytes()
+    if b"memoryRecoveryReview" not in workspace or b"row.manual_recovery_available === true" not in workspace:
+        raise ValueError("Canonical manual memory recovery workspace is missing")
 
     live = originals["LiveApp-DryBTgPw.js"]
     start_marker, end_marker = "function Ge(", "function Ke("
@@ -75,7 +81,7 @@ def prepare(assets: Path) -> dict[str, bytes]:
     app = _once(app, "jQ={expired:", "jQ={" + phases + ",expired:")
     fallback = 'Object.prototype.hasOwnProperty.call(jQ,e)?jQ[e]:{vi:"Chưa rõ",en:"Unknown",tone:"neutral"}'
     app = _once(app, STATUS_RENDERER, STATUS_RENDERER.replace("jQ[e]", fallback, 1))
-    return {"LiveApp-DryBTgPw.js": live.encode("utf-8"), "App-CYliiKd_.js": app.encode("utf-8")}
+    return {"LiveApp-DryBTgPw.js": live.encode("utf-8"), "App-CYliiKd_.js": app.encode("utf-8"), "client.js": client, "workspace.js": workspace}
 
 
 def apply(assets: str | Path) -> dict[str, str]:

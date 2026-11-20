@@ -15,10 +15,11 @@ from sentinelops.telemetry.core import stable_id, timestamp
 
 PROPOSAL_VERSION = 'runbook-proposal/v1'
 APPROVAL_VERSION = 'runbook-approval/v1'
+MANUAL_MEMORY_RECOVERY = 'manual_memory_recovery'
 
 
 def _slot(store, kind, proposal_id):
-    if kind not in ('approval', 'used', 'outcome') or not re.fullmatch(r'[0-9a-f]{64}', proposal_id):
+    if kind not in ('approval', 'used', 'outcome', 'manual-memory-recovery') or not re.fullmatch(r'[0-9a-f]{64}', proposal_id):
         raise ValueError('invalid approval slot')
     return store.root / 'runbook-approvals' / kind / (proposal_id + '.json')
 
@@ -71,13 +72,18 @@ def find_proposal(store, proposal_id):
 
 
 def record_approval(store, *, proposal_id, approved_by, decision, reason='',
-                    confirm_oncall_approval=False, now=None):
+                    confirm_oncall_approval=False, now=None, approval_mode=None):
     if (confirm_oncall_approval is not True or not isinstance(approved_by, str)
         or not approved_by.strip() or decision not in ('approve', 'reject')
         or not isinstance(reason, str)):
         raise ValueError('explicit on-call confirmation, identity and decision required')
     now = now if now is not None else datetime.now(timezone.utc)
     proposal = find_proposal(store, proposal_id)
+    if approval_mode is not None:
+        from sentinelops.remediation.pod_memory import recovery_change
+        if (approval_mode != MANUAL_MEMORY_RECOVERY or decision != 'approve'
+            or recovery_change(proposal) is None):
+            raise ValueError('manual recovery requires the bounded memory approval')
     if not utc_time(proposal['created_at']) <= now < utc_time(proposal['expires_at']):
         raise ValueError('proposal expired or not yet valid')
     if read_slot(store, 'used', proposal_id) or read_slot(store, 'outcome', proposal_id):
@@ -85,4 +91,6 @@ def record_approval(store, *, proposal_id, approved_by, decision, reason='',
     value = {'approval_version': APPROVAL_VERSION, 'proposal_id': proposal_id,
              'proposal_sha256': stable_id(proposal), 'approved_by': approved_by.strip(),
              'approved_at': timestamp(now), 'decision': decision, 'reason': reason}
+    if approval_mode is not None:
+        value['approval_mode'] = approval_mode
     return create_slot(store, 'approval', proposal_id, value)

@@ -1,4 +1,4 @@
-"""One bounded demo action: approved 64Mi -> 256Mi for a verified OOM.
+"""One bounded 64Mi -> 256Mi action, via verified OOM or explicit manual recovery.
 
 This controller observes Kubernetes facts, not ML predictions. Only the dedicated
 demo Deployment is supported. Its image, requests, replicas and other settings
@@ -65,6 +65,22 @@ def review_change(proposal):
         return {'kind': 'memory_limit', **change, 'image': target.image,
                 'deployment': target.deployment, 'container': target.container,
                 'pod_uid': proposal['pod_uid'], 'cause': 'OOMKilled'}
+    except (Blocked, ValueError, KeyError, TypeError):
+        return None
+
+
+def recovery_change(proposal):
+    """Bounded human recovery choice, without claiming OOM or failed-pod proof."""
+    if proposal.get('executor_runbook') != RUNBOOK:
+        return None
+    try:
+        target = MemoryTarget(**proposal['target'])
+        change = proposal['resource_change']
+        if (change != {'memory_before': BEFORE, 'memory_after': AFTER}
+            or proposal['current_image'] != target.image):
+            return None
+        return {'kind': 'memory_limit', **change, 'image': target.image,
+                'namespace': target.namespace, 'deployment': target.deployment, 'container': target.container}
     except (Blocked, ValueError, KeyError, TypeError):
         return None
 
@@ -254,22 +270,30 @@ class MemoryController:
             raise Blocked('oom-demo-incident-revision-changed')
         if current and current['context']['lifecycle_stage'] == stage:
             return current
-        references = [proposal['observation_ref']] + ([ref] if ref else [])
+        action = read_state(self.store, proposal['proposal_id']) or {}
+        manual = action.get('approval_mode') == approvals.MANUAL_MEMORY_RECOVERY
+        verified_oom = not manual and review_change(proposal) is not None and bool(proposal.get('observation_ref'))
+        source_ref = (proposal['observation_ref'] if verified_oom
+                      else self.store.write('manifests', proposal))
+        references = list(dict.fromkeys([source_ref] + ([ref] if ref else [])))
+        fact = ('Kubernetes observed OOMKilled (exit 137) in the bounded memory demo. '
+                'Proposed memory limit: 64Mi -> 256Mi; image unchanged.' if verified_oom else
+                'Bounded manual memory recovery: 64Mi -> 256Mi; image unchanged. '
+                'OOM cause and failed-pod evidence are not established by this recovery approval.')
         payload = {'schema_version': '1.0', 'incident_id': proposal['incident_id'],
             'detected_at': proposal['created_at'], 'state': state, 'severity': 'high',
             'affected_services': [NAME], 'service_signals': [], 'root_cause_ranking': [],
-            'evidence': [{'id': 'kubernetes-oom', 'type': 'log', 'service': NAME,
-                'observed_at': proposal['created_at'], 'source_ref': proposal['observation_ref'],
-                'fact': 'Kubernetes observed OOMKilled (exit 137) in the bounded memory demo. '
-                        'Proposed memory limit: 64Mi -> 256Mi; image unchanged.'}]}
+            'evidence': [{'id': 'kubernetes-oom' if verified_oom else 'manual-memory-recovery',
+                'type': 'log', 'service': NAME, 'observed_at': proposal['created_at'],
+                'source_ref': source_ref, 'fact': fact}]}
         context = {'availability': availability, 'source_refs': references,
             'config_refs': ['config://pod-memory-limit-demo/v1'],
-            'recovery_source': 'action' if state in ('recovering', 'recovered') else None,
-            'trigger_sources': [{'source': 'kubernetes', 'signal_id': proposal['proposal_id'],
-                'emitted_at': proposal['created_at'], 'source_ref': proposal['observation_ref']}]}
+            'recovery_source': ('manual' if manual else 'action') if state in ('recovering', 'recovered') else None,
+            'trigger_sources': [{'source': 'kubernetes' if verified_oom else 'manual',
+                'signal_id': proposal['proposal_id'], 'emitted_at': proposal['created_at'], 'source_ref': source_ref}]}
         return await self.incidents.write(IncidentWrite(payload, stage, current['revision'] if current else 0,
             'oom-' + proposal['proposal_id'][:32] + '-' + stage, 'pod-memory-demo-controller',
-            'verified-kubernetes-oom-' + stage.lower(), context))
+            ('verified-kubernetes-oom-' if verified_oom else 'manual-memory-recovery-') + stage.lower(), context))
 
     async def tick(self):
         import fcntl  # The worker requires Linux; importing HTTP review does not.
@@ -298,7 +322,7 @@ class MemoryController:
                 return {'phase': 'observing', 'reason': 'no-current-oom-at-low-limit'}
             # A target gets one attempt per pod/generation. A rehearsal reset is
             # an explicit operator change; native container restarts never retry.
-            if any(p['pod_uid'] == observed['pod_uid'] or p['generation'] == observed['generation'] for p in proposals):
+            if any(p.get('pod_uid') == observed['pod_uid'] or p.get('generation') == observed['generation'] for p in proposals):
                 return {'phase': 'observing', 'reason': 'episode-already-handled'}
             if proposals and (self.clock() - utc_time((read_state(self.store, proposals[-1]['proposal_id']) or {})['updated_at'])).total_seconds() < 60:
                 return {'phase': 'observing', 'reason': 'cooldown'}
@@ -351,14 +375,24 @@ class MemoryController:
                 if (receipt['decision'] != 'approve' or not receipt['approved_by'].strip()
                     or not utc_time(proposal['created_at']) <= utc_time(receipt['approved_at']) <= self.clock()):
                     raise Blocked('oom-demo-invalid-approval')
+                mode = receipt.get('approval_mode')
+                manual = mode == approvals.MANUAL_MEMORY_RECOVERY
+                if mode is not None and (not manual or recovery_change(proposal) is None
+                                         or proposal['target'] != asdict(self.target)):
+                    raise Blocked('oom-demo-invalid-manual-recovery')
+                if manual:
+                    state = self._save(state, approval_mode=mode)
                 current = await self.incidents.get(proposal['incident_id'])
                 if current['revision'] != proposal['incident_revision']:
                     raise Blocked('oom-demo-incident-revision-changed')
                 observed = await self.kube.observe(self.clock())
-                if (observed['memory'] != BEFORE or observed['ready'] or not observed['fresh_oom']
-                    or observed['pod_uid'] != proposal['pod_uid'] or observed['generation'] != proposal['generation']
-                    or observed['template_sha256'] != proposal['template_sha256']):
+                if (observed['memory'] != BEFORE or observed['target'] != asdict(self.target)
+                    or (not manual and (observed['ready'] or not observed['fresh_oom']
+                        or observed['pod_uid'] != proposal['pod_uid'] or observed['generation'] != proposal['generation']
+                        or observed['template_sha256'] != proposal['template_sha256']))):
                     raise Blocked('oom-demo-target-or-evidence-changed')
+                if manual:
+                    state = self._save(state, recovery_baseline=observed)
                 await self.kube.patch(observed, dry_run=True)
                 self._enabled()
                 if self.clock() >= utc_time(proposal['expires_at']):
@@ -366,6 +400,8 @@ class MemoryController:
                 # Persist consumed approval and intent BEFORE the only mutation.
                 used = {'proposal_id': proposal['proposal_id'], 'approval_sha256': stable_id(receipt),
                         'runbook': RUNBOOK, 'before': observed, 'claimed_at': timestamp(self.clock())}
+                if manual:
+                    used['approval_mode'] = mode
                 approvals.create_slot(self.store, 'used', proposal['proposal_id'], used)
                 state = self._save(state, phase='dispatching', dispatches=1, before=observed,
                     deadline=timestamp(self.clock() + timedelta(minutes=5)), reason='approved-memory-limit-change')
@@ -383,9 +419,11 @@ class MemoryController:
                 # incident transitions are saved. Reobserve all policy guards
                 # and persist the refreshed CAS preconditions before sending.
                 observed = await self.kube.observe(self.clock())
-                if (observed['memory'] != BEFORE or observed['ready'] or not observed['fresh_oom']
-                    or observed['pod_uid'] != proposal['pod_uid'] or observed['generation'] != proposal['generation']
-                    or observed['template_sha256'] != proposal['template_sha256']):
+                baseline = state['recovery_baseline'] if manual else proposal
+                if (observed['memory'] != BEFORE or observed['target'] != asdict(self.target)
+                    or (not manual and (observed['ready'] or not observed['fresh_oom']))
+                    or observed['pod_uid'] != baseline['pod_uid'] or observed['generation'] != baseline['generation']
+                    or observed['template_sha256'] != baseline['template_sha256']):
                     raise Blocked('oom-demo-target-or-evidence-changed-before-dispatch')
                 state = self._save(state, before=observed)
                 self._enabled()
@@ -423,10 +461,11 @@ class MemoryController:
         if self.clock() >= utc_time(state['deadline']):
             return await self._finish(proposal, state, 'escalated', 'verification-timeout')
         observed = await self.kube.observe(self.clock())
-        if (observed['memory'] != AFTER or observed['generation'] != proposal['generation'] + 1
-            or observed['template_sha256'] != proposal['template_sha256']):
+        baseline = state['recovery_baseline'] if state.get('approval_mode') == approvals.MANUAL_MEMORY_RECOVERY else proposal
+        if (observed['memory'] != AFTER or observed['generation'] != baseline['generation'] + 1
+            or observed['template_sha256'] != baseline['template_sha256']):
             raise Blocked('oom-demo-unexpected-post-action-change')
-        if not observed['ready'] or observed['pod_uid'] == proposal['pod_uid']:
+        if not observed['ready'] or observed['pod_uid'] == baseline['pod_uid']:
             return self._save(state, reason='waiting-for-ready-replacement', healthy_since=None,
                               successful_probes=0, last_probe_at=None)
         if observed['oom'] or observed['restart_count'] != 0 or not await self.kube.probe():
@@ -447,16 +486,26 @@ class MemoryController:
         return state
 
     async def _finish(self, proposal, state, phase, reason):
+        # Even a kill switch/expiry that prevents dispatch retains the explicit
+        # human mode in the terminal audit; this never authorizes an action.
+        if state.get('approval_mode') is None:
+            receipt = approvals.read_slot(self.store, 'approval', proposal['proposal_id'])
+            if (receipt and receipt.get('approval_mode') == approvals.MANUAL_MEMORY_RECOVERY
+                and receipt.get('decision') == 'approve' and receipt.get('proposal_sha256') == stable_id(proposal)
+                and recovery_change(proposal) is not None and proposal['target'] == asdict(self.target)):
+                state = {**state, 'approval_mode': approvals.MANUAL_MEMORY_RECOVERY}
         state = self._save(state, phase=phase, reason=reason)
         outcome = {'runbook': RUNBOOK, 'proposal_id': proposal['proposal_id'], 'phase': phase,
                    'reason': reason, 'dispatches': state['dispatches'], 'updated_at': state['updated_at']}
+        if state.get('approval_mode') == approvals.MANUAL_MEMORY_RECOVERY:
+            outcome['approval_mode'] = state['approval_mode']
         if approvals.read_slot(self.store, 'outcome', proposal['proposal_id']) is None:
             approvals.create_slot(self.store, 'outcome', proposal['proposal_id'], outcome)
         if phase == 'recovered':
             current = await self.incidents.get(proposal['incident_id'])
             if current['context']['lifecycle_stage'] == 'CLOSED' and (
                 current['payload']['state'] != 'recovered'
-                or current['context']['recovery_source'] != 'action'
+                or current['context']['recovery_source'] != ('manual' if state.get('approval_mode') == approvals.MANUAL_MEMORY_RECOVERY else 'action')
                 or current['context']['availability'] != 'ELIGIBLE'
             ):
                 raise Blocked('oom-demo-terminal-incident-changed')
