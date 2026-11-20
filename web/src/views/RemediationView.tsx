@@ -65,12 +65,10 @@ export function RemediationView({
     });
   }, [isEn]);
 
+  const focusedProposalId = remediations.find((r) => r.incidentId === focusIncidentId)?.id;
   React.useEffect(() => {
-    if (focusIncidentId) {
-      const match = remediations.find((r) => r.incidentId === focusIncidentId);
-      if (match) setSelectedId(match.id);
-    }
-  }, [focusIncidentId, remediations]);
+    if (focusedProposalId) setSelectedId(focusedProposalId);
+  }, [focusedProposalId]);
 
   const activeProposal =
     remediations.find((r) => r.id === selectedId) ?? remediations[0];

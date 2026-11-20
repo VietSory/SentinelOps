@@ -243,10 +243,10 @@ export default function App({live}: {live?:LiveVisualBinding}) {
   }, [locale, isEn, overrides, live]);
 
   React.useEffect(()=>{
-    if(live?.connected && incidents.length && !incidents.some(i=>i.id===selectedIncidentId)){
+    if(live?.connected && incidents.length && !incidents.some(i=>i.id===selectedIncidentId) && !remediations.some(r=>r.incidentId===selectedIncidentId)){
       setSelectedIncidentId(incidents[0].id);live.onSelect(incidents[0].id);
     }
-  },[live?.connected,incidents,selectedIncidentId]);
+  },[live?.connected,incidents,remediations,selectedIncidentId]);
   const selectIncident=(id:string)=>{setSelectedIncidentId(id);live?.onSelect(id);};
   const demoMutated = Object.keys(overrides).length > 0;
 
@@ -621,7 +621,7 @@ export default function App({live}: {live?:LiveVisualBinding}) {
                     onReject={handleRejectRemediation}
                     onOpenIncident={openIncident}
                     live={Boolean(live)}
-                    onSelectionChange={live?.onSelect}
+                    onSelectionChange={live?selectIncident:undefined}
                   />
                 )}
                 {section==='remediation' && live && <div className="mt-6 space-y-6">{live.reviewPanel}{live.journal}</div>}

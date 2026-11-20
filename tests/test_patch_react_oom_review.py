@@ -14,7 +14,7 @@ from scripts import patch_react_oom_review as patcher
 def assets(tmp_path, monkeypatch):
     files = {
         "LiveApp-DryBTgPw.js": 'const preserve="unrelated";function Ge({row}){return row;}function Ke(){return 1;}',
-        "App-CYliiKd_.js": 'const jQ={expired:{vi:"Hết hạn",en:"Expired",tone:"neutral"}};' + patcher.STATUS_RENDERER + 'const preserve="auth-and-api";',
+        "App-CYliiKd_.js": 'const jQ={expired:{vi:"Hết hạn",en:"Expired",tone:"neutral"}};' + patcher.STATUS_RENDERER + 'const preserve="auth-and-api";function SelectionFixtures(){' + patcher.SELECTION_EFFECT + patcher.APP_SELECTION_GUARD + 'return {' + patcher.APP_SELECTION_CALLBACK + ',confidence:' + patcher.CONFIDENCE_CELL + '};}',
         "client.js": "export function memoryReview(row) { return row; }",
         "index.html": "unchanged entrypoint",
         "style.css": "unchanged CSS",
@@ -210,3 +210,34 @@ if(row.status!=='pending')row.proposal.expires_at=new Date(now-1).toISOString();
     assert result["buttons"][1] == {"disabled": status != "pending", "label": "Reject"}
     assert [decision[1] for decision in result["decisions"]] == (["approve", "reject"] if status == "pending" else ["approve"])
     assert [item[1] for item in result["facts"] if item[0] == "Kubernetes failure"] == ["—"]
+
+
+def test_live_manual_selection_survives_feed_refresh_and_off_page_incident(assets):
+    patcher.apply(assets)
+    code = r"""
+const h={jsx:(type,props)=>props,jsxs:(type,props)=>props};
+let slots=[],slot=0,pending=[],selected='old-proposal',o='old-incident';
+const selections=[],s=id=>{o=id;},f=id=>{selected=id;};
+const e={connected:true,onSelect:id=>selections.push(id)},b=id=>{s(id);e.onSelect(id);};
+const M={useEffect:(fn,deps)=>{const index=slot++,old=slots[index];
+ if(!old||old.length!==deps.length||deps.some((value,i)=>!Object.is(value,old[i])))pending.push(fn);slots[index]=deps;}};
+let rows=[{id:'old-proposal',incidentId:'old-incident',confidence:NaN},
+ {id:'manual-proposal',incidentId:'manual-incident',confidence:NaN}];
+const g=[{id:'old-incident'}];let r,n,y,v,c=true;
+""" + (assets / "App-CYliiKd_.js").read_text() + r"""
+function render(){slot=0;pending=[];r=o;n=rows;y=rows;v=rows.find(row=>row.id===selected);
+ const result=SelectionFixtures();pending.forEach(effect=>effect());return result;}
+render();selected='manual-proposal';rows=rows.map(row=>({...row}));
+const clicked=render();
+if(selected!=='manual-proposal')throw Error('Feed identity reset the clicked proposal before selection propagation');
+clicked.onSelectionChange('manual-incident');
+render();
+if(o!=='manual-incident')throw Error('Off-page incident reset App selection');
+rows=rows.map(row=>({...row}));const refreshed=render();
+if(selected!=='manual-proposal'||o!=='manual-incident')throw Error('Tick reset the selected manual recovery');
+if(refreshed.confidence.children!=='Not provided')throw Error('Missing score rendered as NaN');
+console.log(JSON.stringify({selected,incident:o,selections,confidence:refreshed.confidence.children}));
+"""
+    result = node(code)
+    assert result == {"selected": "manual-proposal", "incident": "manual-incident",
+                      "selections": ["manual-incident"], "confidence": "Not provided"}

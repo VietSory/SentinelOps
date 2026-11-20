@@ -32,6 +32,14 @@ MEMORY_PHASES = {
     "blocked": {"vi": "Bị chặn", "en": "Blocked", "tone": "critical"},
     "escalated": {"vi": "Chuyển kỹ sư", "en": "Escalated", "tone": "critical"},
 }
+SELECTION_EFFECT = 'M.useEffect(()=>{if(r){const T=n.find(R=>R.incidentId===r);T&&f(T.id)}},[r,n]);'
+STABLE_SELECTION_EFFECT = 'const manualFocusedProposal=n.find(T=>T.incidentId===r)?.id;M.useEffect(()=>{manualFocusedProposal&&f(manualFocusedProposal)},[manualFocusedProposal]);'
+APP_SELECTION_GUARD = 'M.useEffect(()=>{e!=null&&e.connected&&g.length&&!g.some(C=>C.id===o)&&(s(g[0].id),e.onSelect(g[0].id))},[e==null?void 0:e.connected,g,o]);'
+FEED_SELECTION_GUARD = 'M.useEffect(()=>{e!=null&&e.connected&&g.length&&!g.some(C=>C.id===o)&&!y.some(C=>C.incidentId===o)&&(s(g[0].id),e.onSelect(g[0].id))},[e==null?void 0:e.connected,g,y,o]);'
+APP_SELECTION_CALLBACK = 'onSelectionChange:e==null?void 0:e.onSelect'
+SYNC_SELECTION_CALLBACK = 'onSelectionChange:e?b:void 0'
+CONFIDENCE_CELL = 'h.jsxs("strong",{className:"text-orange-700",children:[v.confidence,"%"]})'
+FINITE_CONFIDENCE_CELL = 'h.jsx("strong",{className:"text-orange-700",children:Number.isFinite(v.confidence)?`${v.confidence}%`:c?"Not provided":"Chưa có điểm"})'
 
 
 def proposal_component() -> str:
@@ -81,6 +89,11 @@ def prepare(assets: Path) -> dict[str, bytes]:
     app = _once(app, "jQ={expired:", "jQ={" + phases + ",expired:")
     fallback = 'Object.prototype.hasOwnProperty.call(jQ,e)?jQ[e]:{vi:"Chưa rõ",en:"Unknown",tone:"neutral"}'
     app = _once(app, STATUS_RENDERER, STATUS_RENDERER.replace("jQ[e]", fallback, 1))
+    for old, new in ((SELECTION_EFFECT, STABLE_SELECTION_EFFECT),
+                     (APP_SELECTION_GUARD, FEED_SELECTION_GUARD),
+                     (APP_SELECTION_CALLBACK, SYNC_SELECTION_CALLBACK),
+                     (CONFIDENCE_CELL, FINITE_CONFIDENCE_CELL)):
+        app = _once(app, old, new)
     return {"LiveApp-DryBTgPw.js": live.encode("utf-8"), "App-CYliiKd_.js": app.encode("utf-8"), "client.js": client, "workspace.js": workspace}
 
 
