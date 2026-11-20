@@ -1,0 +1,79 @@
+.incident-filters {
+  padding: 16px;
+  border: 1px solid var(--line, #dce3ed);
+  border-radius: 10px;
+  background: var(--surface, #ffffff);
+  color: var(--ink, #182230);
+  color-scheme: light;
+}
+
+.incident-filters-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+
+.incident-filters-field {
+  display: flex;
+  flex: 1 1 160px;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.incident-filters-field:first-child { flex-basis: 250px; }
+
+.incident-filters-field input,
+.incident-filters-field select,
+.incident-filters-reset {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--baseline, #a4b2c4);
+  border-radius: 8px;
+  background: var(--surface, #ffffff);
+  color: inherit;
+  font: inherit;
+}
+
+.incident-filters-reset {
+  width: auto;
+  color: var(--blue, #174ea6);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.incident-filters-reset:hover:not(:disabled) { background: var(--blue-tint, #eef4ff); }
+
+.incident-filters :is(input, select, button):focus-visible {
+  outline: 3px solid var(--blue, #174ea6);
+  outline-offset: 3px;
+}
+
+.incident-filters :disabled { opacity: .55; cursor: not-allowed; }
+.incident-filters-summary { margin: 14px 0 4px; font-weight: 650; }
+.incident-filters-note { margin: 4px 0; color: var(--secondary, #475467); font-size: 12px; }
+
+.incident-filters-message {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line, #dce3ed);
+  border-radius: 8px;
+  background: var(--subtle, #f5f7fa);
+  overflow-wrap: anywhere;
+}
+
+.incident-filters-message[hidden] { display: none; }
+.incident-filters-message p { margin: 5px 0 0; font-size: 13px; }
+
+@media (max-width: 480px) {
+  .incident-filters-field,
+  .incident-filters-field:first-child { flex-basis: 100%; }
+  .incident-filters-reset { width: 100%; }
+}

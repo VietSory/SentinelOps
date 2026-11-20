@@ -20,13 +20,13 @@ export class ApiFailure extends Error {
       action_store_unavailable: 'Action history is unavailable. This does not establish that no action occurred.',
       stored_action_unavailable: 'Action history could not be verified. Reload when its evidence is available.',
       explanation_unavailable: 'Explanation is unavailable for this revision. The incident and evidence remain readable.',
-      proposal_store_unavailable: 'Không đọc được store proposal của controller. Hãy thử tải lại.',
-      proposal_changed: 'Proposal đã thay đổi. Tải lại và kiểm tra trước khi quyết định.',
-      proposal_stale: 'Incident đã đổi revision. Proposal cũ không còn được duyệt.',
-      proposal_not_pending: 'Proposal đã hết hạn hoặc đã có quyết định. Tải lại để xem trạng thái.',
-      proposal_review_incomplete: 'Proposal chưa ghim đủ hai image digest để duyệt. Chuyển engineer hoặc chờ proposal mới.',
-      operator_required: 'Cần token operator để xem và duyệt proposal.',
-      approval_scope_required: 'Token chỉ có quyền đọc. Cần scope remediation.approve để quyết định proposal.',
+      proposal_store_unavailable: 'The proposal store is unavailable. Reload to try again.',
+      proposal_changed: 'The proposal changed. Reload and review it before making a decision.',
+      proposal_stale: 'The incident has a newer revision. Review its current proposal before approving.',
+      proposal_not_pending: 'The proposal expired or already has a decision. Reload to see its status.',
+      proposal_review_incomplete: 'Approval requires both image digests. Send the proposal to an engineer or wait for a new one.',
+      operator_required: 'An operator access token is required to review and approve proposals.',
+      approval_scope_required: 'This token has read-only access. Proposal decisions require the remediation.approve scope.',
       timeout: 'The API did not respond in time. Try again.',
       network: 'Cannot reach the API. Check the connection and try again.',
       invalid_response: 'The API returned an unsupported response. Refresh or check its version.',
@@ -58,7 +58,7 @@ export class CognitoLogin {
         !config.scopes.includes(config.read_scope) || !config.scopes.includes(config.approval_scope) ||
         config.read_scope === config.approval_scope || new URL(origin).origin !== origin ||
         !(origin.startsWith('https://') || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin))) {
-      throw new Error('Cấu hình đăng nhập không hợp lệ.');
+      throw new Error('The sign-in configuration is invalid.');
     }
     this.#config = structuredClone(config); this.#storage = storage; this.#crypto = crypto;
     this.#fetch = fetcher; this.#origin = origin; this.#now = now;
@@ -134,7 +134,7 @@ export class CognitoLogin {
       return {accessToken:tokens.access_token,expiresAt:Math.min(access.exp*1000,this.#now()+tokens.expires_in*1000),
         canApprove:access.scope.split(/\s+/).includes(this.#config.approval_scope)};
     } catch {
-      throw new Error('Không hoàn tất đăng nhập Cognito. Hãy đăng nhập lại.');
+      throw new Error('Cognito sign-in could not complete. Sign in again.');
     }
   }
   expireAt(time, disconnect) {

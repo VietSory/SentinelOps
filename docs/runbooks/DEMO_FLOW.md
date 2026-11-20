@@ -2,6 +2,10 @@
 
 Áp dụng cho branch `feat/grafana-incident-dashboard`, EKS `sentinelops-dev`, context `sentinelops-demo`, namespace `sentinelops-b-actions`. Mốc lịch sử bên dưới là **UTC ngày 19/11/2026**; giờ Việt Nam = UTC + 7. Các lệnh dành cho người vận hành chạy trong buổi demo; việc viết runbook không phải một lượt kiểm chứng live mới.
 
+**Trạng thái bàn giao 19/11:** đã deploy riêng [`fault-console`](../delivery/FAULT_CONSOLE_DEPLOY_2026-11-19.md), chỉ đọc qua `http://127.0.0.1:8765`; mọi thao tác OFF, không runner B7/B9, token ServiceAccount, Service/Ingress hoặc RBAC cho console. 12 workload cũ giữ nguyên spec/image, tổng hiện **13 Deployment**. Chạy phần chuẩn bị/baseline dưới đây trước; các lượt gây lỗi và duyệt chỉ thực hiện trong phiên được cho phép riêng, không tự bật fault từ bước kiểm console.
+
+CFG2 đã đổi **source** sang freshness 900 và báo 939 tests PASS, **chưa có bằng chứng controller live đã nhận thay đổi**. Digest/spec controller trong snapshot trước/sau deploy console không đổi. Trước lượt C phải xác minh policy thực sự đang chạy; không dùng cửa sổ 900 để duyệt nếu chưa xác minh. B9-fix có 90 offline PASS nhưng chưa E2E/watchdog độc lập, nên lượt C còn chờ review recovery/quyền rollback. Admission đã sửa CEL, vẫn **Audit/Warn + Ignore**, chưa Deny. Email mới có thiết kế AL1; GET của task cha **t6k** cho topic `sentinelops-dev-incidents` trả `[]`, AL2 bị ngắt; chưa xác nhận subscription/delivery, không chạy bootstrap/apply email từ runbook này.
+
 > **QUAN TRỌNG NHẤT — NGƯỜI BẤM DUYỆT PHẢI ĐỨNG SẴN.**
 > Owner chọn freshness **900 giây cho policy mới để operator có đủ thời gian phản ứng**; RCA freshness tính từ `RCA.as_of` và được kiểm lại **lúc executor thực thi**. Policy 180 giây giữ để đọc action lịch sử. Cửa sổ thao tác thường **còn ít hơn 900 giây khi proposal hiện ra**. **TTL proposal 15 phút không bảo đảm đủ 15 phút để thực thi từ lúc UI xuất hiện.** Đăng nhập/MFA, đọc quy trình và chuẩn bị CLI trước khi bơm lỗi; khi proposal mới xuất hiện, kiểm đúng bằng chứng rồi duyệt ngay. Không dành thời gian này để thuyết trình Jaeger hoặc thiết lập MFA.
 >
@@ -18,7 +22,7 @@ Phân công một người điều phối màn hình, một operator chạy term
 3. Mở sẵn [Grafana `sentinelops-slo`](https://dr76usfhbe2w8.cloudfront.net/grafana/d/sentinelops-slo), đăng nhập Cognito trước. Chọn **Last 15 minutes**, refresh **5s**, hiển thị Payment/Checkout/Inventory. Mở thêm [dashboard nghiệp vụ](https://dr76usfhbe2w8.cloudfront.net/grafana/d/sentinelops-incidents) để xem error ratio và breach.
 4. Mở Jaeger qua port-forward ở dưới. Chuẩn bị terminal dự phòng duyệt tại mục 5, điền danh tính on-call trước; proposal ID chỉ lấy từ **lượt mới**.
 
-### Terminal điều khiển: kiểm đúng cụm, 12 Deployment và traffic 2 replica
+### Terminal điều khiển: kiểm đúng 12 Deployment cũ, console tùy chọn và traffic 2 replica
 
 Chạy tại thư mục gốc repo. Các terminal mới cũng cần `AWS_PROFILE=console`; hàm `k` chỉ tồn tại trong terminal đã khai báo.
 
@@ -31,8 +35,16 @@ git branch --show-current
 aws sts get-caller-identity --query Account --output text
 k get deployments,pods,pvc
 k get deployments -o json | jq -e '
-  (.items | length) == 12 and
-  all(.items[];
+  [.items[] | select(.metadata.name != "fault-console")] as $baseline |
+  [.items[] | select(.metadata.name == "fault-console")] as $console |
+  ($baseline | map(.metadata.name) | sort) == [
+    "checkout-service", "grafana", "inventory-service", "jaeger",
+    "otel-collector", "payment-service", "postgres", "prometheus",
+    "remediation-controller", "sentinelops-health-worker",
+    "sentinelops-incident-worker", "sentinelops-traffic"
+  ] and
+  ($console | length) <= 1 and
+  all($baseline[];
     (.spec.replicas // 1) > 0 and
     (.status.observedGeneration // 0) >= .metadata.generation and
     (.status.updatedReplicas // 0) == (.spec.replicas // 1) and
@@ -44,7 +56,7 @@ k get deployment sentinelops-traffic -o json | jq -e '
 k logs deployment/sentinelops-traffic --all-pods=true --tail=10
 ```
 
-Kết quả cần có: đúng branch, account **`833925774773`**, hai phép kiểm `jq` trả **`true`/exit 0**, PVC cần dùng `Bound`, traffic có request mới. **12 Deployment Ready không có nghĩa 12 Pod**: traffic có 2 replica, Pod controller có 2 container. Nếu số lượng/Ready khác, xử lý trước buổi; không bắt đầu bơm lỗi. Riêng traffic bị giảm replica, trả về cấu hình demo rồi chạy lại phép kiểm:
+Kết quả cần có: đúng branch, account **`833925774773`**, hai phép kiểm `jq` trả **`true`/exit 0**, PVC cần dùng `Bound`, traffic có request mới. Phép kiểm tên/readiness áp dụng đủ **12 Deployment cũ**, chỉ cho phép thêm `fault-console` tùy chọn: tổng hợp lệ là **12 hoặc 13**, hiện tại là **13**. Thiếu workload cũ, thêm workload khác hoặc workload cũ chưa Ready đều không đạt. Console được kiểm riêng nếu trình chiếu, không thay thế baseline nghiệp vụ. **12 Deployment cũ Ready không có nghĩa 12 Pod**: traffic có 2 replica, Pod controller có 2 container. Nếu baseline khác, xử lý trước buổi; không bắt đầu bơm lỗi. Riêng traffic bị giảm replica, trong phiên demo đã được phép, trả về cấu hình demo rồi chạy lại phép kiểm:
 
 ```bash
 k scale deployment/sentinelops-traffic --replicas=2
@@ -60,6 +72,24 @@ aws cognito-idp admin-get-user \
 ```
 
 Cần `Enabled=true`, `Status=CONFIRMED`, MFA có `SOFTWARE_TOKEN_MFA`, và **thử login thật thành công**. Lệnh admin không thay thế bước enroll của người dùng.
+
+### Console tùy chọn: chỉ đọc, mọi thao tác OFF
+
+Nếu trình chiếu console, dùng port-forward sẵn có; chỉ mở lệnh sau ở terminal riêng nếu chưa có phiên trên cổng 8765:
+
+```bash
+AWS_PROFILE=console kubectl --context sentinelops-demo -n sentinelops-b-actions port-forward --address 127.0.0.1 deployment/fault-console 8765:8765
+```
+
+Mở **http://127.0.0.1:8765**, giữ nguyên loopback/port để khớp Host/Origin guard. Trong terminal điều khiển, kiểm GET duy nhất:
+
+```bash
+curl -fsS --noproxy '*' http://127.0.0.1:8765/api/status | jq -e '
+  .enabled == false and .deployment.configured == false and
+  .deployment.state == "idle" and .busy == false'
+```
+
+Cần `true`/exit 0; mọi nút gây lỗi, KHÔI PHỤC và deploy vẫn khóa. Nếu không đạt, dừng dùng console để kiểm tra, không tự đổi gate/runner. Trạng thái từng service phải là GET thật đúng tên; lỗi/404/timeout là chưa đọc được, không tự bật endpoint fault hoặc suy ra healthy. Fault `healthy` không xác minh image, telemetry hay toàn bộ replica. Không gửi POST để kiểm gate trong bước này. Nếu không dùng console, bỏ qua mục này và tiếp tục đầy đủ baseline Prometheus/Jaeger/controller bên dưới.
 
 ### Port-forward, readiness và baseline
 
@@ -120,7 +150,7 @@ Lượt duyệt cần controller có `--policy-enabled`, kill switch không bậ
 
 ### Chuẩn bị runner cho lượt proposal/Duyệt
 
-Workspace vận hành có bộ **B9** tại `.herdr/out/deploy/`, mở rộng cách ghi receipt của B7 để **giữ image lỗi chờ duyệt**. Đây là bộ công cụ cục bộ đã chuẩn bị, không phải file được bảo đảm có trong một clone repo mới, và không phải bằng chứng B9 đã rollback thành công. Owner **t43** kiểm tra/review bộ này trước buổi, đúng ghi chú `PREPARED ONLY` của runner. Kiểm file/lỗi cú pháp mà chưa gây lỗi:
+Workspace vận hành có bộ **B9** tại `.herdr/out/deploy/`, mở rộng cách ghi receipt của B7 để **giữ image lỗi chờ duyệt**. Đây là bộ công cụ cục bộ đã chuẩn bị, không phải file được bảo đảm có trong một clone repo mới, và không phải bằng chứng B9 đã rollback thành công. B9-fix báo 90 offline PASS; hiện **từ chối fallback PATCH** do chưa có khóa chung với approval/controller. Timeout, Ctrl-C hoặc chưa có approval không bảo đảm tự khôi phục; SIGKILL/mất node chưa có watchdog độc lập. Owner **t43** cần chốt recovery/quyền rollback độc quyền và review trước lượt C; kiểm cú pháp PASS không mở gate chạy thật. Kiểm file/lỗi cú pháp mà chưa gây lỗi:
 
 ```bash
 check_b9_files() {
@@ -137,7 +167,7 @@ check_b9_files() {
 check_b9_files
 ```
 
-Nếu thiếu bộ B9 hoặc chưa hoàn tất review, chọn ngay lượt A/B dưới đây và trình bày proposal B7 đã lưu; **không hứa có Duyệt live**. Không dùng `b7_run.sh` cũ cho lượt Duyệt: nó tự khôi phục image ngay sau `B7_EVIDENCE_PASS`, khiến target của proposal thay đổi. Không thay bằng `kubectl set image` đơn lẻ: đổi image không tự tạo deployment-change receipt.
+Nếu thiếu bộ B9 hoặc chưa hoàn tất review recovery/policy live, giữ baseline chỉ đọc và trình bày proposal B7 đã lưu; **không hứa có Duyệt live**. A/B cũng chỉ chạy khi được cho phép riêng. Không dùng `b7_run.sh` cũ cho lượt Duyệt: nó tự khôi phục image ngay sau `B7_EVIDENCE_PASS`, khiến target của proposal thay đổi. Không thay bằng `kubectl set image` đơn lẻ: đổi image không tự tạo deployment-change receipt.
 
 ## 2. Nhịp trình diễn và số đo được phép nói
 
@@ -156,6 +186,8 @@ Lời dẫn: “Chúng ta theo dõi từ lỗi thật, số liệu nghiệp vụ
 **Các số trên thuộc các lượt khác nhau.** KB1/KB2 dùng fault trong RAM, không có deployment change nên **không sinh proposal rollback**. B7 đổi image có recorder, capture v6/model/receipt và RCA không abstain mới sinh proposal; cả **2/2 lượt B7 có proposal nhưng chưa duyệt, chưa chạy rollback tự động** trong nguồn bàn giao. Giữ đúng phân biệt này khi thuyết trình.
 
 ## 3. Bơm lỗi: chọn đúng lượt
+
+Các lệnh trong mục này dành cho phiên gây lỗi đã được owner cho phép sau baseline. Bản console đang deploy vẫn chỉ đọc; đọc runbook hoặc hoàn tất GET preflight không cấp phép bật fault/B7/B9.
 
 ### Lượt A — Latency 950 ms, Grafana → trace → incident
 
@@ -196,7 +228,7 @@ Mở incident `critical`, giải thích lỗi Payment lan tới Checkout. Lượ
 
 ### Lượt C — Đổi image có receipt → proposal → Duyệt
 
-Chạy sau khi mọi chuẩn bị mục 1 hoàn tất, cả ba service khỏe, không còn fault A/B, on-call đã đăng nhập và đứng sẵn. Trên máy vận hành có bộ B9 đã review, owner t43 chạy ở terminal riêng:
+**Hiện còn pending, chưa chạy lượt C.** Chỉ dùng lệnh dưới sau khi owner cho phép riêng, đã review phương án recovery/quyền rollback độc quyền, xác minh policy live và mọi chuẩn bị mục 1 hoàn tất: cả ba service khỏe, không còn fault A/B, on-call đã đăng nhập và đứng sẵn. Trên máy vận hành có bộ B9 đã review, owner t43 chạy ở terminal riêng; không chạy trong pod console:
 
 ```bash
 B9_EXECUTE=1 bash .herdr/out/deploy/b9_hold.sh 720
@@ -239,7 +271,7 @@ k logs deployment/sentinelops-incident-worker --since=10m --tail=80
 k logs deployment/remediation-controller -c remediation-controller --since=10m --tail=80
 ```
 
-Nếu RCA abstain/engineer hoặc source thiếu, trình bày đúng lý do và để runner kết thúc/khôi phục. Không cam kết mỗi lượt đều có proposal. B9 chưa có approval sẽ khôi phục khi hết chờ; **đã có approval thì giao quyền rollback cho controller**, không tự tranh PATCH. Nếu action bị blocked/escalated, chuyển xử lý vận hành theo mục 7, không gọi đó là demo tự sửa thành công.
+Nếu RCA abstain/engineer hoặc source thiếu, trình bày đúng lý do và theo dõi runner kết thúc/xác minh recovery. Không cam kết mỗi lượt đều có proposal. B9 hết chờ sẽ dừng Job và kiểm image/Ready; **không tự PATCH khôi phục kể cả chưa có approval**. Chưa xác minh hồi phục thì báo URGENT và exit khác 0. Đã có approval thì theo dõi controller, không tự tranh PATCH. Nếu action bị blocked/escalated hoặc chưa hồi phục, chuyển xử lý vận hành theo mục 7, không gọi đó là demo tự sửa thành công.
 
 ## 4. Jaeger: tìm và giải thích cùng một trace
 
@@ -350,8 +382,8 @@ for kind in ("approval", "used", "outcome"):
 
 ## 7. Dọn sau demo và xác nhận hồi phục
 
-1. **Gỡ fault A/B**, kể cả demo bị ngắt: `fault_payment healthy 0`. Nếu lỗi xảy ra ở terminal trước khi khai báo hàm, chạy lại phần khai báo ở mục 3 rồi gỡ. Với lượt C, để runner/controller hoàn thành quản lý image; fault `healthy` không gỡ latency được đóng trong image regression.
-2. **B9 chưa có approval:** kết thúc bình thường hoặc Ctrl-C để runner dừng Job và khôi phục bằng điều kiện UID/image/resourceVersion; phải thấy xác nhận `RESTORED` và rollout xong. **B9 đã có approval:** theo dõi controller, không chạy `set image`/`rollout undo` song song. Nếu blocked/escalated/timeout, kiểm outcome và journal theo [Controlled remediation](CONTROLLED_REMEDIATION.md); chỉ khôi phục thủ công sau khi xác minh không còn action đang thực thi, và ghi đúng là khôi phục thủ công. Không bỏ buổi khi Payment vẫn lỗi hoặc quyền điều khiển chưa rõ.
+1. **Nếu phiên được phép đã chạy fault A/B**, gỡ kể cả demo bị ngắt: `fault_payment healthy 0`. Nếu chỉ xem baseline/console chỉ đọc, không gửi POST gỡ lỗi. Nếu lỗi xảy ra ở terminal trước khi khai báo hàm, chạy lại phần khai báo ở mục 3 rồi gỡ. Với lượt C, theo dõi runner/controller và recovery; fault `healthy` không gỡ latency được đóng trong image regression.
+2. **Nếu đã chạy B9:** kết thúc bình thường/Ctrl-C chỉ dừng Job và xác minh image gốc/UID, rollout/Ready; không bảo đảm khôi phục, kể cả chưa có approval. B9-fix không fallback PATCH; nếu chưa hồi phục sẽ báo URGENT và exit khác 0. Kiểm proposal/approval/action/outcome/journal theo [Controlled remediation](CONTROLLED_REMEDIATION.md). Owner phải xác nhận Job/pod đã dừng, không còn action đang thực thi, giành quyền rollback độc quyền rồi mới khôi phục thủ công bằng snapshot/CAS đã review và xác minh image gốc Ready cùng telemetry; ghi đúng là khôi phục thủ công. Đã có approval thì theo dõi controller, không chạy `set image`/`rollout undo` song song. Không bỏ buổi khi Payment vẫn lỗi hoặc quyền điều khiển chưa rõ; SIGKILL/mất node không được trap bảo đảm.
 3. Kiểm image, rollout và số liệu; giữ **traffic 2 replica** đến khi có đủ bằng chứng hồi phục:
 
 ```bash
@@ -379,4 +411,5 @@ k get deployments
 - [HANDOVER_2026-11-19](../delivery/HANDOVER_2026-11-19.md): truy cập, dashboard, worker metric trống, `/ready` bị edge chặn, known-good và các snapshot hạ tầng. Ghi chú policy tắt ở snapshot sớm đã được mốc B7 cập nhật; luôn kiểm live trước buổi.
 - [EPOCH_MIGRATION_2026-11-19](../delivery/EPOCH_MIGRATION_2026-11-19.md): stream/model/receipt B7, yêu cầu recorder khi đổi image.
 - [AWS_DEMO_ACCESS_AND_FLOWS](../delivery/AWS_DEMO_ACCESS_AND_FLOWS.md): CLI duyệt, receipt, TTL/freshness và verification. Đối chiếu mã: [approve_runbook.py](../../scripts/approve_runbook.py), [Policy cố định freshness](../../src/sentinelops/remediation/domain.py), [kiểm RCA.as_of lúc execute](../../src/sentinelops/remediation/authority.py), [controller chuyển reason khi evidence cũ](../../src/sentinelops/remediation/controller.py).
-- Cặp span **966/989 ms**, baseline span **3,3–10,8/30 ms**, budget **0%** và yêu cầu kiểm **12 Deployment/traffic 2 replica** là số liệu/điều kiện operator cung cấp trực tiếp cho runbook này. Không có trace ID hoặc timestamp riêng cho các số span/budget trong tài liệu delivery đã đọc, nên không tự bổ sung. Bộ B9 là hướng dẫn dùng công cụ chuẩn bị cục bộ, tách khỏi số đo B7 đã chạy thật.
+- [FAULT_CONSOLE_DEPLOY_2026-11-19](../delivery/FAULT_CONSOLE_DEPLOY_2026-11-19.md): receipt rollout chỉ đọc, digest, GET thật và đối chiếu 12 workload cũ; xem thêm [Console README](../../scripts/demo_console/README.md) và [package deployment](../../scripts/demo_console/deployment/README.md). [Handoff t6k](../../.herdr/out/hc-console-handoff.md) bổ sung bảng done/pending/evidence/next cho sáu việc; artifact `.herdr/out` thuộc workspace vận hành, không bảo đảm có trong clone mới.
+- Cặp span **966/989 ms**, baseline span **3,3–10,8/30 ms**, budget **0%** và yêu cầu kiểm **12 Deployment cũ/traffic 2 replica** là số liệu/điều kiện operator cung cấp trực tiếp cho runbook này. Console tùy chọn làm tổng tăng lên 13, không đổi baseline cũ. Không có trace ID hoặc timestamp riêng cho các số span/budget trong tài liệu delivery đã đọc, nên không tự bổ sung. Bộ B9 là hướng dẫn dùng công cụ chuẩn bị cục bộ, tách khỏi số đo B7 đã chạy thật.

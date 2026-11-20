@@ -19,6 +19,31 @@ import httpx
 from sentinelops.telemetry.core import stable_id
 
 
+UI_ASSETS = (
+    'app.js','client.js','workspace.js','styles.css',
+    'deeplinks.js','filters.js','summary.js','proposalwatch.js',
+    'deeplinks.css','filters.css','summary.css','proposalwatch.css',
+)
+UI_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+          "img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+
+
+def verify_ui_assets(client):
+    for path in ('/ui/', *(f'/ui/assets/{name}' for name in UI_ASSETS)):
+        for method in ('get','head'):
+            response = getattr(client,method)(path)
+            assert response.status_code == 200, f'{method.upper()} {path}: {response.status_code}'
+            expected_type = 'text/html' if path == '/ui/' else 'text/css' if path.endswith('.css') else 'text/javascript'
+            assert response.headers['content-type'].split(';')[0] == expected_type, path
+            assert response.headers['content-security-policy'] == UI_CSP, path
+            assert response.headers['x-content-type-options'] == 'nosniff', path
+    for name in ('index.html','routes.py','private.js','private.css','..%2F..%2Fapi_settings.py'):
+        for method in ('get','head'):
+            response = getattr(client,method)('/ui/assets/'+name)
+            assert response.status_code == 404, name
+    return {'assets_checked':len(UI_ASSETS),'asset_methods':['GET','HEAD'],'strict_csp':True}
+
+
 def fixture_envelope(incident, revision, after=0):
     events = [{'event_id':str(uuid5(NAMESPACE_URL,f'fixture/{incident}/{i}')),'incident_id':incident,'revision':i,'event_type':'incident.revised',
         'lifecycle_stage':'ESCALATED','actor':'fixture-ui-only','reason':'Software fixture, not observed source evidence',
@@ -128,7 +153,7 @@ def exercise_fixtures(page, base, output, expect):
         if url.path == '/v1/runbook-proposals':
             # Without this the proposals panel reached the real test server and,
             # depending on timing, added a second alert inside #detail-pane.
-            assert route.request.method == 'GET' and query.get('incident_id')
+            assert route.request.method == 'GET' and query.get('limit') == ['100']
             if outage['proposals']:
                 route.fulfill(status=503,json={'code':'proposal_store_unavailable','request_id':'fixture-proposal-outage'});return
             route.fulfill(json={'items':[],'has_more':False});return
@@ -141,7 +166,12 @@ def exercise_fixtures(page, base, output, expect):
     page.route('**/ready',reply);page.route('**/ready/incidents',reply)
     page.route('**/v1/incidents**',reply);page.route('**/v1/actions/**',reply)
     page.route('**/v1/runbook-proposals**',reply)
-    page.goto(base+'/ui/',wait_until='networkidle')
+    page.emulate_media(color_scheme='dark')
+    page.goto(base+'/ui/#lang=vi',wait_until='networkidle')
+    expect(page.locator('html')).to_have_attribute('lang','en')
+    expect(page.locator('html')).to_have_css('color-scheme','light')
+    expect(page.locator('html')).to_have_css('background-color','rgb(255, 255, 255)')
+    expect(page.get_by_role('heading',name='Incident workspace',exact=True)).to_be_visible()
     page.locator('#nav-explanation').click()
     expect(page.locator('#notice')).to_contain_text('Connect to your workspace, then choose an incident')
     expect(page.locator('#api-token')).to_be_focused()
@@ -152,6 +182,13 @@ def exercise_fixtures(page, base, output, expect):
     expect(page.locator('#notice')).to_contain_text('Token was rejected')
     page.locator('#api-token').fill(token); page.get_by_role('button',name='Connect',exact=True).click()
     expect(page.locator('[data-testid=incident-row]')).to_have_count(1)
+    expect(page.locator('.incident-summary__card--loaded dd')).to_have_text('1')
+    expect(page.locator('.incident-summary__metric--high dd')).to_have_text('1')
+    expect(page.locator('#slot-filters .incident-filters')).to_have_count(1)
+    expect(page.locator('#slot-summary .incident-summary')).to_have_count(1)
+    expect(page.locator('#slot-deeplinks .incident-deeplinks')).to_have_count(1)
+    expect(page.locator('#slot-proposalwatch > *')).to_have_count(1)
+    expect(page.locator('#metric-loaded')).to_have_count(0)
     expect(page.locator('#model-status')).to_have_text('Unavailable')
     assert page.locator('#api-token').input_value() == ''
     assert token not in page.locator('body').inner_text()
@@ -159,13 +196,23 @@ def exercise_fixtures(page, base, output, expect):
     page.locator('#nav-actions').click()
     expect(page.locator('#notice')).to_contain_text('Choose an incident from the feed')
     page.locator('#load-more').click(); expect(page.locator('[data-testid=incident-row]')).to_have_count(2)
+    expect(page.locator('.incident-summary__card--loaded dd')).to_have_text('2')
+    search = page.get_by_role('searchbox',name='Search incident ID')
+    search.fill('INC-FIXTURE-B')
+    expect(page.locator('[data-testid=incident-row]')).to_have_count(1)
+    expect(page.get_by_role('button',name='Open INC-FIXTURE-B, revision 1',exact=True)).to_be_visible()
+    search.fill('');expect(page.locator('[data-testid=incident-row]')).to_have_count(2)
+    page.get_by_role('combobox',name='Severity',exact=True).select_option('high')
+    expect(page.locator('[data-testid=incident-row]')).to_have_count(1)
+    page.get_by_role('combobox',name='Severity',exact=True).select_option('')
+    expect(page.locator('[data-testid=incident-row]')).to_have_count(2)
     page.locator('#state-filter').select_option('recovered'); page.get_by_role('button',name='Apply filters').click()
     expect(page.get_by_text('No incidents in this view',exact=True)).to_be_visible()
     page.locator('#state-filter').select_option(''); page.get_by_role('button',name='Apply filters').click()
     page.get_by_role('button',name='Open INC-FIXTURE-A, revision 3',exact=True).click()
     expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
     proposals = page.get_by_test_id('runbook-proposals')
-    expect(proposals).to_contain_text('Không có đề xuất cho revision này.')
+    expect(proposals).to_contain_text('No proposals for this revision.')
     expect(proposals.get_by_role('alert')).to_have_count(0)
     expect(page.get_by_text('Diagnostic qualification not exposed',exact=True)).to_be_visible()
     page.locator('.reference').click()
@@ -186,13 +233,13 @@ def exercise_fixtures(page, base, output, expect):
     outage['explanation']=True;page.get_by_role('button',name='Reload explanation',exact=True).click()
     expect(page.locator('#detail-pane .detail-content [role=alert]')).to_contain_text('Explanation is unavailable')
     # Independent sections can fail together; each assertion must read its own alert.
-    outage['proposals']=True;proposals.get_by_role('button',name='Tải lại đề xuất',exact=True).click()
-    expect(proposals.get_by_role('alert')).to_contain_text('Không đọc được store proposal')
+    outage['proposals']=True;proposals.get_by_role('button',name='Reload proposals',exact=True).click()
+    expect(proposals.get_by_role('alert')).to_contain_text('The proposal store is unavailable')
     expect(page.locator('#detail-pane [role=alert]')).to_have_count(2)
     expect(page.locator('#detail-pane .detail-content [role=alert]')).to_contain_text('Explanation is unavailable')
-    outage['proposals']=False;proposals.get_by_role('button',name='Tải lại đề xuất',exact=True).click()
+    outage['proposals']=False;proposals.get_by_role('button',name='Reload proposals',exact=True).click()
     expect(proposals.get_by_role('alert')).to_have_count(0)
-    expect(proposals).to_contain_text('Không có đề xuất cho revision này.')
+    expect(proposals).to_contain_text('No proposals for this revision.')
     expect(page.locator('.explanation-summary')).to_have_count(0)
     expect(page.locator('#detail-title')).to_have_text('INC-FIXTURE-A')
     outage['explanation']=False;page.get_by_role('button',name='Load explanation',exact=True).click()
@@ -237,6 +284,7 @@ def exercise_fixtures(page, base, output, expect):
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     page.get_by_role('button',name='Open INC-FIXTURE-A, revision 3',exact=True).click()
     expect(page.locator('#revision-input')).to_have_value('3')
+    expect(page.locator('#detail-title')).to_be_focused()
     expect(page.locator('#detail-title')).to_be_in_viewport()
     page.get_by_role('button',name='Explanation',exact=True).click()
     expect(page.locator('.explanation-summary')).to_contain_text('revision 3')
@@ -251,11 +299,13 @@ def exercise_fixtures(page, base, output, expect):
     page.screenshot(path=str(output/'fixture-actions-mobile.png'),full_page=True)
     outage['active'] = True; page.locator('#refresh').click()
     expect(page.locator('#list-error')).to_contain_text('unavailable')
+    expect(page.locator('.incident-summary__card--loaded dd')).to_have_text('—')
     expect(page.locator('#store-status')).to_have_text('Unavailable')
     page.locator('#disconnect').click()
     expect(page.locator('#connect-title')).to_be_visible()
     assert page.locator('[data-testid=incident-row]').count() == 0
     assert page.locator('#detail-title').count() == 0
+    expect(page.locator('#slot-proposalwatch > *')).to_have_count(0)
     outage['active'] = False
     outage['model_available'] = True  # Readiness fixture only: no scores or approved model are fabricated.
     for problem, notice in (('identity_provider',None),('read_scope','cannot read incidents'),('expired','Token was rejected')):
@@ -276,6 +326,7 @@ def exercise_fixtures(page, base, output, expect):
             expect(page.locator('[data-testid=incident-row]')).to_have_count(0)
             expect(page.locator('#detail-title')).to_have_count(0)
             expect(page.locator('.explanation-summary')).to_have_count(0)
+            expect(page.locator('#slot-proposalwatch > *')).to_have_count(0)
         else:
             expect(page.locator('#readiness-error')).to_contain_text('Authentication is unavailable')
             expect(page.locator('#store-status')).to_have_text('Unknown')
@@ -373,6 +424,8 @@ def main():
     if parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or not parsed.port or parsed.path not in ('','/') or parsed.query or parsed.fragment or parsed.username is not None:
         raise ValueError('browser verification requires the explicit loopback API origin')
     args.output.mkdir(parents=True,exist_ok=False)
+    with httpx.Client(base_url=args.base_url,trust_env=False) as client:
+        asset_checks = verify_ui_assets(client)
     if 'PLAYWRIGHT_NODEJS_PATH' not in os.environ and shutil.which('node'):
         os.environ['PLAYWRIGHT_NODEJS_PATH'] = shutil.which('node')
     from playwright.sync_api import sync_playwright, expect
@@ -388,7 +441,7 @@ def main():
                 os.environ.get('SENTINELOPS_OPERATOR_TOKEN') or os.environ.get('SENTINELOPS_API_TOKEN') or
                 args.token_file.read_text().strip(),expect)
             if errors: raise ValueError('browser emitted unhandled script errors')
-            result.update(status='PASS',page_errors=errors,
+            result.update(status='PASS',page_errors=errors,asset_checks=asset_checks,
                 verifier_commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
                 verifier_worktree_dirty=bool(subprocess.check_output(['git','status','--porcelain'])))
             (args.output/'verification.json').write_text(json.dumps(result,indent=2)+'\n')

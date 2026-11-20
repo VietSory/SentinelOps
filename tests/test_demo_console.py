@@ -56,8 +56,8 @@ def test_static_page_and_assets_are_local_and_do_not_contact_services():
     with console() as (client, _, calls):
         page = client.get("/")
         assert page.status_code == 200
-        assert "BƠM LỖI SẼ LÀM SERVICE HỎNG THẬT" in page.text
-        assert 'lang="vi"' in page.text
+        assert "Fault injection disrupts live services." in page.text
+        assert 'lang="en"' in page.text
         assert "connect-src 'self'" in page.headers["content-security-policy"]
         assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
         assert page.headers["cache-control"] == "no-store"

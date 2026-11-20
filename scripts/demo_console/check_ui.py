@@ -69,27 +69,33 @@ def main():
         browser = playwright.chromium.launch(executable_path=args.browser_executable, headless=True,
                                              args=["--no-sandbox", "--disable-dev-shm-usage"])
         try:
-            page = browser.new_page(viewport={"width": 1440, "height": 1100}, service_workers="block")
+            page = browser.new_page(viewport={"width": 1440, "height": 1100}, service_workers="block",
+                                    color_scheme="dark", locale="vi-VN")
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.on("dialog", lambda dialog: dialog.accept())
             page.route("**/*", route_request)
             page.clock.install()
             page.goto(origin)
+            expect(page.locator("html")).to_have_attribute("lang", "en")
+            expect(page.locator("html")).to_have_css("color-scheme", "light")
+            expect(page.locator("html")).to_have_css("background-color", "rgb(255, 255, 255)")
             expect(page.locator(".card")).to_have_count(8)
-            expect(page.locator("#mode")).to_contain_text("Bơm lỗi TẮT")
+            expect(page.locator("#mode")).to_contain_text("Fault injection off")
             assert all(button.is_disabled() for button in page.locator(".card button").all())
             assert posts == []
+            if args.screenshot:
+                page.screenshot(path=str(args.screenshot), full_page=True)
 
             state["enabled"] = True
-            page.get_by_role("button", name="Làm mới").click()
-            payment_button = page.get_by_role("button", name="Payment · lỗi 503", exact=True)
+            page.get_by_role("button", name="Refresh").click()
+            payment_button = page.get_by_role("button", name="Payment · HTTP 503", exact=True)
             expect(payment_button).to_be_enabled()
             payment_button.click()
             payment_card = page.locator(".card").filter(has=payment_button)
             expect(payment_card.locator(".state")).to_contain_text("mode=error")
             assert posts == ["payment-error"]
 
-            recovery = page.get_by_role("button", name="KHÔI PHỤC", exact=True)
+            recovery = page.get_by_role("button", name="Reset fault modes", exact=True)
             expect(recovery).to_be_enabled()
             recovery.click()
             expect(payment_card.locator(".state")).to_contain_text("mode=healthy")
@@ -99,27 +105,25 @@ def main():
                                                  observed_at=None, error="Offline fixture: port-forward unavailable")
             before = len(reads)
             page.clock.fast_forward(5000)
-            expect(page.locator(".card").filter(has=page.get_by_role("button", name="Inventory · lỗi 503", exact=True)).locator(".state")).to_contain_text("KHÔNG ĐỌC ĐƯỢC")
+            expect(page.locator(".card").filter(has=page.get_by_role("button", name="Inventory · HTTP 503", exact=True)).locator(".state")).to_contain_text("Unavailable")
             assert len(reads) > before
 
             disconnected = True
-            page.get_by_role("button", name="Làm mới").click()
-            expect(page.locator("#mode")).to_have_text("MẤT KẾT NỐI CONSOLE")
+            page.get_by_role("button", name="Refresh").click()
+            expect(page.locator("#mode")).to_have_text("Console disconnected")
             assert all(button.is_disabled() for button in page.locator(".card button").all())
             assert page.locator(".card.active").count() == 0
 
             disconnected = False
-            page.get_by_role("button", name="Làm mới").click()
-            deploy = page.get_by_role("button", name="DEPLOY IMAGE HỎNG", exact=True)
+            page.get_by_role("button", name="Refresh").click()
+            deploy = page.get_by_role("button", name="Deploy regression image", exact=True)
             expect(deploy).to_be_enabled()
             deploy.click()
-            expect(page.locator("#deployment-status")).to_contain_text("Script đang chạy")
+            expect(page.locator("#deployment-status")).to_contain_text("The script is running")
             assert all(button.is_disabled() for button in page.locator(".card button").all())
             assert posts == ["payment-error", "recover", "deploy-bad-image"]
             assert not errors, errors
 
-            if args.screenshot:
-                page.screenshot(path=str(args.screenshot), full_page=True)
             page.set_viewport_size({"width": 390, "height": 844})
             assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
             print("PASS: 8 cards, read-only default, fault/recovery clicks, 5s polling, service/backend failures, deploy lock, desktop/mobile; all requests intercepted, no backend or cluster calls.")

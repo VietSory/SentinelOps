@@ -1,0 +1,14 @@
+# Build from repository root; never send credentials, evidence or model data.
+**
+!services/
+!services/__init__.py
+!services/common/
+!services/common/__init__.py
+!services/common/faults.py
+!scripts/
+!scripts/demo_console/
+!scripts/demo_console/*.py
+!scripts/demo_console/static/
+!scripts/demo_console/static/**
+!scripts/demo_console/deployment/
+!scripts/demo_console/deployment/requirements.txt

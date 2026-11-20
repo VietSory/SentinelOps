@@ -1,39 +1,43 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SentinelOps · Dev Fault Console</title>
+  <meta name="color-scheme" content="light">
+  <title>Fault console · SentinelOps</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <script src="/assets/app.js" defer></script>
 </head>
 <body>
+  <header class="topbar">
+    <span class="brand"><span class="brand-mark" aria-hidden="true">S</span>SentinelOps</span>
+    <span class="breadcrumb">Developer tools / Fault console</span>
+  </header>
   <main>
-    <header>
-      <p class="eyebrow">SENTINELOPS / DEV TOOLS</p>
-      <h1>Điều khiển lỗi</h1>
-      <p>Chọn một kịch bản. Theo dõi fault mode trực tiếp từ payment và inventory.</p>
-      <p class="context">Mục tiêu dự kiến: EKS <strong>sentinelops-dev</strong> · context <strong>sentinelops-demo</strong> · namespace <strong>sentinelops-b-actions</strong></p>
-    </header>
+    <div class="page-heading">
+      <h1>Fault console</h1>
+      <p>Monitor fault modes for Payment and Inventory and run authorized development scenarios.</p>
+      <p class="context">Expected target: EKS <strong>sentinelops-dev</strong> · context <strong>sentinelops-demo</strong> · namespace <strong>sentinelops-b-actions</strong></p>
+    </div>
     <aside class="warning" role="note">
-      <strong>CHỈ DÀNH CHO DEV — BƠM LỖI SẼ LÀM SERVICE HỎNG THẬT.</strong>
-      <p>Kiểm tra port-forward đang trỏ đúng cụm và namespace trước khi bật thao tác. Console không tự xác minh cụm từ URL.</p>
+      <strong>Development only. Fault injection disrupts live services.</strong>
+      <p>Verify the cluster and namespace of your port-forward before enabling actions. The console cannot verify the cluster from a URL.</p>
     </aside>
-    <section class="toolbar" aria-label="Kết nối và chế độ thao tác">
-      <strong id="mode" class="badge">Đang đọc cấu hình…</strong>
-      <span id="refresh-status" role="status">Đang lấy trạng thái thực tế…</span>
-      <button id="refresh" type="button" class="secondary">Làm mới</button>
+    <section class="toolbar" aria-label="Connection and action mode">
+      <strong id="mode" class="badge">Checking configuration…</strong>
+      <span id="refresh-status" role="status">Reading current fault modes…</span>
+      <button id="refresh" type="button" class="secondary">Refresh</button>
     </section>
-    <p class="hint">Tự làm mới mỗi 5 giây từ GET /internal/faults. “healthy” chỉ là fault mode; không xác minh image, pod hoặc sức khỏe nghiệp vụ. Khi có nhiều replica, trạng thái chỉ thuộc instance mà URL/port-forward đang truy cập.</p>
+    <p class="hint">Refreshes every 5 seconds. The “healthy” fault mode applies to the instance reached by the request. Check image, pod and service health separately.</p>
     <p id="result" role="status" aria-live="polite"></p>
-    <section id="cards" class="cards" aria-label="Các kịch bản lỗi" aria-busy="true"></section>
+    <section id="cards" class="cards" aria-label="Fault scenarios" aria-busy="true"></section>
     <section class="deployment" aria-labelledby="deployment-title">
-      <h2 id="deployment-title">Tiến trình deploy image</h2>
-      <p id="deployment-status">Chưa đọc được trạng thái script.</p>
-      <p class="hint">Mã thoát và log là kết quả tiến trình script, không phải bằng chứng service đã phục hồi. Chờ script hoàn tất; giữ console mở trong lúc chạy.</p>
-      <details><summary>Log gần nhất của script (tối đa 8 KiB)</summary><pre id="deployment-log">Chưa có log.</pre></details>
+      <h2 id="deployment-title">Image deployment</h2>
+      <p id="deployment-status">Script status unavailable.</p>
+      <p class="hint">Keep the console open while the script runs. Verify service recovery separately from the script exit code and log.</p>
+      <details><summary>Latest script log (up to 8 KiB)</summary><pre id="deployment-log">No log output yet.</pre></details>
     </section>
-    <footer>Chỉ phục vụ tại 127.0.0.1 · Không có xác thực · Hướng dẫn: scripts/demo_console/README.md</footer>
+    <footer>Local access at 127.0.0.1 · No sign-in · Runbook: scripts/demo_console/README.md</footer>
   </main>
 </body>
 </html>

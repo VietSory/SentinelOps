@@ -1,0 +1,112 @@
+.incident-summary {
+  color: var(--ink, #182230);
+  font: 13px/1.4 system-ui, sans-serif;
+  margin-block: 0 16px;
+  min-width: 0;
+}
+
+.incident-summary .incident-summary__scope {
+  color: var(--secondary, #475467);
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.incident-summary__rail {
+  display: grid;
+  grid-template-columns: minmax(105px, .6fr) minmax(215px, 1.2fr) minmax(165px, .9fr) minmax(225px, 1.25fr) minmax(245px, 1.4fr);
+  gap: 8px;
+  overflow-x: auto;
+  padding: 3px 3px 7px;
+  scrollbar-width: thin;
+}
+
+.incident-summary__rail:focus-visible {
+  outline: 2px solid var(--blue, #174ea6);
+  outline-offset: -2px;
+  border-radius: 10px;
+}
+
+.incident-summary .incident-summary__card {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line, #dce3ed);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+
+.incident-summary .incident-summary__heading {
+  color: var(--secondary, #475467);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .035em;
+  line-height: 1.4;
+  margin: 0 0 7px;
+  text-transform: uppercase;
+}
+
+.incident-summary .incident-summary__metrics {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+
+.incident-summary__metric {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  min-width: 0;
+}
+
+.incident-summary .incident-summary__label {
+  color: var(--secondary, #475467);
+  font-size: 11px;
+}
+
+.incident-summary .incident-summary__value {
+  color: var(--ink, #182230);
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 720;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.incident-summary__metric--critical .incident-summary__value {
+  color: var(--critical, #b42318);
+}
+
+.incident-summary__metric--high .incident-summary__value {
+  color: var(--warning, #855200);
+}
+
+.incident-summary__metric--recovered .incident-summary__value {
+  color: var(--good, #16724d);
+}
+
+.incident-summary .incident-summary__text {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.4;
+  margin: 0 0 3px;
+}
+
+.incident-summary .incident-summary__note {
+  display: block;
+  color: var(--secondary, #475467);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.incident-summary .incident-summary__id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incident-summary [hidden] {
+  display: none !important;
+}

@@ -21,9 +21,10 @@ function buildCards(actions) {
     if (cards.has(action.id)) continue;
     const card = node("article", "card", "");
     if (action.id === "recover") card.classList.add("recovery");
-    const state = node("p", "state", "Chưa đọc được trạng thái.");
+    const state = node("p", "state", "Fault mode unavailable.");
     const match = node("p", "match", "");
-    const button = node("button", "", action.id === "recover" ? "Khôi phục cả hai" : action.id === "deploy-bad-image" ? "Deploy image hỏng" : "Bơm lỗi");
+    const label = action.id === "recover" ? "Reset both fault modes" : action.id === "deploy-bad-image" ? "Deploy regression image" : "Inject fault";
+    const button = node("button", "", label);
     button.type = "button";
     button.disabled = true;
     button.setAttribute("aria-label", action.title);
@@ -38,47 +39,47 @@ function buildCards(actions) {
 function render(data) {
   current = data;
   buildCards(data.actions);
-  elements.mode.textContent = data.enabled ? "Bơm lỗi ĐANG BẬT" : "CHỈ ĐỌC · Bơm lỗi TẮT";
+  elements.mode.textContent = data.enabled ? "Fault injection enabled" : "Read only · Fault injection off";
   elements.mode.className = `badge ${data.enabled ? "on" : "off"}`;
   const running = data.deployment.state === "running";
   for (const {card, state, match, button, action} of cards.values()) {
     const states = action.services.map(service => [service, data.services[service]]);
     state.textContent = states.map(([service, value]) => value.ok
-      ? `${service}: mode=${value.mode}, delay=${value.delay_ms} ms\nGET lúc ${new Date(value.observed_at).toLocaleTimeString("vi-VN")}`
-      : `${service}: KHÔNG ĐỌC ĐƯỢC\n${value.error}`).join("\n\n");
+      ? `${service}: mode=${value.mode}, delay=${value.delay_ms} ms\nObserved at ${new Date(value.observed_at).toLocaleTimeString("en-US")}`
+      : `${service}: Unavailable\n${value.error}`).join("\n\n");
     state.classList.toggle("error", states.some(([, value]) => !value.ok));
     const matches = Boolean(action.fault) && states.every(([, value]) => value.ok
       && value.mode === action.fault.mode && value.delay_ms === action.fault.delay_ms);
     card.classList.toggle("active", matches);
     match.textContent = action.id === "deploy-bad-image"
-      ? "Trạng thái image: chưa xác minh qua GET faults."
-      : matches ? "GET đang khớp cấu hình thẻ này." : "";
+      ? "Check the deployed image separately."
+      : matches ? "The observed fault mode matches this scenario." : "";
     button.disabled = pending || !data.enabled || data.busy || running
       || (action.id === "deploy-bad-image" && !data.deployment.configured);
-    button.title = !data.enabled ? "Cần DEMO_CONSOLE_ENABLE_FAULTS=true khi khởi động."
-      : running ? "Đợi script deploy hoàn tất."
+    button.title = !data.enabled ? "Actions require DEMO_CONSOLE_ENABLE_FAULTS=true at startup."
+      : running ? "Wait for the deployment script to finish."
       : action.id === "deploy-bad-image" ? data.deployment.configuration_error || "" : "";
   }
   const deployment = data.deployment;
   elements["deployment-status"].textContent = deployment.state === "running"
-    ? "Script đang chạy. Các thao tác khác tạm khóa; chờ script xử lý khôi phục."
+    ? "The script is running. Actions stay locked until it finishes."
     : deployment.state === "exited"
-      ? `Script đã thoát, mã ${deployment.returncode}. Kiểm tra log và bằng chứng của script.`
-      : deployment.configuration_error || "Script đã cấu hình; chưa chạy trong phiên console này.";
-  elements["deployment-log"].textContent = deployment.log_tail || "Chưa có log.";
+      ? `The script exited with code ${deployment.returncode}. Review its log and evidence.`
+      : deployment.configuration_error || "The script is configured and has yet to run in this console session.";
+  elements["deployment-log"].textContent = deployment.log_tail || "No log output yet.";
   const failed = Object.values(data.services).some(value => !value.ok);
-  elements["refresh-status"].textContent = `${failed ? "Có service không đọc được" : "Đã đọc cả hai service"} · ${new Date(data.checked_at).toLocaleTimeString("vi-VN")} · chu kỳ 5 giây`;
+  elements["refresh-status"].textContent = `${failed ? "Some fault modes are unavailable" : "Read both fault modes"} · ${new Date(data.checked_at).toLocaleTimeString("en-US")} · refreshes every 5 seconds`;
 }
 
 function unavailable(message) {
   current = null;
-  elements.mode.textContent = "MẤT KẾT NỐI CONSOLE";
-  elements.mode.className = "badge off";
+  elements.mode.textContent = "Console disconnected";
+  elements.mode.className = "badge error";
   elements["refresh-status"].textContent = message;
-  elements["deployment-status"].textContent = "Không đọc được tiến trình; trạng thái hiện tại chưa biết.";
-  elements["deployment-log"].textContent = "Không đọc được log hiện tại.";
+  elements["deployment-status"].textContent = "Current script status is unknown.";
+  elements["deployment-log"].textContent = "Current script log is unavailable.";
   for (const {card, state, match, button} of cards.values()) {
-    state.textContent = "KHÔNG ĐỌC ĐƯỢC — trạng thái hiện tại chưa biết.";
+    state.textContent = "Unavailable. Current fault mode is unknown.";
     state.classList.add("error");
     card.classList.remove("active");
     match.textContent = "";
@@ -96,7 +97,7 @@ async function refresh() {
     const data = await response.json();
     if (started === generation) render(data);
   } catch (error) {
-    if (started === generation) unavailable(`Không kết nối được console: ${error.message}. Kiểm tra backend localhost.`);
+    if (started === generation) unavailable(`Cannot reach the console. Check the local server or port-forward. (${error.message})`);
   } finally {
     polling = false;
   }
@@ -104,12 +105,12 @@ async function refresh() {
 
 async function apply(action) {
   if (pending || !current?.enabled) return;
-  if (action.id !== "recover" && !window.confirm(`${action.title}\n\nCHỈ DÀNH CHO DEV. Thao tác này làm service hỏng thật. Tiếp tục?`)) return;
+  if (action.id !== "recover" && !window.confirm(`${action.title}\n\nDevelopment only. This action will disrupt the service. Continue?`)) return;
   pending = true;
   generation += 1;
   render(current);
   elements.result.className = "";
-  elements.result.textContent = `Đang gửi: ${action.title}…`;
+  elements.result.textContent = `Sending ${action.title}…`;
   try {
     const response = await fetch(`/api/actions/${action.id}`, {
       method: "POST", headers: {"X-Console-Action": "apply"},
@@ -117,12 +118,12 @@ async function apply(action) {
     });
     const data = await response.json();
     const details = data.results ? Object.entries(data.results).map(([service, value]) =>
-      `${service}: ${value.acknowledged ? "POST được chấp nhận" : value.error}`).join("\n") : "";
+      `${service}: ${value.acknowledged ? "Request accepted" : value.error}`).join("\n") : "";
     elements.result.textContent = [data.message || data.detail || `HTTP ${response.status}`, details].filter(Boolean).join("\n");
     elements.result.className = response.ok ? "" : "error";
   } catch (error) {
     elements.result.className = "error";
-    elements.result.textContent = `Mất phản hồi: ${error.message}. Thao tác có thể đã áp dụng. Đọc lại trạng thái; không tự gửi lại.`;
+    elements.result.textContent = `Response lost (${error.message}). The action may have taken effect. Check the current fault mode before retrying.`;
   } finally {
     pending = false;
     generation += 1;

@@ -3,9 +3,39 @@
 Trang HTML/CSS/JS tĩnh và backend FastAPI có sẵn trong repo, không thêm dependency.
 **Bấm nút sẽ làm service dev hỏng thật. Mặc định chỉ đọc, mọi POST bị khóa.**
 Backend chỉ bind `127.0.0.1`, một worker, không có xác thực. Không đặt sau proxy,
-không mở tunnel/public ingress; chạy bằng entrypoint dưới đây, không đổi host qua uvicorn CLI.
+không mở tunnel ra Internet hoặc public ingress; chạy bằng entrypoint dưới đây,
+không đổi host qua uvicorn CLI.
+
+## Trạng thái triển khai ngày 19/11/2026
+
+Console đã được deploy riêng thành `fault-console` trên EKS `sentinelops-dev`,
+namespace `sentinelops-b-actions`; xem [receipt rollout](../../docs/delivery/FAULT_CONSOLE_DEPLOY_2026-11-19.md)
+và [hướng dẫn deployment](deployment/README.md).
+Truy cập qua port-forward **http://127.0.0.1:8765**; backend vẫn bind loopback.
+**Bản đang deploy chỉ đọc, mọi thao tác OFF**: `DEMO_CONSOLE_ENABLE_FAULTS=false`,
+`DEMO_CONSOLE_DEPLOY_SCRIPT` rỗng, runner chưa cấu hình và idle. Không có runner
+B7/B9 trong image, không mount token ServiceAccount/credential, không có
+Service/Ingress hoặc quyền RBAC cho console.
+
+12 Deployment cũ giữ nguyên spec/image; thêm console là **13 Deployment**.
+Console là thành phần tùy chọn, không thay bước kiểm traffic 2 replica,
+readiness, telemetry hoặc baseline trong [kịch bản demo](../../docs/runbooks/DEMO_FLOW.md).
+GET `/api/status` lúc **14:18:49 UTC** xác nhận gate tắt, không busy,
+Payment/Inventory trả `healthy`, delay 0; đây chỉ là trạng thái fault của các
+endpoint được đọc, không phải bằng chứng sức khỏe nghiệp vụ/toàn bộ pod.
+
+Giữ nguyên bản triển khai chỉ đọc. Các ví dụ bật thao tác và B7/B9 bên dưới dành
+cho phiên local được review, cho phép riêng; không áp dụng để mở nút trong pod
+console. B9 mới có kiểm thử offline, chưa có bằng chứng E2E và chưa có watchdog
+độc lập; khi controller không rollback, B9 báo URGENT và từ chối fallback PATCH,
+không bảo đảm tự phục hồi. Chưa dùng nút deploy B9 cho đến khi owner chốt quyền
+rollback độc quyền và đường khôi phục.
 
 ## Chuẩn bị kết nối
+
+Phần này dành cho chạy backend local. Nếu đang dùng port-forward tới
+`fault-console` trên cổng 8765, dùng phiên đó; không khởi động thêm backend
+local trên cùng cổng. Pod console dùng URL Service nội bộ theo tài liệu deployment.
 
 Console không tạo port-forward và không gọi kubectl cho các thẻ fault mode.
 Dùng các port-forward do operator đã mở, hoặc đặt URL HTTP(S) của service dev.

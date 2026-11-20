@@ -35,18 +35,18 @@ class Settings:
 
     def __post_init__(self):
         if not 1 <= self.port <= 65535:
-            raise ValueError("DEMO_CONSOLE_PORT phải trong khoảng 1..65535")
+            raise ValueError("DEMO_CONSOLE_PORT must be between 1 and 65535.")
         for service in SERVICE_NAMES:
             value = getattr(self, service + "_url")
             parsed = urlsplit(value)
             if (parsed.scheme not in {"http", "https"} or not parsed.hostname
                     or parsed.username or parsed.password or parsed.query or parsed.fragment
                     or parsed.path not in {"", "/"}):
-                raise ValueError(f"DEMO_CONSOLE_{service.upper()}_URL phải là HTTP(S) origin, không chứa credentials/path/query")
+                raise ValueError(f"DEMO_CONSOLE_{service.upper()}_URL must be an HTTP(S) origin without credentials, a path or a query.")
             try:
                 parsed.port
             except ValueError as exc:
-                raise ValueError(f"Port không hợp lệ: {service}") from exc
+                raise ValueError(f"Invalid port for {service}.") from exc
 
     @classmethod
     def from_env(cls):
@@ -85,14 +85,14 @@ class Action:
 
 
 ACTIONS = (
-    Action("payment-latency-950", "Payment · trễ 950 ms", "Thêm 950 ms vào mỗi yêu cầu thanh toán.", ("payment",), "latency", 950),
-    Action("payment-latency-2000", "Payment · trễ 2000 ms", "Thêm 2 giây vào mỗi yêu cầu thanh toán.", ("payment",), "latency", 2000),
-    Action("payment-error", "Payment · lỗi 503", "API thanh toán trả HTTP 503.", ("payment",), "error"),
-    Action("inventory-latency-950", "Inventory · trễ 950 ms", "Thêm 950 ms vào mỗi yêu cầu tồn kho.", ("inventory",), "latency", 950),
-    Action("inventory-error", "Inventory · lỗi 503", "API tồn kho trả HTTP 503.", ("inventory",), "error"),
-    Action("both-error", "Cả hai cùng lỗi 503", "Bật lỗi trên payment và inventory; kết quả được báo riêng từng service.", ("payment", "inventory"), "error"),
-    Action("recover", "KHÔI PHỤC", "Đặt fault mode của cả hai về healthy, delay 0. Không rollback image hoặc xác minh sức khỏe nghiệp vụ.", ("payment", "inventory"), "healthy"),
-    Action("deploy-bad-image", "DEPLOY IMAGE HỎNG", "Chạy script B7/B9 đã cấu hình. Script quản lý vòng đời image và khôi phục; GET faults không cho biết image đang chạy.", ("payment",)),
+    Action("payment-latency-950", "Payment · 950 ms delay", "Add 950 ms to each payment request.", ("payment",), "latency", 950),
+    Action("payment-latency-2000", "Payment · 2,000 ms delay", "Add 2 seconds to each payment request.", ("payment",), "latency", 2000),
+    Action("payment-error", "Payment · HTTP 503", "Make the Payment API return HTTP 503.", ("payment",), "error"),
+    Action("inventory-latency-950", "Inventory · 950 ms delay", "Add 950 ms to each inventory request.", ("inventory",), "latency", 950),
+    Action("inventory-error", "Inventory · HTTP 503", "Make the Inventory API return HTTP 503.", ("inventory",), "error"),
+    Action("both-error", "Both services · HTTP 503", "Make Payment and Inventory return HTTP 503. Each service reports its result separately.", ("payment", "inventory"), "error"),
+    Action("recover", "Reset fault modes", "Set both fault modes to healthy with zero delay. Verify the deployed image and service health separately.", ("payment", "inventory"), "healthy"),
+    Action("deploy-bad-image", "Deploy regression image", "Start the configured B7 or B9 script. Check rollout and recovery evidence separately from the fault mode.", ("payment",)),
 )
 ACTION_BY_ID = {action.id: action for action in ACTIONS}
 
@@ -117,10 +117,10 @@ class DeploymentRunner:
 
     def configuration_error(self):
         if not self.script:
-            return "Chưa đặt DEMO_CONSOLE_DEPLOY_SCRIPT (đường dẫn tuyệt đối tới B7/B9)."
+            return "Deployment script is not configured. DEMO_CONSOLE_DEPLOY_SCRIPT requires an absolute path to B7 or B9."
         path = Path(self.script)
         if not path.is_absolute() or not path.is_file() or not os.access(path, os.R_OK):
-            return "DEMO_CONSOLE_DEPLOY_SCRIPT phải trỏ tới file tuyệt đối, tồn tại và đọc được."
+            return "DEMO_CONSOLE_DEPLOY_SCRIPT must point to an existing, readable file using an absolute path."
         return None
 
     def snapshot(self):
@@ -140,7 +140,7 @@ class DeploymentRunner:
         if error:
             raise HTTPException(503, error)
         if self.process and self.process.poll() is None:
-            raise HTTPException(409, "Script deploy đang chạy.")
+            raise HTTPException(409, "The deployment script is already running.")
         if self.output:
             self.output.close()
         self.output = tempfile.TemporaryFile()
@@ -154,7 +154,7 @@ class DeploymentRunner:
             self.output.close()
             self.output = None
             self.process = None
-            raise HTTPException(503, "Không khởi chạy được Bash/script deploy; kiểm tra đường dẫn và quyền đọc.") from exc
+            raise HTTPException(503, "Could not start the deployment script. Check Bash, the script path and read permissions.") from exc
 
 
 async def observe(client: httpx.AsyncClient, settings: Settings, service: str):
@@ -170,11 +170,11 @@ async def observe(client: httpx.AsyncClient, settings: Settings, service: str):
         status = exc.response.status_code
         error = f"GET {endpoint}: HTTP {status}."
         if status == 404:
-            error += " Endpoint có thể đang tắt; kiểm tra ENABLE_FAULT_INJECTION=true, DEPLOYMENT_ENVIRONMENT=dev và ALLOW_DEV_FAULT_INJECTION=true trên service."
+            error += " The fault endpoint may be disabled. Check ENABLE_FAULT_INJECTION=true, DEPLOYMENT_ENVIRONMENT=dev and ALLOW_DEV_FAULT_INJECTION=true on the service."
     except httpx.RequestError:
-        error = f"Không kết nối được GET {endpoint}; kiểm tra địa chỉ cấu hình và port-forward đang chạy."
+        error = f"GET {endpoint} could not connect. Check the configured address and port-forward."
     except (ValidationError, ValueError):
-        error = f"GET {endpoint}: dữ liệu faults không hợp lệ hoặc sai tên service."
+        error = f"GET {endpoint}: Invalid fault status or unexpected service name."
     return {"ok": False, "mode": None, "delay_ms": None, "observed_at": None,
             "error": error}
 
@@ -200,15 +200,15 @@ def create_app(settings: Settings | None = None, *, transport=None, runner=None)
         # Fixed Host + peer + Origin keep an unauthenticated local control off
         # remote clients, DNS rebinding and cross-origin browser form submissions.
         if not request.client or request.client.host != "127.0.0.1":
-            response = JSONResponse({"detail": "Console chỉ chấp nhận client 127.0.0.1."}, status_code=403)
+            response = JSONResponse({"detail": "The console accepts clients from 127.0.0.1 only."}, status_code=403)
         elif request.headers.get("host") != f"127.0.0.1:{settings.port}":
-            response = JSONResponse({"detail": f"Mở đúng địa chỉ {settings.origin}"}, status_code=400)
+            response = JSONResponse({"detail": f"Open the console at {settings.origin}."}, status_code=400)
         elif request.method == "POST" and (
             request.headers.get("origin") != settings.origin
             or request.headers.get("x-console-action") != "apply"
             or request.headers.get("sec-fetch-site", "same-origin") != "same-origin"
         ):
-            response = JSONResponse({"detail": "Thao tác phải đến từ trang console cùng origin."}, status_code=403)
+            response = JSONResponse({"detail": "Actions must come from the same origin as the console."}, status_code=403)
         else:
             response = await call_next(request)
         response.headers.update({
@@ -242,16 +242,16 @@ def create_app(settings: Settings | None = None, *, transport=None, runner=None)
     @app.post("/api/actions/{action_id}")
     async def execute(action_id: str):
         if not settings.enabled:
-            raise HTTPException(403, "Bơm lỗi đang TẮT. Chỉ bật khi đặt DEMO_CONSOLE_ENABLE_FAULTS=true trước khi khởi động.")
+            raise HTTPException(403, "Fault injection is off. Actions require DEMO_CONSOLE_ENABLE_FAULTS=true at startup.")
         action = ACTION_BY_ID.get(action_id)
         if action is None:
-            raise HTTPException(404, "Thẻ lỗi không tồn tại.")
+            raise HTTPException(404, "Fault scenario not found.")
         if action_lock.locked() or runner.snapshot()["state"] == "running":
-            raise HTTPException(409, "Một thao tác đang chạy. Nếu là B7/B9, chờ script hoàn tất vòng đời image và khôi phục.")
+            raise HTTPException(409, "An action is in progress. If the deployment script is running, wait for it to finish.")
         async with action_lock:
             if action_id == "deploy-bad-image":
                 runner.start()
-                return JSONResponse({"accepted": True, "message": "Đã khởi chạy script; chưa kết luận deploy hay khôi phục thành công.",
+                return JSONResponse({"accepted": True, "message": "The script started. Deployment and recovery are unconfirmed.",
                                      "deployment": runner.snapshot()}, status_code=202)
             results = {}
             for service in action.services:
@@ -265,16 +265,16 @@ def create_app(settings: Settings | None = None, *, transport=None, runner=None)
                     response.raise_for_status()
                     results[service] = {"acknowledged": True, "error": None}
                 except httpx.HTTPStatusError as exc:
-                    results[service] = {"acknowledged": False, "error": f"POST {service}: HTTP {exc.response.status_code}; hãy đọc lại trạng thái thực tế."}
+                    results[service] = {"acknowledged": False, "error": f"POST {service}: HTTP {exc.response.status_code}. Refresh the current fault mode."}
                 except httpx.RequestError:
-                    results[service] = {"acknowledged": False, "error": f"Mất kết nối khi POST {service}; chưa biết yêu cầu đã áp dụng chưa. Không tự thử lại; kiểm tra port-forward và trạng thái thực tế."}
+                    results[service] = {"acknowledged": False, "error": f"POST to {service} lost its connection. The action may have taken effect. Check the port-forward and current fault mode before retrying."}
             # POST acknowledgement is never used as a current-state observation.
             services = await observations()
             verified = all(results[s]["acknowledged"] and services[s]["ok"]
                            and all(services[s][key] == value for key, value in action.payload().items())
                            for s in action.services)
             return JSONResponse({"verified": verified, "results": results, "services": services,
-                                 "message": "GET xác nhận fault mode đã yêu cầu." if verified else "Chưa xác nhận đầy đủ; có thể chỉ một phần đã áp dụng. Xem từng service, không tự thử lại."},
+                                 "message": "The latest read confirms the requested fault mode." if verified else "The action may have applied only in part. Check each service before retrying."},
                                 status_code=200 if verified else 502)
 
     return app

@@ -1,0 +1,5 @@
+# Direct runtime requirements match pyproject.toml; deployment pins the built digest.
+fastapi==0.115.8
+uvicorn==0.34.0
+pydantic==2.10.6
+httpx==0.28.1
