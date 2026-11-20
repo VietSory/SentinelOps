@@ -18,7 +18,20 @@ MIGRATIONS = (
     "004-incident-consumer.sql", "005-remediation.sql", "006-quarantine-review.sql",
 )
 EXPIRES = datetime(2026, 11, 25, tzinfo=timezone.utc)
-RUNTIME_ROLES = {"runtime": "control_writer", "action-runtime": "control_action_writer"}
+RESOLVER_GROUP = "control_action_resolver"
+RESOLVER_LOGIN = "control_quarantine_resolver"
+RELEASE_FUNCTION = "sentinel_remediation.release_quarantine(text,integer,text,text,text,jsonb)"
+RUNTIME_ROLES = {"runtime": "control_writer", "action-runtime": "control_action_writer",
+                 "action-read": "control_action_reader", "action-resolve": RESOLVER_LOGIN}
+# The AWS demo driver reads incidents and the health ledger with a SELECT-only
+# login; 005 granted the reader only sentinel_remediation. Idempotent, owner-scoped.
+READER_GRANTS = (
+    "GRANT USAGE ON SCHEMA sentinel_control TO control_action_reader",
+    "GRANT SELECT ON sentinel_control.incidents, sentinel_control.incident_versions, "
+    "sentinel_control.health_streams, sentinel_control.health_batches, sentinel_control.health_signals "
+    "TO control_action_reader",
+)
+DEMO_LOGINS = tuple(RUNTIME_ROLES.values())
 
 
 def role_attributes_sql(role):
@@ -38,6 +51,63 @@ def runtime_privileges_sql(role):
             AND NOT pg_has_role(current_user,'control_owner','MEMBER')
             AND NOT pg_has_role(current_user,'control_action_writer','MEMBER')
             AND NOT pg_has_role(current_user,'control_action_resolver','MEMBER')
+            AND NOT has_database_privilege(current_user,current_database(),'CREATE')"""
+    if role == "control_action_reader":
+        # Mirrors ActionReader.check_ready: no write, owner or quarantine-release capability.
+        return """SELECT current_user='control_action_reader'
+            AND NOT EXISTS (
+                SELECT FROM (VALUES ('sentinel_control.incidents'),('sentinel_control.incident_versions'),
+                    ('sentinel_control.health_streams'),('sentinel_control.health_batches'),
+                    ('sentinel_control.health_signals'),('sentinel_remediation.intents'),
+                    ('sentinel_remediation.states'),('sentinel_remediation.events'),
+                    ('sentinel_remediation.targets'),('sentinel_remediation.dispatches')) AS t(name)
+                WHERE NOT has_table_privilege(current_user,name,'SELECT'))
+            AND NOT EXISTS (
+                SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE n.nspname IN ('sentinel_control','sentinel_remediation') AND c.relkind IN ('r','p','v')
+                  AND (has_table_privilege(current_user,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES')
+                       OR has_any_column_privilege(current_user,c.oid,'INSERT,UPDATE,REFERENCES')))
+            AND NOT EXISTS (
+                SELECT FROM pg_namespace WHERE has_schema_privilege(current_user,oid,'CREATE'))
+            AND NOT pg_has_role(current_user,'control_owner','MEMBER')
+            AND NOT pg_has_role(current_user,'control_writer','MEMBER')
+            AND NOT pg_has_role(current_user,'control_action_writer','MEMBER')
+            AND NOT pg_has_role(current_user,'control_action_resolver','MEMBER')
+            AND NOT coalesce(has_function_privilege(current_user,
+                to_regprocedure('sentinel_remediation.release_quarantine(text,integer,text,text,text,jsonb)'),
+                'EXECUTE'),false)
+            AND NOT has_database_privilege(current_user,current_database(),'CREATE')"""
+    if role == RESOLVER_LOGIN:
+        # Direct table DML is forbidden. The SECURITY DEFINER function is the one
+        # reviewed mutation boundary, inherited through the NOLOGIN group only.
+        return f"""SELECT current_user='{RESOLVER_LOGIN}'
+            AND pg_has_role(current_user,'{RESOLVER_GROUP}','MEMBER')
+            AND (SELECT count(*)=1 AND bool_and(parent.rolname='{RESOLVER_GROUP}'
+                    AND membership.inherit_option AND NOT membership.set_option
+                    AND NOT membership.admin_option)
+                FROM pg_auth_members membership
+                JOIN pg_roles child ON child.oid=membership.member
+                JOIN pg_roles parent ON parent.oid=membership.roleid
+                WHERE child.rolname=current_user)
+            AND has_function_privilege(current_user,'{RELEASE_FUNCTION}','EXECUTE')
+            AND NOT EXISTS (
+                SELECT FROM pg_proc procedure JOIN pg_namespace namespace ON namespace.oid=procedure.pronamespace
+                WHERE namespace.nspname IN ('sentinel_control','sentinel_remediation')
+                  AND procedure.oid<>to_regprocedure('{RELEASE_FUNCTION}')
+                  AND has_function_privilege(current_user,procedure.oid,'EXECUTE'))
+            AND NOT EXISTS (
+                SELECT FROM pg_class relation JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
+                WHERE namespace.nspname IN ('sentinel_control','sentinel_remediation')
+                  AND relation.relkind IN ('r','p','v')
+                  AND (has_table_privilege(current_user,relation.oid,
+                          'INSERT,UPDATE,DELETE,TRUNCATE,TRIGGER,REFERENCES')
+                       OR has_any_column_privilege(current_user,relation.oid,'INSERT,UPDATE,REFERENCES')))
+            AND NOT EXISTS (
+                SELECT FROM pg_namespace WHERE has_schema_privilege(current_user,oid,'CREATE'))
+            AND NOT pg_has_role(current_user,'control_owner','MEMBER')
+            AND NOT pg_has_role(current_user,'control_writer','MEMBER')
+            AND NOT pg_has_role(current_user,'control_action_writer','MEMBER')
+            AND NOT pg_has_role(current_user,'control_action_reader','MEMBER')
             AND NOT has_database_privilege(current_user,current_database(),'CREATE')"""
     if role != "control_action_writer":
         raise ValueError("unsupported runtime role")
@@ -80,17 +150,37 @@ def runtime_privileges_sql(role):
 
 
 def runtime_login_sql(role, password):
-    role_attributes_sql(role)  # Restrict interpolation to the two reviewed role names.
+    role_attributes_sql(role)  # Restrict interpolation to the reviewed fixed role names.
     return (f"ALTER ROLE {role} LOGIN PASSWORD '{scram_verifier(password)}' "
             "VALID UNTIL '2026-11-25 00:00:00+00'")
 
 
-def disable_statements():
-    # Revoke BOTH logins before terminating sessions, including failure recovery.
-    return ("ALTER ROLE control_writer NOLOGIN PASSWORD NULL",
-            "ALTER ROLE control_action_writer NOLOGIN PASSWORD NULL",
+def resolver_membership_sql():
+    return f"""SELECT count(*)=1 AND bool_and(parent.rolname='{RESOLVER_GROUP}'
+            AND membership.inherit_option AND NOT membership.set_option AND NOT membership.admin_option)
+        FROM pg_auth_members membership
+        JOIN pg_roles child ON child.oid=membership.member
+        JOIN pg_roles parent ON parent.oid=membership.roleid
+        WHERE child.rolname='{RESOLVER_LOGIN}'"""
+
+
+def disable_statements(roles=DEMO_LOGINS):
+    # Revoke every selected login before terminating sessions, including failure recovery.
+    if not roles or not set(roles) <= set(DEMO_LOGINS):
+        raise ValueError("unsupported runtime role")
+    names = ",".join(f"'{role}'" for role in roles)
+    statements = []
+    for role in roles:
+        if role == RESOLVER_LOGIN:
+            # action-resolve creates this fixed login; general cleanup also works
+            # safely when that optional action was never run.
+            statements.append(f"DO $$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname='{role}') THEN "
+                              f"ALTER ROLE {role} NOLOGIN PASSWORD NULL; END IF; END $$")
+        else:
+            statements.append(f"ALTER ROLE {role} NOLOGIN PASSWORD NULL")
+    return (*statements,
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE usename IN ('control_writer','control_action_writer') AND pid<>pg_backend_pid()")
+            f"WHERE usename IN ({names}) AND pid<>pg_backend_pid()")
 
 
 def scram_verifier(password: str, salt: bytes | None = None) -> str:
@@ -137,12 +227,14 @@ async def verify_schema(conn):
         raise RuntimeError("unexpected migration ledger")
     if await conn.fetchval("SELECT pg_has_role('control_writer','control_owner','MEMBER')"):
         raise RuntimeError("runtime is an owner member")
+    if await conn.fetchval("SELECT rolcanlogin FROM pg_roles WHERE rolname='control_action_resolver'"):
+        raise RuntimeError("resolver group must remain NOLOGIN")
 
 
 async def run(action: str):
     import asyncpg
 
-    if action not in ("bootstrap", *RUNTIME_ROLES, "disable"):
+    if action not in ("bootstrap", *RUNTIME_ROLES, "disable", "disable-read", "disable-resolve"):
         raise ValueError("unsupported action")
     master = json.loads(Path("/run/control/master.json").read_text())
     if master["username"] != "control_bootstrap" or not master["password"]:
@@ -173,11 +265,34 @@ async def run(action: str):
             password = Path("/run/control/runtime-password").read_text()
             if len(password) < 32 or not password.isascii() or not all(c.isalnum() or c in "-_" for c in password):
                 raise ValueError("invalid generated password")
+            if role == RESOLVER_LOGIN:
+                exists = await conn.fetchval("SELECT EXISTS(SELECT FROM pg_roles WHERE rolname=$1)", role)
+                if not exists:
+                    await conn.execute(f"CREATE ROLE {RESOLVER_LOGIN} NOLOGIN INHERIT "
+                                       "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS")
+                membership_count = await conn.fetchval("""SELECT count(*) FROM pg_auth_members membership
+                    JOIN pg_roles child ON child.oid=membership.member WHERE child.rolname=$1""", role)
+                if membership_count:
+                    if not await conn.fetchval(resolver_membership_sql()):
+                        raise RuntimeError("resolver login has an unexpected membership")
+                else:
+                    await conn.execute(f"GRANT {RESOLVER_GROUP} TO {RESOLVER_LOGIN} "
+                                       "WITH INHERIT TRUE, SET FALSE")
+                if not await conn.fetchval(resolver_membership_sql()):
+                    raise RuntimeError("resolver login membership differs")
             # RDS master is CREATEROLE, not superuser: PostgreSQL 16 rejects naming
             # SUPERUSER/REPLICATION/BYPASSRLS (even NO*) in ALTER ROLE. Migrations created the
             # role with those defaults off; verify them instead of re-asserting them.
             if not await conn.fetchval(role_attributes_sql(role)):
                 raise RuntimeError("runtime role carries an elevated attribute")
+            if role == "control_action_reader":
+                # 001 leaves the master with SET-only owner membership; grants run as the owner.
+                await conn.execute("SET ROLE control_owner")
+                try:
+                    for statement in READER_GRANTS:
+                        await conn.execute(statement)
+                finally:
+                    await conn.execute("RESET ROLE")
             await conn.execute(runtime_login_sql(role, password))
             # Authenticate using the new password, verify the real TLS session and privilege boundary.
             runtime = await asyncpg.connect(user=role, password=password, **options)
@@ -187,11 +302,20 @@ async def run(action: str):
                     raise RuntimeError("runtime privilege verification failed")
             finally:
                 await runtime.close()
+        elif action in ("disable-read", "disable-resolve"):
+            # Scoped failure recovery must not revoke live worker/controller logins.
+            role = "control_action_reader" if action == "disable-read" else RESOLVER_LOGIN
+            exists = await conn.fetchval("SELECT EXISTS(SELECT FROM pg_roles WHERE rolname=$1)", role)
+            if exists:
+                for statement in disable_statements((role,)):
+                    await conn.execute(statement)
+            if await conn.fetchval("SELECT count(*) FROM pg_stat_activity WHERE usename=$1", role):
+                raise RuntimeError("scoped runtime sessions remain; operator must verify termination")
         else:
             for statement in disable_statements():
                 await conn.execute(statement)
-            if await conn.fetchval("SELECT count(*) FROM pg_stat_activity "
-                                   "WHERE usename IN ('control_writer','control_action_writer')"):
+            if await conn.fetchval("SELECT count(*) FROM pg_stat_activity WHERE usename = ANY($1::text[])",
+                                   list(DEMO_LOGINS)):
                 raise RuntimeError("runtime sessions remain; operator must verify termination")
         print(json.dumps({"action": action, "status": "PASS"}), flush=True)
     finally:

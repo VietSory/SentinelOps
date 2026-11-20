@@ -1,0 +1,171 @@
+# Bounded operator Job for the runbook's explicit Payment quarantine review.
+# It observes only; release calls the guarded PostgreSQL function and never patches Kubernetes.
+#
+# Every command names the reviewed context; K="kubectl --context <reviewed> -n sentinelops-b-actions".
+# Prerequisites (after a ClusterAdmin applies payment-quarantine-observer-rbac.yaml):
+#   python scripts/aws_demo/control.py action-resolve --context <reviewed> ...  # Secret remediation-resolve
+#   $K get configmap/quarantine-runner-script job/quarantine-runner --ignore-not-found  # must print nothing
+#   $K create configmap quarantine-runner-script \
+#     --from-file=review_payment_quarantine.py=scripts/review_payment_quarantine.py
+#
+# Bind this one-shot Job to the controller's original health source root. The stream follows
+# sentinelops-workers-runtime; the placeholder prevents accidentally assuming an old PVC root.
+#   arg() { $K get deploy remediation-controller -o json | python3 -c 'import json, sys
+#   a=json.load(sys.stdin)["spec"]["template"]["spec"]["containers"][0]["args"]; print(a[a.index(sys.argv[1])+1])' "$1"; }
+#   ROOT=$(arg --source-store); case "$ROOT" in /artifacts/health*) ;; *) echo "bad root"; false;; esac
+#   sed "s#__HEALTH_ROOT__#$ROOT#" scripts/aws_demo/quarantine-runner.yaml | $K create -f -
+#   $K wait --for=condition=Ready pod -l job-name=quarantine-runner --timeout=300s
+#
+# Exact runbook open command, adapted to execute inside the pod:
+#   $K exec job/quarantine-runner -- sh -c '
+#     python /opt/quarantine/review_payment_quarantine.py \
+#       --target /etc/sentinelops/remediation/target.json --health-stream "$HEALTH_STREAM" \
+#       --source-store "$HEALTH_ROOT" --review-store "$QUARANTINE_REVIEW_ROOT" \
+#       --server https://kubernetes.default.svc --ca-file /credentials/ca.crt \
+#       --token-file /credentials/token open --action-id ACTION_SHA256'
+#
+# Inspect the opening card, keep healthy traffic running, and wait for three whole current
+# healthy buckets. Then use the returned artifact://manifests/<sha256>.json reference:
+#   $K exec job/quarantine-runner -- sh -c '
+#     python /opt/quarantine/review_payment_quarantine.py \
+#       --target /etc/sentinelops/remediation/target.json --health-stream "$HEALTH_STREAM" \
+#       --source-store "$HEALTH_ROOT" --review-store "$QUARANTINE_REVIEW_ROOT" \
+#       --server https://kubernetes.default.svc --ca-file /credentials/ca.crt \
+#       --token-file /credentials/token release \
+#       --review-ref artifact://manifests/REVIEW_SHA256.json \
+#       --idempotency-key STABLE_OPERATOR_KEY'
+#
+# Cleanup immediately after release/review (the receipt and review artifacts remain durable):
+#   $K delete job/quarantine-runner configmap/quarantine-runner-script --ignore-not-found
+#   python scripts/aws_demo/control.py disable-resolve --context <reviewed> ...
+#   $K delete secret/remediation-resolve --ignore-not-found
+#
+# The writable store is /artifacts/remediation/quarantine-review on the existing
+# remediation-artifacts PVC. This is a dedicated child root, separate from the immutable
+# health source and read-only known-good review store. Pod affinity keeps all three RWO EBS
+# claims on the remediation-controller node; the CLI's ArtifactStore creates only its child
+# observations/manifests there. The controller does not consume this child as action authority.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: quarantine-runner
+  namespace: sentinelops-b-actions
+  labels:
+    app: quarantine-runner
+    app.kubernetes.io/part-of: sentinelops
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 7200
+  ttlSecondsAfterFinished: 0
+  template:
+    metadata:
+      labels:
+        app: quarantine-runner
+        app.kubernetes.io/part-of: sentinelops
+    spec:
+      serviceAccountName: payment-quarantine-observer
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      activeDeadlineSeconds: 7200
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: remediation-controller
+            topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: private-credentials
+        image: 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:8af9fd87b65984c2fb44407a534e443231934504f037fcfa2dd99da23ad6fdb3
+        command:
+        - python
+        - -c
+        - import os, shutil, sys; from pathlib import Path; os.umask(0o077); target=Path(sys.argv[1]); target.mkdir(exist_ok=True); [(shutil.copyfile(Path(sys.argv[2], name), target/name), os.chmod(target/name, 0o600)) for name in ('token','ca.crt')]
+        args: [/credentials, /source]
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          readOnlyRootFilesystem: true
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {cpu: 100m, memory: 64Mi}
+        volumeMounts:
+        - {name: credentials, mountPath: /credentials}
+        - {name: observer-token, mountPath: /source, readOnly: true}
+      containers:
+      - name: runner
+        image: 833925774773.dkr.ecr.ap-southeast-1.amazonaws.com/sentinelops/control-plane@sha256:8af9fd87b65984c2fb44407a534e443231934504f037fcfa2dd99da23ad6fdb3
+        command: [sleep, '7200']
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          readOnlyRootFilesystem: true
+        resources:
+          requests: {cpu: 50m, memory: 128Mi}
+          limits: {cpu: 500m, memory: 512Mi}
+        env:
+        - name: HEALTH_STREAM
+          valueFrom:
+            configMapKeyRef:
+              name: sentinelops-workers-runtime
+              key: SENTINELOPS_HEALTH_STREAM
+        - {name: HEALTH_ROOT, value: __HEALTH_ROOT__}
+        - {name: QUARANTINE_REVIEW_ROOT, value: /artifacts/remediation/quarantine-review}
+        - name: SENTINELOPS_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: sentinelops-workers-runtime
+              key: SENTINELOPS_ENV
+        - {name: SENTINELOPS_KUBERNETES_REMOTE_SERVER, value: 'https://kubernetes.default.svc'}
+        - {name: SSL_CERT_FILE, value: /etc/sentinelops/tls/ca-bundle.crt}
+        - {name: PGSSLROOTCERT, value: /etc/sentinelops/tls/ca-bundle.crt}
+        - name: SENTINELOPS_QUARANTINE_DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: remediation-resolve
+              key: quarantine-database-url
+        volumeMounts:
+        - {name: tmp, mountPath: /tmp}
+        - {name: credentials, mountPath: /credentials, readOnly: true}
+        - {name: driver, mountPath: /opt/quarantine, readOnly: true}
+        - {name: target, mountPath: /etc/sentinelops/remediation, readOnly: true}
+        - {name: database-ca, mountPath: /etc/sentinelops/tls, readOnly: true}
+        - {name: health-artifacts, mountPath: /artifacts/health, readOnly: true}
+        - {name: review-artifacts, mountPath: /artifacts/review, readOnly: true}
+        - {name: quarantine-review, mountPath: /artifacts/remediation}
+      volumes:
+      - name: tmp
+        emptyDir: {sizeLimit: 256Mi}
+      - name: credentials
+        emptyDir: {medium: Memory, sizeLimit: 128Ki}
+      - name: observer-token
+        projected:
+          defaultMode: 0440
+          sources:
+          - serviceAccountToken: {path: token, expirationSeconds: 7200}
+          - configMap:
+              name: kube-root-ca.crt
+              items: [{key: ca.crt, path: ca.crt}]
+      - name: driver
+        configMap: {name: quarantine-runner-script}
+      - name: target
+        configMap: {name: sentinelops-remediation-kubernetes}
+      - name: database-ca
+        configMap:
+          name: control-rds-ca
+          items: [{key: ca-bundle.crt, path: ca-bundle.crt}]
+      - name: health-artifacts
+        persistentVolumeClaim: {claimName: health-artifacts, readOnly: true}
+      - name: review-artifacts
+        persistentVolumeClaim: {claimName: review-artifacts, readOnly: true}
+      - name: quarantine-review
+        persistentVolumeClaim: {claimName: remediation-artifacts}

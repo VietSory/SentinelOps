@@ -23,6 +23,7 @@ from uuid import uuid4
 import control
 import control_job
 import upload_model
+from sentinelops.remediation.reader import ActionReader
 
 
 class OfflineChecks(unittest.TestCase):
@@ -185,6 +186,110 @@ class OfflineChecks(unittest.TestCase):
         self.assertEqual(actions, ["action-runtime", "disable"])
         self.assertNotIn("remediation-runtime", [doc["metadata"]["name"] for doc in documents])
 
+    def scoped_execution(self, action, secret, *, publication_fails=False, job_fails=False,
+                         existing=False, namespace="sentinelops-b-actions"):
+        args = self.args(action=action, runtime_secret_arn=None, namespace=namespace)
+        actions, documents = [], []
+        password = "RAM-only:/@?#%+" + secrets.token_urlsafe(36)
+        def fake_aws(_args, *operation, data=None):
+            if operation == ("sts", "get-caller-identity"):
+                return json.dumps({"Account": "123456789012"})
+            return json.dumps({"SecretString": json.dumps({
+                "username": "control_bootstrap", "password": "master-in-RAM"})})
+        def fake_apply(_args, document, **kwargs):
+            self.assertTrue(kwargs.get("create"))
+            documents.append(document)
+            if document["metadata"]["name"] == secret and publication_fails:
+                raise RuntimeError("publication unavailable")
+        def fake_job(*_args, **kwargs):
+            selected = kwargs.get("action", action)
+            actions.append(selected)
+            if job_fails:
+                raise RuntimeError("job verification failed")
+        output = io.StringIO()
+        with patch.object(control, "aws", side_effect=fake_aws), \
+             patch.object(control, "kubectl", return_value=f"secret/{secret}" if existing else ""), \
+             patch.object(control, "apply", side_effect=fake_apply), \
+             patch.object(control.secrets, "token_urlsafe", return_value=password), \
+             patch.object(control, "run_job", side_effect=fake_job), \
+             contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            if publication_fails or job_fails or existing or namespace != "sentinelops-b-actions":
+                with self.assertRaises((RuntimeError, ValueError)):
+                    control.execute(args)
+            else:
+                control.execute(args)
+        self.assertNotIn(password, output.getvalue())
+        return args, actions, documents, password, output.getvalue()
+
+    def test_action_read_uses_reader_secret_and_scoped_failure_recovery(self):
+        args, actions, documents, password, _ = self.scoped_execution("action-read", "remediation-read")
+        self.assertEqual(actions, ["action-read"])
+        doc = documents[-1]
+        self.assertEqual(list(doc["data"]), ["action-read-database-url"])
+        dsn = control.base64.b64decode(doc["data"]["action-read-database-url"]).decode()
+        self.assertEqual(unquote(urlsplit(dsn).username), "control_action_reader")
+        self.assertEqual(unquote(urlsplit(dsn).password), password)
+        self.assertEqual(parse_qs(urlsplit(dsn).query), {"sslmode": ["verify-full"]})
+        _, actions, _, _, _ = self.scoped_execution("action-read", "remediation-read",
+                                                     publication_fails=True)
+        self.assertEqual(actions, ["action-read", "disable-read"])
+
+    def test_action_resolve_publishes_verified_resolver_and_scoped_failure_recovery(self):
+        args, actions, documents, password, _ = self.scoped_execution(
+            "action-resolve", "remediation-resolve")
+        self.assertEqual(actions, ["action-resolve"])
+        doc = documents[-1]
+        self.assertEqual(doc["metadata"], {"name": "remediation-resolve",
+                                           "namespace": "sentinelops-b-actions"})
+        self.assertEqual(list(doc["data"]), ["quarantine-database-url"])
+        dsn = control.base64.b64decode(doc["data"]["quarantine-database-url"]).decode()
+        url = urlsplit(dsn)
+        self.assertEqual(unquote(url.username), control_job.RESOLVER_LOGIN)
+        self.assertEqual(unquote(url.password), password)
+        self.assertEqual((url.hostname, url.port, url.path), (args.host, 5432, "/sentinelops_control"))
+        self.assertEqual(parse_qs(url.query), {"sslmode": ["verify-full"]})
+        _, actions, _, _, _ = self.scoped_execution("action-resolve", "remediation-resolve",
+                                                     publication_fails=True)
+        self.assertEqual(actions, ["action-resolve", "disable-resolve"])
+
+    def test_action_resolve_failure_never_falls_back_to_general_disable(self):
+        _, actions, documents, _, output = self.scoped_execution(
+            "action-resolve", "remediation-resolve", job_fails=True)
+        self.assertEqual(actions, ["action-resolve", "disable-resolve"])
+        self.assertNotIn("remediation-resolve", [d["metadata"]["name"] for d in documents])
+        self.assertIn("control.py disable-resolve", output)
+        self.assertNotIn("using the disable command", output)
+
+    def test_scoped_logins_refuse_existing_secret_or_other_namespace(self):
+        for action, secret in (("action-read", "remediation-read"),
+                               ("action-resolve", "remediation-resolve")):
+            for options in ({"existing": True}, {"namespace": "sentinelops"}):
+                with self.subTest(action=action, options=options):
+                    _, actions, documents, _, _ = self.scoped_execution(action, secret, **options)
+                    self.assertEqual(actions, [])
+                    self.assertEqual(documents, [])
+
+    def test_resolver_disable_is_scoped_and_general_disable_includes_every_demo_login(self):
+        statements = control_job.disable_statements((control_job.RESOLVER_LOGIN,))
+        self.assertTrue(all("control_writer" not in statement and "control_action_writer" not in statement
+                            and "control_action_reader" not in statement for statement in statements))
+        general = "\n".join(control_job.disable_statements())
+        for role in control_job.DEMO_LOGINS:
+            self.assertIn(role, general)
+        with self.assertRaises(ValueError):
+            control_job.disable_statements(("control_owner",))
+
+    def test_action_reader_refuses_resolver_credential(self):
+        connection = SimpleNamespace(fetchval=AsyncMock(side_effect=[[1, 2], False, False, 42, True]))
+        class Acquire:
+            async def __aenter__(self):
+                return connection
+            async def __aexit__(self, *_):
+                return False
+        pool = SimpleNamespace(acquire=Acquire)
+        with self.assertRaisesRegex(RuntimeError, "must not be able to release quarantine"):
+            asyncio.run(ActionReader(pool).check_ready())
+
     def test_action_runtime_refuses_existing_secret_or_other_namespace(self):
         for overrides in ({"existing": True}, {"namespace": "sentinelops"}):
             with self.subTest(overrides=overrides):
@@ -227,6 +332,48 @@ class OfflineChecks(unittest.TestCase):
                 else:
                     master_conn.execute.assert_not_awaited()
                 master_conn.close.assert_awaited_once()
+
+    def test_resolver_job_creates_exact_membership_before_login_and_verification(self):
+        master_conn = SimpleNamespace(fetchval=AsyncMock(side_effect=[
+            True, True, False, False, 0, True, True]), execute=AsyncMock(), close=AsyncMock())
+        runtime_conn = SimpleNamespace(fetchval=AsyncMock(side_effect=[True, True]), close=AsyncMock())
+        driver = SimpleNamespace(connect=AsyncMock(side_effect=[master_conn, runtime_conn]))
+        password = secrets.token_urlsafe(36)
+        master = json.dumps({"username": "control_bootstrap", "password": "master-in-RAM"})
+        with patch.dict("sys.modules", {"asyncpg": driver}), \
+             patch.object(Path, "read_text", side_effect=[master, password]), \
+             patch.dict("os.environ", {"CONTROL_HOST": "control.example.rds.amazonaws.com"}), \
+             patch.object(control_job, "verify_schema", new=AsyncMock()), \
+             patch.object(control_job.ssl, "create_default_context",
+                          return_value=__import__("ssl").create_default_context()), \
+             contextlib.redirect_stdout(io.StringIO()):
+            asyncio.run(control_job.run("action-resolve"))
+        statements = [call.args[0] for call in master_conn.execute.await_args_list]
+        self.assertTrue(any(f"CREATE ROLE {control_job.RESOLVER_LOGIN} NOLOGIN INHERIT" in s
+                            for s in statements))
+        self.assertTrue(any(f"GRANT {control_job.RESOLVER_GROUP} TO {control_job.RESOLVER_LOGIN} "
+                            "WITH INHERIT TRUE, SET FALSE" in s for s in statements))
+        login = next(s for s in statements if s.startswith(f"ALTER ROLE {control_job.RESOLVER_LOGIN} LOGIN"))
+        self.assertIn("SCRAM-SHA-256$", login)
+        self.assertNotIn(password, login)
+        self.assertEqual(driver.connect.await_args_list[1].kwargs["user"], control_job.RESOLVER_LOGIN)
+
+    def test_resolver_job_rejects_any_preexisting_extra_membership(self):
+        master_conn = SimpleNamespace(fetchval=AsyncMock(side_effect=[
+            True, True, False, True, 2, False]), execute=AsyncMock(), close=AsyncMock())
+        driver = SimpleNamespace(connect=AsyncMock(return_value=master_conn))
+        password = secrets.token_urlsafe(36)
+        master = json.dumps({"username": "control_bootstrap", "password": "master-in-RAM"})
+        with patch.dict("sys.modules", {"asyncpg": driver}), \
+             patch.object(Path, "read_text", side_effect=[master, password]), \
+             patch.dict("os.environ", {"CONTROL_HOST": "control.example.rds.amazonaws.com"}), \
+             patch.object(control_job, "verify_schema", new=AsyncMock()), \
+             patch.object(control_job.ssl, "create_default_context",
+                          return_value=__import__("ssl").create_default_context()):
+            with self.assertRaisesRegex(RuntimeError, "unexpected membership"):
+                asyncio.run(control_job.run("action-resolve"))
+        self.assertFalse(any(call.args[0].startswith(f"ALTER ROLE {control_job.RESOLVER_LOGIN} LOGIN")
+                             for call in master_conn.execute.await_args_list))
 
     def test_job_rejects_non_tls_session(self):
         connection = SimpleNamespace(fetchval=AsyncMock(return_value=False), close=AsyncMock())
@@ -306,6 +453,18 @@ def postgres_fixture(image):
                "AND member='control_bootstrap'::regrole") != "f":
             raise RuntimeError("master inherited owner rights after migration")
         sql(bootstrap, user="control_bootstrap", success=False)
+        if sql("SELECT rolcanlogin FROM pg_roles WHERE rolname='control_action_resolver'") != "f":
+            raise RuntimeError("resolver group is not NOLOGIN")
+        # General/scoped cleanup must remain usable before optional action-resolve
+        # has created its dedicated login.
+        for statement in control_job.disable_statements((control_job.RESOLVER_LOGIN,)):
+            sql(statement, user="control_bootstrap")
+        sql(f"CREATE ROLE {control_job.RESOLVER_LOGIN} NOLOGIN INHERIT NOSUPERUSER NOCREATEDB "
+            "NOCREATEROLE NOREPLICATION NOBYPASSRLS", user="control_bootstrap")
+        sql(f"GRANT {control_job.RESOLVER_GROUP} TO {control_job.RESOLVER_LOGIN} "
+            "WITH INHERIT TRUE, SET FALSE", user="control_bootstrap")
+        if sql(control_job.resolver_membership_sql(), user="control_bootstrap") != "t":
+            raise RuntimeError("resolver login does not inherit only the resolver group")
         for role in control_job.RUNTIME_ROLES.values():
             sql(f"ALTER ROLE {role} CREATEDB", user="control_bootstrap")
             if sql(control_job.role_attributes_sql(role), user="control_bootstrap") != "f":
@@ -392,8 +551,70 @@ def postgres_fixture(image):
         if login(control_job.runtime_privileges_sql(action_role), role=action_role) != "f":
             raise RuntimeError("SET-only owner membership was accepted")
         sql("REVOKE control_owner FROM control_action_writer", user="control_bootstrap")
+        # The SELECT-only driver login remains distinct from both action authority roles.
+        reader = "control_action_reader"
+        login(control_job.runtime_privileges_sql(reader), success=False, role=reader)
+        sql("SET ROLE control_owner; " + "; ".join(control_job.READER_GRANTS) + "; RESET ROLE;",
+            user="control_bootstrap")
+        if login(control_job.runtime_privileges_sql(reader), role=reader) != "t":
+            raise RuntimeError("reader privilege boundary differs")
+        if login("SELECT count(*) FROM sentinel_control.incidents", role=reader) != "1":
+            raise RuntimeError("reader cannot read incidents")
+        for forbidden in ("UPDATE sentinel_control.incidents SET lifecycle_stage='closed'",
+                          "DELETE FROM sentinel_remediation.events", "SET ROLE control_owner",
+                          f"SET ROLE {control_job.RESOLVER_GROUP}",
+                          "INSERT INTO sentinel_remediation.targets(target_key) VALUES(repeat('9',64))"):
+            login(forbidden, success=False, role=reader)
+        function = control_job.RELEASE_FUNCTION
+        sql(f"SET ROLE control_owner; GRANT EXECUTE ON FUNCTION {function} TO {reader}; RESET ROLE;",
+            user="control_bootstrap")
+        if login(control_job.runtime_privileges_sql(reader), role=reader) != "f":
+            raise RuntimeError("reader able to release quarantine was accepted")
+        sql(f"SET ROLE control_owner; REVOKE EXECUTE ON FUNCTION {function} FROM {reader}; RESET ROLE;",
+            user="control_bootstrap")
+        # The dedicated resolver inherits only the NOLOGIN resolver group. It can
+        # read and call the guarded function, but has no raw DML or writer/reader membership.
+        resolver = control_job.RESOLVER_LOGIN
+        if login(control_job.runtime_privileges_sql(resolver), role=resolver) != "t":
+            raise RuntimeError("resolver privilege boundary differs")
+        if login("SELECT pg_has_role(current_user,'control_action_resolver','MEMBER') "
+                 "AND NOT pg_has_role(current_user,'control_action_reader','MEMBER') "
+                 "AND NOT pg_has_role(current_user,'control_action_writer','MEMBER')", role=resolver) != "t":
+            raise RuntimeError("resolver inherited reader/writer authority")
+        for forbidden in ("UPDATE sentinel_remediation.targets SET active_action=NULL",
+                          "DELETE FROM sentinel_remediation.quarantine_releases",
+                          "INSERT INTO sentinel_remediation.quarantine_releases(action_id) VALUES(NULL)",
+                          "SET ROLE control_action_resolver", "SET ROLE control_action_reader",
+                          "SET ROLE control_action_writer"):
+            login(forbidden, success=False, role=resolver)
+        for membership in (reader, action_role):
+            sql(f"GRANT {membership} TO {resolver} WITH INHERIT TRUE, SET FALSE", user="control_bootstrap")
+            if login(control_job.runtime_privileges_sql(resolver), role=resolver) != "f":
+                raise RuntimeError("resolver with reader/writer membership was accepted")
+            sql(f"REVOKE {membership} FROM {resolver}", user="control_bootstrap")
+        sql(f"SET ROLE control_owner; GRANT UPDATE ON sentinel_remediation.targets TO {resolver}; RESET ROLE;",
+            user="control_bootstrap")
+        if login(control_job.runtime_privileges_sql(resolver), role=resolver) != "f":
+            raise RuntimeError("resolver raw DML was accepted")
+        sql(f"SET ROLE control_owner; REVOKE UPDATE ON sentinel_remediation.targets FROM {resolver}; RESET ROLE;",
+            user="control_bootstrap")
+        sql("SET ROLE control_owner; CREATE FUNCTION sentinel_remediation.fixture_extra() "
+            "RETURNS integer LANGUAGE sql AS 'SELECT 1'; RESET ROLE;", user="control_bootstrap")
+        if login(control_job.runtime_privileges_sql(resolver), role=resolver) != "f":
+            raise RuntimeError("resolver able to execute an unreviewed function was accepted")
+        sql("SET ROLE control_owner; DROP FUNCTION sentinel_remediation.fixture_extra(); RESET ROLE;",
+            user="control_bootstrap")
+        # Scoped cleanup leaves the other three live identities untouched.
+        for selected in (reader, resolver):
+            for statement in control_job.disable_statements((selected,)):
+                sql(statement, user="control_bootstrap")
+            login("SELECT 1", success=False, role=selected)
+            if login("SELECT current_user", role=action_role) != action_role:
+                raise RuntimeError("scoped disable revoked the action writer")
+            sql(control_job.runtime_login_sql(selected, password), user="control_bootstrap")
         # pg_signal_backend models the RDS master's non-superuser termination capability.
         sessions = []
+        login_names = ",".join(f"'{role}'" for role in control_job.DEMO_LOGINS)
         try:
             for role in control_job.RUNTIME_ROLES.values():
                 session = subprocess.Popen(["docker", "exec", "-i", name, "sh", "-c",
@@ -404,8 +625,8 @@ def postgres_fixture(image):
                 session.stdin.write(password + "\nSELECT pg_sleep(60);\n")
                 session.stdin.close()
             for _ in range(50):
-                if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN "
-                       "('control_writer','control_action_writer') AND wait_event='PgSleep'") == "2":
+                if sql(f"SELECT count(*) FROM pg_stat_activity WHERE usename IN ({login_names}) "
+                       f"AND wait_event='PgSleep'") == str(len(control_job.DEMO_LOGINS)):
                     break
                 time.sleep(0.1)
             else:
@@ -423,15 +644,14 @@ def postgres_fixture(image):
         for role in control_job.RUNTIME_ROLES.values():
             login("SELECT 1", success=False, role=role)
         if sql("SELECT bool_and(NOT rolcanlogin AND rolpassword IS NULL) FROM pg_authid "
-               "WHERE rolname IN ('control_writer','control_action_writer')") != "t":
-            raise RuntimeError("disable did not clear both credentials")
-        if sql("SELECT count(*) FROM pg_stat_activity WHERE usename IN "
-               "('control_writer','control_action_writer')") != "0":
+               f"WHERE rolname IN ({login_names})") != "t":
+            raise RuntimeError("disable did not clear all credentials")
+        if sql(f"SELECT count(*) FROM pg_stat_activity WHERE usename IN ({login_names})") != "0":
             raise RuntimeError("runtime sessions remain")
         print(json.dumps({"postgres_image": image, "status": "PASS", "core_versions": [1, 2, 3],
             "remediation_versions": [1, 2], "restricted_master": True, "scram_auth": True,
             "runtime_forbidden_operations_rejected": True, "wrong_database_and_replay_rejected": True,
-            "action_runtime_privileges": True, "both_logins_and_sessions_revoked": True,
+            "action_runtime_privileges": True, "all_logins_and_sessions_revoked": True,
             "aws_calls": False, "host_ports": False, "network": "none", "rds_or_tls_proof": False}))
     finally:
         docker("rm", "--force", name)

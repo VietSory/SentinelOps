@@ -19,12 +19,12 @@ import tempfile
 from urllib.parse import quote
 from uuid import uuid4
 
-from control_job import EXPIRES, MIGRATIONS
+from control_job import EXPIRES, MIGRATIONS, RESOLVER_LOGIN
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 RUNTIME_NAME = "sentinelops/dev/control-runtime"
-LOGIN_ACTIONS = ("runtime", "action-runtime")
+LOGIN_ACTIONS = ("runtime", "action-runtime", "action-read", "action-resolve")
 
 
 def command(argv, payload=None):
@@ -137,6 +137,14 @@ def execute(args):
             raise ValueError("demo exception expired")
         if kubectl(args, "get", "secret", "remediation-runtime", "--ignore-not-found", "-o", "name").strip():
             raise ValueError("remediation-runtime already exists; review before replacing")
+    if args.action in ("action-read", "action-resolve"):
+        secret = "remediation-read" if args.action == "action-read" else "remediation-resolve"
+        if args.namespace != "sentinelops-b-actions":
+            raise ValueError(f"{args.action} requires sentinelops-b-actions namespace")
+        if datetime.now(timezone.utc) >= EXPIRES:
+            raise ValueError("demo exception expired")
+        if kubectl(args, "get", "secret", secret, "--ignore-not-found", "-o", "name").strip():
+            raise ValueError(f"{secret} already exists; review before replacing")
     if args.action == "runtime":
         if datetime.now(timezone.utc) >= EXPIRES:
             raise ValueError("demo exception expired")
@@ -177,6 +185,16 @@ def execute(args):
                    "sentinelops_control?sslmode=verify-full")
             # Fresh create only: never replace live action credentials or write Secrets Manager.
             apply(args, secret_document(args, "remediation-runtime", {"action-database-url": dsn}), create=True)
+        if args.action == "action-read":
+            password = values["runtime-password"]
+            dsn = (f"postgresql://control_action_reader:{quote(password, safe='')}@{args.host}:5432/"
+                   "sentinelops_control?sslmode=verify-full")
+            apply(args, secret_document(args, "remediation-read", {"action-read-database-url": dsn}), create=True)
+        if args.action == "action-resolve":
+            password = values["runtime-password"]
+            dsn = (f"postgresql://{RESOLVER_LOGIN}:{quote(password, safe='')}@{args.host}:5432/"
+                   "sentinelops_control?sslmode=verify-full")
+            apply(args, secret_document(args, "remediation-resolve", {"quarantine-database-url": dsn}), create=True)
         if args.action == "runtime":
             password = values["runtime-password"]
             endpoint = f"postgresql://{args.host}:5432/sentinelops_control?sslmode=verify-full"
@@ -197,10 +215,25 @@ def execute(args):
     except Exception:
         if runtime_attempted:
             try:
-                run_job(args, master_name, config_name, action="disable")
-                print("Runtime failure: both demo logins disabled and their sessions terminated", file=sys.stderr)
+                scoped = {"action-read": ("disable-read", "Reader"),
+                          "action-resolve": ("disable-resolve", "Resolver")}.get(args.action)
+                if scoped:
+                    run_job(args, master_name, config_name, action=scoped[0])
+                    print(f"{scoped[1]} failure: its login disabled; worker/controller logins untouched",
+                          file=sys.stderr)
+                else:
+                    run_job(args, master_name, config_name, action="disable")
+                    print("Runtime failure: all demo logins disabled and their sessions terminated", file=sys.stderr)
             except Exception:
-                print("URGENT: revoke both demo logins manually using the disable command in the runbook", file=sys.stderr)
+                if args.action == "action-read":
+                    print("URGENT: revoke the reader login with `control.py disable-read`; leave other logins",
+                          file=sys.stderr)
+                elif args.action == "action-resolve":
+                    print("URGENT: revoke the resolver login with `control.py disable-resolve`; leave other logins",
+                          file=sys.stderr)
+                else:
+                    print("URGENT: revoke all demo logins manually using the disable command in the runbook",
+                          file=sys.stderr)
         raise
     finally:
         # If Job deletion failed, these may also fail: report the non-secret names for manual cleanup.
@@ -213,7 +246,9 @@ def execute(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("bootstrap", "runtime", "action-runtime", "sync-runtime", "disable"))
+    parser.add_argument("action", choices=("bootstrap", "runtime", "action-runtime", "action-read",
+                                           "action-resolve", "sync-runtime", "disable", "disable-read",
+                                           "disable-resolve"))
     parser.add_argument("--host", required=True, help="Terraform control_database_endpoint")
     parser.add_argument("--image", required=True, help="Terraform image_repository_urls[control-plane] + @sha256:...")
     parser.add_argument("--namespace", default="sentinelops-b-actions")

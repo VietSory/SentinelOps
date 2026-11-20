@@ -254,8 +254,9 @@ không rotate ngầm, không có `sync-runtime` cho credential action. Nếu m�
 review thu hồi và tạo lại login với password mới; password cũ không được lưu để
 đồng bộ. Không decode/in Secret ra terminal hay file.
 
-Nếu Job hoặc việc tạo Secret thất bại, CLI thử `disable`, thu hồi **cả hai** demo
-login và ngắt session, nên worker dùng `control_writer` cũng mất kết nối. Nếu
+Nếu Job hoặc việc tạo Secret thất bại, CLI thử `disable`, thu hồi **mọi** demo
+login (worker, action writer, reader và resolver nếu đã tạo) và ngắt session, nên
+worker dùng `control_writer` cũng mất kết nối. Nếu
 operator bị ngắt hoặc có `URGENT`, chạy §7 ngay, kiểm tra Secret có thể đã được
 tạo trước khi response bị mất; review trước lần bật lại.
 
@@ -338,13 +339,13 @@ metrics trong phạm vi observability/budget đã review; không tự bật bằ
 ## 7. Thu hồi và cleanup — chạy cả khi destroy bị chặn
 
 Dừng các consumer trước (chỉ các Deployment đã triển khai), gồm action/trial nếu
-đang chạy, sau đó revoke cả hai login:
+đang chạy, sau đó revoke mọi demo login:
 
 ```bash
 kubectl --context "$CONTEXT" -n "$NS" scale deployment/sentinelops-health-worker deployment/sentinelops-incident-worker --replicas=0
 python3.11 scripts/aws_demo/control.py disable "${COMMON[@]}" \
   --master-secret-arn "$MASTER_ARN" --execute
-kubectl --context "$CONTEXT" -n "$NS" delete secret control-runtime remediation-runtime --ignore-not-found
+kubectl --context "$CONTEXT" -n "$NS" delete secret control-runtime remediation-runtime remediation-read remediation-resolve --ignore-not-found
 # Nếu đã tạo bản cho API ở §5, dừng trial/API rồi xóa bản đó:
 kubectl --context "$CONTEXT" -n sentinelops delete secret control-runtime --ignore-not-found
 
@@ -354,8 +355,9 @@ kubectl --context "$CONTEXT" -n sentinelops delete secret control-runtime --igno
 aws --region "$REGION" secretsmanager delete-secret --secret-id "$RUNTIME_ARN" --recovery-window-in-days 7
 ```
 
-Job `disable` chạy `ALTER ROLE ... NOLOGIN PASSWORD NULL` cho **control_writer và
-control_action_writer**, rồi `pg_terminate_backend` cho mọi session của cả hai.
+Job `disable` chạy `ALTER ROLE ... NOLOGIN PASSWORD NULL` cho **control_writer,
+control_action_writer, control_action_reader và control_quarantine_resolver**
+(resolver login là optional), rồi `pg_terminate_backend` cho mọi session của chúng.
 Các bước NOLOGIN/PASSWORD NULL được commit trước bước terminate, để lỗi ngắt
 session không rollback việc khóa login. Nếu master không có quyền
 ngắt một session, Job fail: operator có quyền RDS phù hợp phải xác nhận không còn
