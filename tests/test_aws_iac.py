@@ -152,13 +152,16 @@ def test_unbounded_bedrock_grant_is_rejected():
 
 
 def test_bedrock_invoke_is_absent_until_models_are_named():
-    """Default configuration grants no invoke permission at all."""
+    """Both explicit resource allowlists default empty; neither grants invoke."""
     variables = normalize((ROOT/'variables.tf').read_text())
-    assert 'variable "bedrock_model_ids"' in variables
-    block = variables.split('variable "bedrock_model_ids"')[1].split('\nvariable ')[0]
-    assert 'default = []' in block
+    for name in ('bedrock_model_ids', 'bedrock_resource_arns'):
+        assert f'variable "{name}"' in variables
+        block = variables.split(f'variable "{name}"')[1].split('\nvariable ')[0]
+        assert 'default = []' in block
     policy = BLOCKS['aws_iam_role_policy.explanation']['body']
-    assert 'count = length(var.bedrock_model_ids) > 0 ? 1 : 0' in policy
+    allowlist_count = 'length(var.bedrock_model_ids) + length(var.bedrock_resource_arns)'
+    assert f'count = {allowlist_count} > 0 ? 1 : 0' in policy
+    assert f'for_each = {allowlist_count} > 0 ? [1] : []' in DOCUMENTS['explanation']['body']
 
 
 def test_irsa_trust_is_scoped_to_one_service_account():

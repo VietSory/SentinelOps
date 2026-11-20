@@ -32,6 +32,10 @@ def test_explanation_browser_fixture_is_separate_from_source_or_provider_evidenc
     result=fixture_explanation('INC-FIXTURE-A',3)
     validate_payload('explanation-response.schema.json',result)
     assert result['revision']==3 and result['fallback'] and 'Software fixture' in result['payload']['summary']
+    assert result['payload']['schema_version']=='2.0'
+    root=result['payload']['root_cause']
+    assert root['service'] is None and root['score'] is None and root['evidence_refs']==[]
+    assert 'Software fixture' in root['explanation'] and 'no actual ranked root-cause hypothesis' in root['explanation']
 
 
 def test_ui_serves_same_origin_without_exposing_token_or_private_incidents():

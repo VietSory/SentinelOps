@@ -254,7 +254,7 @@ variable "bedrock_model_ids" {
   validation {
     condition = alltrue([for id in var.bedrock_model_ids :
       can(regex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,2047}$", id))
-      && !can(regex(":prompt(?:/|-router/)", id))])
+    && !can(regex(":prompt(?:/|-router/)", id))])
     error_message = "Bedrock model ids must be explicit foundation or inference-profile identities."
   }
 }
@@ -267,7 +267,7 @@ variable "bedrock_resource_arns" {
   validation {
     condition = alltrue([for arn in var.bedrock_resource_arns :
       can(regex("^arn:aws:bedrock:[a-z0-9-]+:[0-9]{12}:inference-profile/[A-Za-z0-9._:/-]+$", arn))
-      || can(regex("^arn:aws:bedrock:[a-z0-9-]+::foundation-model/[A-Za-z0-9._:/-]+$", arn))])
+    || can(regex("^arn:aws:bedrock:[a-z0-9-]+::foundation-model/[A-Za-z0-9._:/-]+$", arn))])
     error_message = "Bedrock resource ARNs must explicitly name an inference profile or foundation model; wildcards are rejected."
   }
 }
@@ -278,9 +278,9 @@ variable "bedrock_trusted_service_account_subjects" {
   default     = []
 
   validation {
-    condition = length(distinct(var.bedrock_trusted_service_account_subjects)) == length(var.bedrock_trusted_service_account_subjects)
+    condition = (length(distinct(var.bedrock_trusted_service_account_subjects)) == length(var.bedrock_trusted_service_account_subjects)
       && alltrue([for subject in var.bedrock_trusted_service_account_subjects :
-        can(regex("^system:serviceaccount:[a-z0-9][a-z0-9-]{0,62}:[a-z0-9][a-z0-9-]{0,62}$", subject))])
+    can(regex("^system:serviceaccount:[a-z0-9][a-z0-9-]{0,62}:[a-z0-9][a-z0-9-]{0,62}$", subject))]))
     error_message = "Bedrock trust additions must be exact, unique Kubernetes service-account subjects."
   }
 }

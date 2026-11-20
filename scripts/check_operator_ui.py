@@ -111,8 +111,11 @@ def fixture_explanation(incident, revision, *, now=None):
     """Explicit browser contract fixture, never source/model/provider evidence."""
     return {'schema_version':'1.0','incident_id':incident,'revision':revision,
         'generated_at':timestamp(now or FIXTURE_TIME),'provider':'deterministic-facts/v1','fallback':True,
-        'payload':{'schema_version':'1.0','incident_id':incident,
+        'payload':{'schema_version':'2.0','incident_id':incident,
             'summary':f'Software fixture for revision {revision}; hypotheses are not confirmed causes.',
+            'root_cause':{'service':None,'score':None,
+                'explanation':f'Software fixture for revision {revision}; no actual ranked root-cause hypothesis is established.',
+                'evidence_refs':[]},
             'claims':[{'text':'<img src=x onerror="window.__explanation_xss=true">',
                        'evidence_refs':['fixture-evidence-1']}]}}
 
