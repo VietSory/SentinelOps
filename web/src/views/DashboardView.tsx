@@ -409,8 +409,8 @@ export function DashboardView({
                         : 'border-slate-200 bg-slate-50/40',
                   )}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {isCritical ? (
                         <ShieldAlert className="h-4 w-4 text-red-600 shrink-0" />
                       ) : isDegraded ? (
