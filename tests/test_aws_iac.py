@@ -157,8 +157,10 @@ def test_bedrock_invoke_is_absent_until_models_are_named():
     assert 'variable "bedrock_model_ids"' in variables
     block = variables.split('variable "bedrock_model_ids"')[1].split('\nvariable ')[0]
     assert 'default = []' in block
+    arns = variables.split('variable "bedrock_resource_arns"')[1].split('\nvariable ')[0]
+    assert 'default = []' in arns
     policy = BLOCKS['aws_iam_role_policy.explanation']['body']
-    assert 'count = length(var.bedrock_model_ids) > 0 ? 1 : 0' in policy
+    assert 'count = length(var.bedrock_model_ids) + length(var.bedrock_resource_arns) > 0 ? 1 : 0' in policy
 
 
 def test_irsa_trust_is_scoped_to_one_service_account():

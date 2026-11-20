@@ -556,26 +556,29 @@ function explanation(state) {
   }
   if (state.explanationLoading) target.append(node('p','Reading explanation…','subtle'));
   if (result) {
-    target.append(section(result.fallback ? 'Deterministic fallback' :
-      (result.payload.root_cause?.service ? 'AI-generated explanation' : 'AI abstained')),
+    const root = result.payload.root_cause;
+    const status = result.fallback ? 'fallback' : root.service === null ? 'abstained' : 'generated';
+    const [heading, rootHeading] = {
+      fallback: ['Deterministic fallback','Root-cause hypothesis'],
+      abstained: ['AI abstained','No AI root cause'],
+      generated: ['AI-generated explanation','AI-synthesized root cause'],
+    }[status];
+    target.append(section(heading),
       node('p',`Provider ${result.provider} · generated ${date(result.generated_at)}`,'subtle'),
       helpDisclosure('Generated summary',raw('p',result.payload.summary,'explanation-summary')));
-    if (result.payload.root_cause) {
-      const root = result.payload.root_cause;
-      const card = node('div',null,'explanation-root-cause');
-      card.append(node('h3',result.fallback ? 'Root-cause hypothesis' : 'AI-synthesized root cause'));
-      card.append(node('p',`${root.service || 'Unknown'} · RCA score ${root.score === null ? 'unavailable' : score(root.score)} (not probability)`,'subtle'));
-      card.append(raw('p',root.explanation));
-      const refs = node('div',null,'reference-list');
-      for (const ref of root.evidence_refs) {
-        const link = button(short(ref,24),() => {
-          tab = 'evidence'; highlightedEvidence = ref; renderDetail(workspace.state);
-          const item = [...document.querySelectorAll('[data-evidence-id]')].find(value => value.dataset.evidenceId === ref);
-          if (item) { item.open = true; item.scrollIntoView({block:'nearest'}); item.querySelector('summary')?.focus(); }
-        },'reference'); link.title = ref; refs.append(link);
-      }
-      card.append(refs); target.append(card);
+    const rootCard = node('div',null,`explanation-root-cause explanation-root-cause--${status}`);
+    rootCard.append(node('h3',rootHeading));
+    rootCard.append(node('p',`${root.service || 'Unknown'} · RCA score ${root.score === null ? 'unavailable' : score(root.score)} (not probability)`,'subtle'));
+    rootCard.append(raw('p',root.explanation));
+    const rootRefs = node('div',null,'reference-list');
+    for (const ref of root.evidence_refs) {
+      const link = button(short(ref,24),() => {
+        tab = 'evidence'; highlightedEvidence = ref; renderDetail(workspace.state);
+        const item = [...document.querySelectorAll('[data-evidence-id]')].find(value => value.dataset.evidenceId === ref);
+        if (item) { item.open = true; item.scrollIntoView({block:'nearest'}); item.querySelector('summary')?.focus(); }
+      },'reference'); link.title = ref; rootRefs.append(link);
     }
+    rootCard.append(rootRefs); target.append(rootCard);
     if (!result.payload.claims.length) target.append(node('p','No bounded evidence claims are available for this revision.','subtle'));
     for (const claim of result.payload.claims) {
       const card = node('div',null,'explanation-claim'); card.append(raw('p',claim.text));

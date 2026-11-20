@@ -3,6 +3,7 @@
 Uses OIDC public configuration and existing control/action-reader DB Secret references.
 Default inference is unavailable. An optional read-only model PVC/reference is
 only wiring: the existing registry must validate its content at runtime.
+LLM explanations are opt-in and use an existing gateway credential Secret.
 """
 from __future__ import annotations
 
@@ -41,7 +42,8 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
            action_read_secret: str | None = None,
            model_claim: str | None = None, model_release_ref: str | None = None,
            login_domain: str | None = None, approval_scope: str = 'sentinelops/remediation.approve',
-           controller_sidecar: bool = False, service_type: str = 'ClusterIP', node_port: int | None = None) -> list[dict]:
+           controller_sidecar: bool = False, service_type: str = 'ClusterIP', node_port: int | None = None,
+           llm_model: str | None = None, llm_base_url: str = 'https://api.openai.com/v1') -> list[dict]:
     image_digest(image)
     _label(environment, 'environment')
     _label(control_secret, 'control secret reference')
@@ -56,6 +58,12 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
                       login_domain=login_domain, approval_scope=approval_scope)
     if type(controller_sidecar) is not bool or service_type not in ('ClusterIP', 'NodePort'):
         raise ValueError('explicit sidecar boolean and ClusterIP/NodePort Service required')
+    enable_llm = llm_model is not None
+    if enable_llm and (type(llm_model) is not str or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}', llm_model)):
+        raise ValueError('explicit LLM model ID required')
+    if enable_llm and (type(llm_base_url) is not str
+                       or not re.fullmatch(r'https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~-]+)*', llm_base_url)):
+        raise ValueError('LLM base URL must be credential-free HTTPS')
     if (service_type == 'NodePort' and (type(node_port) is not int or not 30000 <= node_port <= 32767)
         or service_type == 'ClusterIP' and node_port is not None):
         raise ValueError('NodePort requires an explicit port in 30000..32767; ClusterIP has no node port')
@@ -78,6 +86,8 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
             'SENTINELOPS_OIDC_APPROVAL_SCOPE': oidc.approval_scope}
     if login_domain is not None:
         data['SENTINELOPS_OIDC_LOGIN_DOMAIN'] = login_domain
+    if enable_llm:
+        data.update(SENTINELOPS_LLM_BASE_URL=llm_base_url, SENTINELOPS_LLM_MODEL=llm_model)
     service = {'apiVersion': 'v1', 'kind': 'Service', 'metadata': metadata(NAME), 'spec': {
         'type': service_type, 'selector': {'app': 'remediation-controller' if controller_sidecar else NAME},
         'ports': [{'name': 'http', 'port': 8000, 'targetPort': 'http',
@@ -103,6 +113,9 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
     if action_read_secret is not None:
         environment_variables.append({'name': 'SENTINELOPS_ACTION_READ_DATABASE_URL', 'valueFrom': {
             'secretKeyRef': {'name': action_read_secret, 'key': 'database-url', 'optional': False}}})
+    if enable_llm:
+        environment_variables.append({'name': 'SENTINELOPS_LLM_API_KEY', 'valueFrom': {
+            'secretKeyRef': {'name': 'sentinelops-llm', 'key': 'SENTINELOPS_LLM_API_KEY', 'optional': False}}})
     container = {'name': 'api', 'image': image, 'imagePullPolicy': 'IfNotPresent',
         'command': ['python', '-m', 'uvicorn', 'sentinelops.main:app', '--host', '0.0.0.0',
                     '--port', '8000', '--no-access-log'],
@@ -148,6 +161,8 @@ def main():
     parser.add_argument('--login-domain')
     parser.add_argument('--approval-scope', default='sentinelops/remediation.approve')
     parser.add_argument('--controller-sidecar', action='store_true')
+    parser.add_argument('--llm-model', help='Enable LLM explanations with this model ID and the sentinelops-llm Secret')
+    parser.add_argument('--llm-base-url', default='https://api.openai.com/v1')
     parser.add_argument('--service-type', choices=('ClusterIP', 'NodePort'), default='ClusterIP')
     parser.add_argument('--node-port', type=int)
     parser.add_argument('--output', type=Path, required=True)

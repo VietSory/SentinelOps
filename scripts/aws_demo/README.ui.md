@@ -63,6 +63,19 @@ Renderer API mặc định vẫn có thể sinh Deployment riêng chỉ đọc v
 mount approval PVC. Deployment đó **không** phải phương án ghi receipt cho RWO
 store. Chỉ dùng nó cho đọc khi cần; đường demo duyệt dùng `--controller-sidecar`.
 
+### Bật giải thích LLM
+
+Thêm `--llm-model <model-id>` vào lệnh render API ở trên để ghi base URL
+(mặc định `https://api.openai.com/v1`, đổi bằng `--llm-base-url`) và model vào
+ConfigMap `sentinelops-api-runtime`. Không truyền `--llm-model` thì LLM tắt.
+Chuẩn bị Secret `sentinelops-llm` có khóa `SENTINELOPS_LLM_API_KEY` trong namespace
+`sentinelops-b-actions` qua quy trình quản lý bí mật của môi trường.
+Với `--controller-sidecar`, cập nhật ConfigMap trước, sau đó cập nhật Pod template
+của `remediation-controller`. Giữ `envFrom` hiện có của `operator-ui` và thêm
+một mục `env` tên `SENTINELOPS_LLM_API_KEY` qua `valueFrom.secretKeyRef` trỏ đến
+Secret và khóa trên, với `optional: false`. Với Deployment API riêng, renderer
+tự thêm tham chiếu này khi bật cờ.
+
 ## Luồng đăng nhập và token
 
 - `GET /ui/auth-config` công khai chỉ trả issuer, public client ID, Cognito domain,

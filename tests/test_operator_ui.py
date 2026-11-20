@@ -26,12 +26,20 @@ def test_quarantine_browser_fixture_cannot_claim_recovery_or_dispatch_authority(
     assert result['action_phase']=='escalated' and result['resolution']['payload']['recovery_accepted'] is False
 
 
-def test_explanation_browser_fixture_is_separate_from_source_or_provider_evidence():
+@pytest.mark.parametrize('mode,service',[
+    ('fallback','payment-service'),('generated','payment-service'),('abstained',None),
+])
+def test_explanation_browser_fixture_is_separate_from_source_or_provider_evidence(mode,service):
     from scripts.check_operator_ui import fixture_explanation
     from sentinelops.contracts import validate_payload
-    result=fixture_explanation('INC-FIXTURE-A',3)
+    result=fixture_explanation('INC-FIXTURE-A',3,mode=mode)
     validate_payload('explanation-response.schema.json',result)
-    assert result['revision']==3 and result['fallback'] and 'Software fixture' in result['payload']['summary']
+    assert result['revision']==3 and result['fallback']==(mode=='fallback')
+    assert 'Software fixture' in result['payload']['summary']
+    root = result['payload']['root_cause']
+    assert root['service']==service and 'Software fixture' in root['explanation']
+    assert root['score']==(.4 if service else None)
+    assert root['evidence_refs']==(['fixture-evidence-1'] if service else [])
 
 
 def test_ui_serves_same_origin_without_exposing_token_or_private_incidents():

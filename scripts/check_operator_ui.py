@@ -107,12 +107,24 @@ def fixture_envelope(incident, revision, after=0, *, now=None):
     return result
 
 
-def fixture_explanation(incident, revision, *, now=None):
+def fixture_explanation(incident, revision, *, now=None, mode='fallback'):
     """Explicit browser contract fixture, never source/model/provider evidence."""
+    narrative = {
+        'fallback': 'Software fixture for the ranked hypothesis.',
+        'generated': 'Software fixture for the AI narrative.\n' + 'fixture'*125,
+        'abstained': 'Software fixture for an AI explanation without a root cause.',
+    }[mode]
+    fallback = mode == 'fallback'
+    if mode == 'abstained':
+        root = {'service':None,'score':None,'evidence_refs':[]}
+    else:
+        root = fixture_envelope(incident,1,now=now)['payload']['root_cause_ranking'][0]
     return {'schema_version':'1.0','incident_id':incident,'revision':revision,
-        'generated_at':timestamp(now or FIXTURE_TIME),'provider':'deterministic-facts/v1','fallback':True,
-        'payload':{'schema_version':'1.0','incident_id':incident,
+        'generated_at':timestamp(now or FIXTURE_TIME),
+        'provider':'deterministic-facts/v1' if fallback else 'fixture-ai/v1','fallback':fallback,
+        'payload':{'schema_version':'2.0','incident_id':incident,
             'summary':f'Software fixture for revision {revision}; hypotheses are not confirmed causes.',
+            'root_cause':{**root,'explanation':narrative},
             'claims':[{'text':'<img src=x onerror="window.__explanation_xss=true">',
                        'evidence_refs':['fixture-evidence-1']}]}}
 
@@ -173,6 +185,7 @@ def fixture_proposals(now=None):
 
 def exercise_fixtures(page, base, output, expect):
     token = FIXTURE_TOKEN
+    explanation_mode = 'fallback'
     outage = {'active':False,'actions':False,'quarantine':False,'explanation':False,'proposals':False,
               'read_scope':False,'expired':False,'identity_provider':False,'model_available':False}
     # The two-row subset deliberately exercises pagination and empty state filters.
@@ -211,7 +224,8 @@ def exercise_fixtures(page, base, output, expect):
             assert route.request.method == 'GET' and 'revision' in query
             if outage['explanation']:
                 route.fulfill(status=503,json={'code':'explanation_unavailable','request_id':'fixture-explanation-outage'});return
-            route.fulfill(json=fixture_explanation(url.path.split('/')[-2],int(query['revision'][0])));return
+            route.fulfill(json=fixture_explanation(url.path.split('/')[-2],int(query['revision'][0]),
+                mode=explanation_mode));return
         if url.path.endswith('/actions'):
             if outage['actions']:
                 route.fulfill(status=503,json={'code':'action_store_unavailable','request_id':'fixture-action-outage'}); return
@@ -293,12 +307,27 @@ def exercise_fixtures(page, base, output, expect):
     page.locator('#nav-explanation').focus();page.keyboard.press('Enter')
     expect(page.locator('#nav-explanation')).to_have_attribute('aria-current','page')
     expect(page.get_by_text('Deterministic fallback',exact=True)).to_be_visible()
+    root_card = page.locator('.explanation-root-cause')
+    expect(root_card.locator('h3')).to_have_text('Root-cause hypothesis')
+    expect(page.locator('.explanation-root-cause--fallback')).to_be_visible()
+    border_colors = {root_card.evaluate('(card) => getComputedStyle(card).borderLeftColor')}
     expect(page.locator('.explanation-summary')).to_contain_text('revision 3')
     expect(page.locator('.explanation-claim p')).to_have_text('<img src=x onerror="window.__explanation_xss=true">')
     assert page.evaluate('window.__explanation_xss') is None and page.locator('#detail-pane img').count()==0
     page.locator('.explanation-claim .reference').click()
     expect(page.locator('details[data-evidence-id="fixture-evidence-1"]')).to_have_attribute('open','')
     page.get_by_role('button',name='Explanation',exact=True).click()
+    for explanation_mode, heading, root_heading in (
+        ('generated','AI-generated explanation','AI-synthesized root cause'),
+        ('abstained','AI abstained','No AI root cause'),
+    ):
+        page.get_by_role('button',name='Reload explanation',exact=True).click()
+        expect(page.get_by_role('heading',name=heading,exact=True)).to_be_visible()
+        expect(root_card.locator('h3')).to_have_text(root_heading)
+        expect(page.locator(f'.explanation-root-cause--{explanation_mode}')).to_be_visible()
+        border_colors.add(root_card.evaluate('(card) => getComputedStyle(card).borderLeftColor'))
+    assert len(border_colors) == 3
+    explanation_mode = 'fallback'
     outage['explanation']=True;page.get_by_role('button',name='Reload explanation',exact=True).click()
     expect(page.locator('#detail-pane .detail-content [role=alert]')).to_contain_text('Explanation is unavailable')
     # Independent sections can fail together; each assertion must read its own alert.
@@ -355,10 +384,17 @@ def exercise_fixtures(page, base, output, expect):
     expect(page.locator('#revision-input')).to_have_value('3')
     expect(page.locator('#detail-title')).to_be_focused()
     expect(page.locator('#detail-title')).to_be_in_viewport()
+    explanation_mode = 'generated'
     page.get_by_role('button',name='Explanation',exact=True).click()
     expect(page.locator('.explanation-summary')).to_contain_text('revision 3')
+    narrative = page.locator('.explanation-root-cause--generated p').last
+    expect(narrative).to_contain_text('fixture'*125)
+    expect(narrative).to_have_css('white-space','pre-wrap')
+    expect(narrative).to_have_css('overflow-wrap','anywhere')
+    assert narrative.evaluate('(paragraph) => paragraph.scrollWidth <= paragraph.clientWidth')
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     page.screenshot(path=str(output/'fixture-mobile.png'),full_page=True)
+    explanation_mode = 'fallback'
     page.get_by_role('button',name='Actions',exact=True).click()
     expect(page.locator('.evidence-card')).to_have_count(1)
     page.locator('.evidence-card summary').click()

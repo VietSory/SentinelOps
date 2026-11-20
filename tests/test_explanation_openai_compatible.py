@@ -19,7 +19,7 @@ from tests.test_explanations import envelope, run, selection
 BASE_URL = "https://llm.example.test/v1"
 MODEL = "fixture-model-v1"
 API_KEY = "fixture-api-key-never-a-real-credential"
-ACTOR_AUTHORIZATION = "fixture-actor-authorization"
+ACTOR_AUTHORIZATION = "fixture-actor authorization"
 
 
 def response_handler(payload, *, status_code=200):
@@ -46,6 +46,21 @@ def close_runtime(runtime):
     asyncio.run(runtime.close())
 
 
+class TrackedResponseStream(httpx.AsyncByteStream):
+    def __init__(self, *chunks):
+        self.chunks = chunks
+        self.chunks_read = 0
+        self.closed = False
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            self.chunks_read += 1
+            yield chunk
+
+    async def aclose(self):
+        self.closed = True
+
+
 @pytest.mark.parametrize("trailing_slash", ["", "/"], ids=["no-slash", "trailing-slash"])
 def test_responses_request_preserves_url_prefix_and_uses_expected_schema(trailing_slash):
     base_url = "https://llm.example.test/gateway/team/v1"
@@ -55,8 +70,9 @@ def test_responses_request_preserves_url_prefix_and_uses_expected_schema(trailin
         body = json.loads(request.content)
         requests.append((request, body))
         requested_selection = json.loads(body["input"])
-        return httpx.Response(200, json={"status": "completed", "output_text": json.dumps(
-            selection(requested_selection))})
+        payload = {"status": "completed", "output_text": json.dumps(selection(requested_selection))}
+        return httpx.Response(200, headers={"Content-Encoding": "identity"},
+                              stream=httpx.ByteStream(json.dumps(payload).encode()))
 
     runtime, provider = build_provider(
         handle, base_url=base_url + trailing_slash, actor_authorization=ACTOR_AUTHORIZATION
@@ -73,11 +89,13 @@ def test_responses_request_preserves_url_prefix_and_uses_expected_schema(trailin
     assert request.url == "https://llm.example.test/gateway/team/v1/responses"
     assert request.headers["authorization"] == f"Bearer {API_KEY}"
     assert request.headers["x-openai-actor-authorization"] == ACTOR_AUTHORIZATION
+    assert request.headers["accept-encoding"] == "identity"
     assert set(body) == {"model", "instructions", "input", "max_output_tokens", "store", "text"}
     assert body["model"] == MODEL
     assert body["store"] is False
     assert body["max_output_tokens"] == 512
-    assert body["text"] == {"format": {"type": "json_object"}}
+    assert body["text"] == {"format": {"type": "json_schema", "name": "incident_explanation",
+                                       "schema": {"type": "object"}, "strict": False}}
     assert isinstance(body["instructions"], str) and body["instructions"]
     assert json.loads(body["input"])["revision"] == 1
 
@@ -161,6 +179,59 @@ def test_provider_does_not_parse_refusal_as_output_text():
         close_runtime(runtime)
 
 
+@pytest.mark.parametrize("message_state", ["refusal", "incomplete"])
+@pytest.mark.parametrize("include_flat_text", [False, True], ids=["blocks-only", "with-flat-text"])
+def test_provider_rejects_refused_or_incomplete_messages(message_state, include_flat_text):
+    def handle(request):
+        answer = json.dumps(selection(json.loads(json.loads(request.content)["input"])))
+        message = {"type": "message", "status": "completed", "content": [
+            {"type": "output_text", "text": answer},
+        ]}
+        if message_state == "refusal":
+            message["content"].append({"type": "refusal", "refusal": "fixture refusal"})
+        else:
+            message["status"] = "incomplete"
+        payload = {"status": "completed", "output": [message]}
+        if include_flat_text:
+            payload["output_text"] = answer
+        return httpx.Response(200, json=payload)
+
+    runtime, provider = build_provider(handle)
+    try:
+        assert run(provider) == run()
+    finally:
+        close_runtime(runtime)
+
+
+@pytest.mark.parametrize("response_shape", ["flat", "blocks", "both"])
+@pytest.mark.parametrize("credential,escaped", [
+    (API_KEY, False),
+    (f" {ACTOR_AUTHORIZATION} ", False),
+    (ACTOR_AUTHORIZATION, False),
+    (API_KEY, True),
+], ids=["api-key", "actor-exact", "actor-stripped", "json-escaped-key"])
+def test_provider_rejects_reflected_credentials(response_shape, credential, escaped, caplog):
+    text = json.dumps({"details": [{"value": f"prefix {credential} suffix"}]})
+    if escaped:
+        text = text.replace(credential, f"\\u{ord(credential[0]):04x}" + credential[1:])
+    payload = {"status": "completed"}
+    if response_shape in ("flat", "both"):
+        payload["output_text"] = text if response_shape == "flat" or escaped else "{}"
+    if response_shape in ("blocks", "both"):
+        payload["output"] = [{"type": "message", "content": [{"type": "output_text", "text": text}]}]
+    runtime, provider = build_provider(response_handler(payload),
+                                       actor_authorization=f" {ACTOR_AUTHORIZATION} ")
+    try:
+        with pytest.raises(ValueError, match="^Responses API returned invalid output$") as error:
+            asyncio.run(provider.invoke({}))
+        assert credential not in str(error.value)
+        assert run(provider) == run()
+    finally:
+        close_runtime(runtime)
+    assert API_KEY not in caplog.text
+    assert ACTOR_AUTHORIZATION not in caplog.text
+
+
 @pytest.mark.parametrize("body", [
     b"{not-json",
     b'{"status":"completed","status":"incomplete"}',
@@ -179,15 +250,36 @@ def test_runtime_rejects_malformed_json_duplicate_keys_and_nonfinite_values(body
 
 
 def test_runtime_stops_reading_an_oversized_response_body():
+    stream = TrackedResponseStream(b"x" * MAX_BYTES, b"y", b"unread")
     runtime = OpenAIResponsesRuntime(
         base_url=BASE_URL, model=MODEL, api_key=API_KEY,
-        transport=httpx.MockTransport(response_handler(b"x" * (MAX_BYTES + 1))),
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=stream)),
     )
     try:
         with pytest.raises(ValueError, match="body exceeds byte limit"):
             asyncio.run(runtime.converse(model=MODEL, instructions="test", input="{}"))
     finally:
         close_runtime(runtime)
+    assert stream.chunks_read == 2
+    assert stream.closed
+
+
+@pytest.mark.parametrize("encoding", ["gzip", "br", "identity, gzip"])
+def test_runtime_rejects_non_identity_encoding_before_reading_the_body(encoding):
+    stream = TrackedResponseStream(b"unread")
+    runtime = OpenAIResponsesRuntime(
+        base_url=BASE_URL, model=MODEL, api_key=API_KEY,
+        transport=httpx.MockTransport(lambda request: httpx.Response(
+            200, headers={"Content-Encoding": encoding}, stream=stream,
+        )),
+    )
+    try:
+        with pytest.raises(ValueError, match="unsupported content encoding"):
+            asyncio.run(runtime.converse(model=MODEL, instructions="test", input="{}"))
+    finally:
+        close_runtime(runtime)
+    assert stream.chunks_read == 0
+    assert stream.closed
 
 
 @pytest.mark.parametrize("payload", [
@@ -229,6 +321,21 @@ def test_http_errors_fall_back_without_leaking_credentials_or_provider_body(stat
     assert private_error not in json.dumps(result)
 
 
+@pytest.mark.parametrize("error_type", [httpx.ConnectError, httpx.ReadTimeout])
+def test_transport_errors_fall_back_without_logging_error_details(error_type, caplog):
+    error_detail = "fixture-transport-error-detail"
+
+    def handle(request):
+        raise error_type(error_detail, request=request)
+
+    runtime, provider = build_provider(handle)
+    try:
+        assert run(provider) == run()
+    finally:
+        close_runtime(runtime)
+    assert error_detail not in caplog.text
+
+
 @pytest.mark.parametrize("settings_kwargs", [
     {"llm_base_url": BASE_URL},
     {"llm_model": MODEL},
@@ -255,6 +362,37 @@ def test_settings_accept_complete_provider_configuration_and_optional_actor_head
     assert settings.llm_actor_authorization == ACTOR_AUTHORIZATION
     assert API_KEY not in repr(settings)
     assert ACTOR_AUTHORIZATION not in repr(settings)
+
+
+@pytest.mark.parametrize("setting,invalid_character", [
+    ("API_KEY", " "),
+    ("API_KEY", "\n"),
+    ("API_KEY", "\x7f"),
+    ("API_KEY", "é"),
+    ("ACTOR_AUTHORIZATION", "\t"),
+    ("ACTOR_AUTHORIZATION", "\x7f"),
+    ("ACTOR_AUTHORIZATION", "é"),
+], ids=["key-space", "key-control", "key-del", "key-unicode",
+        "actor-control", "actor-del", "actor-unicode"])
+def test_invalid_credential_characters_are_rejected_without_echoing_the_value(
+    setting, invalid_character, monkeypatch,
+):
+    invalid_value = f"test-key-000000{invalid_character}fixture"
+    env_name = f"SENTINELOPS_LLM_{setting}"
+    monkeypatch.setenv("SENTINELOPS_LLM_BASE_URL", BASE_URL)
+    monkeypatch.setenv("SENTINELOPS_LLM_MODEL", MODEL)
+    monkeypatch.setenv("SENTINELOPS_LLM_API_KEY", API_KEY)
+    monkeypatch.setenv("SENTINELOPS_LLM_ACTOR_AUTHORIZATION", ACTOR_AUTHORIZATION)
+    monkeypatch.setenv(env_name, invalid_value)
+    with pytest.raises(ValueError, match=f"^{env_name} is invalid$") as settings_error:
+        Settings.from_env()
+    assert "test-key-000000" not in repr(settings_error.value)
+
+    with pytest.raises(ValueError) as runtime_error:
+        build_provider(response_handler({}),
+                       api_key=invalid_value if setting == "API_KEY" else API_KEY,
+                       actor_authorization=invalid_value if setting == "ACTOR_AUTHORIZATION" else ACTOR_AUTHORIZATION)
+    assert "test-key-000000" not in repr(runtime_error.value)
 
 
 @pytest.mark.parametrize("settings_kwargs", [
