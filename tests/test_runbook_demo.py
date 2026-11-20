@@ -591,5 +591,6 @@ def test_safe_reason_never_echoes_library_value_errors():
     assert demo.safe_reason(Blocked('deployment-change-baseline-mismatch')) == ': deployment-change-baseline-mismatch'
     for leaky in (ValueError('postgresql://user:password@host/db'), Blocked('abc-def-123'),
                   ValueError("image: 'https://user:password@host/x' does not match"),
-                  Blocked('postgresql://user:password@host/db'), TimeoutError('token=abc')):
+                  Blocked('postgresql://user:password@host/db'), TimeoutError('token=abc'),
+                  Blocked('invalid demo cooldown/deadline/poll bounds')):
         assert demo.safe_reason(leaky) == ''

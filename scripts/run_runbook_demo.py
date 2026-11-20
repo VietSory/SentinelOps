@@ -524,9 +524,11 @@ TERMINAL_PHASES = ('blocked', 'escalated', 'recovered', 'verifying', 'dispatchin
 
 def safe_reason(exc):
     message = str(exc)
-    if (message in GUARD_MESSAGES
+    driver = type(exc) in (ValueError, TimeoutError)
+    if ((driver and message in GUARD_MESSAGES)
             or (isinstance(exc, (Blocked, KubernetesUnavailable)) and message in DOMAIN_CODES)
-            or message in {'approved action did not recover: ' + phase for phase in TERMINAL_PHASES}):
+            or (type(exc) is ValueError
+                and message in {'approved action did not recover: ' + phase for phase in TERMINAL_PHASES})):
         return ': ' + message
     return ''
 
