@@ -184,7 +184,9 @@ def test_changes_during_incident_writes_block_the_actual_patch(tmp_path, failure
                 if failure == 'stale': repo.rows[p['incident_id']]['revision'] += 1
             return result
         repo.write = changed
-        assert (await c.tick())['phase'] == 'escalated'
+        state = await c.tick()
+        assert state['phase'] == 'blocked' and state['dispatches'] == 0
+        assert approvals.read_slot(store, 'used', p['proposal_id']) is None
         assert not kube.patches
     asyncio.run(scenario())
 
