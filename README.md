@@ -10,7 +10,7 @@ SentinelOps là hệ thống AIOps thử nghiệm cho ba microservice **Checkout
 | --- | --- |
 | **Incident Workspace** | [Operator UI](https://dr76usfhbe2w8.cloudfront.net/ui/). Chọn **Sign in with Cognito**, dùng tài khoản operator và hoàn tất MFA. |
 | **Grafana** | [Grafana](https://dr76usfhbe2w8.cloudfront.net/grafana/) · [SLO](https://dr76usfhbe2w8.cloudfront.net/grafana/d/sentinelops-slo) · [Business health and incidents](https://dr76usfhbe2w8.cloudfront.net/grafana/d/sentinelops-incidents) · [Worker telemetry](https://dr76usfhbe2w8.cloudfront.net/grafana/d/sentinelops-workers). |
-| **Fault Console** | [127.0.0.1:8765](http://127.0.0.1:8765/) sau port-forward. Bản EKS đọc fault mode của Payment và Inventory. Các nút thao tác đang khóa. |
+| **Fault Console** | [127.0.0.1:8765](http://127.0.0.1:8765/) sau port-forward. Bản EKS đọc fault mode của Payment và Inventory. Các nút thao tác đang khóa. · [Khởi động local trên Windows](scripts/demo_console/START.md) |
 | **Prometheus và Jaeger** | [Prometheus trên 9090](http://127.0.0.1:9090/) · [Jaeger trên 16686](http://127.0.0.1:16686/) sau port-forward. |
 | **Hướng dẫn demo** | [Bàn giao UI và flow demo](docs/delivery/SENTINELOPS_UI_DEMO_HANDOFF.md) · [Runbook theo từng bước](docs/runbooks/DEMO_FLOW.md). |
 
