@@ -25,7 +25,9 @@ Mở [demo tiếng Việt](http://127.0.0.1:5173/ui/demo/?lang=vi) hoặc [demo 
 
 ### 2. Chạy testbed local
 
-Cần **Python 3.11 hoặc 3.12**, Docker và Docker Compose v2. Các lệnh sau chạy trong Linux hoặc WSL, từ thư mục gốc repo:
+Cần **Python 3.11 hoặc 3.12**, Docker và Docker Compose v2. Nếu dùng WSL,
+clone repo từ WSL vào thư mục Linux như `~/SentinelOps`. Testbed dùng quyền
+file Linux cho token và cấu hình runtime. Chạy các lệnh sau từ thư mục gốc repo:
 
 ```bash
 python3.11 -m venv .venv
@@ -65,7 +67,8 @@ Demo AWS tháng 11/2026 đã được teardown. Để dựng mới, dùng mẫu 
 | [`infra/`](infra/) · [`docker/`](docker/) · [`observability/`](observability/) | IaC, SQL/Kubernetes, image và cấu hình quan sát. |
 | [`scripts/`](scripts/) · [`tests/`](tests/) · [`docs/`](docs/) | Lệnh vận hành, bộ kiểm thử và tài liệu dự án. |
 
-Từ thư mục gốc, sau khi cài `.[dev]`:
+Từ thư mục gốc, sau khi cài `.[dev]`. Nhóm test script triển khai cần Bash và
+`jq`. Bộ test đầy đủ chạy trên Linux hoặc checkout nằm trong filesystem WSL:
 
 ```bash
 python scripts/validate_contracts.py
