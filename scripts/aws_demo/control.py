@@ -63,8 +63,9 @@ def render(args, name="control-bootstrap", master="control-bootstrap-master", co
     container["command"][-1] = args.action
     container["env"][0]["value"] = args.host
     if args.action in LOGIN_ACTIONS:
+        expiry = getattr(args, "expires_at", EXPIRES)
         container["env"].append({"name": "CONTROL_RUNTIME_EXPIRES_AT",
-                                 "value": args.expires_at.strftime("%Y-%m-%dT%H:%M:%SZ")})
+                                 "value": expiry.strftime("%Y-%m-%dT%H:%M:%SZ")})
     pod["volumes"][0]["configMap"]["name"] = config
     pod["volumes"][1]["secret"]["secretName"] = master
     pod["volumes"][2]["configMap"]["name"] = args.ca_config
@@ -121,7 +122,9 @@ def sync(args):
 
 
 def execute(args):
-    if args.action in LOGIN_ACTIONS and datetime.now(timezone.utc) >= args.expires_at:
+    expiry = getattr(args, "expires_at", EXPIRES)
+    runtime_name = getattr(args, "runtime_secret_name", RUNTIME_NAME)
+    if args.action in LOGIN_ACTIONS and datetime.now(timezone.utc) >= expiry:
         raise ValueError("demo exception expired")
     account = json.loads(aws(args, "sts", "get-caller-identity"))["Account"]
     if account != args.image.split(".", 1)[0]:
@@ -131,7 +134,7 @@ def execute(args):
             raise ValueError("secret ARN differs from the selected region/account")
     if args.action == "sync-runtime":
         description = json.loads(aws(args, "secretsmanager", "describe-secret", "--secret-id", args.runtime_secret_arn))
-        if description.get("Name") != RUNTIME_NAME:
+        if description.get("Name") != runtime_name:
             raise ValueError("wrong runtime secret name")
         sync(args)
         return
@@ -147,7 +150,7 @@ def execute(args):
             raise ValueError("remediation-read already exists; review before replacing")
     if args.action == "runtime":
         description = json.loads(aws(args, "secretsmanager", "describe-secret", "--secret-id", args.runtime_secret_arn))
-        if description.get("Name") != RUNTIME_NAME:
+        if description.get("Name") != runtime_name:
             raise ValueError("wrong runtime secret name")
         # This is fresh bootstrap, not an implicit rotation of live worker credentials.
         if description.get("VersionIdsToStages"):
@@ -193,7 +196,7 @@ def execute(args):
             endpoint = f"postgresql://{args.host}:5432/sentinelops_control?sslmode=verify-full"
             full = f"postgresql://control_writer:{quote(password, safe='')}@{args.host}:5432/sentinelops_control?sslmode=verify-full"
             payload = {"database-url": full, "worker-database-url": endpoint, "username": "control_writer",
-                       "password": password, "expires-at": args.expires_at.strftime("%Y-%m-%dT%H:%M:%SZ")}
+                       "password": password, "expires-at": expiry.strftime("%Y-%m-%dT%H:%M:%SZ")}
             # AWS CLI v2 cannot parse --cli-input-json from a piped /dev/stdin under WSL.
             # Use a 0600 file on tmpfs (/dev/shm, RAM only), never argv, and unlink it at once.
             fd, request_path = tempfile.mkstemp(dir="/dev/shm", prefix="control-runtime-", suffix=".json")
@@ -240,6 +243,8 @@ def main():
     parser.add_argument("--region", default="ap-southeast-1")
     parser.add_argument("--master-secret-arn", help="Terraform control_database_secret_arn")
     parser.add_argument("--runtime-secret-arn", help="Terraform control_runtime_secret_arn")
+    parser.add_argument("--runtime-secret-name", default=RUNTIME_NAME,
+                        help="Expected Secrets Manager name when bootstrapping an isolated stack")
     parser.add_argument("--ca-config", default="control-rds-ca")
     parser.add_argument("--consumer", choices=("worker", "api"), default="worker")
     parser.add_argument("--expires-at", type=parse_expiry, help="Operator-approved UTC login expiry (YYYY-MM-DDTHH:MM:SSZ)")

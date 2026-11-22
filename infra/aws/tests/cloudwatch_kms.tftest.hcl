@@ -251,8 +251,8 @@ run "changed_environment_and_region" {
       jsondecode(aws_kms_key.main.policy).Statement[1].Principal.Service == "logs.ap-southeast-1.amazonaws.com" &&
       toset(jsondecode(aws_kms_key.main.policy).Statement[1].Condition.ArnEquals["kms:EncryptionContext:aws:logs:arn"]) == toset([
         "arn:aws:logs:ap-southeast-1:123456789012:log-group:/aws/eks/sentinelops-next-prod/cluster",
-        "arn:aws:logs:ap-southeast-1:123456789012:log-group:/sentinelops/prod/vpc-flow",
-        "arn:aws:logs:ap-southeast-1:123456789012:log-group:/sentinelops/prod/workloads",
+        "arn:aws:logs:ap-southeast-1:123456789012:log-group:/sentinelops-next/prod/vpc-flow",
+        "arn:aws:logs:ap-southeast-1:123456789012:log-group:/sentinelops-next/prod/workloads",
       ])
     )
     error_message = "Region, environment and prefix changes must update the Logs service principal and exact encryption contexts."
@@ -266,7 +266,7 @@ run "changed_environment_and_region" {
       ]) &&
       strcontains(jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[1].properties.metrics[0][0].expression, "SentinelOps/prod") &&
       jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[7].properties.metrics[0][3] == "sentinelops-next-control-prod" &&
-      startswith(jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[10].properties.query, "SOURCE '/sentinelops/prod/workloads'")
+      startswith(jsondecode(aws_cloudwatch_dashboard.operations.dashboard_body).widgets[10].properties.query, "SOURCE '/sentinelops-next/prod/workloads'")
     )
     error_message = "Dashboard metrics, database and log source must follow the actual region/environment/prefix, without stale dev bindings."
   }

@@ -44,6 +44,15 @@ class OfflineChecks(unittest.TestCase):
         self.assertEqual(pod["containers"][0]["command"][-1], "bootstrap")
         self.assertNotIn("001-local-roles.sql", control_job.MIGRATIONS)
 
+    def test_runtime_job_renders_the_requested_utc_expiry(self):
+        timestamp = "2027-02-01T12:30:00Z"
+        args = self.args(action="runtime", expires_at=control_job.parse_expiry(timestamp))
+        job = control.render(args)
+        env = job["spec"]["template"]["spec"]["containers"][0]["env"]
+        self.assertIn({"name": "CONTROL_RUNTIME_EXPIRES_AT", "value": timestamp}, env)
+        sql = control_job.runtime_login_sql("control_writer", secrets.token_urlsafe(36), args.expires_at)
+        self.assertIn("VALID UNTIL '2027-02-01 12:30:00+00'", sql)
+
     def test_upload_mismatch_fails_before_any_external_call(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bundle.tar.gz"

@@ -170,12 +170,7 @@ resource "aws_lb_listener_rule" "edge_allow_grafana_jaeger_module" {
   }
   condition {
     path_pattern {
-      values = [
-        "/grafana/public/plugins/jaeger/module.js",
-        "/grafana/public/plugins/jaeger/plugin.json",
-        "/grafana/public/plugins/jaeger/img/*.svg",
-        "/grafana/public/plugins/jaeger/img/*.png",
-      ]
+      regex_values = ["^/grafana/public/plugins/jaeger/(module[.]js|plugin[.]json|img/[^/]+[.](svg|png))$"]
     }
   }
   condition {

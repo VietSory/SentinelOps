@@ -22,10 +22,16 @@ variable "operator_callback_urls" {
   }
 }
 
+variable "operator_deletion_protection" {
+  description = "Protect the operator user pool from deletion. Disable only for a disposable environment or deliberate teardown."
+  type        = bool
+  default     = true
+}
+
 resource "aws_cognito_user_pool" "operators" {
   count               = var.operator_identity_enabled ? 1 : 0
   name                = "${var.name_prefix}-${var.environment}-operators"
-  deletion_protection = "ACTIVE"
+  deletion_protection = var.operator_deletion_protection ? "ACTIVE" : "INACTIVE"
   mfa_configuration   = "ON"
 
   admin_create_user_config {

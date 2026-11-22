@@ -35,7 +35,7 @@ def test_real_edge():
     ('condition = var.operator_identity_enabled', 'condition = true'),
     ('216adef6-5c7f-47e4-b989-5492eafa07d3', 'untrusted-origin-policy'),
     ('error_caching_min_ttl = 0', 'error_caching_min_ttl = 10'),
-    ('"/grafana/public/plugins/jaeger/plugin.json"', '"/grafana/public/plugins/jaeger/api"'),
+    ('|plugin[.]json|', '|api|'),
     ('values = ["GET", "HEAD"]', 'values = ["GET", "HEAD", "POST"]'),
     ('priority     = 1', 'priority     = 3'),
     ('value = "no-store"', 'value = "public,max-age=3600"'),

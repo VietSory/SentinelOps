@@ -14,5 +14,6 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir .
 
 COPY services ./services
+RUN chmod -R a+rX services
 
 EXPOSE 8000

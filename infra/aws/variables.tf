@@ -174,6 +174,12 @@ variable "database_deletion_protection" {
   default     = true
 }
 
+variable "database_skip_final_snapshot" {
+  description = "Skip the final database snapshot for a disposable environment."
+  type        = bool
+  default     = false
+}
+
 variable "database_instance_class" {
   description = "RDS instance class for the control database."
   type        = string

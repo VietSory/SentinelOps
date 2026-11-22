@@ -181,10 +181,15 @@ def assert_private_by_default(blocks: dict[str, dict]) -> list[str]:
     for requirement, message in (
         ('publicly_accessible = false', 'the control database must not be publicly accessible'),
         ('storage_encrypted = true', 'the control database must be encrypted at rest'),
-        ('skip_final_snapshot = false', 'teardown must retain a final snapshot of IER/audit history'),
+        ('skip_final_snapshot = var.database_skip_final_snapshot', 'teardown must retain a final snapshot by default'),
     ):
         if requirement not in database:
             raise ValueError(message)
+    variables = _blocks(re.compile(r'^variable\s+"([^"]+)"\s*\{', re.MULTILINE))
+    for name, expected in (('database_skip_final_snapshot', 'false'), ('database_deletion_protection', 'true'),
+                           ('operator_deletion_protection', 'true')):
+        if _assignments(variables[name]['body']).get('default') != [expected]:
+            raise ValueError(f'the teardown setting {name} must default to {expected}')
     checks.append('control database private, encrypted and retains a final snapshot')
 
     access_block = blocks['aws_s3_bucket_public_access_block.artifacts']['body']
@@ -623,22 +628,9 @@ def assert_edge(blocks: dict[str, dict]) -> list[str]:
     require('aws_lb_listener_rule.edge_allow_grafana_jaeger_module', 'type', '"forward"')
     require('aws_lb_listener_rule.edge_allow_grafana_jaeger_module', 'target_group_arn',
             'aws_lb_target_group.edge["grafana"].arn')
+    require('aws_lb_listener_rule.edge_allow_grafana_jaeger_module', 'regex_values',
+            '["^/grafana/public/plugins/jaeger/(module[.]js|plugin[.]json|img/[^/]+[.](svg|png))$"]')
     jaeger_path = _child_blocks(blocks['aws_lb_listener_rule.edge_allow_grafana_jaeger_module']['body'], 'condition')
-    configured_jaeger_assets = []
-    for condition in jaeger_path:
-        if 'path_pattern' not in condition:
-            continue
-        values = re.search(r'\bvalues\s*=\s*\[([\s\S]*?)\]', condition)
-        if values:
-            configured_jaeger_assets.extend(re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', values.group(1)))
-    expected_jaeger_values = [
-        '/grafana/public/plugins/jaeger/module.js',
-        '/grafana/public/plugins/jaeger/plugin.json',
-        '/grafana/public/plugins/jaeger/img/*.svg',
-        '/grafana/public/plugins/jaeger/img/*.png',
-    ]
-    if configured_jaeger_assets != expected_jaeger_values:
-        raise ValueError('only named Grafana Jaeger plugin frontend assets may bypass the Jaeger API path guard')
     if not any(_assignments(condition).get('values') == ['["GET", "HEAD"]']
                for condition in jaeger_path if 'http_request_method' in condition):
         raise ValueError('only GET/HEAD may load Grafana Jaeger plugin assets')

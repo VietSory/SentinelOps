@@ -133,8 +133,8 @@ resource "aws_db_instance" "control" {
   deletion_protection     = var.database_deletion_protection
 
   # A final snapshot preserves IER revisions and audit history on teardown.
-  skip_final_snapshot       = false
-  final_snapshot_identifier = "${var.name_prefix}-control-${var.environment}-final"
+  skip_final_snapshot       = var.database_skip_final_snapshot
+  final_snapshot_identifier = var.database_skip_final_snapshot ? null : "${var.name_prefix}-control-${var.environment}-final"
 
   enabled_cloudwatch_logs_exports = ["postgresql"]
   auto_minor_version_upgrade      = true

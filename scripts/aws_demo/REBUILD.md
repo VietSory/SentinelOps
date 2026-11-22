@@ -30,6 +30,12 @@ sau khi NodePort, API/UI, Grafana và OAuth đã qua kiểm tra, theo [EDGE.md](
 Khi xóa cụm cũ, xử lý riêng bảo vệ xóa RDS/Cognito và giữ bucket chứa state cho
 đến khi các bước teardown cần state đã hoàn thành.
 
+Khi chạy thử song song trong cùng tài khoản, dùng `name_prefix` và VPC CIDR riêng.
+Chỉ bật `database_skip_final_snapshot` và tắt `database_deletion_protection` cùng
+`operator_deletion_protection` cho môi trường bỏ đi. Khi bootstrap DB thử, truyền
+`--runtime-secret-name` khớp tên trong Terraform. Kiểm tra image bằng cùng UID
+10001 mà EKS dùng trước khi rollout.
+
 ## Từ hạ tầng tới demo chạy được
 
 1. Tạo EKS access entries theo nhóm quyền đã phê duyệt. Profile demo hiện có

@@ -4,8 +4,8 @@
 locals {
   log_group_names = {
     cluster   = "/aws/eks/${var.name_prefix}-${var.environment}/cluster"
-    workloads = "/sentinelops/${var.environment}/workloads"
-    vpc_flow  = "/sentinelops/${var.environment}/vpc-flow"
+    workloads = "/${var.name_prefix}/${var.environment}/workloads"
+    vpc_flow  = "/${var.name_prefix}/${var.environment}/vpc-flow"
   }
   log_group_arns = {
     for name, path in local.log_group_names : name =>
