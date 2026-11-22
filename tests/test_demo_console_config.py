@@ -344,12 +344,12 @@ def test_no_raw_kubectl_stderr_or_credentials_printed(tmp_path, monkeypatch, cap
 
 @pytest.mark.parametrize('operation', ['get', 'logs'])
 @pytest.mark.parametrize('failure', ['stderr', 'expired'])
-def test_read_timeout_retries_once_then_returns_the_healthy_response(tmp_path, monkeypatch, capsys,
-                                                                   operation, failure):
+def test_read_timeout_retries_with_bounded_backoff_then_returns_healthy_response(
+        tmp_path, monkeypatch, capsys, operation, failure):
     calls, sleeps = [], []
     def subprocess_run(command, **kwargs):
         calls.append((command, kwargs))
-        if len(calls) == 1:
+        if len(calls) < oom.READ_ATTEMPTS:
             if failure == 'expired':
                 raise oom.subprocess.TimeoutExpired(command, kwargs['timeout'], stderr='private-credential')
             return oom.subprocess.CompletedProcess(command, 1, '',
@@ -362,15 +362,20 @@ def test_read_timeout_retries_once_then_returns_the_healthy_response(tmp_path, m
         assert kube.get('namespace', 'kube-system', namespace=None) == {'healthy': True}
     else:
         assert kube.run(['logs', 'deployment/memory-controller'], json_result=False) == '{"healthy":true}'
-    assert len(calls) == 2 and calls[0][0] == calls[1][0]
-    assert all('--request-timeout=10s' in command and kwargs['timeout'] == 15 for command, kwargs in calls)
-    assert sleeps == [.25] and sum(kwargs['timeout'] for _, kwargs in calls) + sum(sleeps) <= 31
+    assert len(calls) == oom.READ_ATTEMPTS
+    assert all(command == calls[0][0] for command, _ in calls)
+    assert all(f'--request-timeout={oom.KUBECTL_REQUEST_TIMEOUT}' in command
+               and kwargs['timeout'] == oom.KUBECTL_PROCESS_TIMEOUT_SECONDS for command, kwargs in calls)
+    assert sleeps == list(oom.READ_RETRY_BACKOFF_SECONDS)
+    assert sum(kwargs['timeout'] for _, kwargs in calls) + sum(sleeps) <= 54.7
     output = capsys.readouterr().out
-    assert 'retrying once (2/2)' in output and 'private-credential' not in output
+    assert all(f'attempt {attempt}/{oom.READ_ATTEMPTS}' in output
+               for attempt in range(2, oom.READ_ATTEMPTS + 1))
+    assert 'private-credential' not in output
 
 
 @pytest.mark.parametrize('failure', ['stderr', 'expired'])
-def test_read_timeouts_exhaust_exactly_two_attempts(tmp_path, monkeypatch, capsys, failure):
+def test_read_timeouts_exhaust_exactly_three_attempts(tmp_path, monkeypatch, capsys, failure):
     calls, sleeps = [], []
     def subprocess_run(command, **kwargs):
         calls.append(command)
@@ -380,9 +385,10 @@ def test_read_timeouts_exhaust_exactly_two_attempts(tmp_path, monkeypatch, capsy
             'net/http: TLS handshake timeout; private-credential')
     monkeypatch.setattr(oom.subprocess, 'run', subprocess_run)
     monkeypatch.setattr(oom.time, 'sleep', sleeps.append)
-    with pytest.raises(oom.ReadTimeout, match='read timed out after 2 attempts'):
+    with pytest.raises(oom.ReadTimeout, match='read timed out after 3 attempts'):
         oom.Kubectl(config(tmp_path)).get('namespace', 'kube-system', namespace=None)
-    assert len(calls) == 2 and sleeps == [.25]
+    assert len(calls) == oom.READ_ATTEMPTS == 3
+    assert sleeps == list(oom.READ_RETRY_BACKOFF_SECONDS)
     assert 'private-credential' not in capsys.readouterr().out
 
 
@@ -453,7 +459,7 @@ def test_read_timeout_message_only_claims_no_patch_before_trigger(tmp_path, monk
         expected += [('get', 'deployment')]
     if phase == 'replicasets':
         expected += [('get', 'pods')]
-    assert calls == expected + [('get', failed)] * 2
+    assert calls == expected + [('get', failed)] * oom.READ_ATTEMPTS
 
 
 def test_controller_configmap_latency_does_not_age_the_latest_log(tmp_path, monkeypatch):

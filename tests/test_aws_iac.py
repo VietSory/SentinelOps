@@ -72,7 +72,8 @@ def test_skipping_the_final_snapshot_is_rejected():
     """Teardown must not silently discard IER revisions and audit history."""
     with pytest.raises(ValueError, match='final snapshot'):
         assert_private_by_default(mutate('aws_db_instance.control',
-                                         'skip_final_snapshot = false', 'skip_final_snapshot = true'))
+                                         'skip_final_snapshot = var.database_skip_final_snapshot',
+                                         'skip_final_snapshot = true'))
 
 
 def test_private_cluster_endpoint_cannot_be_disabled():

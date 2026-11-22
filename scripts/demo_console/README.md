@@ -45,11 +45,13 @@ Mục tiêu của bài demo: EKS `sentinelops-dev`, `AWS_PROFILE=console`, conte
 `sentinelops-demo`, namespace `sentinelops-b-actions`. URL không chứng minh đang
 trỏ đúng cụm: operator phải kiểm tra đích trước khi bật thao tác.
 
-Ví dụ mở ở hai terminal riêng, **chỉ khi operator chuẩn bị chạy demo**:
+Mở mỗi port-forward ở một terminal riêng khi chuẩn bị demo. Dùng Service để
+tunnel chọn Pod hiện tại. Nếu rollout làm mất kết nối với Pod, chạy lại tunnel
+rồi xác minh endpoint trước khi kích hoạt fault.
 
 ```sh
-AWS_PROFILE=console kubectl --context sentinelops-demo -n sentinelops-b-actions port-forward --address 127.0.0.1 deployment/payment-service 18081:8000
-AWS_PROFILE=console kubectl --context sentinelops-demo -n sentinelops-b-actions port-forward --address 127.0.0.1 deployment/inventory-service 18082:8000
+AWS_PROFILE=console kubectl --context sentinelops-demo -n sentinelops-b-actions port-forward --address 127.0.0.1 service/payment-service 18081:8000
+AWS_PROFILE=console kubectl --context sentinelops-demo -n sentinelops-b-actions port-forward --address 127.0.0.1 service/inventory-service 18082:8000
 ```
 
 Trong terminal console, từ thư mục gốc repo:

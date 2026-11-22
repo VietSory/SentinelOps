@@ -23,6 +23,10 @@ RESOURCES = {'requests': {'cpu': '25m', 'memory': '32Mi'},
              'limits': {'cpu': '250m', 'memory': '256Mi'}}
 IMAGE = re.compile(r'[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[a-f0-9]{64}')
 LABELS = {'app': NAME, 'sentinelops.io/demo': 'oom'}
+READ_ATTEMPTS = 3
+READ_RETRY_BACKOFF_SECONDS = (0.2, 0.5)
+KUBECTL_REQUEST_TIMEOUT = '15s'
+KUBECTL_PROCESS_TIMEOUT_SECONDS = 18
 
 
 class Blocked(ValueError):
@@ -30,7 +34,7 @@ class Blocked(ValueError):
 
 
 class ReadTimeout(Blocked):
-    """Both bounded attempts at one read timed out; no mutation was retried."""
+    """All bounded attempts at one read timed out; no mutation was retried."""
 
 
 def clock():
@@ -86,17 +90,19 @@ class Config:
 class Kubectl:
     def __init__(self, config):
         self.base = ['kubectl', '--kubeconfig', config.kubeconfig, '--context', config.context,
-                     '--request-timeout=10s']
+                     f'--request-timeout={KUBECTL_REQUEST_TIMEOUT}']
 
     def run(self, args, *, json_result=True, input_json=None):
         command = self.base + args
         read_only = bool(args and args[0] in ('get', 'logs') and input_json is None)
-        for attempt in range(2 if read_only else 1):
+        attempts = READ_ATTEMPTS if read_only else 1
+        for attempt in range(attempts):
             print('$ ' + shlex.join(command), flush=True)
             try:
                 stdin = ({'input': json.dumps(input_json, separators=(',', ':'))} if input_json is not None
                          else {'stdin': subprocess.DEVNULL})
-                result = subprocess.run(command, capture_output=True, text=True, timeout=15,
+                result = subprocess.run(command, capture_output=True, text=True,
+                                        timeout=KUBECTL_PROCESS_TIMEOUT_SECONDS,
                                         check=False, **stdin)
             except subprocess.TimeoutExpired as exc:
                 if not read_only:
@@ -114,10 +120,12 @@ class Kubectl:
                     'client.timeout exceeded', 'timeout awaiting response headers', 'request timed out',
                     'the server was unable to return a response in the time allotted')):
                     raise Blocked('kubectl request failed; inspect operator diagnostics separately')
-            if attempt == 1:
-                raise ReadTimeout('Kubernetes read timed out after 2 attempts')
-            print('Kubernetes read timed out; retrying once (2/2).', flush=True)
-            time.sleep(.25)  # At most 2 x 15s subprocess timeouts + 0.25s backoff.
+            if attempt + 1 == attempts:
+                raise ReadTimeout(f'Kubernetes read timed out after {attempts} attempts')
+            delay = READ_RETRY_BACKOFF_SECONDS[attempt]
+            print(f'Kubernetes read timed out; retrying with bounded backoff '
+                  f'(attempt {attempt + 2}/{attempts}).', flush=True)
+            time.sleep(delay)
 
     def get(self, kind, name=None, *, namespace=NAMESPACE, selector=None):
         args = ['get', kind] + ([name] if name else [])
@@ -331,7 +339,8 @@ def run(config, *, check=False, kube=None):
         try:
             deployment = preflight(config, kube)
         except ReadTimeout as exc:
-            raise Blocked('Kubernetes read timed out after 2 attempts; no memory-change PATCH was sent') from exc
+            raise Blocked(f'Kubernetes read timed out after {READ_ATTEMPTS} attempts; '
+                          'no memory-change PATCH was sent') from exc
         if check:
             print('CHECK PASS: bound OOM target/controller at a healthy 256Mi baseline. No PATCH.', flush=True)
             return 0
