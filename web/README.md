@@ -1,21 +1,24 @@
-# SentinelOps Web UI (Bilingual VI / EN)
+# SentinelOps Web UI
 
-Modern white-and-orange SaaS interface for **SentinelOps** built with **React + TypeScript + Tailwind CSS + shadcn/ui + Framer Motion + Recharts + React Flow (`@xyflow/react`)**, supporting instant **Vietnamese / English (`VI | EN`)** switching.
+Giao diện React và TypeScript của SentinelOps. Có chế độ xem dữ liệu mẫu để
+trình diễn và workspace kết nối với backend. Nút **VI | EN** đổi ngôn ngữ trong
+cùng phiên.
 
 ## Chạy local / Run locally
 
 ```bash
 cd web
-npm install
+npm ci
 npm run dev
 ```
 
-- Tiếng Việt (mặc định): `http://127.0.0.1:5173/?lang=vi`
-- English: `http://127.0.0.1:5173/?lang=en`
-- Có thể bấm trực tiếp nút **`VI | EN`** ở góc phải thanh Topbar để chuyển đổi song ngữ tức thì mà vẫn giữ nguyên trạng thái phiên đang thao tác.
+- **Dữ liệu mẫu:** [tiếng Việt](http://127.0.0.1:5173/ui/demo/?lang=vi) hoặc [English](http://127.0.0.1:5173/ui/demo/?lang=en). Phê duyệt và phục hồi ở đây diễn ra trong mô phỏng trên trình duyệt.
+- **Workspace kết nối backend:** [mở trang gốc](http://127.0.0.1:5173/). Dùng kết nối từ [testbed local](../docs/runbooks/LOCAL_TESTBED.md) hoặc môi trường đã triển khai.
 
-## Bản demo trên EKS
+## Đóng gói để triển khai
 
-Mở [SentinelOps Demo](https://dr76usfhbe2w8.cloudfront.net/ui/demo/). Giao diện dùng dữ liệu mẫu, mô phỏng phê duyệt và khắc phục trong trình duyệt. Workspace vận hành dùng Cognito tại [`/ui/`](https://dr76usfhbe2w8.cloudfront.net/ui/).
+Trong cấu hình EKS, `/ui/demo/` phục vụ mô phỏng, còn `/ui/` dùng Cognito
+cho workspace vận hành. Môi trường mới lấy domain từ
+[quy trình dựng AWS](../scripts/aws_demo/REBUILD.md).
 
 Để đóng gói, chạy `npm ci` và `VITE_BASE_PATH=/ui/demo/ npm run build` trong thư mục `web/`. Dockerfile tại `deployment/Dockerfile` nhận image digest hiện tại của container `operator-ui` qua `OPERATOR_IMAGE`, user của image gốc qua `OPERATOR_USER` và commit qua `SOURCE_REVISION`. Dùng thư mục `web/` làm build context.

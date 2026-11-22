@@ -2,6 +2,9 @@
 
 Baseline lịch sử: `main` sau PR #24, merge `f4891cf`, 2026-10-31. Trạng thái
 bàn giao cập nhật 2026-11-14; không chứng minh máy mới đã có data/model/runtime.
+Người mới nên mở [quickstart](../README.md#bắt-đầu) trước. Trang này giữ
+quy ước làm việc và bàn giao theo lane; xem [trạng thái dự án](PROJECT_STATUS.md)
+cho mốc triển khai sau bản bàn giao.
 
 ## 1. Sản phẩm và trạng thái hiện tại
 
@@ -25,7 +28,8 @@ Lớp 2 `ald` đạt các ngưỡng phát triển S1/S3, nhưng chưa nghiệm t
 Q-04…Q-07 (thiếu S2/S4, MTTD live và holdout). Native trials của bundle cũ
 `badf9da0` ghi 9/10 recovered, 1/1 failed-verify escalated; B đã review safety
 tests. **Chưa nghiệm thu:** chất lượng model đầy đủ, full G4, G5, G6 và G8.
-AWS/provider identity thật chưa triển khai.
+Tình trạng AWS ở bản bàn giao này là mốc lịch sử. Xem
+[trạng thái dự án](PROJECT_STATUS.md#môi-trường) cho các lượt triển khai sau đó.
 Không làm lại những module đã có hoặc coi fixture model là model đã được chấp nhận.
 Report cũ có thể ghi active capture; đó là quan sát tại thời điểm report, không
 phải xác nhận controller vẫn sống hôm nay. Kiểm tra trên đúng máy trước khi tiếp tục.

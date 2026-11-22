@@ -1,11 +1,14 @@
 # Tài liệu SentinelOps
 
-## Lộ trình đọc
+## Chọn theo việc bạn muốn làm
 
-1. [Trạng thái hiện tại](PROJECT_STATUS.md): hệ thống đã có gì, còn thiếu gì.
-2. [Team handoff](TEAM_HANDOFF.md): context và lệnh bắt đầu cho người mới.
-3. [Delivery plan](delivery/DELIVERY_PLAN.md) và [workstream contract](delivery/WORKSTREAM_CONTRACT.md): nhận lane A/B, file ownership và integration.
-4. Mở đặc tả/runbook của phần đang làm; không cần đọc toàn bộ reports hoặc archive.
+| Mục tiêu | Điểm bắt đầu |
+| --- | --- |
+| Mở UI demo hoặc chạy service trên máy | [Quickstart](../README.md#bắt-đầu) |
+| Hiểu hệ thống bằng ví dụ | [Hướng dẫn tổng quan, model và incident](guide/README.md) |
+| Xem phần đã có và giới hạn đã ghi nhận | [Trạng thái dự án](PROJECT_STATUS.md) |
+| Dựng một AWS dev mới | [Hướng dẫn dựng lại](../scripts/aws_demo/REBUILD.md) |
+| Nhận bàn giao công việc trong đội | [Team handoff](TEAM_HANDOFF.md), [ownership và tích hợp](delivery/WORKSTREAM_CONTRACT.md) |
 
 ## Thiết kế và yêu cầu hiện hành
 
@@ -24,7 +27,8 @@
 | --- | --- |
 | Dựng workload/quan sát request | [Local testbed](runbooks/LOCAL_TESTBED.md), [observability](runbooks/OBSERVABILITY.md) |
 | Capture và dựng features | [Telemetry](runbooks/TELEMETRY.md), [experiments](runbooks/EXPERIMENTS.md) |
-| Thu data/train model hiện tại | [Prospective HTTP corpus](runbooks/LOCAL_HTTP_CORPUS.md), [model pipeline](runbooks/MODEL_PIPELINE.md) |
+| Tải nguồn và train model hiện tại | [Model pipeline Alibaba](runbooks/MODEL_PIPELINE.md) |
+| Capture HTTP để đánh giá trên testbed | [Prospective HTTP corpus](runbooks/LOCAL_HTTP_CORPUS.md) |
 | Incident API/control DB | [API](runbooks/INCIDENT_API.md), [storage](runbooks/INCIDENT_STORE.md) |
 | Health/incident processes | [Health worker](runbooks/HEALTH_WORKER.md), [incident worker](runbooks/INCIDENT_WORKER.md) |
 | Hiểu quyết định incident | [SLO health](runbooks/SLO_HEALTH.md), [correlation](runbooks/CORRELATION.md), [RCA](runbooks/RCA.md) |
@@ -33,6 +37,8 @@
 ## Lịch sử và bằng chứng
 
 - [Research results](reports/README.md): chỉ baseline/evaluation cần dùng lại, không phải hồ sơ service đã PASS.
+- [Kịch bản demo AWS lịch sử](delivery/DEMO_SCENARIOS_2026-11-19.md) và
+  [kiểm kê trước/sau teardown](delivery/AWS_TERRAFORM_STATE_REDACTED.md).
 - [Archive](archive/README.md): spec/checkpoint/guide đã thay thế, gồm nghiên cứu GAMMA/SMD.
 - Input dùng cho regression nằm ở `tests/fixtures/`. JSON trong reports chỉ đi kèm
   kết quả nghiên cứu còn cần dùng; raw data/model binaries nằm ngoài Git.

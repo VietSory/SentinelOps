@@ -108,18 +108,20 @@ all dependencies true; `/ui/` returned 200. Both `/v1/detect` and `/v1/risk`
 returned the designed 409 `model_requires_stream_history`. All three user units
 were active on the new host release, with zero automatic restarts at verification.
 
-Local evidence (artifacts stay outside Git):
+Historical local evidence paths are listed below. For a tracked development
+result, see the [Layer 2 report](LAYER2_LOCAL_ALIBABA_DE38FC6B.md) and its
+[summary JSON](evidence/layer2-alibaba-de38fc6b.json).
 
-- [Selected parity](../../artifacts/lane-b/alibaba-de38fc6b-20261114/parity-05/parity.json) and
-  [verification](../../artifacts/lane-b/alibaba-de38fc6b-20261114/parity-05/verification.json); the
-  [first FAIL](../../artifacts/lane-b/alibaba-de38fc6b-20261114/parity/verification.json) is retained.
-- [Serving release](../../artifacts/lane-b/alibaba-de38fc6b-20261114/model-release.json),
-  [host release](../../artifacts/lane-b/alibaba-de38fc6b-20261114/host-release.json), and
-  [health PID readiness](../../artifacts/lane-b/alibaba-de38fc6b-20261114/health-readiness.json).
-- [Accepted baseline inference](../../artifacts/lane-b/alibaba-de38fc6b-20261114/baseline-inference.json).
-- [Live check](../../artifacts/lane-b/live-20261114T051455-7d7bc5cc/run.json) and
-  [final verification](../../artifacts/lane-b/alibaba-de38fc6b-20261114/final-verification.json).
-- [Reproduced model signals](../../artifacts/lane-b/alibaba-de38fc6b-20261114/verified-model-signals.json).
+- Selected parity (`artifacts/lane-b/alibaba-de38fc6b-20261114/parity-05/parity.json`) and
+  verification (`artifacts/lane-b/alibaba-de38fc6b-20261114/parity-05/verification.json`); the
+  first FAIL (`artifacts/lane-b/alibaba-de38fc6b-20261114/parity/verification.json`) is retained.
+- Serving release (`artifacts/lane-b/alibaba-de38fc6b-20261114/model-release.json`),
+  host release (`artifacts/lane-b/alibaba-de38fc6b-20261114/host-release.json`), and
+  health PID readiness (`artifacts/lane-b/alibaba-de38fc6b-20261114/health-readiness.json`).
+- Accepted baseline inference (`artifacts/lane-b/alibaba-de38fc6b-20261114/baseline-inference.json`).
+- Live check (`artifacts/lane-b/live-20261114T051455-7d7bc5cc/run.json`) and
+  final verification (`artifacts/lane-b/alibaba-de38fc6b-20261114/final-verification.json`).
+- Reproduced model signals (`artifacts/lane-b/alibaba-de38fc6b-20261114/verified-model-signals.json`).
 
 ## Environment fixes and rollback
 
@@ -147,7 +149,7 @@ recorded as `LD_LIBRARY_PATH` in the new immutable host release:
 The lane B Docker stack runs with its existing database volumes. The three
 old user units were inactive in the recorded baseline. Their immutable sessions, old host releases, model store and
 `alibaba-v2-01` stream remain available; see
-[baseline](../../artifacts/lane-b/alibaba-de38fc6b-20261114/baseline.json). For rollback, stop incidents,
+baseline (`artifacts/lane-b/alibaba-de38fc6b-20261114/baseline.json`). For rollback, stop incidents,
 health and API, then select the recorded old host releases with the old model
 store/release and old epoch. Keep the old code with its v1 model: current
 ADR-019 code rejects `badf9da0`. Do not remove historical checkpoints.
@@ -199,16 +201,16 @@ S4 attempt history is retained outside Git:
 
 Local evidence:
 
-- [Progress](../../artifacts/lane-b/local-followup-20261114/progress.json),
-  [main CI](../../artifacts/lane-b/local-followup-20261114/main-ci.json),
-  [PostgreSQL](../../artifacts/lane-b/local-followup-20261114/q10-postgresql.json).
-- [Native UI](../../artifacts/lane-b/local-followup-20261114/ui-native-02/verification.json),
-  [native S2/H4](../../artifacts/lane-b/local-followup-20261114/s2-h4-02/verification.json).
-- [First failed run](../../artifacts/lane-b/local-followup-20261114/s4-runs/run-37bdd31a5b5345039fc26cbc3192d132/run.json),
-  [host interruption](../../artifacts/lane-b/local-followup-20261114/s4-attempt-02/interruption.json),
-  [recovered control data](../../artifacts/lane-b/local-followup-20261114/s4-attempt-02/s4-live-database.json),
-  [third preflight rejection](../../artifacts/lane-b/local-followup-20261114/s4-attempt-03/operator-process.log),
-  [native waiter verification](../../artifacts/lane-b/local-followup-20261114/s4-native-review.json).
+- Progress (`artifacts/lane-b/local-followup-20261114/progress.json`),
+  main CI (`artifacts/lane-b/local-followup-20261114/main-ci.json`),
+  PostgreSQL (`artifacts/lane-b/local-followup-20261114/q10-postgresql.json`).
+- Native UI (`artifacts/lane-b/local-followup-20261114/ui-native-02/verification.json`),
+  native S2/H4 (`artifacts/lane-b/local-followup-20261114/s2-h4-02/verification.json`).
+- First failed run (`artifacts/lane-b/local-followup-20261114/s4-runs/run-37bdd31a5b5345039fc26cbc3192d132/run.json`),
+  host interruption (`artifacts/lane-b/local-followup-20261114/s4-attempt-02/interruption.json`),
+  recovered control data (`artifacts/lane-b/local-followup-20261114/s4-attempt-02/s4-live-database.json`),
+  third preflight rejection (`artifacts/lane-b/local-followup-20261114/s4-attempt-03/operator-process.log`),
+  native waiter verification (`artifacts/lane-b/local-followup-20261114/s4-native-review.json`).
 
 
 ### Verified S4 capture after review
@@ -257,18 +259,18 @@ The native RCA result **abstained** for `insufficient-coverage`,
 the observed injected root was RDS. The IER progressed OPEN → RCA_READY →
 ESCALATED → CLOSED, with no action dispatched. This capture does **not**
 demonstrate successful S4 root-cause identification. The
-[raw RCA result](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-live-journal/manifests/3800cfa1c1ae0c74dd450da3f50b50d55e8df8b3a2685f3a9034311e48224fd0.json)
+raw RCA result (`artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-live-journal/manifests/3800cfa1c1ae0c74dd450da3f50b50d55e8df8b3a2685f3a9034311e48224fd0.json`)
 shows RDS anomaly support from connection pressure only (0.072165), despite
 trace relevance 0.997446. Its native lock-wait evidence is retained by the
 experiment collector but is not a live RCA scoring input. Integrating that
 source requires a separate evidence/contract review and a predeclared evaluation;
 this run is preserved without tuning weights or thresholds to its known root.
 
-- [Frozen capture protocol](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-plan.json),
-  [live clock protocol](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-live-plan-02.json).
-- [Capture manifest](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-runs/run-9b695be1b8ab4aa3b1cc050b2f728507/run.json),
-  [source/clock verification](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/verification.json),
-  [independent SLO](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/independent-slo.json),
-  [replay windows](../../artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/predictions.json).
-- [Software review](../../artifacts/lane-b/local-followup-20261114/s4-review-verification.json),
-  [source CI](../../artifacts/lane-b/local-followup-20261114/pr48-review-ci.json).
+- Frozen capture protocol (`artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-plan.json`),
+  live clock protocol (`artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-live-plan-02.json`).
+- Capture manifest (`artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-runs/run-9b695be1b8ab4aa3b1cc050b2f728507/run.json`),
+  source/clock verification (`artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/verification.json`),
+  independent SLO (`artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/independent-slo.json`),
+  replay windows (`artifacts/lane-b/local-followup-20261114/s4-attempt-04/s4-analysis/predictions.json`).
+- Software review (`artifacts/lane-b/local-followup-20261114/s4-review-verification.json`),
+  source CI (`artifacts/lane-b/local-followup-20261114/pr48-review-ci.json`).

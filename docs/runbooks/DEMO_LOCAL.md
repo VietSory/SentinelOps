@@ -32,7 +32,7 @@ pipeline itself observed through Prometheus rules and a Grafana console.
 | RCA diagnostic accuracy | Full G4 is unaccepted; rankings are suspects with evidence, not confirmed causes |
 | Bedrock explanations | G5 unaccepted; the demo uses the real deterministic fallback |
 | Automatic Payment rollback | This walkthrough does not dispatch. Native trial ledgers/outcomes are reported separately; G6 remains unaccepted |
-| Anything on AWS | Not deployed. IaC is described and validated only; see [AWS baseline](AWS_BASELINE.md) |
+| Anything on AWS | This walkthrough runs locally. See the [AWS rebuild guide](../../scripts/aws_demo/REBUILD.md) for cloud setup |
 
 A limited demo is deliverable early, but it does not substitute for acceptance of
 anything above.

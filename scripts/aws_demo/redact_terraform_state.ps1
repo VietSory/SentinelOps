@@ -1,70 +1,55 @@
+#requires -Version 7.0
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory)]
     [string] $InputPath,
 
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory)]
     [string] $OutputPath
 )
 
-$ErrorActionPreference = "Stop"
-$sensitiveName = '(?i)(password|secret|token|client_secret|access_key|private_key|credential|master_user|connection_string|authorization|api_key|cookie)'
-
-function Redact-Node {
-    param(
-        [AllowNull()] $Node,
-        [string] $PropertyName = ''
-    )
-
-    if ($null -eq $Node) { return $null }
-
-    if ($PropertyName -match $sensitiveName) {
-        return '[REDACTED]'
-    }
-
-    if ($Node -is [string]) {
-        if ($Node -match '(?i)AKIA[0-9A-Z]{16}' -or
-            $Node -match '(?i)ASIA[0-9A-Z]{16}' -or
-            $Node -match '-----BEGIN [A-Z ]+-----' -or
-            $Node -match '^arn:aws:secretsmanager:' -or
-            $Node -match '^[^\s@]+://[^\s@]+:[^\s@]+@') {
-            return '[REDACTED]'
-        }
-        return $Node
-    }
-
-    if ($Node -is [System.Management.Automation.PSCustomObject]) {
-        $copy = [ordered]@{}
-        $isSensitiveObject = $false
-        $sensitiveFlag = $Node.PSObject.Properties['sensitive']
-        if ($null -ne $sensitiveFlag -and $sensitiveFlag.Value -eq $true) {
-            $isSensitiveObject = $true
-        }
-
-        foreach ($property in $Node.PSObject.Properties) {
-            if ($isSensitiveObject -and $property.Name -eq 'value') {
-                $copy[$property.Name] = '[REDACTED]'
-            } else {
-                $copy[$property.Name] = Redact-Node -Node $property.Value -PropertyName $property.Name
-            }
-        }
-        return [PSCustomObject]$copy
-    }
-
-    if ($Node -is [System.Collections.IEnumerable] -and $Node -isnot [string]) {
-        $items = foreach ($item in $Node) {
-            Redact-Node -Node $item -PropertyName $PropertyName
-        }
-        return @($items)
-    }
-
-    return $Node
+$ErrorActionPreference = 'Stop'
+$source = (Get-Item -LiteralPath $InputPath).FullName
+$destination = [IO.Path]::GetFullPath($OutputPath, (Get-Location).ProviderPath)
+if (Test-Path -LiteralPath $destination) {
+    throw 'Choose a new path for the public inventory.'
 }
 
-$state = Get-Content -LiteralPath $InputPath -Raw | ConvertFrom-Json -Depth 100
-$redacted = Redact-Node -Node $state
-$parent = Split-Path -Parent $OutputPath
-New-Item -ItemType Directory -Force -Path $parent | Out-Null
-$redacted | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+$state = Get-Content -LiteralPath $source -Raw | ConvertFrom-Json -AsHashtable -Depth 100
+if ($state.serial -isnot [long] -and $state.serial -isnot [int]) {
+    throw 'Terraform state must contain an integer serial.'
+}
+if ($state.serial -lt 0 -or $state.resources -isnot [array]) {
+    throw 'Invalid Terraform state serial or resource list.'
+}
 
-Write-Output "Wrote redacted Terraform state snapshot: $OutputPath"
-Write-Output "Serial: $($state.serial)"
+foreach ($resource in $state.resources) {
+    if ($resource.mode -cnotin @('managed', 'data') -or
+        $resource.type -isnot [string] -or $resource.type -cnotmatch '^[a-z0-9_]{1,100}$') {
+        throw 'Unexpected resource mode or type.'
+    }
+}
+
+# Build the public artifact from scratch. Provider fields and output values
+# can contain credentials even when their keys do not look sensitive.
+$groups = @(
+    $state.resources |
+        Group-Object -Property mode, type |
+        Sort-Object -Property Name |
+        ForEach-Object {
+            [ordered]@{
+                mode = $_.Group[0].mode
+                type = $_.Group[0].type
+                entries = $_.Count
+            }
+        }
+)
+
+$inventory = [ordered]@{
+    format = 'terraform-resource-inventory/v1'
+    serial = $state.serial
+    resource_entries = $state.resources.Count
+    resource_types = $groups
+}
+
+$inventory | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $destination -Encoding utf8
+Write-Output "Wrote Terraform resource inventory: $destination"
