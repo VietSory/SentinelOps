@@ -1,18 +1,18 @@
-# AWS Terraform state snapshot (redacted)
+# AWS Terraform state history
 
-This is the latest refreshed state snapshot for the original SentinelOps AWS
-stack, with Terraform serial `126`.
+[Serial 126](AWS_TERRAFORM_STATE_REDACTED.json) records the original stack
+before teardown. It documents historical resource types and bindings.
 
-The JSON is a reference snapshot only, not a usable Terraform backend state.
-Values for secrets, tokens, credentials, private keys, connection strings,
-secret ARNs, and sensitive outputs were replaced with `[REDACTED]`. The
-unredacted state remains in the configured Terraform backend and is not stored
-in Git.
+| Stack | Final state serial read on 2026-11-22 | Entries in the state resource list |
+| --- | ---: | ---: |
+| `sentinelops-dev` | 235 | 0 |
+| `sentinelops-trial-dev` | 238 | 0 |
 
-Regenerate it from a local state file with:
+The table records what the final local state files contained. A live AWS
+inventory is a separate check.
 
-```powershell
-pwsh -NoProfile -File scripts/aws_demo/redact_terraform_state.ps1 `
-  -InputPath <path-to-terraform.tfstate> `
-  -OutputPath docs/delivery/AWS_TERRAFORM_STATE_REDACTED.json
-```
+To create another environment, follow the
+[clone-to-rebuild guide](../../scripts/aws_demo/REBUILD.md) and initialize a
+dedicated Terraform working directory and state for that environment. Keep
+active state and plan files in restricted storage. They can contain
+provider-generated values and account-specific resource bindings.

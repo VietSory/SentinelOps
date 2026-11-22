@@ -27,6 +27,8 @@ models/
 *.tfstate
 *.tfstate.*
 *.tfvars
+*.tfvars.json
+*.tfplan
 !*.tfvars.example
 crash.log
 crash.*.log
