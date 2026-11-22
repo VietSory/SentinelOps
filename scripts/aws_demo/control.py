@@ -19,7 +19,7 @@ import tempfile
 from urllib.parse import quote
 from uuid import uuid4
 
-from control_job import EXPIRES, MIGRATIONS
+from control_job import EXPIRES, MIGRATIONS, parse_expiry
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -62,6 +62,9 @@ def render(args, name="control-bootstrap", master="control-bootstrap-master", co
     container["image"] = args.image
     container["command"][-1] = args.action
     container["env"][0]["value"] = args.host
+    if args.action in LOGIN_ACTIONS:
+        container["env"].append({"name": "CONTROL_RUNTIME_EXPIRES_AT",
+                                 "value": args.expires_at.strftime("%Y-%m-%dT%H:%M:%SZ")})
     pod["volumes"][0]["configMap"]["name"] = config
     pod["volumes"][1]["secret"]["secretName"] = master
     pod["volumes"][2]["configMap"]["name"] = args.ca_config
@@ -91,18 +94,18 @@ def read_runtime(args):
     value = json.loads(response["SecretString"])
     endpoint = f"postgresql://{args.host}:5432/sentinelops_control?sslmode=verify-full"
     if (value.get("worker-database-url") != endpoint or value.get("username") != "control_writer"
-        or value.get("expires-at") != "2026-11-25T00:00:00Z"
+        or not isinstance(value.get("expires-at"), str)
         or not re.fullmatch(r"[A-Za-z0-9_-]{32,}", value.get("password", ""))):
         raise ValueError("runtime secret shape/endpoint differs")
     full = f"postgresql://control_writer:{quote(value['password'], safe='')}@{args.host}:5432/sentinelops_control?sslmode=verify-full"
     if value.get("database-url") != full:
         raise ValueError("runtime DSN differs")
+    if datetime.now(timezone.utc) >= parse_expiry(value["expires-at"]):
+        raise ValueError("runtime login expired")
     return value
 
 
 def sync(args):
-    if datetime.now(timezone.utc) >= EXPIRES:
-        raise ValueError("demo exception expired")
     value = read_runtime(args)
     dsn = value["worker-database-url" if args.consumer == "worker" else "database-url"]
     # replace/create avoids the kubectl last-applied annotation duplicating secret data.
@@ -118,6 +121,8 @@ def sync(args):
 
 
 def execute(args):
+    if args.action in LOGIN_ACTIONS and datetime.now(timezone.utc) >= args.expires_at:
+        raise ValueError("demo exception expired")
     account = json.loads(aws(args, "sts", "get-caller-identity"))["Account"]
     if account != args.image.split(".", 1)[0]:
         raise ValueError("AWS caller account differs from the reviewed ECR image")
@@ -133,20 +138,14 @@ def execute(args):
     if args.action == "action-runtime":
         if args.namespace != "sentinelops-b-actions":
             raise ValueError("action-runtime requires sentinelops-b-actions namespace")
-        if datetime.now(timezone.utc) >= EXPIRES:
-            raise ValueError("demo exception expired")
         if kubectl(args, "get", "secret", "remediation-runtime", "--ignore-not-found", "-o", "name").strip():
             raise ValueError("remediation-runtime already exists; review before replacing")
     if args.action == "action-read":
         if args.namespace != "sentinelops-b-actions":
             raise ValueError("action-read requires sentinelops-b-actions namespace")
-        if datetime.now(timezone.utc) >= EXPIRES:
-            raise ValueError("demo exception expired")
         if kubectl(args, "get", "secret", "remediation-read", "--ignore-not-found", "-o", "name").strip():
             raise ValueError("remediation-read already exists; review before replacing")
     if args.action == "runtime":
-        if datetime.now(timezone.utc) >= EXPIRES:
-            raise ValueError("demo exception expired")
         description = json.loads(aws(args, "secretsmanager", "describe-secret", "--secret-id", args.runtime_secret_arn))
         if description.get("Name") != RUNTIME_NAME:
             raise ValueError("wrong runtime secret name")
@@ -194,7 +193,7 @@ def execute(args):
             endpoint = f"postgresql://{args.host}:5432/sentinelops_control?sslmode=verify-full"
             full = f"postgresql://control_writer:{quote(password, safe='')}@{args.host}:5432/sentinelops_control?sslmode=verify-full"
             payload = {"database-url": full, "worker-database-url": endpoint, "username": "control_writer",
-                       "password": password, "expires-at": "2026-11-25T00:00:00Z"}
+                       "password": password, "expires-at": args.expires_at.strftime("%Y-%m-%dT%H:%M:%SZ")}
             # AWS CLI v2 cannot parse --cli-input-json from a piped /dev/stdin under WSL.
             # Use a 0600 file on tmpfs (/dev/shm, RAM only), never argv, and unlink it at once.
             fd, request_path = tempfile.mkstemp(dir="/dev/shm", prefix="control-runtime-", suffix=".json")
@@ -243,8 +242,12 @@ def main():
     parser.add_argument("--runtime-secret-arn", help="Terraform control_runtime_secret_arn")
     parser.add_argument("--ca-config", default="control-rds-ca")
     parser.add_argument("--consumer", choices=("worker", "api"), default="worker")
+    parser.add_argument("--expires-at", type=parse_expiry, help="Operator-approved UTC login expiry (YYYY-MM-DDTHH:MM:SSZ)")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
+    if args.expires_at is not None and args.action not in LOGIN_ACTIONS:
+        parser.error("--expires-at applies to runtime, action-runtime or action-read")
+    args.expires_at = args.expires_at or EXPIRES
     if not re.fullmatch(r"[a-z0-9.-]+\.rds\.amazonaws\.com", args.host):
         parser.error("use the exact RDS DNS endpoint, without scheme or port")
     if not re.fullmatch(r"[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[^\s@]+@sha256:[0-9a-f]{64}", args.image):

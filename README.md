@@ -72,6 +72,8 @@ Mở [Fault Console](http://127.0.0.1:8765/) bằng đúng IP và cổng để k
 
 Fault mode `healthy` mô tả instance trả lời GET. **Reset fault modes** đặt delay về 0. Việc khôi phục image được theo dõi qua rollout và telemetry. Để chạy lượt fault live mới, dùng [runbook demo đầy đủ](docs/runbooks/DEMO_FLOW.md) sau khi kiểm đúng cụm, baseline và đường hồi phục.
 
+Để tạo lại AWS dev với DB và image mới, xem [quy trình dựng hạ tầng và runtime](scripts/aws_demo/REBUILD.md).
+
 ## Chạy local từ source
 
 Cần **Python 3.11 hoặc 3.12**. Testbed cần Docker và Compose. Bộ kiểm JavaScript cần Node.js 20+.

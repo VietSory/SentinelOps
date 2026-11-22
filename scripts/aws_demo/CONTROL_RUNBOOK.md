@@ -162,6 +162,11 @@ ConfigMap theo tên đó bằng các lệnh ở §7. Không xóa theo wildcard.
 
 ## 4. Bật login demo, ghi Secrets Manager và Secret runtime
 
+Khi dựng môi trường demo mới, truyền `--expires-at YYYY-MM-DDTHH:MM:SSZ` với
+thời điểm UTC đã duyệt cho `runtime`, `action-runtime` và `action-read`. Job
+áp dụng mốc đó trong `VALID UNTIL`. `sync-runtime` kiểm tra mốc đã lưu trong
+Secrets Manager. Mặc định giữ mốc của đợt demo ban đầu.
+
 ```bash
 python3.11 scripts/aws_demo/control.py runtime "${COMMON[@]}" \
   --master-secret-arn "$MASTER_ARN" --runtime-secret-arn "$RUNTIME_ARN" \

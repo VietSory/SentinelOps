@@ -114,10 +114,17 @@ def runtime_privileges_sql(role):
         AND NOT has_database_privilege(current_user,current_database(),'CREATE')"""
 
 
-def runtime_login_sql(role, password):
-    role_attributes_sql(role)  # Restrict interpolation to the two reviewed role names.
+def parse_expiry(value):
+    expiry = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    if expiry.strftime("%Y-%m-%dT%H:%M:%SZ") != value:
+        raise ValueError("expiry must be YYYY-MM-DDTHH:MM:SSZ")
+    return expiry
+
+
+def runtime_login_sql(role, password, expiry=EXPIRES):
+    role_attributes_sql(role)  # Restrict interpolation to the reviewed role names.
     return (f"ALTER ROLE {role} LOGIN PASSWORD '{scram_verifier(password)}' "
-            "VALID UNTIL '2026-11-25 00:00:00+00'")
+            f"VALID UNTIL '{expiry.astimezone(timezone.utc):%Y-%m-%d %H:%M:%S}+00'")
 
 
 def disable_statements(roles=DEMO_LOGINS):
@@ -205,7 +212,9 @@ async def run(action: str):
         elif action in RUNTIME_ROLES:
             role = RUNTIME_ROLES[action]
             await verify_schema(conn)
-            if await conn.fetchval("SELECT clock_timestamp() >= $1", EXPIRES):
+            expiry_value = os.environ.get("CONTROL_RUNTIME_EXPIRES_AT")
+            expiry = parse_expiry(expiry_value) if expiry_value is not None else EXPIRES
+            if await conn.fetchval("SELECT clock_timestamp() >= $1", expiry):
                 raise RuntimeError("demo exception expired")
             password = Path("/run/control/runtime-password").read_text()
             if len(password) < 32 or not password.isascii() or not all(c.isalnum() or c in "-_" for c in password):
@@ -223,7 +232,7 @@ async def run(action: str):
                         await conn.execute(statement)
                 finally:
                     await conn.execute("RESET ROLE")
-            await conn.execute(runtime_login_sql(role, password))
+            await conn.execute(runtime_login_sql(role, password, expiry))
             # Authenticate using the new password, verify the real TLS session and privilege boundary.
             runtime = await asyncpg.connect(user=role, password=password, **options)
             try:
