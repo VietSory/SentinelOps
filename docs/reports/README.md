@@ -1,7 +1,9 @@
 # Kết quả cần giữ để dùng lại
 
-Hiện chỉ giữ [RCA development baseline](RCA_DEVELOPMENT.md) và JSON đi kèm:
-chúng cung cấp mẫu số, giới hạn evidence và mốc so sánh cho thay đổi RCA tiếp theo.
+- [RCA development baseline](RCA_DEVELOPMENT.md) và JSON đi kèm cung cấp
+  mẫu số, giới hạn evidence và mốc so sánh cho thay đổi RCA tiếp theo.
+- [Bằng chứng kiểm thử local đã lưu](LOCAL_EVIDENCE_ARCHIVE_2026-11-22.md)
+  ghi kết quả và mã băm để đối chiếu receipt gốc của corpus, RCA và incident.
 
 Không cần report lịch sử để xác nhận service chạy: dùng code/tests, lệnh kiểm tra
 trong [runbooks](../README.md#runbooks--mở-khi-cần-thực-hiện) và CI đúng phiên bản.
