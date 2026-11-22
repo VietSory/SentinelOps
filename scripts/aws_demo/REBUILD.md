@@ -59,10 +59,12 @@ Chỉ bật `database_skip_final_snapshot` và tắt `database_deletion_protecti
 2. Build từ Git bằng [build_images.sh](build_images.sh) và publish qua
    [push_images_ecr.py](../push_images_ecr.py). Dùng digest mới của application
    làm `BASE` để build image Payment regression. Build console EKS bằng
-   [Dockerfile của Fault Console](../demo_console/deployment/Dockerfile). Các
-   nguồn image công khai cho Postgres, OTel, Prometheus, Jaeger và Grafana được
-   pin theo digest trong [mẫu cấu trúc image](k8s-images.example.json). Kiểm
-   tra digest thực tế và thay bằng image đã build cho lần dựng hiện tại.
+   [Dockerfile của Fault Console](../demo_console/deployment/Dockerfile).
+   [Mẫu cấu trúc image](k8s-images.example.json) minh họa các key của renderer
+   và có digest giả để test offline. Với bản dựng thật, lấy digest ECR từ
+   lượt push mới. Dùng `docker buildx imagetools inspect <image:tag>` để tra
+   digest các image công khai theo tag đã duyệt, rồi điền các trường còn lại.
+   [Runbook Grafana](README.grafana.md) có pin riêng cho Grafana.
 3. Bootstrap RDS trắng và tạo credential mới theo [CONTROL_RUNBOOK.md](CONTROL_RUNBOOK.md).
    Khi cấp login demo, truyền `--expires-at` với mốc UTC đã được owner duyệt.
    Dựng volume trống và mount đúng đường dẫn. Dựng model bằng quy trình
