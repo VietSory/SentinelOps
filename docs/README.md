@@ -9,6 +9,7 @@
 | Xem phần đã có và giới hạn đã ghi nhận | [Trạng thái dự án](PROJECT_STATUS.md) |
 | Dựng một AWS dev mới | [Hướng dẫn dựng lại](../scripts/aws_demo/REBUILD.md) |
 | Nhận bàn giao công việc trong đội | [Team handoff](TEAM_HANDOFF.md), [ownership và tích hợp](delivery/WORKSTREAM_CONTRACT.md) |
+| Chuẩn bị buổi demo: cảnh báo sớm, duyệt, email | [Kế hoạch nâng cấp demo](delivery/DEMO_UPGRADE_PLAN.md) |
 
 ## Thiết kế và yêu cầu hiện hành
 
@@ -20,6 +21,7 @@
 | [Telemetry conventions](architecture/TELEMETRY_CONVENTIONS.md) | Tên trường, labels và đơn vị |
 | [Trace timing](architecture/TRACE_TIMING.md) | Source/receipt clocks và giới hạn diễn giải |
 | [ADR index](adr/README.md) | Quyết định kiến trúc, status và quan hệ supersession |
+| [Production gaps](delivery/PRODUCTION_GAPS.md) | Khoảng cách tới vận hành thật, ngoài phạm vi demo |
 
 ## Runbooks — mở khi cần thực hiện
 
