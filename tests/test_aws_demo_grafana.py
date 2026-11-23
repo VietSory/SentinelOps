@@ -153,7 +153,7 @@ def test_repository_provisioning_and_dashboards_are_mounted_without_rewriting_th
     paths = sorted((grafana.GRAFANA / 'dashboards').glob('*.json'))
     assert set(dashboards) == {
         'sentinelops-workers.json', 'sentinelops-incidents.json', 'sentinelops-slo.json',
-        'sentinelops-oom.json'}
+        'sentinelops-oom.json', 'sentinelops-risk.json'}
     assert list(dashboards) == [path.name for path in paths]
     assert dashboards == {path.name: path.read_text(encoding='utf-8') for path in paths}
     assert all(json.loads(dashboard)['editable'] is False for dashboard in dashboards.values())
@@ -167,7 +167,7 @@ def test_repository_provisioning_and_dashboards_are_mounted_without_rewriting_th
 
 @pytest.mark.parametrize('name', [
     'sentinelops-workers.json', 'sentinelops-incidents.json', 'sentinelops-slo.json',
-    'sentinelops-oom.json'])
+    'sentinelops-oom.json', 'sentinelops-risk.json'])
 def test_config_and_dashboard_changes_restart_grafana(tmp_path, monkeypatch, name):
     before = grafana.render(**inputs())
     changed = grafana.render(**{**inputs(), 'cloudfront_domain': 'new.cloudfront.net'})
