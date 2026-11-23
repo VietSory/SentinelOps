@@ -60,8 +60,9 @@ Còn chờ owner: địa chỉ email nhận (cấp ngoài repo) và ngày dựng
 
 ## 4. Hạng mục
 
-Mỗi hạng mục: Codex triển khai, rồi qua hai lượt review (tự review và review độc lập)
-trước khi lên `main`. Mọi thao tác ghi lên AWS cũng qua hai lượt review.
+Mỗi hạng mục qua hai lượt review (tự review và review độc lập) trước khi lên `main`.
+Mọi thao tác ghi lên AWS cũng qua hai lượt review. Đặc tả thực thi, test nghiệm thu
+đóng băng trước và cổng hoàn thành nằm ở [DEMO_UPGRADE_SPEC.md](DEMO_UPGRADE_SPEC.md).
 
 ### 4.1 Bộ chấm điểm rủi ro mỗi phút (2–3 ngày)
 
@@ -71,8 +72,11 @@ trước khi lên `main`. Mọi thao tác ghi lên AWS cũng qua hai lượt rev
 - Kết quả theo từng service: trạng thái `normal` / `watch` / `degrading` và điểm rủi ro.
 - Đưa ra ba nơi: metric cho panel Grafana "Nguy cơ trong 5 phút tới", API cho thẻ
   cảnh báo trên UI, và một email mỗi đợt nguy cơ.
-- Chỉ gửi email khi `degrading` kéo dài 2 bucket liên tiếp; không gửi lặp trong cùng
-  một đợt; gửi kèm dòng "đã hết nguy cơ" khi trạng thái trở lại `normal`.
+- Một đợt nguy cơ bắt đầu khi trạng thái là `degrading` và bucket liền trước đã ở
+  mức `watch` hoặc `degrading`, tức nguy cơ tăng qua 2 phút liên tiếp. Quy tắc này
+  lọc được một lần tăng đột ngột lẻ mà vẫn giữ được thời gian báo trước. Mỗi đợt chỉ
+  gửi một email; gửi thêm một email "đã hết nguy cơ" khi đợt kết thúc. Chi tiết ở
+  [DEMO_UPGRADE_SPEC.md](DEMO_UPGRADE_SPEC.md) R2.4.
 - Cảnh báo chỉ để thông báo. Cảnh báo không mở incident và không cho phép hành động
   tự động.
 
@@ -177,7 +181,7 @@ thái "chưa kết luận", mức khớp từ 0,80 trở lên và bỏ xa runboo
 | Rủi ro | Xử lý |
 | --- | --- |
 | Model mới được đánh giá với kiểu chậm dần trong 20 phút. Bản v2 phải chậm nhanh hơn để vi phạm trong 10 phút, nên cảnh báo có thể đến sát giờ | Đo ở bước tập dượt local. Không đạt thì tách hai màn: màn 1 cảnh báo sớm bằng đúng kiểu chậm dần 20 phút đã đánh giá; màn 2 rollback bằng image lỗi hiện có |
-| Cảnh báo nhầm khi hệ thống khỏe | Chỉ gửi email khi `degrading` 2 bucket liên tiếp; chạy 1 giờ khỏe để kiểm |
+| Cảnh báo nhầm khi hệ thống khỏe | Chỉ mở đợt nguy cơ khi `degrading` đi sau một bucket `watch` hoặc `degrading`; chạy 1 giờ khỏe để kiểm |
 | Thời gian báo trước khi chạy thật ngắn hơn số đo local, vì có độ trễ thu số liệu | Ghi số đo thật của từng lượt; dùng số đó trong lời thoại, không dùng số local |
 | AWS đã teardown ngày 22/11/2026 | Dựng lại theo [REBUILD](../../scripts/aws_demo/REBUILD.md) trước buổi tập |
 
@@ -187,4 +191,6 @@ thái "chưa kết luận", mức khớp từ 0,80 trở lên và bỏ xa runboo
 2. 4.3 kịch bản và 4.4 sửa lỗi trình chiếu.
 3. 4.5 tập dượt local, dựng lại AWS, chạy 3 lượt liên tiếp.
 
-Tổng khoảng 5–7 ngày làm việc.
+Ước lượng ban đầu là 5–7 ngày. Với quy trình đóng băng test và hai lượt review ở
+[DEMO_UPGRADE_SPEC.md](DEMO_UPGRADE_SPEC.md), con số thực tế là khoảng 9–10 ngày
+làm việc, cộng 2 ngày tập dượt L2/L3.

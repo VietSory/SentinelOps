@@ -9,7 +9,7 @@
 | Xem phần đã có và giới hạn đã ghi nhận | [Trạng thái dự án](PROJECT_STATUS.md) |
 | Dựng một AWS dev mới | [Hướng dẫn dựng lại](../scripts/aws_demo/REBUILD.md) |
 | Nhận bàn giao công việc trong đội | [Team handoff](TEAM_HANDOFF.md), [ownership và tích hợp](delivery/WORKSTREAM_CONTRACT.md) |
-| Chuẩn bị buổi demo: cảnh báo sớm, duyệt, email | [Kế hoạch nâng cấp demo](delivery/DEMO_UPGRADE_PLAN.md) |
+| Chuẩn bị buổi demo: cảnh báo sớm, duyệt, email | [Kế hoạch nâng cấp demo](delivery/DEMO_UPGRADE_PLAN.md), [đặc tả thực thi và test nghiệm thu](delivery/DEMO_UPGRADE_SPEC.md) |
 
 ## Thiết kế và yêu cầu hiện hành
 
