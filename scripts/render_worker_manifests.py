@@ -105,8 +105,26 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
            policy_enabled: bool = False, demo_ui: bool = False,
            metrics_otlp_endpoint: str | None = None,
            health_metrics_instance: str = 'health-0',
-           incident_metrics_instance: str = 'incidents-0') -> list[dict]:
+           incident_metrics_instance: str = 'incidents-0',
+           early_warning: bool = False, alerts_topic_arn: str | None = None,
+           ui_url: str | None = None, alerts_otlp_endpoint: str | None = None) -> list[dict]:
     image_digest(image)
+    if type(early_warning) is not bool:
+        raise ValueError('early_warning must be an explicit boolean')
+    if early_warning:
+        # The risk worker scores with the deployed release and exports to the in-cluster Collector only.
+        if not model_claim or not model_release_ref:
+            raise ValueError('early warning requires the model claim/release used by the incident worker')
+        from sentinelops.remediation.pod_memory_metrics import metrics_endpoint
+        metrics_endpoint(alerts_otlp_endpoint)
+        if alerts_topic_arn is not None:
+            from sentinelops.notifications import TOPIC_ARN
+            if not isinstance(alerts_topic_arn, str) or not TOPIC_ARN.fullmatch(alerts_topic_arn):
+                raise ValueError('alerts topic must be an SNS topic ARN')
+        parsed_ui = urlsplit(ui_url) if isinstance(ui_url, str) else None
+        if (parsed_ui is None or parsed_ui.scheme != 'https' or not parsed_ui.hostname or parsed_ui.username
+                or parsed_ui.password or parsed_ui.query or parsed_ui.fragment):
+            raise ValueError('early warning emails need the https operator UI URL')
     _label(remediation_store_claim, 'remediation artifact claim')
     _label(known_good_store_claim, 'known-good artifact claim')
     _label(deployment_change_store_claim, 'deployment-change artifact claim')
@@ -244,6 +262,30 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                 volumes.append({'name': 'models', 'persistentVolumeClaim': {'claimName': model_claim, 'readOnly': True}})
                 mounts.append({'name': 'models', 'mountPath': '/models', 'readOnly': True})
                 args += ['--model-store', '$(SENTINELOPS_MODEL_STORE)', '--model-release-ref', '$(SENTINELOPS_MODEL_RELEASE_REF)']
+        sidecars = []
+        if incident and early_warning:
+            # Same pod as the incident worker: the health PVC is RWO and stays read-only here.
+            volumes.append({'name': 'risk-scratch', 'emptyDir': {'sizeLimit': '256Mi'}})
+            sidecars.append({'name': 'risk-worker', 'image': image, 'imagePullPolicy': 'IfNotPresent',
+                'command': ['python', 'scripts/run_risk_worker.py'],
+                'args': common_args + ['--health-stream', '$(SENTINELOPS_HEALTH_STREAM)',
+                    '--source-store', HEALTH_ROOT, '--scratch-store', '/risk-scratch',
+                    '--model-store', '/models', '--model-release-ref', model_release_ref,
+                    '--metrics-otlp-endpoint', alerts_otlp_endpoint],
+                'envFrom': [{'configMapRef': {'name': CONFIG}}], 'env': [
+                    {'name': 'CONTROL_DATABASE_URL', 'valueFrom': {'secretKeyRef': {
+                        'name': 'control-runtime', 'key': 'database-url', 'optional': False}}},
+                    {'name': 'SSL_CERT_FILE', 'value': '/etc/sentinelops/tls/ca-bundle.crt'},
+                    {'name': 'PGSSLROOTCERT', 'value': '/etc/sentinelops/tls/ca-bundle.crt'}],
+                'securityContext': dict(hardening),
+                'volumeMounts': [{'name': 'tmp', 'mountPath': '/tmp'},
+                    {'name': 'credentials', 'mountPath': CREDENTIAL_ROOT, 'readOnly': True},
+                    {'name': 'database-ca', 'mountPath': '/etc/sentinelops/tls', 'readOnly': True},
+                    {'name': 'health-artifacts', 'mountPath': HEALTH_ROOT, 'readOnly': True},
+                    {'name': 'models', 'mountPath': '/models', 'readOnly': True},
+                    {'name': 'risk-scratch', 'mountPath': '/risk-scratch'}],
+                'resources': {'requests': {'cpu': '50m', 'memory': '256Mi'},
+                              'limits': {'cpu': '500m', 'memory': '768Mi'}}})
         status_command = ['python', '-c', STATUS_EXEC, f'scripts/run_{worker}_worker.py', *args, '--status']
         if metrics_otlp_endpoint is not None:
             instance = incident_metrics_instance if incident else health_metrics_instance
@@ -279,7 +321,7 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
                             {'name': 'PGSSLROOTCERT', 'value': '/etc/sentinelops/tls/ca-bundle.crt'}],
                         'securityContext': dict(hardening), 'volumeMounts': mounts,
                         'resources': {'requests': {'cpu': '100m', 'memory': '256Mi'},
-                                      'limits': {'cpu': '1', 'memory': '1Gi'}}}], 'volumes': volumes}}}})
+                                      'limits': {'cpu': '1', 'memory': '1Gi'}}}, *sidecars], 'volumes': volumes}}}})
     # These are observer permissions only. SelfSubjectAccessReview is already
     # supplied to authenticated service accounts by Kubernetes; no write role
     # or remediation policy is introduced here.
@@ -305,13 +347,14 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
     documents += _controller(image, target, metadata, labels, hardening,
         health_store_claim, incident_store_claim, remediation_store_claim,
         known_good_store_claim, database_ca_config, health_stream, environment, policy_enabled,
-        model_claim, model_release_ref, demo_ui)
+        model_claim, model_release_ref, demo_ui,
+        notifier={'topic_arn': alerts_topic_arn, 'ui_url': ui_url, 'otlp': alerts_otlp_endpoint} if early_warning else None)
     return documents
 
 
 def _controller(image, target, metadata, labels, hardening, health_claim, incident_claim,
                 remediation_claim, known_good_claim, database_ca_config, health_stream, environment,
-                enabled, model_claim, model_release_ref, demo_ui):
+                enabled, model_claim, model_release_ref, demo_ui, notifier=None):
     """Use the same non-root private credential copy as PR #70.
 
     remediation-runtime is provisioned separately by the operator: action-database-url
@@ -418,6 +461,21 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
             'readinessProbe': probe, 'livenessProbe': probe,
             'resources': {'requests': {'cpu': '50m', 'memory': '128Mi'},
                           'limits': {'cpu': '500m', 'memory': '512Mi'}}}]
+    if notifier is not None:
+        # Reads proposals (read-only) and records sent emails under its own subPath. SNS
+        # credentials come from EKS Pod Identity (alerts_publisher role), never a Secret.
+        ui = ui + [{'name': 'notifier', 'image': image, 'imagePullPolicy': 'IfNotPresent',
+            'command': ['python', 'scripts/run_notifier.py'],
+            'args': ['--store', '/artifacts/remediation', '--notifier-store', '/notifier',
+                     '--ui-url', notifier['ui_url'], '--metrics-otlp-endpoint', notifier['otlp']]
+                    + (['--topic-arn', notifier['topic_arn']] if notifier['topic_arn'] else []),
+            'env': [{'name': 'AWS_REGION', 'value': 'ap-southeast-1'}],
+            'securityContext': dict(hardening),
+            'volumeMounts': [{'name': 'tmp', 'mountPath': '/tmp'},
+                {'name': 'remediation-artifacts', 'mountPath': '/artifacts/remediation', 'readOnly': True},
+                {'name': 'remediation-artifacts', 'mountPath': '/notifier', 'subPath': 'notifier'}],
+            'resources': {'requests': {'cpu': '20m', 'memory': '96Mi'},
+                          'limits': {'cpu': '200m', 'memory': '256Mi'}}}]
     return [
         {'apiVersion': 'v1', 'kind': 'ServiceAccount', 'metadata': metadata('payment-rollback'),
             'automountServiceAccountToken': False},
@@ -489,6 +547,11 @@ def main():
         help='Opt-in credential-free HTTP loopback OTLP endpoint; requires staging or production')
     parser.add_argument('--health-metrics-instance', default='health-0')
     parser.add_argument('--incident-metrics-instance', default='incidents-0')
+    parser.add_argument('--early-warning', action='store_true',
+        help='Add the risk-worker and notifier sidecars (requires model claim/release, --ui-url, --alerts-otlp-endpoint)')
+    parser.add_argument('--alerts-topic-arn', help='SNS topic for demo emails (terraform output demo_alerts_topic_arn)')
+    parser.add_argument('--ui-url', help='https operator UI URL used in emails')
+    parser.add_argument('--alerts-otlp-endpoint', help='In-cluster Collector OTLP endpoint for risk/notifier metrics')
     parser.add_argument('--output', type=Path, required=True)
     args = vars(parser.parse_args())
     output = args.pop('output')

@@ -113,3 +113,8 @@ output "edge_grafana_client_id" {
   description = "Public ID of Grafana's confidential code/PKCE client; the sensitive client secret is never output."
   value       = var.operator_identity_enabled && var.edge_enabled ? aws_cognito_user_pool_client.grafana[0].id : null
 }
+
+output "demo_alerts_topic_arn" {
+  description = "SNS topic for demo alert emails; pass to render_worker_manifests --alerts-topic-arn."
+  value       = aws_sns_topic.demo_alerts.arn
+}

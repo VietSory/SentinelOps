@@ -243,6 +243,42 @@ def assert_private_by_default(blocks: dict[str, dict]) -> list[str]:
     return checks
 
 
+def assert_alerts_publisher_scoped(blocks: dict[str, dict], documents: dict[str, dict]) -> list[str]:
+    """The demo alert publisher may only sns:Publish to its own topic, through one Pod Identity binding."""
+    role = 'aws_iam_role.alerts_publisher'
+    pattern = re.compile(r'\baws_iam_role\.alerts_publisher\b|alerts-publisher"')
+    references = {key for key, block in blocks.items() if key != role and pattern.search(block['body'])}
+    expected = {'aws_iam_role_policy.alerts_publisher', 'aws_eks_pod_identity_association.alerts_publisher'}
+    if references != expected:
+        raise ValueError('the alerts publisher role must be bound only by its inline policy and one pod '
+                         'identity association: ' + ', '.join(sorted(references ^ expected)))
+    if set(_direct_assignments(blocks[role]['body'])) != {'name', 'assume_role_policy', 'tags'}:
+        raise ValueError('the alerts publisher role definition may contain only name, trust and tags')
+    if _direct_assignments(blocks[role]['body'])['assume_role_policy'] != [
+            'data.aws_iam_policy_document.alerts_publisher_pod_identity.json']:
+        raise ValueError('the alerts publisher must use its scoped pod identity trust')
+    association = _direct_assignments(blocks['aws_eks_pod_identity_association.alerts_publisher']['body'])
+    if (association.get('namespace') != ['"sentinelops-b-actions"']
+            or association.get('service_account') != ['"payment-rollback"']
+            or association.get('role_arn') != ['aws_iam_role.alerts_publisher.arn']):
+        raise ValueError('the alerts publisher must bind exactly payment-rollback in sentinelops-b-actions')
+    if _direct_assignments(blocks['aws_iam_role_policy.alerts_publisher']['body']).get('policy') != [
+            'data.aws_iam_policy_document.alerts_publisher.json']:
+        raise ValueError('the alerts publisher inline policy must be its scoped document')
+    document = documents.get('alerts_publisher')
+    statements = [] if document is None else _child_blocks(document['body'], 'statement')
+    if (document is None or _direct_assignments(document['body']) or 'dynamic' in document['body']
+            or len(statements) != 1 or _child_blocks(statements[0], 'condition')
+            or _direct_assignments(statements[0]) != {'sid': ['"PublishDemoAlertsOnly"'], 'effect': ['"Allow"'],
+                                                       'actions': ['["sns:Publish"]'],
+                                                       'resources': ['[aws_sns_topic.demo_alerts.arn]']}):
+        raise ValueError('the alerts publisher may only sns:Publish to the demo alerts topic')
+    trust = documents.get('alerts_publisher_pod_identity')
+    if trust is None or trust['body'] != documents['ebs_csi_pod_identity']['body']:
+        raise ValueError('the alerts publisher trust must equal the reviewed cluster-bound pod identity trust')
+    return ['alerts publisher: sns:Publish on its topic only, one pod identity binding']
+
+
 def assert_ebs_csi_scoped(blocks: dict[str, dict], documents: dict[str, dict]) -> list[str]:
     """Accept only the EBS CSI role, policy, trust, and add-on bindings described here."""
     expected_role_references = {
@@ -717,6 +753,7 @@ def exercise(output: Path | None) -> dict:
     checks += assert_bounded_retention(blocks)
     checks += assert_no_overbroad_identity(blocks, documents)
     checks += assert_ebs_csi_scoped(blocks, documents)
+    checks += assert_alerts_publisher_scoped(blocks, documents)
     checks += assert_no_static_credentials()
     checks += assert_operator_identity(blocks)
     checks += assert_edge(blocks)

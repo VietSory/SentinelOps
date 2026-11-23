@@ -356,3 +356,14 @@ variable "edge_grafana_node_port" {
     error_message = "Grafana NodePort must be an integer in 30000-32767, different from the API NodePort."
   }
 }
+
+variable "demo_alert_emails" {
+  description = "Recipients of demo alert emails (SNS email subscriptions). Provide outside Git, e.g. TF_VAR_demo_alert_emails."
+  type        = list(string)
+  default     = []
+  sensitive   = true
+  validation {
+    condition     = alltrue([for address in var.demo_alert_emails : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", address))])
+    error_message = "demo_alert_emails must contain email addresses only."
+  }
+}
