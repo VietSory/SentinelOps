@@ -44,7 +44,7 @@ def test_proposal_and_outcome_events_have_stable_keys():
         [view('engineer', outcome={'phase': 'escalated', 'reason': 'approval-rejected'})], UI))
     assert ('outcome', f'outcome:{PID}:escalated') in kinds(proposal_notifications(
         [view('engineer', outcome={'phase': 'escalated', 'reason': 'evidence-stale-or-future'})], UI))
-    oom = view('recovered', runbook='pod-memory-limit-oom/v1', action={'phase': 'recovered'})
+    oom = view('recovered', runbook='pod-memory-limit-demo/v1', action={'phase': 'recovered'})
     assert ('outcome', f'outcome:{PID}:recovered') in kinds(proposal_notifications([oom], UI))
     assert kinds(proposal_notifications([view('consumed')], UI)) == [('proposal_pending', 'proposal:' + PID)]
 
@@ -159,8 +159,9 @@ def test_controller_records_the_final_action_phase(tmp_path, monkeypatch):
         await c.controller.tick()
         assert read_slot(c.store, 'final', proposal['proposal_id']) is None
         from datetime import timedelta
-        c.f.time[0] += timedelta(minutes=5)
-        await c.controller.tick()
+        for _ in range(2):  # the first reconcile only records the rollout effective time
+            c.f.time[0] += timedelta(minutes=5)
+            await c.controller.tick()
         final = read_slot(c.store, 'final', proposal['proposal_id'])
         assert final['phase'] == 'recovered' and final['proposal_id'] == proposal['proposal_id']
     asyncio.run(run())
