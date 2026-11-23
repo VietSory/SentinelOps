@@ -4,7 +4,7 @@ The mounted store is a trusted operator boundary, never a client-selected path.
 This adapter has no executor, Kubernetes client or action-writer connection.
 """
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import re
 
 from fastapi import Depends, Query, Request, Response
@@ -43,7 +43,7 @@ class ProposalStore:
         values = {}
         for path in (self.store.root / 'manifests').glob('*.json'):
             value = self.store.read('artifact://manifests/' + path.name)
-            if value.get('proposal_version') != approvals.PROPOSAL_VERSION:
+            if not approvals.is_proposal(value):
                 continue
             identifier = value['proposal_id']
             if not isinstance(identifier, str) or not IDENTIFIER.fullmatch(identifier) or identifier in values:
@@ -85,7 +85,7 @@ class ProposalStore:
             raise ApiError(409, 'proposal_not_pending', 'Persisted recovery origin changed')
         action = read_state(self.store, child['proposal_id'])
         now = datetime.now(timezone.utc)
-        if (utc_time(child['created_at']) <= now < utc_time(child['expires_at'])
+        if (approvals.approval_window_open(child, now)
             and (not action or action.get('phase') == 'pending')
             and all(approvals.read_slot(self.store, kind, child['proposal_id']) is None
                     for kind in ('approval', 'used', 'outcome'))):
@@ -112,10 +112,11 @@ class ProposalStore:
             child_id = stable_id({'approval_mode': approvals.MANUAL_MEMORY_RECOVERY,
                 'manual_recovery_of': identifier, 'origin_proposal_sha256': stable_id(proposal),
                 'origin_incident_revision': current_revision})
-            child = {'proposal_version': approvals.PROPOSAL_VERSION, 'proposal_id': child_id,
+            child = {'proposal_version': approvals.PROPOSAL_VERSION_V2,
+                'approval_policy': approvals.APPROVAL_POLICY, 'proposal_id': child_id,
                 'executor_runbook': MEMORY_RUNBOOK, 'runbook_id': 'pod-oom-memory-limit',
                 'incident_id': 'INC-OOM-MANUAL-' + child_id, 'incident_revision': 1,
-                'created_at': timestamp(now), 'expires_at': timestamp(now + timedelta(minutes=15)),
+                'created_at': timestamp(now),
                 'target': deepcopy(proposal['target']), 'current_image': proposal['current_image'],
                 'resource_change': deepcopy(proposal['resource_change']),
                 'manual_recovery_of': identifier, 'origin_proposal_sha256': stable_id(proposal),
@@ -138,13 +139,14 @@ class ProposalStore:
         memory = proposal.get('executor_runbook') == MEMORY_RUNBOOK
         action = read_state(self.store, identifier) if memory else None
         status = (action['phase'] if memory and action and action['phase'] != 'pending' else
+                  'obsolete' if outcome and outcome.get('phase') == 'obsolete' else
                   'engineer' if outcome or receipt and receipt['decision'] == 'reject' else
                   'consumed' if used else 'approved' if receipt else
-                  'expired' if now >= utc_time(proposal['expires_at']) else
+                  'expired' if approvals.expired(proposal, now) else
                   'not_yet_valid' if now < utc_time(proposal['created_at']) else 'pending')
         pending_manual = (memory and recovery_change(proposal) is not None and not receipt and not used and not outcome
             and (not action or action['phase'] == 'pending')
-            and utc_time(proposal['created_at']) <= now < utc_time(proposal['expires_at']))
+            and approvals.approval_window_open(proposal, now))
         return {'proposal': proposal, 'proposal_sha256': stable_id(proposal),
                 'status': status, 'approval': receipt, 'outcome': outcome,
                 'review_images': review_images(proposal),

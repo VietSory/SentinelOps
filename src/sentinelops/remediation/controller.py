@@ -10,14 +10,15 @@ from __future__ import annotations
 import asyncio
 from copy import deepcopy
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
 
 from sentinelops.contracts import utc_time
 from sentinelops.incidents.rca_replay import group_severity
-from sentinelops.remediation.approvals import APPROVAL_VERSION, PROPOSAL_VERSION, create_slot, read_slot
+from sentinelops.remediation.approvals import (APPROVAL_POLICY, APPROVAL_VERSION, PROPOSAL_VERSION_V2, create_slot,
+                                              expired, is_proposal, pending_until_decision, read_slot)
 from sentinelops.remediation.authority import HEALTH_CONSUMER_LAG, current_health_checkpoint
 from sentinelops.remediation.domain import Blocked, Request, RUNBOOK, image_digest
 from sentinelops.telemetry.core import stable_id, timestamp
@@ -222,7 +223,7 @@ class AutoRunbookController:
 
     def _validated_approval(self, proposal):
         now = self.clock()
-        if now >= utc_time(proposal['expires_at']):
+        if expired(proposal, now):
             raise Blocked('approval-expired')
         value = read_slot(self.store, 'approval', proposal['proposal_id'])
         if value is None:
@@ -232,7 +233,8 @@ class AutoRunbookController:
             or value.get('proposal_sha256') != stable_id(proposal)
             or not isinstance(value.get('approved_by'), str) or not value['approved_by'].strip()
             or not utc_time(proposal['created_at']) <= utc_time(value['approved_at']) <= now
-            or utc_time(value['approved_at']) >= utc_time(proposal['expires_at'])):
+            or (not pending_until_decision(proposal)
+                and utc_time(value['approved_at']) >= utc_time(proposal['expires_at']))):
             raise Blocked('approval-invalid')
         if value.get('decision') != 'approve':
             raise Blocked('approval-rejected' if value.get('decision') == 'reject' else 'approval-invalid')
@@ -247,14 +249,47 @@ class AutoRunbookController:
         logger.info(json.dumps({'event': 'runbook_approval_escalated', **value}, sort_keys=True))
         return value
 
+    def _obsolete(self, proposal, reason):
+        """Close a waiting proposal whose situation changed; it never escalates or dispatches."""
+        value = {'outcome_version': 'runbook-approval-outcome/v1',
+                 'proposal_id': proposal['proposal_id'], 'incident_id': proposal['incident_id'],
+                 'incident_revision': proposal['incident_revision'], 'phase': 'obsolete',
+                 'reason': reason, 'recorded_at': timestamp(self.clock())}
+        create_slot(self.store, 'outcome', proposal['proposal_id'], value)
+        logger.info(json.dumps({'event': 'runbook_proposal_obsolete', **value}, sort_keys=True))
+        return value
+
+    async def _changed_situation(self, proposal):
+        """Return why a waiting v2 proposal no longer matches the system, or None.
+
+        Unavailable reads keep the proposal waiting: only an observed change closes it.
+        """
+        try:
+            snapshot = await self.incidents.get(proposal['incident_id'])
+            if snapshot['revision'] != proposal['incident_revision']:
+                return 'incident-changed'
+            if 'current_image' not in proposal:
+                return None  # Incomplete legacy bindings are rejected on the approval path.
+            current = await self.executor.kube.observe()
+            if image_digest(current.image) != proposal['current_image']:
+                return 'deployment-changed'
+        except Exception:
+            return None
+        return None
+
     async def _approved_actions(self, results):
         actions = 0
         for proposal in self._decisions.values():
-            if proposal.get('proposal_version') != PROPOSAL_VERSION:
+            if not is_proposal(proposal):
                 continue
             pid = proposal['proposal_id']
             if read_slot(self.store, 'outcome', pid) or read_slot(self.store, 'used', pid):
                 continue
+            if pending_until_decision(proposal):
+                reason = await self._changed_situation(proposal)
+                if reason is not None:
+                    results.append(self._obsolete(proposal, reason))
+                    continue
             try:
                 approval = self._approval(proposal)
             except Blocked as exc:
@@ -267,7 +302,10 @@ class AutoRunbookController:
                 await self._current(proposal)
                 approval = self._approval(proposal)
             except Blocked as exc:
-                results.append(self._escalate(proposal, str(exc)))
+                if pending_until_decision(proposal) and str(exc) == 'incident-revision-changed':
+                    results.append(self._obsolete(proposal, 'incident-changed'))
+                else:
+                    results.append(self._escalate(proposal, str(exc)))
                 continue
             # Claim before execute: a crash can lose an attempt, never reuse an
             # approval. Restarts only reconcile durable executor intents.
@@ -285,10 +323,11 @@ class AutoRunbookController:
                 self._active_approval = None
             if state['phase'] in ('blocked', 'escalated'):
                 reason = state['facts'].get('reason', 'executor-blocked')
-                if self.clock() >= utc_time(proposal['expires_at']):
-                    reason = 'approval-expired'
-                elif reason == 'evidence-stale-or-future':
-                    reason = 'approval-after-evidence-freshness'
+                if not pending_until_decision(proposal):
+                    if expired(proposal, self.clock()):
+                        reason = 'approval-expired'
+                    elif reason == 'evidence-stale-or-future':
+                        reason = 'approval-after-evidence-freshness'
                 results.append(self._escalate(proposal, reason, action_id=state['action_id']))
             results.append(state)
             if state['phase'] not in TERMINAL:
@@ -326,9 +365,9 @@ class AutoRunbookController:
                                     incident_revision=snapshot['revision'], decided_at=timestamp(self.clock()))
                     if decision['decision'] == 'oncall':
                         created = self.clock()
-                        decision.update(proposal_version=PROPOSAL_VERSION,
+                        decision.update(proposal_version=PROPOSAL_VERSION_V2, approval_policy=APPROVAL_POLICY,
                             proposal_id=stable_id([identifier, snapshot['revision'], decision['runbook_id']]),
-                            created_at=timestamp(created), expires_at=timestamp(created + timedelta(minutes=15)))
+                            created_at=timestamp(created))
                     reference = self.store.write('manifests', decision)
                     self._decisions[identifier] = deepcopy(decision)
                     logger.info(json.dumps({'event': 'runbook_proposal' if decision['decision'] == 'oncall'

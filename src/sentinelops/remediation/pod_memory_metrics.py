@@ -24,7 +24,7 @@ FRESH_SECONDS = 20
 SEEN_EVENTS = 128
 COLLECTOR = 'otel-collector.sentinelops-b-actions.svc.cluster.local'
 PHASES = ('observing', 'waiting', 'pending', 'dispatching', 'verifying',
-          'recovered', 'blocked', 'escalated', 'rejected', 'expired', 'unavailable')
+          'recovered', 'blocked', 'escalated', 'rejected', 'expired', 'obsolete', 'unavailable')
 PREFIX = 'sentinelops_oom_demo_'
 # Actual Collector Prometheus names, including unit/counter suffix conversion.
 NAMES = {

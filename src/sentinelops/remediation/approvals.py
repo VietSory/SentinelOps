@@ -13,9 +13,32 @@ import re
 from sentinelops.contracts import utc_time
 from sentinelops.telemetry.core import stable_id, timestamp
 
-PROPOSAL_VERSION = 'runbook-proposal/v1'
+PROPOSAL_VERSION = 'runbook-proposal/v1'  # legacy: expires 15 minutes after creation
+PROPOSAL_VERSION_V2 = 'runbook-proposal/v2'  # waits until an on-call decision; no expiry
+PROPOSAL_VERSIONS = (PROPOSAL_VERSION, PROPOSAL_VERSION_V2)
+APPROVAL_POLICY = 'pending-until-decision/v1'
 APPROVAL_VERSION = 'runbook-approval/v1'
 MANUAL_MEMORY_RECOVERY = 'manual_memory_recovery'
+
+
+def is_proposal(value):
+    return isinstance(value, dict) and value.get('proposal_version') in PROPOSAL_VERSIONS
+
+
+def pending_until_decision(proposal):
+    """v2 proposals stay reviewable until a human decides or the situation changes."""
+    return proposal.get('proposal_version') == PROPOSAL_VERSION_V2
+
+
+def approval_window_open(proposal, now):
+    """A v1 proposal keeps its original 15-minute window; v2 has no upper bound."""
+    if utc_time(proposal['created_at']) > now:
+        return False
+    return pending_until_decision(proposal) or now < utc_time(proposal['expires_at'])
+
+
+def expired(proposal, now):
+    return not pending_until_decision(proposal) and now >= utc_time(proposal['expires_at'])
 
 
 def _slot(store, kind, proposal_id):
@@ -64,7 +87,7 @@ def find_proposal(store, proposal_id):
     found = []
     for path in sorted((store.root / 'manifests').glob('*.json')):
         value = store.read('artifact://manifests/' + path.name)
-        if value.get('proposal_version') == PROPOSAL_VERSION and value.get('proposal_id') == proposal_id:
+        if is_proposal(value) and value.get('proposal_id') == proposal_id:
             found.append(value)
     if len(found) != 1:
         raise ValueError('proposal must resolve uniquely')
@@ -84,7 +107,7 @@ def record_approval(store, *, proposal_id, approved_by, decision, reason='',
         if (approval_mode != MANUAL_MEMORY_RECOVERY or decision != 'approve'
             or recovery_change(proposal) is None):
             raise ValueError('manual recovery requires the bounded memory approval')
-    if not utc_time(proposal['created_at']) <= now < utc_time(proposal['expires_at']):
+    if not approval_window_open(proposal, now):
         raise ValueError('proposal expired or not yet valid')
     if read_slot(store, 'used', proposal_id) or read_slot(store, 'outcome', proposal_id):
         raise ValueError('proposal already handled')

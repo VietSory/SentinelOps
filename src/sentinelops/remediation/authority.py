@@ -57,6 +57,9 @@ class Assessment:
     change: Change | None
     dispatch_authority: bool = False
     missing_reason: str = 'native-h4-contract-not-activated'
+    # The accepted, caught-up health checkpoint still shows the top-ranked RCA
+    # service breaching. Only then may an older RCA support a later approval.
+    root_breaching: bool = False
 
 
 class NativeH4Authority:
@@ -101,9 +104,13 @@ class NativeH4Authority:
                     qualified = True
                     reason = ''
         change = Change(**{**value, 'target': Target(**value['target'])}) if qualified else None
+        root = result['ranking'][0] if result.get('ranking') else None
+        root_state = (state.get('service_states') or {}).get(root) if root and qualified else None
+        root_breaching = bool(qualified and root_state and root_state.get('availability') == 'ELIGIBLE'
+                              and root_state.get('incident_active') is True)
         return Assessment(request.incident_id, snapshot['revision'], snapshot['context']['lifecycle_stage'],
             snapshot['context']['availability'], state['last_bucket_end'], accepted['result_ref'], result, change,
-            dispatch_authority=qualified, missing_reason=reason)
+            dispatch_authority=qualified, missing_reason=reason, root_breaching=root_breaching)
 
 
 def qualify(assessment, request, before, known_good, policy, rca_policy, *, now: datetime):
@@ -119,7 +126,15 @@ def qualify(assessment, request, before, known_good, policy, rca_policy, *, now:
         raise Blocked('incident-revision-lifecycle-or-availability-mismatch')
     if result['abstained'] or not result['ranking'] or result['ranking'][0] != 'payment-service':
         raise Blocked('rca-not-qualified-payment-root')
-    fresh(result['as_of'], now, policy.freshness_seconds)
+    try:
+        fresh(result['as_of'], now, policy.freshness_seconds)
+    except Blocked:
+        # A proposal may wait for its human decision. An older RCA still counts only
+        # while the incident is unchanged and the latest accepted health shows its
+        # root service breaching; the health and deployment reads below stay fresh.
+        if (assessment.root_breaching is not True or assessment.lifecycle != 'RCA_READY'
+                or utc_time(result['as_of']) > now):
+            raise
     fresh(assessment.latest_health_at, now, policy.freshness_seconds)
     fresh(before.observed_at, now, policy.freshness_seconds)
     group = next(g for g in result['correlation']['groups'] if g['group_id'] == result['group_id'])

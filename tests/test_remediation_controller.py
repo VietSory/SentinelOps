@@ -17,7 +17,7 @@ from sentinelops.incidents.rca_replay import group_severity as original_group_se
 from sentinelops.remediation.controller import AutoRunbookController
 from sentinelops.remediation.domain import Blocked, RUNBOOK
 from sentinelops.remediation.approvals import record_approval, read_slot, create_slot
-from sentinelops.telemetry.core import stable_id
+from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.telemetry.store import ArtifactStore
 from test_remediation_executor import setup as executor_fixture
 from test_remediation_kubernetes import BAD, GOOD, TARGET
@@ -128,8 +128,7 @@ def test_proposals_never_dispatch_without_approval_and_survive_restart(tmp_path,
         assert c.f.executor.authorize == c.controller.authorize
         if verdict == 'oncall':
             assert decision['proposal_id'] == stable_id([c.f.request.incident_id, 2, decision['runbook_id']])
-            from sentinelops.contracts import utc_time
-            assert utc_time(decision['expires_at']) - utc_time(decision['created_at']) == timedelta(minutes=15)
+            assert decision['proposal_version'] == 'runbook-proposal/v2' and 'expires_at' not in decision
         artifacts = list((c.store.root / 'manifests').glob('*.json'))
         assert len(artifacts) == 1
         before = artifacts[0].read_bytes()
@@ -139,7 +138,11 @@ def test_proposals_never_dispatch_without_approval_and_survive_restart(tmp_path,
         restarted = AutoRunbookController(**c.kwargs)
         await restarted.tick()
         assert artifacts[0].read_bytes() == before
-        assert len(list((c.store.root / 'manifests').glob('*.json'))) == 1
+        # A waiting v2 proposal is closed as obsolete when its incident revision moves on.
+        assert len(list((c.store.root / 'manifests').glob('*.json'))) == (2 if verdict == 'oncall' else 1)
+        if verdict == 'oncall':
+            outcome = read_slot(c.store, 'outcome', decision['proposal_id'])
+            assert outcome['phase'] == 'obsolete' and outcome['reason'] == 'incident-changed'
         assert c.f.kube.calls == [] and executed == []
     asyncio.run(run())
 
@@ -177,7 +180,7 @@ def test_proposal_pins_server_target_images_and_ledger_in_approval_hash(tmp_path
 
 @pytest.mark.parametrize('timing', ['before-execute', 'before-patch'])
 @pytest.mark.parametrize('change', ['revision', 'digest', 'ledger', 'rollback-image', 'ledger-content',
-                                  'deployment_uid', 'namespace_uid', 'cluster_uid', 'expired'])
+                                  'deployment_uid', 'namespace_uid', 'cluster_uid'])
 def test_approval_invalidates_revision_target_ledger_and_expiry(tmp_path, monkeypatch, timing, change):
     async def run():
         c = fixture(tmp_path, monkeypatch)
@@ -209,16 +212,19 @@ def test_approval_invalidates_revision_target_ledger_and_expiry(tmp_path, monkey
         def invalidate():
             changed[0] = True
             if change == 'revision': c.snapshot['revision'] += 1
-            if change == 'expired': c.f.time[0] += timedelta(minutes=15)
         if timing == 'before-execute':
             invalidate()
         else:
             c.f.journal.after_arm = invalidate
         results = await c.controller.tick()
-        expected = ('incident-revision-changed' if change == 'revision' else
-                    'approval-expired' if change == 'expired' else 'approval-target-changed')
+        expected = 'incident-revision-changed' if change == 'revision' else 'approval-target-changed'
         outcome = read_slot(c.store, 'outcome', proposal['proposal_id'])
-        assert outcome['phase'] == 'escalated' and outcome['reason'] == expected
+        if timing == 'before-execute' and change in ('revision', 'digest'):
+            # A waiting v2 proposal closes when the incident or deployment changed.
+            assert outcome['phase'] == 'obsolete'
+            assert outcome['reason'] == ('incident-changed' if change == 'revision' else 'deployment-changed')
+        else:
+            assert outcome['phase'] == 'escalated' and outcome['reason'] == expected
         expected_calls = [] if timing == 'before-execute' else [True]
         assert c.f.kube.calls == expected_calls
         if timing == 'before-patch':
@@ -358,7 +364,7 @@ def test_fail_closed_records_engineer_without_any_patch(tmp_path, monkeypatch, f
 
 
 @pytest.mark.parametrize('change', ['current-severity', 'incident-severity', 'revision', 'kill-switch',
-                                  'evidence-error', 'expired', 'approval-changed'])
+                                  'evidence-error', 'stale-rca', 'approval-changed'])
 def test_authorize_rechecks_after_arm_and_blocks_before_real_patch(tmp_path, monkeypatch, change):
     async def run():
         c = fixture(tmp_path, monkeypatch)
@@ -368,7 +374,7 @@ def test_authorize_rechecks_after_arm_and_blocks_before_real_patch(tmp_path, mon
             if change == 'revision': c.snapshot['revision'] += 1
             if change == 'kill-switch': c.controller.kill_switch.touch()
             if change == 'evidence-error': c.evidence.error = True
-            if change == 'expired': c.f.time[0] += timedelta(minutes=15)
+            if change == 'stale-rca': c.f.time[0] += timedelta(minutes=16)  # RCA older than 900 s, root not breaching
             if change == 'approval-changed':
                 pid = next(iter(c.controller._decisions.values()))['proposal_id']
                 receipt = read_slot(c.store, 'approval', pid)
@@ -499,13 +505,13 @@ def test_restart_cancels_prepared_intent_and_rejects_corrupt_decision(tmp_path, 
     asyncio.run(run())
 
 
-@pytest.mark.parametrize('problem', ['reject', 'expired', 'wrong-proposal', 'wrong-hash', 'used',
+@pytest.mark.parametrize('problem', ['reject', 'wrong-proposal', 'wrong-hash', 'used',
                                   'revision', 'severity', 'decision', 'stale', 'malformed', 'future', 'blank-operator'])
 def test_approval_failures_cannot_dispatch(tmp_path, monkeypatch, problem):
     async def run():
         c = fixture(tmp_path, monkeypatch)
-        # RCA is already 2 seconds old when proposed, so it can become stale
-        # while the proposal is still within its independent 900-second TTL.
+        # RCA is already 2 seconds old when proposed; a v2 proposal has no TTL,
+        # so only the 900-second RCA freshness rule can block the late approval.
         if problem == 'stale': c.f.time[0] += timedelta(seconds=2)
         proposal = (await c.controller.tick())[0]
         pid = proposal['proposal_id']
@@ -515,7 +521,7 @@ def test_approval_failures_cannot_dispatch(tmp_path, monkeypatch, problem):
             if problem == 'wrong-proposal': original['proposal_id'] = 'f' * 64
             if problem == 'wrong-hash': original['proposal_sha256'] = 'f' * 64
             if problem == 'malformed': original['approved_at'] = None
-            if problem == 'future': original['approved_at'] = proposal['expires_at']
+            if problem == 'future': original['approved_at'] = timestamp(c.f.clock() + timedelta(hours=1))
             if problem == 'blank-operator': original['approved_by'] = ' '
             # Simulate an untrusted receipt in the identity slot.
             path = c.store.root / 'runbook-approvals' / 'approval' / (pid + '.json')
@@ -523,7 +529,6 @@ def test_approval_failures_cannot_dispatch(tmp_path, monkeypatch, problem):
             create_slot(c.store, 'approval', pid, original)
         if problem == 'used':
             create_slot(c.store, 'used', pid, {'proposal_id': pid, 'approval_sha256': 'f'*64})
-        if problem == 'expired': c.f.time[0] += timedelta(minutes=15)
         if problem == 'revision': c.snapshot['revision'] += 1
         if problem == 'severity': c.snapshot['payload']['severity'] = 'high'
         if problem == 'decision': c.controller.catalog['catalog_version'] = 'changed'
@@ -533,27 +538,24 @@ def test_approval_failures_cannot_dispatch(tmp_path, monkeypatch, problem):
             monkeypatch.setattr(c.controller, '_decide', changed)
         results = await c.controller.tick()
         assert c.f.kube.calls == []
-        if problem == 'expired': assert results[0]['reason'] == 'approval-expired'
         if problem == 'stale':
-            assert c.f.clock() < utc_time(proposal['expires_at'])
             assert (c.f.clock() - utc_time(c.f.authority.value.rca['as_of'])).total_seconds() == 901
-            assert results[0]['reason'] == 'approval-after-evidence-freshness'
+            assert results[0]['reason'] == 'evidence-stale-or-future'
             assert c.f.journal.state['facts']['reason'] == 'evidence-stale-or-future'
         await AutoRunbookController(**c.kwargs).tick()
         assert c.f.kube.calls == []
     asyncio.run(run())
 
 
-def test_unapproved_proposal_expires_and_cannot_be_approved_later(tmp_path, monkeypatch):
+def test_unapproved_v2_proposal_waits_without_expiry_and_never_dispatches(tmp_path, monkeypatch):
     async def run():
         c = fixture(tmp_path, monkeypatch)
         proposal = (await c.controller.tick())[0]
-        c.f.time[0] += timedelta(minutes=15)
-        outcome = (await c.controller.tick())[0]
-        assert outcome['phase'] == 'escalated' and outcome['reason'] == 'approval-expired'
-        assert read_slot(c.store, 'outcome', proposal['proposal_id']) == outcome
-        with pytest.raises(ValueError): approve(c)
+        c.f.time[0] += timedelta(hours=3)
+        assert await c.controller.tick() == []
+        assert read_slot(c.store, 'outcome', proposal['proposal_id']) is None
         assert c.f.kube.calls == []
+        approve(c)  # still reviewable after three hours
     asyncio.run(run())
 
 
@@ -675,7 +677,7 @@ def test_approval_waits_for_consumer_and_revalidates_before_dispatch(tmp_path, m
                 assert read_slot(c.store, 'used', proposal['proposal_id']) is None
                 assert c.f.kube.calls == []
                 if expires:
-                    c.f.time[0] += timedelta(minutes=15)
+                    c.f.time[0] += timedelta(minutes=16)  # RCA becomes older than 900 s
                 return {'newer_accepted_bucket': True}
             return await original_next(checkpoint)
 
@@ -683,9 +685,11 @@ def test_approval_waits_for_consumer_and_revalidates_before_dispatch(tmp_path, m
         result = (await c.controller.tick())[-1]
         assert len(checks) >= 2
         if expires:
-            assert result['phase'] == 'escalated' and result['reason'] == 'approval-expired'
+            # v2 has no approval deadline; the stale RCA (root not breaching) blocks before any PATCH.
+            outcome = read_slot(c.store, 'outcome', proposal['proposal_id'])
+            assert result['phase'] == 'blocked' and result['facts']['reason'] == 'evidence-stale-or-future'
+            assert outcome['phase'] == 'escalated' and outcome['reason'] == 'evidence-stale-or-future'
             assert c.f.kube.calls == []
-            assert read_slot(c.store, 'used', proposal['proposal_id']) is None
         else:
             assert result['phase'] == 'verifying'
             assert c.f.kube.calls == [True, False]

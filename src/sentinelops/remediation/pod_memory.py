@@ -26,7 +26,7 @@ RUNBOOK = 'pod-memory-limit-demo/v1'
 NAME = 'sentinelops-oom-demo'
 NAMESPACE = 'sentinelops-b-actions'
 BEFORE, AFTER = '64Mi', '256Mi'
-TERMINAL = {'recovered', 'blocked', 'escalated', 'rejected', 'expired'}
+TERMINAL = {'recovered', 'blocked', 'escalated', 'rejected', 'expired', 'obsolete'}
 OOM_WINDOW_SECONDS = 180
 OOM_EVIDENCE_ID = 'kubernetes-oom'
 OOM_RCA_RULE = 'config://pod-memory-oom-rca/v1'
@@ -359,7 +359,7 @@ class MemoryController:
             proposals = []
             for path in (self.store.root / 'manifests').glob('*.json'):
                 value = self.store.read('artifact://manifests/' + path.name)
-                if value.get('executor_runbook') == RUNBOOK and value.get('proposal_version') == approvals.PROPOSAL_VERSION:
+                if value.get('executor_runbook') == RUNBOOK and approvals.is_proposal(value):
                     if value['target'] == asdict(self.target):
                         proposals.append(value)
             proposals.sort(key=lambda p: p['created_at'])
@@ -381,10 +381,11 @@ class MemoryController:
             ref = self.store.write('observations', observed)
             now = self.clock()
             identifier = stable_id({'runbook': RUNBOOK, 'observation_ref': ref})
-            proposal = {'proposal_version': approvals.PROPOSAL_VERSION, 'proposal_id': identifier,
+            proposal = {'proposal_version': approvals.PROPOSAL_VERSION_V2,
+                'approval_policy': approvals.APPROVAL_POLICY, 'proposal_id': identifier,
                 'executor_runbook': RUNBOOK, 'runbook_id': 'pod-oom-memory-limit',
                 'incident_id': 'INC-OOM-' + identifier, 'incident_revision': 1,
-                'created_at': timestamp(now), 'expires_at': timestamp(now + timedelta(minutes=15)),
+                'created_at': timestamp(now),
                 'target': asdict(self.target), 'current_image': self.target.image,
                 'resource_change': {'memory_before': BEFORE, 'memory_after': AFTER}, 'cause': 'OOMKilled',
                 'pod_uid': observed['pod_uid'], 'generation': observed['generation'],
@@ -415,10 +416,18 @@ class MemoryController:
                 except IncidentNotFound:
                     await self._incident(proposal, 'OPEN')
                 self._enabled()
-                if self.clock() >= utc_time(proposal['expires_at']):
+                if approvals.expired(proposal, self.clock()):
                     return await self._finish(proposal, state, 'expired', 'approval-expired')
                 receipt = approvals.read_slot(self.store, 'approval', proposal['proposal_id'])
                 if receipt is None:
+                    if approvals.pending_until_decision(proposal):
+                        # Waiting has no deadline; a pod that recovered on its own closes it.
+                        try:
+                            observed = await self.kube.observe(self.clock())
+                        except Exception:
+                            return state
+                        if observed['ready'] and not observed['fresh_oom']:
+                            return await self._finish(proposal, state, 'obsolete', 'pod-recovered')
                     return state
                 if receipt['proposal_sha256'] != stable_id(proposal):
                     raise Blocked('oom-demo-approval-hash-mismatch')
@@ -447,14 +456,14 @@ class MemoryController:
                     state = self._save(state, recovery_baseline=observed)
                 await self.kube.patch(observed, dry_run=True)
                 self._enabled()
-                if self.clock() >= utc_time(proposal['expires_at']):
+                if approvals.expired(proposal, self.clock()):
                     raise Blocked('oom-demo-approval-expired-before-dispatch')
                 rca = await self._incident(proposal, 'RCA_READY', expected_revision=proposal['incident_revision'])
                 planned = await self._incident(proposal, 'MITIGATION_PLANNED', expected_revision=rca['revision'])
                 mitigating = await self._incident(proposal, 'MITIGATING', state='recovering',
                                                    expected_revision=planned['revision'])
                 self._enabled()
-                if self.clock() >= utc_time(proposal['expires_at']):
+                if approvals.expired(proposal, self.clock()):
                     raise Blocked('oom-demo-approval-expired-before-dispatch')
                 current = await self.incidents.get(proposal['incident_id'])
                 if current['revision'] != mitigating['revision']:
@@ -471,7 +480,7 @@ class MemoryController:
                     raise Blocked('oom-demo-target-or-evidence-changed-before-dispatch')
                 state = self._save(state, before=observed)
                 self._enabled()
-                if self.clock() >= utc_time(proposal['expires_at']):
+                if approvals.expired(proposal, self.clock()):
                     raise Blocked('oom-demo-approval-expired-before-dispatch')
                 # Incident preparation can fail without ever attempting PATCH.
                 # Claim the approval and persist send intent only after those

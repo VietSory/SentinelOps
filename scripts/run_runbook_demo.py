@@ -32,7 +32,7 @@ from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.kubernetes import LocalKubernetes
 from sentinelops.remediation.reader import ActionReader
 from sentinelops.remediation.registry import KnownGoodRegistry
-from sentinelops.remediation.approvals import PROPOSAL_VERSION, read_slot, record_approval
+from sentinelops.remediation.approvals import is_proposal, read_slot, record_approval
 from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.telemetry.deployment_changes import DeploymentChangeReview
 from sentinelops.telemetry.store import ArtifactStore
@@ -63,7 +63,7 @@ async def wait_for(read, accept, *, timeout, poll, clock, sleep):
 
 def proposal_decision(card):
     return (card.get('decision_version') == 'runbook-decision/v1'
-        and card.get('proposal_version') == PROPOSAL_VERSION
+        and is_proposal(card)
         and isinstance(card.get('proposal_id'), str) and re.fullmatch(r'[0-9a-f]{64}', card['proposal_id'])
         and card.get('decision') == 'oncall' and card.get('runbook_id') == RUNBOOK_ID
         and card.get('executor_runbook') == 'payment-rollback-known-good/v1'
@@ -317,7 +317,7 @@ class Backend:
                 continue
             ref = f'artifact://manifests/{path.name}'
             card = self.store.read(ref)
-            if (card.get('proposal_version') == PROPOSAL_VERSION
+            if (is_proposal(card)
                 or card.get('decision_version') == 'runbook-decision/v1' and card.get('decision') == 'engineer'):
                 records.append((ref, card))
         return records

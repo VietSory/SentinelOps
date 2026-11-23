@@ -103,13 +103,12 @@ def test_real_approval_single_patch_durable_audit_restart_and_verified_incident(
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize('failure', ['reject', 'expired', 'kill', 'stale', 'target', 'native_recovery'])
+@pytest.mark.parametrize('failure', ['reject', 'kill', 'stale', 'target', 'native_recovery'])
 def test_no_patch_without_current_valid_approved_failure(tmp_path, failure):
     async def scenario():
         now, target, store, kube, repo, kwargs, c, prepare = fixture(tmp_path)
         p = await prepare()
         approve(store, p, now[0], 'reject' if failure == 'reject' else 'approve')
-        if failure == 'expired': now[0] += timedelta(minutes=15)
         if failure == 'kill': kwargs['kill_switch'].touch()
         if failure == 'stale': repo.rows[p['incident_id']]['revision'] += 1
         if failure == 'target': kube.observation['template_sha256'] = 'd' * 64
@@ -166,7 +165,7 @@ def test_resource_version_refreshed_after_durable_incident_transitions(tmp_path)
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize('failure', ['template', 'pod', 'generation', 'ready', 'expired', 'kill', 'stale'])
+@pytest.mark.parametrize('failure', ['template', 'pod', 'generation', 'ready', 'kill', 'stale'])
 def test_changes_during_incident_writes_block_the_actual_patch(tmp_path, failure):
     async def scenario():
         now, target, store, kube, repo, kwargs, c, prepare = fixture(tmp_path)
@@ -179,7 +178,6 @@ def test_changes_during_incident_writes_block_the_actual_patch(tmp_path, failure
                 if failure == 'pod': kube.observation['pod_uid'] = 'different'
                 if failure == 'generation': kube.observation['generation'] += 1
                 if failure == 'ready': kube.observation['ready'] = True
-                if failure == 'expired': now[0] += timedelta(minutes=15)
                 if failure == 'kill': kwargs['kill_switch'].touch()
                 if failure == 'stale': repo.rows[p['incident_id']]['revision'] += 1
             return result
