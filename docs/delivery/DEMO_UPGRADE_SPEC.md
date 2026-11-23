@@ -567,13 +567,15 @@ assertion nào khác bị đổi.
 
 | WP | Commit đóng băng (F_n) | Ngày | Người duyệt test |
 | --- | --- | --- | --- |
-| WP0 + WP1 | chưa đóng băng | | |
-| WP2 | chưa đóng băng | | |
-| WP3 | chưa đóng băng | | |
-| WP4 | chưa đóng băng | | |
-| WP5 | chưa đóng băng | | |
-| WP6 | chưa đóng băng | | |
-| WP7 | chưa đóng băng | | |
+| WP0 + WP1 | 9eaeabb (+8f73439 sửa fixture) | 2026-11-24 | self-review |
+| WP2 | 2819796 | 2026-11-24 | self-review |
+| WP3 | cff1133 (+ sửa fixture) | 2026-11-24 | self-review |
+| WP4 | 0d354e3 | 2026-11-24 | self-review |
+| WP5 | daee55e | 2026-11-24 | self-review |
+| WP6 | fab8e10 | 2026-11-24 | self-review |
+| WP7 | 66fdf10 | 2026-11-24 | self-review |
+
+Triển khai WP0–WP7 lên `main` tại `6a3feb7` (CI xanh). Còn lại: nghiệm thu live L2/L3 trên AWS.
 
 ## 7. Tham số được phép chỉnh khi tập dượt
 
