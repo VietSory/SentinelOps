@@ -16,6 +16,7 @@ import argparse
 import asyncio
 from dataclasses import asdict
 from datetime import datetime, timezone
+from uuid import uuid4
 import json
 import math
 import os
@@ -40,6 +41,38 @@ from sentinelops.workers.health_source import HealthLedgerReader, validate_strea
 
 COOLDOWN = 600
 RUNBOOK_ID = 'payment-bad-deploy-rollback'
+
+
+def _seconds(later, earlier):
+    try:
+        return round((datetime.fromisoformat(later.replace('Z', '+00:00'))
+                      - datetime.fromisoformat(earlier.replace('Z', '+00:00'))).total_seconds())
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def round_receipt(*, invocation, round_number, scenario, clocks, episodes, rca_top1, proposal, action,
+                  dispatch_count, notifications, image_params, service='payment-service'):
+    """Demo round receipt v2 (DEMO_UPGRADE_SPEC R5.4), checked by scripts.check_demo_round.
+
+    The warning is the last episode of the root service that started after the deploy and
+    no later than the first breach; derived timings are recomputed by the checker.
+    """
+    deploy, breach = clocks.get('deploy_started_at'), clocks.get('first_breach_at')
+    candidates = sorted(at for at in episodes.get(service, [])
+                        if deploy and breach and _seconds(at, deploy) is not None
+                        and _seconds(at, deploy) >= 0 and _seconds(breach, at) >= 0)
+    started = candidates[-1] if candidates else None
+    redacted = {k: v for k, v in (proposal or {}).items() if k not in ('current_image', 'rollback_image', 'target')}
+    return {'receipt_version': 'runbook-demo-round/v2', 'runner_invocation_id': invocation, 'round': round_number,
+            'scenario': scenario, **{k: clocks.get(k) for k in (
+                'deploy_started_at', 'change_observed_at', 'first_breach_at', 'incident_created_at',
+                'proposal_created_at', 'approved_at', 'recovered_at')},
+            'warning': {'service': service, 'episode_started_at': started},
+            'lead_seconds': _seconds(breach, started) if started else None,
+            'deploy_to_breach_seconds': _seconds(breach, deploy), 'rca_top1': rca_top1, 'proposal': redacted,
+            'action': dict(action), 'dispatch_count': dispatch_count, 'notifications': dict(notifications),
+            'image_params': dict(image_params), 'demo_mode': True, 'q09_eligible': False}
 
 
 async def wait_for(read, accept, *, timeout, poll, clock, sleep):
@@ -101,6 +134,7 @@ async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_swit
     if any((output / f'{n}.json').exists() for n in range(1, count + 1)):
         raise FileExistsError('demo receipts already exist; choose a new output directory')
     receipts, consumed = [], set()
+    invocation = uuid4().hex
     for number in range(1, count + 1):
         if number > 1:
             # Waiting after recovery is stricter than spacing deployment starts.
@@ -206,10 +240,24 @@ async def run_demo(backend, *, output=Path('artifacts/aws-demo/runs'), kill_swit
                 await complete_action(backend, decision, before, good, receipt, change,
                     failed_verify_run=failed_verify_run, timeout=timeout, poll=poll,
                     clock=clock, sleep=sleep, now=now, dispatches_before=dispatches_before)
+                if not failed_verify_run and getattr(backend, 'round_facts_enabled', False):
+                    facts = await backend.round_facts(decision, started, receipt)
+                    receipt['round_v2'] = round_receipt(invocation=invocation, round_number=number,
+                        scenario=backend.scenario, clocks={'deploy_started_at': started,
+                            'change_observed_at': change.get('observed_at'), **facts['clocks']},
+                        episodes=facts['episodes'], rca_top1=facts['rca_top1'], proposal=decision,
+                        action={'phase': receipt.get('phase'),
+                                'telemetry_verified': (receipt.get('telemetry') or {}).get('status') == 'telemetry_verified'},
+                        dispatch_count=receipt['dispatches_after'] - receipt['dispatches_before'],
+                        notifications=facts['notifications'], image_params=backend.image_params)
         receipt['completed_at'] = timestamp(now())
         with (output / f'{number}.json').open('x') as stream:
             json.dump(receipt, stream, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False)
             stream.write('\n')
+        if 'round_v2' in receipt:
+            with (output / f'round-{number}.json').open('x') as stream:
+                json.dump(receipt['round_v2'], stream, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False)
+                stream.write('\n')
         receipts.append(receipt)
     return receipts
 
@@ -278,6 +326,10 @@ async def complete_action(backend, decision, before, good, receipt, change, *, f
 
 
 class Backend:
+    round_facts_enabled = False
+    scenario = 'abrupt-regression'
+    image_params = {}
+
     def __init__(self, args, pool, kube, registry, *, observer=None, source=None, fault_kube=None):
         self.args, self.pool, self.kube, self.registry = args, pool, kube, registry
         self.regression_image = args.regression_image
@@ -286,6 +338,50 @@ class Backend:
         self.journal = ActionJournal(pool)
         self.observer, self.source = observer, source
         self.fault_kube, self.pending_fault = fault_kube, None
+        self.prometheus = getattr(args, 'prometheus', None)
+        if self.prometheus:
+            self.round_facts_enabled = True
+            self.scenario = getattr(args, 'scenario', None) or self.scenario
+            self.image_params = json.loads(getattr(args, 'image_params', None) or '{}')
+
+    def _prometheus(self, path, params):
+        import httpx
+        with httpx.Client(base_url=self.prometheus, timeout=10, trust_env=False) as client:
+            body = client.get(path, params=params).json()
+        if body.get('status') != 'success':
+            raise ValueError('prometheus query failed')
+        return body['data']['result']
+
+    async def round_facts(self, decision, started, receipt):
+        """Clocks, warning episodes and email counts for the v2 round receipt (WP5)."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow('''SELECT i.created_at, v.payload FROM sentinel_control.incidents i
+                JOIN sentinel_control.incident_versions v ON v.incident_id=i.incident_id AND v.revision=$2
+                WHERE i.incident_id=$1''', decision['incident_id'], decision['incident_revision'])
+        payload = json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload']
+        ranking = payload.get('root_cause_ranking') or []
+        approval = read_slot(self.store, 'approval', decision['proposal_id'])
+        await asyncio.sleep(30)  # let the notifier report the outcome email
+        start = datetime.fromisoformat(started.replace('Z', '+00:00')).timestamp()
+        end = datetime.now(timezone.utc).timestamp()
+        service = ranking[0]['service'] if ranking else 'payment-service'
+        series = await asyncio.to_thread(self._prometheus, '/api/v1/query_range', {
+            'query': f'sentinelops_risk_episode_started_unixtime{{service="{service}"}}',
+            'start': start - 1800, 'end': end, 'step': 60})
+        episodes = sorted({datetime.fromtimestamp(float(v), timezone.utc).isoformat().replace('+00:00', 'Z')
+                           for item in series for _, v in item['values']})
+        counts = await asyncio.to_thread(self._prometheus, '/api/v1/query', {
+            'query': f'sum by (kind) (increase(sentinelops_notifications_sent_total[{int(end - start) + 60}s]))'})
+        sent = {item['metric'].get('kind'): round(float(item['value'][1])) for item in counts}
+        onset = next((item.get('first_anomaly_at') for item in payload.get('service_signals') or []
+                      if item.get('service') == service), None)
+        return {'clocks': {'first_breach_at': onset,
+                           'incident_created_at': timestamp(row['created_at']),
+                           'proposal_created_at': decision.get('created_at'),
+                           'approved_at': approval.get('approved_at') if approval else None,
+                           'recovered_at': receipt.get('verdict_observed_at')},
+                'episodes': {service: episodes}, 'rca_top1': ranking[0]['service'] if ranking else None,
+                'notifications': {kind: sent.get(kind, 0) for kind in ('early_warning', 'proposal_pending', 'outcome')}}
 
     async def known_good(self, instant):
         return await self.registry.resolve(self.kube.target, incident_at=instant)
@@ -497,6 +593,9 @@ def main():
     modes.add_argument('--reject-run', action='store_true')
     parser.add_argument('--fault-token-file', type=Path,
                         help='explicit credential for GET pods and GET/POST pods/proxy; failed-verify only')
+    parser.add_argument('--prometheus', help='Prometheus URL; enables the v2 round receipt (warning lead, emails)')
+    parser.add_argument('--scenario', choices=('gradual-regression', 'abrupt-regression'), default='abrupt-regression')
+    parser.add_argument('--image-params', help='JSON of the regression image parameters, recorded in the receipt')
     parser.add_argument('--approve-as', help='explicit on-call identity for automated rehearsal approval')
     parser.add_argument('--controller-store', type=Path, default=Path('/artifacts/remediation'),
                         help='store path inside the controller pod for the printed approval command')

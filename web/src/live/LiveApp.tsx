@@ -535,7 +535,8 @@ export default function LiveApp() {
   },[state.session]);
   const detailPayload=state.detail?.payload;
   const leadService=detailPayload?.root_cause_ranking?.[0]?.service as string|undefined;
-  const leadOnset=(detailPayload?.started_at??detailPayload?.detected_at) as string|undefined;
+  // SLO breach onset of the root service, as recorded in the incident (never the later publish time).
+  const leadOnset=(detailPayload?.service_signals??[]).find((item:Row)=>item?.service===leadService)?.first_anomaly_at as string|undefined;
   React.useEffect(()=>{
     if(!state.session||!leadService||!leadOnset){setEpisodes(null);return;}
     const onset=Date.parse(leadOnset);if(!Number.isFinite(onset)){setEpisodes(null);return;}

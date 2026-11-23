@@ -26,7 +26,7 @@ def problems(value: dict) -> list[str]:
     def seconds(later, earlier):
         try:
             return (utc_time(later) - utc_time(earlier)).total_seconds()
-        except (TypeError, ValueError, KeyError):
+        except (AttributeError, TypeError, ValueError, KeyError):
             return None
 
     proposal = value.get('proposal') or {}

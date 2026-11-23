@@ -541,7 +541,8 @@ File được phép đụng: `tests/test_remediation_controller.py`,
 `tests/test_runbook_approval.py`, `tests/test_runbook_proposal_api.py`,
 `tests/test_manual_memory_recovery.py`, `tests/test_remediation_executor.py`,
 `tests/test_runbook_demo.py`, `tests/test_patch_react_oom_review.py`,
-`tests/test_ui_preview.py`, `tests/ui/proposals.test.mjs`.
+`tests/test_ui_preview.py`, `tests/ui/proposals.test.mjs`; in WP5 only the action count in
+`tests/test_demo_console.py` (9 → 12, the three new actions of R5.3).
 
 Commit message phải liệt kê từng test được sửa và lý do. Người review kiểm không còn
 assertion nào khác bị đổi.

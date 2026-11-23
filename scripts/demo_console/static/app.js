@@ -22,12 +22,18 @@ function clock(value) {
   return Number.isNaN(date.getTime()) ? "Time unavailable" : date.toLocaleTimeString("en-US");
 }
 
+const SCRIPT_ACTIONS = {"deploy-bad-image": "deployment", "oom": "oom", "payment-gradual-fault": "gradual_fault",
+  "deploy-gradual-image": "gradual_image", "reset-demo": "reset"};
+const SCRIPT_LABELS = {deployment: "Image deployment", oom: "Isolated OOM", gradual_fault: "Gradual latency fault",
+  gradual_image: "Payment v2 release", reset: "Demo reset"};
+
 function scriptFor(action, data) {
-  return action.id === "oom" ? data.oom : action.id === "deploy-bad-image" ? data.deployment : null;
+  const key = SCRIPT_ACTIONS[action.id];
+  return key ? (data.scripts?.[key] ?? data[key] ?? null) : null;
 }
 
 function runnerBusy(data) {
-  return [data.deployment, data.oom].some(runner => runner?.state === "running");
+  return Object.values(data.scripts ?? {deployment: data.deployment, oom: data.oom}).some(runner => runner?.state === "running");
 }
 
 function blockReason(action, data) {
@@ -35,7 +41,7 @@ function blockReason(action, data) {
   if (pending || data.busy || runnerBusy(data)) return "Wait for the current action or script to finish.";
   if (action.available !== true) return action.unavailable_reason || "Scenario readiness is unavailable.";
   const runner = scriptFor(action, data);
-  if (["oom", "deploy-bad-image"].includes(action.id) && !runner?.configured) {
+  if (action.id in SCRIPT_ACTIONS && !runner?.configured) {
     return runner?.configuration_error || "The scenario runner is not configured.";
   }
   return "";
@@ -89,7 +95,7 @@ function renderTerminal(data) {
     if (entry.detail) lines.push(String(entry.detail));
     lines.push("");
   }
-  for (const [key, label] of [["deployment", "Image deployment"], ["oom", "Isolated OOM"]]) {
+  for (const [key, label] of Object.entries(SCRIPT_LABELS)) {
     const log = terminal.logs?.[key];
     if (log) lines.push(`── ${label} · latest script output ──`, String(log), "");
   }
@@ -123,10 +129,12 @@ function render(data) {
     const runner = scriptFor(action, data);
     state.textContent = action.id === "oom"
       ? describeRunner("Isolated memory workload", runner)
+      : ["reset-demo", "deploy-gradual-image"].includes(action.id)
+      ? describeRunner(SCRIPT_LABELS[SCRIPT_ACTIONS[action.id]], runner)
       : states.map(([service, value]) => value?.ok
         ? `${service}: mode=${value.mode}, delay=${value.delay_ms} ms\nObserved at ${clock(value.observed_at)}`
         : `${service}: Unavailable\n${value?.error || "Current fault mode is unknown."}`).join("\n\n");
-    state.classList.toggle("error", action.id === "oom" ? !runner?.configured : states.some(([, value]) => !value?.ok));
+    state.classList.toggle("error", ["oom", "reset-demo", "deploy-gradual-image"].includes(action.id) ? !runner?.configured : states.some(([, value]) => !value?.ok));
     const matches = Boolean(action.fault) && states.length > 0 && states.every(([, value]) => value?.ok
       && value.mode === action.fault.mode && value.delay_ms === action.fault.delay_ms);
     card.classList.toggle("active", matches);

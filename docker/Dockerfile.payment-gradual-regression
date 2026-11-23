@@ -1,0 +1,9 @@
+ARG BASE
+FROM ${BASE}
+ARG BASE
+LABEL sentinelops.dev/variant="payment-gradual-regression" \
+      sentinelops.dev/base-digest="${BASE}" \
+      sentinelops.dev/max-ms="1200" \
+      sentinelops.dev/ramp-s="600" \
+      sentinelops.dev/start-delay-s="60"
+RUN ["python", "-c", "from pathlib import Path\np = Path('/app/services/payment/app.py')\ns = p.read_text()\ngate = 'fault = FaultState()'\nmarker = '    await fault.apply(SERVICE_NAME)'\nassert s.count(marker) == s.count(gate) == 1\nhelper = 'def gradual_delay_ms(elapsed_s, *, start_delay_s, ramp_s, max_ms):\\n    \"\"\"Added Payment latency: 0 until start_delay_s, then linear to max_ms over ramp_s, then flat.\"\"\"\\n    if elapsed_s < start_delay_s:\\n        return 0\\n    return int(min(max_ms, max_ms * (elapsed_s - start_delay_s) / ramp_s))\\n'\ns = s.replace(gate, 'import asyncio\\nimport time\\n' + helper + gate + '\\n_gradual_started = time.monotonic()')\ns = s.replace(marker, '    _gradual_ms = gradual_delay_ms(time.monotonic() - _gradual_started, start_delay_s=60, ramp_s=600, max_ms=1200)\\n    if _gradual_ms:\\n        await asyncio.sleep(_gradual_ms / 1000)\\n' + marker, 1)\np.write_text(s)\n"]

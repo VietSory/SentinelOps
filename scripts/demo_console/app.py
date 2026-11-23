@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import threading
 from contextlib import asynccontextmanager
@@ -38,6 +39,8 @@ class Settings:
     port: int = 8765
     deploy_script: str = ""
     oom_script: str = ""
+    gradual_script: str = ""
+    reset_script: str = ""
     oom_enabled: bool = False
 
     def __post_init__(self):
@@ -64,6 +67,8 @@ class Settings:
             port=int(os.getenv("DEMO_CONSOLE_PORT", "8765")),
             deploy_script=os.getenv("DEMO_CONSOLE_DEPLOY_SCRIPT", ""),
             oom_script=os.getenv("DEMO_CONSOLE_OOM_SCRIPT", ""),
+            gradual_script=os.getenv("DEMO_CONSOLE_GRADUAL_SCRIPT", ""),
+            reset_script=os.getenv("DEMO_CONSOLE_RESET_SCRIPT", ""),
             oom_enabled=os.getenv("DEMO_CONSOLE_ENABLE_OOM", "false").lower() == "true",
         )
 
@@ -102,6 +107,9 @@ ACTIONS = (
     Action("both-error", "Both services · HTTP 503", "Make Payment and Inventory return HTTP 503. Each service reports its result separately.", ("payment", "inventory"), "error"),
     Action("recover", "Reset fault modes", "Set both fault modes to healthy with zero delay. Verify the deployed image and service health separately.", ("payment", "inventory"), "healthy"),
     Action("deploy-bad-image", "Deploy regression image", "Start the configured B7 or B9 script. Check rollout and recovery evidence separately from the fault mode.", ("payment",)),
+    Action("payment-gradual-fault", "Payment · latency creeps up (20 min)", "Raise Payment latency every 30 s up to 1,200 ms over 20 minutes through the fault endpoint, then reset. Shows the early warning on the evaluated gradual shape.", ("payment",)),
+    Action("deploy-gradual-image", "Release Payment v2 (gradual regression)", "Start the configured script that deploys the Payment image whose latency creeps up after start. The early warning, incident and rollback proposal follow from real telemetry.", ("payment",)),
+    Action("reset-demo", "Reset demo", "Start the configured script that restores the known-good Payment image, resets fault modes and waits until services are healthy.", ()),
     Action("oom", "Pod memory · OOM", "Run the configured bounded OOM scenario on the isolated demo workload. Recovery still requires approval in the incident workspace.", ()),
 )
 ACTION_BY_ID = {action.id: action for action in ACTIONS}
@@ -196,9 +204,10 @@ class ExecutionJournal:
 class DeploymentRunner:
     """One inherited-environment Bash process; logs cannot fill a pipe or memory."""
 
-    def __init__(self, script: str, *, environment_key="DEMO_CONSOLE_DEPLOY_SCRIPT"):
+    def __init__(self, script: str, *, environment_key="DEMO_CONSOLE_DEPLOY_SCRIPT", argv=None):
         self.script = script
         self.environment_key = environment_key
+        self.argv = list(argv) if argv else None
         self.process: subprocess.Popen | None = None
         self.output = None
         self.journal: ExecutionJournal | None = None
@@ -207,9 +216,11 @@ class DeploymentRunner:
 
     @property
     def command(self):
-        return shlex.join(["bash", self.script])
+        return shlex.join(self.argv or ["bash", self.script])
 
     def configuration_error(self):
+        if self.argv:
+            return None
         if not self.script:
             return f"Scenario script is not configured. {self.environment_key} requires an absolute path to a reviewed script."
         path = Path(self.script)
@@ -255,7 +266,7 @@ class DeploymentRunner:
             if self.journal:
                 self.journal.add(self.action_id, self.command, "starting", "Starting the configured scenario script.")
             self.process = subprocess.Popen(
-                ["bash", self.script], cwd=ROOT, env=os.environ.copy(),
+                self.argv or ["bash", self.script], cwd=ROOT, env=os.environ.copy(),
                 stdin=subprocess.DEVNULL, stdout=self.output, stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
@@ -299,13 +310,29 @@ async def observe(client: httpx.AsyncClient, settings: Settings, service: str, *
             "error": error}
 
 
+SCRIPT_ACTIONS = {"deploy-bad-image": "deployment", "oom": "oom", "payment-gradual-fault": "gradual_fault",
+                  "deploy-gradual-image": "gradual_image", "reset-demo": "reset"}
+
+
+def script_runners(settings: Settings, *, runner=None, oom_runner=None):
+    """One process runner per script-backed action (WP5 adds three)."""
+    return {
+        "deploy-bad-image": runner or DeploymentRunner(settings.deploy_script),
+        "oom": oom_runner or DeploymentRunner(settings.oom_script, environment_key="DEMO_CONSOLE_OOM_SCRIPT"),
+        "payment-gradual-fault": DeploymentRunner("", environment_key="DEMO_CONSOLE_PAYMENT_URL", argv=[
+            sys.executable, "-m", "scripts.demo_console.gradual_fault", "--url", settings.payment_url]),
+        "deploy-gradual-image": DeploymentRunner(settings.gradual_script, environment_key="DEMO_CONSOLE_GRADUAL_SCRIPT"),
+        "reset-demo": DeploymentRunner(settings.reset_script, environment_key="DEMO_CONSOLE_RESET_SCRIPT"),
+    }
+
+
 def create_app(settings: Settings | None = None, *, transport=None, runner=None, oom_runner=None):
     settings = settings or Settings.from_env()
-    runner = runner or DeploymentRunner(settings.deploy_script)
-    oom_runner = oom_runner or DeploymentRunner(settings.oom_script, environment_key="DEMO_CONSOLE_OOM_SCRIPT")
+    runners = script_runners(settings, runner=runner, oom_runner=oom_runner)
+    runner, oom_runner = runners["deploy-bad-image"], runners["oom"]
     action_lock = asyncio.Lock()
     journal = ExecutionJournal()
-    for action_id, process_runner in (("deploy-bad-image", runner), ("oom", oom_runner)):
+    for action_id, process_runner in runners.items():
         process_runner.journal = journal
         process_runner.action_id = action_id
 
@@ -362,8 +389,9 @@ def create_app(settings: Settings | None = None, *, transport=None, runner=None,
     @app.get("/api/status")
     async def status():
         services = await observations()
-        deployment, oom = runner.snapshot(), oom_runner.snapshot()
-        busy = action_lock.locked() or deployment["state"] == "running" or oom["state"] == "running"
+        snapshots = {action_id: process_runner.snapshot() for action_id, process_runner in runners.items()}
+        deployment, oom = snapshots["deploy-bad-image"], snapshots["oom"]
+        busy = action_lock.locked() or any(value["state"] == "running" for value in snapshots.values())
         actions = []
         for action in ACTIONS:
             reason = None
@@ -373,8 +401,10 @@ def create_app(settings: Settings | None = None, *, transport=None, runner=None,
                 reason = "Another scenario is running."
             elif action.id == "oom" and not settings.oom_enabled:
                 reason = "OOM is disabled. Configure the isolated workload and controller, then set DEMO_CONSOLE_ENABLE_OOM=true."
-            elif action.id in {"deploy-bad-image", "oom"}:
-                reason = (deployment if action.id == "deploy-bad-image" else oom)["configuration_error"]
+            elif action.id in SCRIPT_ACTIONS:
+                reason = snapshots[action.id]["configuration_error"]
+                if reason is None and action.id == "payment-gradual-fault" and not services["payment"]["ok"]:
+                    reason = "The Payment fault endpoint is unavailable. Refresh and check the service connection."
             elif any(not services[service]["ok"] for service in action.services):
                 # A partial reset remains useful when one service is unreachable.
                 if action.id != "recover" or not any(services[service]["ok"] for service in action.services):
@@ -382,8 +412,9 @@ def create_app(settings: Settings | None = None, *, transport=None, runner=None,
             actions.append({**action.public(), "available": reason is None, "unavailable_reason": reason})
         return {"enabled": settings.enabled, "actions": actions,
                 "services": services, "deployment": deployment, "oom": oom,
+                "scripts": {SCRIPT_ACTIONS[k]: v for k, v in snapshots.items()},
                 "terminal": {"entries": journal.snapshot(), "logs": {
-                    "deployment": deployment["log_tail"], "oom": oom["log_tail"]}},
+                    SCRIPT_ACTIONS[k]: v["log_tail"] for k, v in snapshots.items()}},
                 "busy": busy, "checked_at": now()}
 
     @app.post("/api/actions/{action_id}")
@@ -393,17 +424,17 @@ def create_app(settings: Settings | None = None, *, transport=None, runner=None,
         action = ACTION_BY_ID.get(action_id)
         if action is None:
             raise HTTPException(404, "Fault scenario not found.")
-        if action_lock.locked() or any(r.snapshot()["state"] == "running" for r in (runner, oom_runner)):
+        if action_lock.locked() or any(r.snapshot()["state"] == "running" for r in runners.values()):
             raise HTTPException(409, "An action is in progress. If the deployment script is running, wait for it to finish.")
         async with action_lock:
-            if action_id in {"deploy-bad-image", "oom"}:
+            if action_id in SCRIPT_ACTIONS:
                 if action_id == "oom" and not settings.oom_enabled:
                     message = "OOM requires DEMO_CONSOLE_ENABLE_OOM=true and a configured scenario script."
                     journal.add(action_id, "", "blocked", message)
                     raise HTTPException(403, message)
-                selected = runner if action_id == "deploy-bad-image" else oom_runner
+                selected = runners[action_id]
                 selected.start()
-                key = "deployment" if action_id == "deploy-bad-image" else "oom"
+                key = SCRIPT_ACTIONS[action_id]
                 return JSONResponse({"accepted": True, "message": "The script started. Fault injection and recovery are unconfirmed.",
                                      key: selected.snapshot()}, status_code=202)
             results = {}
