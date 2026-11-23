@@ -82,6 +82,36 @@ Chỉ bật `database_skip_final_snapshot` và tắt `database_deletion_protecti
    Chạy một lượt regression được cấp quyền và xác nhận incident, proposal,
    đúng một lần rollback sau khi duyệt, rồi telemetry xác nhận phục hồi.
 
+### Cảnh báo sớm, email và Payment v2 (nâng cấp demo 11/2026)
+
+Thêm vào các bước trên, theo [DEMO_UPGRADE_PLAN](../../docs/delivery/DEMO_UPGRADE_PLAN.md):
+
+1. **Email nhận cảnh báo** đặt ngoài Git, ví dụ file bị ignore
+   `infra/aws/demo-alerts.auto.tfvars` với `demo_alert_emails = ["<địa chỉ>"]`,
+   hoặc biến môi trường `TF_VAR_demo_alert_emails`. Plan sẽ có thêm topic SNS,
+   subscription, role `alerts_publisher` và Pod Identity association. Sau apply,
+   mở hộp thư và bấm **Confirm subscription**; chưa xác nhận thì không có email.
+2. **Image:** control-plane build từ commit mới đã chứa `run_risk_worker.py` và
+   `run_notifier.py`. Build thêm Payment v2 chậm dần bằng
+   `docker/Dockerfile.payment-gradual-regression` với `--build-arg BASE=<digest application>`,
+   push vào cùng repo `sentinelops/application`; trước khi build chạy
+   `python -m scripts.check_payment_regression_image --base <digest>` cho bản regression cũ.
+3. **Render worker** thêm `--early-warning --ui-url https://<edge_domain>/ui/
+   --alerts-otlp-endpoint http://otel-collector.sentinelops-b-actions.svc.cluster.local:4317
+   --alerts-topic-arn $(terraform -chdir=infra/aws output -raw demo_alerts_topic_arn)`
+   (cần `--model-claim` và `--model-release-ref`). Pod incident-worker có thêm
+   container `risk-worker`; pod remediation-controller có thêm `notifier`.
+   Log `notifier identity arn:aws:sts::…:assumed-role/<prefix>-alerts-publisher/…`
+   xác nhận Pod Identity hoạt động.
+4. **Fault Console:** đặt `DEMO_CONSOLE_GRADUAL_SCRIPT` (script deploy Payment v2 bằng
+   runner với `--scenario gradual-regression --prometheus <url> --image-params '<json>'`)
+   và `DEMO_CONSOLE_RESET_SCRIPT` (đưa Payment về known-good, tắt fault, chờ khỏe).
+5. **Nghiệm thu L2/L3** theo [DEMO_UPGRADE_SPEC](../../docs/delivery/DEMO_UPGRADE_SPEC.md) §1.5:
+   một giờ khỏe rồi `python -m scripts.check_risk_quiet --prometheus <url> --minutes 60`;
+   sau đó chạy runner và `python -m scripts.check_demo_round <out>/round-*.json --require 3`.
+   Panel "SentinelOps — Cảnh báo sớm" trên Grafana phải có số liệu, UI hiện
+   "Chờ duyệt từ …" thay cho đồng hồ.
+
 Lệnh hiện tự động hóa phần hạ tầng. Các bước runtime trên cần được chạy qua
 trên môi trường sạch trước khi coi demo dựng lại đã nghiệm thu.
 
