@@ -149,6 +149,7 @@ class ProposalStore:
             and approvals.approval_window_open(proposal, now))
         return {'proposal': proposal, 'proposal_sha256': stable_id(proposal),
                 'status': status, 'approval': receipt, 'outcome': outcome,
+                'final': approvals.read_slot(self.store, 'final', identifier),
                 'review_images': review_images(proposal),
                 **({'review_change': review_change(proposal), 'recovery_change': recovery_change(proposal),
                     'manual_recovery_available': bool(pending_manual or self.manual_renewable(proposal)),

@@ -42,7 +42,7 @@ def expired(proposal, now):
 
 
 def _slot(store, kind, proposal_id):
-    if kind not in ('approval', 'used', 'outcome', 'manual-memory-recovery') or not re.fullmatch(r'[0-9a-f]{64}', proposal_id):
+    if kind not in ('approval', 'used', 'outcome', 'final', 'manual-memory-recovery') or not re.fullmatch(r'[0-9a-f]{64}', proposal_id):
         raise ValueError('invalid approval slot')
     return store.root / 'runbook-approvals' / kind / (proposal_id + '.json')
 

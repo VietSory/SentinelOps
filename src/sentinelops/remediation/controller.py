@@ -249,6 +249,20 @@ class AutoRunbookController:
         logger.info(json.dumps({'event': 'runbook_approval_escalated', **value}, sort_keys=True))
         return value
 
+    def _record_final(self, state):
+        """Record the terminal action phase next to its proposal, for notifications only."""
+        try:
+            incident = state['intent']['request']['incident_id']
+        except (KeyError, TypeError):
+            return
+        proposal = self._decisions.get(incident)
+        if not proposal or 'proposal_id' not in proposal or read_slot(self.store, 'final', proposal['proposal_id']):
+            return
+        create_slot(self.store, 'final', proposal['proposal_id'], {
+            'final_version': 'runbook-action-final/v1', 'proposal_id': proposal['proposal_id'],
+            'incident_id': incident, 'action_id': state['action_id'], 'phase': state['phase'],
+            'recorded_at': timestamp(self.clock())})
+
     def _obsolete(self, proposal, reason):
         """Close a waiting proposal whose situation changed; it never escalates or dispatches."""
         value = {'outcome_version': 'runbook-approval-outcome/v1',
@@ -345,6 +359,7 @@ class AutoRunbookController:
                     state = await self.executor.reconcile(identifier)
                 results.append(state)
                 if state['phase'] in TERMINAL:
+                    self._record_final(state)
                     del self._pending[identifier]
                 else:
                     self._pending[identifier] = state
