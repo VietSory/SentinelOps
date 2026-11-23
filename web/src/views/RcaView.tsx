@@ -258,10 +258,7 @@ export function RcaView({
                         )}
                       </div>
                       <span className="font-mono text-sm font-bold tabular-nums text-orange-700">
-                        {hyp.confidence}%{' '}
-                        <span className="text-xs font-normal text-slate-400">
-                          (score {formatNumber(hyp.score, 2, locale)})
-                        </span>
+                        {isEn ? 'RCA score ' : 'Điểm RCA '}{formatNumber(hyp.score, 2, locale)}
                       </span>
                     </div>
 

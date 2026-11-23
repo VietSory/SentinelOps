@@ -1,6 +1,7 @@
 import { useLocale } from '@/i18n/LocaleContext';
 import { cn } from '@/lib/utils';
 import type { AiExplanationState, Incident } from '@/types/sentinelops';
+import { scoreValue } from '@/live/demoLogic';
 
 export interface ConfidenceBadgeProps {
   /** RCA ranking score scaled to 0-100, or null when unavailable. Not a probability. */
@@ -21,8 +22,8 @@ export function incidentConfidence(incident: Incident): Pick<ConfidenceBadgeProp
 
 export function ConfidenceBadge({ value, source, size = 'sm', className }: ConfidenceBadgeProps) {
   const { isEn } = useLocale();
-  const label = isEn ? 'RCA confidence' : 'Độ tin cậy RCA';
-  const note = isEn ? 'ranking score, not a probability' : 'điểm xếp hạng, không phải xác suất';
+  const label = isEn ? 'RCA score' : 'Điểm RCA';
+  const note = isEn ? 'weighted evidence score 0-1, not a probability' : 'điểm bằng chứng có trọng số 0-1, không phải xác suất';
   const sourceLabel = {
     ai: 'AI',
     fallback: 'Fallback',
@@ -32,7 +33,7 @@ export function ConfidenceBadge({ value, source, size = 'sm', className }: Confi
   const score = source === 'abstained' || !Number.isFinite(value) ? null : value;
   const result = score === null
     ? isEn ? 'AI abstained' : 'AI chưa kết luận'
-    : `${Math.round(score)}%`;
+    : scoreValue(score, isEn ? 'en' : 'vi');
   const displayLabel = [label, result, sourceLabel, note].filter(Boolean).join('. ');
   const tone = score === null
     ? 'bg-[#475569] text-white'

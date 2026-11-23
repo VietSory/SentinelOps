@@ -1,8 +1,9 @@
 const mounts = new WeakMap();
-const statuses = new Set(['pending', 'stale', 'expired', 'approved', 'consumed', 'engineer', 'not_yet_valid']);
+const statuses = new Set(['pending', 'stale', 'expired', 'approved', 'consumed', 'engineer', 'not_yet_valid', 'obsolete']);
 const labels = {pending:'Pending', stale:'Stale', expired:'Expired', approved:'Approved',
-  consumed:'Consumed', engineer:'Engineer', not_yet_valid:'Not yet valid'};
-const terminal = new Set(['approved', 'consumed', 'engineer']);
+  consumed:'Consumed', engineer:'Engineer', not_yet_valid:'Not yet valid', obsolete:'Closed: situation changed'};
+const terminal = new Set(['approved', 'consumed', 'engineer', 'obsolete']);
+const waitsForDecision = proposal => proposal?.proposal_version === 'runbook-proposal/v2';
 const secondsUntil = (deadline, now) => Math.max(0, Math.ceil((deadline - now) / 1000));
 const timestamp = value => typeof value === 'string' ? Date.parse(value) : NaN;
 const displayTime = value => new Date(value).toLocaleString('en-GB', {hour12:false});
@@ -15,7 +16,9 @@ function validate(body, incidentId) {
   const identifiers = new Set();
   for (const row of body.items) {
     const proposal = row?.proposal;
-    if (proposal?.proposal_version !== 'runbook-proposal/v1' ||
+    const waiting = waitsForDecision(proposal) && proposal.approval_policy === 'pending-until-decision/v1' &&
+      !('expires_at' in proposal);
+    if ((proposal?.proposal_version !== 'runbook-proposal/v1' && !waiting) ||
         !/^[a-f0-9]{64}$/.test(proposal.proposal_id) || identifiers.has(proposal.proposal_id) ||
         !/^[a-f0-9]{64}$/.test(row.proposal_sha256) || !statuses.has(row.status) ||
         typeof proposal.incident_id !== 'string' || !proposal.incident_id ||
@@ -24,8 +27,8 @@ function validate(body, incidentId) {
         !Number.isSafeInteger(proposal.incident_revision) || proposal.incident_revision < 1 ||
         !Number.isSafeInteger(row.current_revision) || row.current_revision < proposal.incident_revision ||
         !Number.isFinite(timestamp(proposal.created_at)) ||
-        !Number.isFinite(timestamp(proposal.expires_at)) ||
-        timestamp(proposal.expires_at) <= timestamp(proposal.created_at)) {
+        (!waiting && (!Number.isFinite(timestamp(proposal.expires_at)) ||
+          timestamp(proposal.expires_at) <= timestamp(proposal.created_at)))) {
       throw new Error('Invalid proposal row');
     }
     identifiers.add(proposal.proposal_id);
@@ -48,6 +51,13 @@ function rcaTime(row, resolver) {
 
 function timing(row, rca, now) {
   const proposal = row.proposal;
+  if (waitsForDecision(proposal)) {
+    // No approval deadline: reviewable while pending on the current revision.
+    let status = row.status;
+    if (status === 'pending' && row.current_revision !== proposal.incident_revision) status = 'stale';
+    return {ttl: null, status, remaining: null, deadline: NaN, futureRca: false,
+      reviewable: status === 'pending' && now >= timestamp(proposal.created_at)};
+  }
   const expiry = timestamp(proposal.expires_at);
   const ttl = secondsUntil(expiry, now);
   let status = row.status;
@@ -179,7 +189,8 @@ export function mount(root, ctx) {
     try {
       const notification = new window.Notification('New runbook proposal', {
         body:`${entry.row.proposal.incident_id}: ${labels[state.status]}. ` +
-          (state.remaining === null ? `TTL ${state.ttl}s; RCA review window unknown.` :
+          (waitsForDecision(entry.row.proposal) ? 'Waiting for an on-call decision; no deadline.' :
+            state.remaining === null ? `TTL ${state.ttl}s; RCA review window unknown.` :
             `Review window estimate ${state.remaining}s; TTL ${state.ttl}s.`),
         tag:`sentinelops-proposal-${entry.row.proposal.proposal_id}`,
       });
@@ -260,8 +271,9 @@ export function mount(root, ctx) {
     const row = entry.row;
     const proposal = row.proposal;
     const state = timing(row, entry.rca, now);
+    const waiting = waitsForDecision(proposal);
     const urgency = state.status === 'pending' ?
-      state.remaining === null ? 'unknown' : state.remaining <= 60 ? 'critical' :
+      waiting ? 'warning' : state.remaining === null ? 'unknown' : state.remaining <= 60 ? 'critical' :
         state.remaining <= 180 ? 'serious' : 'warning' : state.status === 'expired' ? 'critical' :
         state.status === 'stale' ? 'serious' : 'neutral';
     entry.card.dataset.urgency = urgency;
@@ -276,7 +288,9 @@ export function mount(root, ctx) {
     entry.identity.textContent = `Proposal ${proposal.proposal_id} · revision ${proposal.incident_revision}`;
     entry.discovered.textContent = `${entry.isNew ? 'NEW · ' : ''}Created ${displayTime(timestamp(proposal.created_at))} · ` +
       `First seen ${displayTime(entry.firstSeen)} (this watch session)`;
-    const countdownText = terminal.has(state.status) ? 'Decision recorded' :
+    const countdownText = state.status === 'obsolete' ? 'Closed: the situation changed before a decision' :
+      terminal.has(state.status) ? 'Decision recorded' :
+      waiting && state.status === 'pending' ? `Waiting for approval since ${displayTime(timestamp(proposal.created_at))}` :
       state.status === 'expired' ? 'Expired · 0s remaining' : state.status === 'stale' ? 'Stale · review blocked' :
       state.status === 'not_yet_valid' ? 'Not yet valid · waiting for server confirmation' :
       state.futureRca ? 'Review window unavailable · RCA time is in the future' :
@@ -285,11 +299,13 @@ export function mount(root, ctx) {
       `Review window estimate: ${state.remaining}s remaining${urgency === 'critical' ? ' · Urgent' : urgency === 'serious' ? ' · Ending soon' : ''}`;
     const running = state.status === 'pending' && !state.futureRca && state.remaining !== null && state.remaining > 0;
     entry.countdownLabel.textContent = running ? 'Review window estimate:' : countdownText;
-    entry.countdownValue.textContent = running ? duration(state.remaining) : state.status === 'pending' && state.remaining === null ? '—' : '';
+    entry.countdownValue.textContent = running ? duration(state.remaining) :
+      state.status === 'pending' && state.remaining === null && !waiting ? '—' : '';
     entry.countdownValue.hidden = !entry.countdownValue.textContent;
     entry.countdownAccessible.textContent = running ? `${state.remaining}s remaining` : '';
     entry.countdown.hidden = state.status !== 'pending';
-    entry.ttl.textContent = `Proposal TTL: ${state.ttl}s remaining · expires ${displayTime(timestamp(proposal.expires_at))}`;
+    entry.ttl.textContent = waiting ? 'No approval deadline · the controller rechecks the evidence when you approve' :
+      `Proposal TTL: ${state.ttl}s remaining · expires ${displayTime(timestamp(proposal.expires_at))}`;
     entry.clocks.textContent = Number.isFinite(entry.rca) ?
       `RCA time: ${displayTime(entry.rca)} · freshness limit ${displayTime(entry.rca + 900000)} (900s)` :
       'The RCA clock is unavailable. The proposal TTL alone does not establish the usable approval window.';

@@ -91,7 +91,7 @@ export function dataset(rows:Row[],contexts:Record<string,Row>,overview:Row|null
     if(row.approval?.decision==='reject')status='rejected';
     return {id:p.proposal_id,incidentId:p.incident_id,incidentTitle:p.incident_id,service:'Payment',
       runbookId:p.runbook_id,runbookName:p.runbook_id,summaryVi:row.outcome?.reason||p.reasons?.join(', ')||p.runbook_id,
-      riskLevel:'unknown',status,confidence:Math.round(p.score*100),createdAt:p.created_at,expiresAt:p.expires_at,
+      riskLevel:'unknown',status,confidence:Math.round(p.score*100),createdAt:p.created_at,expiresAt:p.expires_at??null,
       currentImage:row.review_images?.current_image,rollbackImage:row.review_images?.rollback_image,
       approvedBy:row.approval?.approved_by,approvedAt:row.approval?.approved_at,decisionReason:row.approval?.reason,
       steps:(action?.history||[]).map((event:Row,i:number)=>({order:i+1,title:event.phase,command:event.reason||'',status:'done'})),

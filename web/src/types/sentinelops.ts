@@ -22,7 +22,7 @@ export type RemediationStatus =
   | 'recovered'
   | 'blocked'
   | 'escalated'
-  | 'rejected' | 'engineer' | 'stale' | 'expired' | 'consumed' | 'not_yet_valid';
+  | 'rejected' | 'engineer' | 'stale' | 'expired' | 'consumed' | 'not_yet_valid' | 'obsolete';
 
 export type NavSection =
   | 'dashboard'
@@ -134,7 +134,8 @@ export interface RemediationProposal {
   status: RemediationStatus;
   confidence: number;
   createdAt: string;
-  expiresAt: string;
+  /** Absent for v2 proposals, which wait for a decision without a deadline. */
+  expiresAt?: string | null;
   currentImage?: string;
   rollbackImage?: string;
   approvedBy?: string;

@@ -99,6 +99,7 @@ export function StatusBadge({ status }: { status: IncidentStatus }) {
 
 const REMEDIATION_META: Record<RemediationStatus, { vi: string; en: string; tone: BadgeTone }> = {
   expired: {vi:'Hết hạn',en:'Expired',tone:'neutral'},
+  obsolete: {vi:'Đã đóng: tình trạng đã thay đổi',en:'Closed: situation changed',tone:'neutral'},
   stale: {vi:'Revision cũ',en:'Stale revision',tone:'neutral'},
   engineer: {vi:'Chuyển kỹ sư',en:'Engineer review',tone:'critical'},
   consumed: {vi:'Quyết định đã được nhận',en:'Decision consumed',tone:'medium'},

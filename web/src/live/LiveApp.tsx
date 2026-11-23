@@ -2,6 +2,7 @@ import * as React from 'react';
 import {LogIn,LogOut} from 'lucide-react';
 import App from '@/App';
 import {dataset,explanationKey,incidentTime,mapExplanation,traceRecord,type ExplanationLoad} from './adapters';
+import {incidentTimeline,proposalStatusLabel,proposalTiming,riskCards,scoreLabel,warningLead,type RiskCard} from './demoLogic';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -43,14 +44,39 @@ function Facts({items}: {items: [string, any][]}) {
 function Raw({value}: {value:any}) {return <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs">{JSON.stringify(value,null,2)}</pre>;}
 function Notice({children,error=false}: {children:React.ReactNode,error?:boolean}) {return <div role={error?'alert':'status'} className={cn('min-w-0 rounded-xl border p-4 text-sm break-words [overflow-wrap:anywhere]',error?'border-red-200 bg-red-50 text-red-800':'border-orange-200 bg-orange-50 text-orange-900')}>{children}</div>;}
 
+function RiskBanner({cards,isEn}:{cards:RiskCard[],isEn:boolean}) {
+  if(!cards.length)return null;
+  const label=(state:string)=>state==='degrading'?(isEn?'Likely SLO breach':'Sắp vi phạm SLO'):state==='watch'?(isEn?'Watch':'Theo dõi'):(isEn?'No forecast yet':'Chưa có dự báo');
+  return <div className="space-y-2" data-testid="early-warning">{cards.map(card=>{
+    const width=(value:number|null)=>`${Math.max(0,Math.min(100,(value??0)*100))}%`;
+    return <div key={card.service} role="status" className={cn('min-w-0 rounded-xl border p-4 text-sm break-words',card.muted?'border-slate-200 bg-slate-50 text-slate-500':card.state==='degrading'?'border-red-300 bg-red-50 text-red-900':'border-amber-200 bg-amber-50 text-amber-900')}>
+      <div className="flex flex-wrap items-center justify-between gap-2"><strong>{isEn?'Early warning':'Cảnh báo sớm'} · {card.service}</strong><Badge tone={card.state==='degrading'?'critical':card.muted?'neutral':'medium'}>{label(card.state)}</Badge></div>
+      {!card.muted&&<p className="mt-1">{isEn?'Forecast: risk of an SLO breach within about 5 minutes. This is a prediction, not an incident; no action is taken.':'Dự báo: có nguy cơ vi phạm SLO trong khoảng 5 phút tới. Đây là dự báo, chưa phải sự cố; hệ thống chưa thực hiện hành động nào.'}{card.startedAt?` ${isEn?'Since':'Từ'} ${formatVietnamStamp(card.startedAt)}.`:''}</p>}
+      {card.score!==null&&<div className="mt-2"><div className="relative h-2 w-full rounded-full bg-white/70 overflow-hidden" aria-label={`${isEn?'Risk score':'Điểm rủi ro'} ${card.score.toFixed(2)}`}>
+        <div className={cn('h-full rounded-full',card.state==='degrading'?'bg-red-500':'bg-amber-500')} style={{width:width(card.score)}}/>
+        {card.thresholds.watch!==null&&<div className="absolute top-0 h-2 w-0.5 bg-amber-700" style={{left:width(card.thresholds.watch)}}/>}
+        {card.thresholds.degrading!==null&&<div className="absolute top-0 h-2 w-0.5 bg-red-700" style={{left:width(card.thresholds.degrading)}}/>}
+      </div><p className="mt-1 text-xs">{isEn?'Risk score':'Điểm rủi ro'} {card.score.toFixed(2)} · {isEn?'thresholds':'ngưỡng'} {card.thresholds.watch?.toFixed(2)??'—'} / {card.thresholds.degrading?.toFixed(2)??'—'}</p></div>}
+    </div>;})}</div>;
+}
+
+function WarningLead({lead,steps,isEn}:{lead:number|null,steps:{key:string,at:string,secondsFromPrevious:number|null}[],isEn:boolean}) {
+  if(lead===null&&steps.length<2)return null;
+  const names:Record<string,[string,string]>={warning:['Cảnh báo sớm','Early warning'],breach:['Vi phạm SLO','SLO breach'],incident:['Mở sự cố','Incident opened'],approved:['Người trực duyệt','On-call approved'],recovered:['Đã hồi phục','Recovered']};
+  const gap=(s:number)=>`${Math.floor(s/60)}m ${String(s%60).padStart(2,'0')}s`;
+  return <div role="status" data-testid="warning-lead" className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 break-words">
+    {lead!==null&&<p className="font-semibold">{isEn?`Warned ${gap(lead)} before the SLO breach.`:`Đã cảnh báo trước ${gap(lead)} so với lúc vi phạm SLO.`}</p>}
+    {steps.length>1&&<ol className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">{steps.map(step=><li key={step.key}>{names[step.key]?.[isEn?1:0]??step.key} · {formatVietnamStamp(step.at)}{step.secondsFromPrevious!==null?` (+${gap(step.secondsFromPrevious)})`:''}</li>)}</ol>}
+  </div>;
+}
+
 function Proposal({row,state,engine,now,isEn,memoryReview,memoryRecoveryReview,onDecided}: {row:Row,state:Row,engine:any,now:number,isEn:boolean,memoryReview:MemoryReview,memoryRecoveryReview:MemoryReview,onDecided?:()=>void}) {
   const [reason,setReason] = React.useState('');
   const p=row.proposal, images=row.review_images;
   const evidence=memoryReview(row), recovery=memoryRecoveryReview(row), memory=evidence||recovery, isMemory=p.executor_runbook==='pod-memory-limit-demo/v1';
-  const remaining=Math.max(0,Math.ceil((Date.parse(p.expires_at)-now)/1000));
+  const timing=proposalTiming(row,now), remaining=timing.remaining??0;
   const current = row.current_revision === p.incident_revision;
-  const hasHash = typeof row.proposal_sha256 === 'string' && /^[a-f0-9]{64}$/.test(row.proposal_sha256);
-  const pending=row.status==='pending' && remaining>0 && current && hasHash && now>=Date.parse(p.created_at);
+  const pending=timing.reviewable && current;
   const canDecide=pending && state.canApprove && !state.decisionLoading;
   const canApprove=(isMemory?row.manual_recovery_available===true:pending) && state.canApprove && !state.decisionLoading;
   const complete=isMemory?Boolean(recovery):Boolean(images?.current_image && images?.rollback_image);
@@ -68,19 +94,21 @@ function Proposal({row,state,engine,now,isEn,memoryReview,memoryRecoveryReview,o
     [isEn?'Memory limit':'Giới hạn RAM',memory?`${memory.memory_before} → ${memory.memory_after}`:'—'],
     [isEn?'Deployment / container':'Deployment / container',memory?`${memory.deployment} / ${memory.container}`:'—'],[isEn?'Image unchanged':'Image giữ nguyên',memory?.image],
     [isEn?'Recovery checks':'Điều kiện hồi phục',isEn?'Replacement ready, zero restarts, HTTP healthy for 30 seconds':'Pod mới Ready, không restart, HTTP ổn định 30 giây']);
-  else items.push([isEn?'Match score / margin':'Điểm khớp / margin',`${p.score} / ${p.margin}`],
+  else items.push([isEn?'Runbook match / margin':'Mức khớp runbook / margin',`${scoreLabel('runbook',p.score,isEn?'en':'vi')} / ${p.margin}`],
     [isEn?'Current image':'Image hiện tại',images?.current_image],[isEn?'Rollback image':'Image rollback',images?.rollback_image]);
-  items.push([isEn?'Approval deadline':'Hạn duyệt',stamp(p.expires_at,isEn?'en':'vi')],['SHA-256',row.proposal_sha256]);
+  items.push(timing.waiting?[isEn?'Waiting since':'Chờ duyệt từ',stamp(p.created_at,isEn?'en':'vi')]:[isEn?'Approval deadline':'Hạn duyệt',stamp(p.expires_at,isEn?'en':'vi')],['SHA-256',row.proposal_sha256]);
   return <Card className="p-5 space-y-4" accent={pending?'orange':'none'} data-testid="live-proposal">
-    <div className="flex flex-wrap justify-between gap-3"><h3 className="font-semibold break-all">{p.runbook_id}</h3><Badge tone={row.status==='recovered'?'success':pending?'high':'neutral'}>{row.status}</Badge></div>
+    <div className="flex flex-wrap justify-between gap-3"><h3 className="font-semibold break-all">{p.runbook_id}</h3><Badge tone={row.status==='recovered'?'success':pending?'high':'neutral'}>{proposalStatusLabel(row.status,isEn?'en':'vi')}</Badge></div>
     <Facts items={items}/>
-    {pending&&<p className="text-sm font-semibold text-orange-700">{isEn?'Time remaining':'Thời gian còn lại'}: {Math.floor(remaining/60)}:{String(remaining%60).padStart(2,'0')}</p>}
+    {pending&&!timing.waiting&&<p className="text-sm font-semibold text-orange-700">{isEn?'Time remaining':'Thời gian còn lại'}: {Math.floor(remaining/60)}:{String(remaining%60).padStart(2,'0')}</p>}
+    {pending&&timing.waiting&&<p className="text-sm font-semibold text-orange-700">{isEn?'Waiting for your decision · no deadline. The controller rechecks the evidence when you approve.':'Đang chờ bạn quyết định · không có hạn giờ. Khi bạn duyệt, controller kiểm tra lại bằng chứng trước khi thực thi.'}</p>}
+    {row.status==='obsolete'&&<Notice>{isEn?'Closed without action: the incident or deployment changed before a decision.':'Đã đóng, không thực thi: sự cố hoặc bản triển khai đã thay đổi trước khi có quyết định.'}{row.outcome?.reason?` (${row.outcome.reason})`:''}</Notice>}
     {!current&&<Notice>{isEn?'Incident revision advanced. Reload the current incident.':'Incident đã có revision mới. Hãy tải lại incident hiện tại.'}</Notice>}
     {!complete&&<Notice>{isMemory?(isEn?'Complete pinned memory change evidence is required before approval.':'Cần đủ bằng chứng thay đổi bộ nhớ được ghim trong đề xuất trước khi duyệt.'):(isEn?'Both pinned image digests are required before approval.':'Cần đủ hai image digest được ghim trong đề xuất trước khi duyệt.')}</Notice>}
     {!state.canApprove&&<Notice>{isEn?'Read-only session: remediation.approve permission is required.':'Phiên chỉ đọc: cần quyền remediation.approve để quyết định.'}</Notice>}
     {row.approval&&<Raw value={row.approval}/>}
     {row.memory_action&&<Notice error={['blocked','escalated'].includes(row.memory_action.phase)}>{isEn?'Recovery: ':'Hồi phục: '}{row.memory_action.phase} · {row.memory_action.reason}</Notice>}
-    {row.outcome&&!row.memory_action&&<Notice error>{row.outcome.phase}: {row.outcome.reason}</Notice>}
+    {row.outcome&&!row.memory_action&&row.outcome.phase!=='obsolete'&&<Notice error>{row.outcome.phase}: {row.outcome.reason}</Notice>}
     <p className="text-xs text-slate-500">{isMemory?
       (isEn?'Approve fixed 64Mi → 256Mi memory recovery for the pinned target. The controller rechecks the deployment, image and memory limit before execution.':'Duyệt khôi phục RAM cố định 64Mi → 256Mi cho target đã ghim. Controller kiểm tra lại deployment, image và giới hạn RAM trước khi thực thi.'):
       (isEn?'Approval records a human decision. The controller still checks evidence freshness, target, quarantine and recovery telemetry.':'Duyệt ghi nhận quyết định của người trực. Controller tiếp tục kiểm tra tuổi bằng chứng, target, quarantine và telemetry hồi phục.')}</p>
@@ -110,6 +138,7 @@ export default function LiveApp() {
   const [explanations,setExplanations]=React.useState<Record<string,ExplanationLoad>>({});
   const explanationSession=React.useRef<ExplanationSession|null>(null);
   const [overview,setOverview]=React.useState<Row|null>(null),[telemetryError,setTelemetryError]=React.useState('');
+  const [risk,setRisk]=React.useState<Row|null>(null),[episodes,setEpisodes]=React.useState<{key:string,values:string[]}|null>(null);
   const [traceData,setTraceData]=React.useState<Record<string,Row>>({}),[traceError,setTraceError]=React.useState('');
   const traceRun=React.useRef(0);
   const [allProposals,setAllProposals]=React.useState<Row|null>(null), [watchError,setWatchError]=React.useState('');
@@ -496,6 +525,27 @@ export default function LiveApp() {
     void read();const timer=setInterval(()=>void read(),30000);
     return()=>{cancelled=true;abort.abort();clearInterval(timer);};
   },[state.session,disconnect]);
+  React.useEffect(()=>{
+    // Early warning: refresh every 15 s; failures only hide the cards (no guessed values).
+    if(!state.session){setRisk(null);return;}
+    let cancelled=false;const abort=new AbortController();const activeClient=client.current;
+    const read=async()=>{try{const value=await activeClient.get('/v1/observability/risk',abort.signal,{timeoutMs:15000});if(!cancelled)setRisk(value);}catch{if(!cancelled)setRisk(null);}};
+    void read();const timer=setInterval(()=>void read(),15000);
+    return()=>{cancelled=true;abort.abort();clearInterval(timer);};
+  },[state.session]);
+  const detailPayload=state.detail?.payload;
+  const leadService=detailPayload?.root_cause_ranking?.[0]?.service as string|undefined;
+  const leadOnset=(detailPayload?.started_at??detailPayload?.detected_at) as string|undefined;
+  React.useEffect(()=>{
+    if(!state.session||!leadService||!leadOnset){setEpisodes(null);return;}
+    const onset=Date.parse(leadOnset);if(!Number.isFinite(onset)){setEpisodes(null);return;}
+    let cancelled=false;const abort=new AbortController();
+    const query=new URLSearchParams({service:leadService,start:String(Math.floor(onset/1000)-1800),end:String(Math.floor(onset/1000))});
+    client.current.get('/v1/observability/risk/episodes?'+query,abort.signal,{timeoutMs:15000})
+      .then((value:Row)=>{if(!cancelled)setEpisodes({key:leadService+leadOnset,values:Array.isArray(value?.episodes)?value.episodes:[]});})
+      .catch(()=>{if(!cancelled)setEpisodes(null);});
+    return()=>{cancelled=true;abort.abort();};
+  },[state.session,leadService,leadOnset]);
   const loadTraces=React.useCallback(async(recent=false)=>{
     const value=engine.current?.state.detail,active=client.current;if(!value||!active)return;
     const run=++traceRun.current,id=value.incident_id,rev=value.revision;
@@ -539,7 +589,12 @@ export default function LiveApp() {
   const gate=<Card className="p-6 sm:p-10 max-w-2xl mx-auto mt-8 space-y-5"><h2 className="text-xl font-semibold">{tr('Kết nối workspace vận hành','Connect to your operator workspace')}</h2><p className="text-sm text-slate-500">{tr('Đăng nhập để xem dashboard, trace waterfall và service map bằng dữ liệu thật.','Sign in for live dashboards, trace waterfalls and the service map.')}</p>{mode==='oidc'&&<Button onClick={async()=>{try{setLocale(locale);window.location.assign(await login.current.begin());}catch(e:any){setError(e.message);}}}><LogIn className="h-4 w-4"/>{tr('Đăng nhập Cognito','Sign in with Cognito')}</Button>}{mode==='manual'&&<form className="flex flex-wrap gap-3" onSubmit={async e=>{e.preventDefault();const input=tokenInput.current;if(!input?.value)return;const value=input.value;input.value='';await engine.current.connect(value);}}><input ref={tokenInput} type="password" autoComplete="off" aria-label="API access token" className="rounded-lg border px-3 py-2"/><Button type="submit">{tr('Kết nối','Connect')}</Button></form>}{mode==='loading'&&<p role="status">{tr('Đang kiểm tra đăng nhập…','Checking sign-in…')}</p>}{mode==='unavailable'&&<Notice error>{tr('Đăng nhập chưa được cấu hình.','Sign-in is not configured.')}</Notice>}<a href="/ui/demo/" className="text-sm text-orange-700 underline block">{tr('Mở giao diện mô phỏng gốc','Open the original simulation')}</a></Card>;
   const review=<div className="min-w-0 space-y-4"><div className="flex flex-wrap gap-3 justify-between"><h2 className="font-semibold">{tr('Duyệt proposal theo revision thật','Review the actual revision-bound proposal')}</h2><Button size="sm" variant="secondary" disabled={state.proposalsLoading||state.decisionLoading||!detail} onClick={()=>void engine.current.loadProposals()}>{tr('Tải lại đề xuất','Reload proposals')}</Button></div>{state.proposalsError&&<Notice error>{state.proposalsError.message} · {tr('Tải lại để xác minh kết quả trước khi quyết định tiếp.','Reload to verify the outcome before another decision.')}</Notice>}{state.proposalsLoading&&<p>{tr('Đang tải…','Loading…')}</p>}{state.proposals?.length===0&&<Notice>{tr('Revision này không có proposal để duyệt.','No proposal for this revision.')}</Notice>}{state.proposals?.map((row:Row)=><Proposal key={row.proposal.proposal_id} row={row} state={state} engine={engine.current} now={now} isEn={isEn} memoryReview={memoryReview.current} memoryRecoveryReview={memoryRecoveryReview.current} onDecided={()=>void readProposals()}/>)}</div>;
   const journal=<Card className="p-5 space-y-3"><h3 className="font-semibold">{tr('Nhật ký thực thi / Giải thích','Execution journal / Explanation')}</h3>{state.actionsError&&<Notice error>{state.actionsError.message}</Notice>}{state.actions?.items.map((item:Row)=><details key={item.action_id}><summary className="min-w-0 cursor-pointer text-sm break-all">{item.phase} · {item.action_id}</summary><Raw value={item}/></details>)}{selectedExplanation?.aiExplanationStatus==='ready'&&<p className="min-w-0 whitespace-pre-wrap text-sm break-words [overflow-wrap:anywhere]">{selectedExplanation.aiExplanation.summary}</p>}{selectedExplanation?.aiExplanationStatus==='error'&&<Notice error>{selectedExplanation.aiExplanationError}</Notice>}</Card>;
-  const notices=<div className="space-y-3 mb-5">{error&&<Notice error>{error}</Notice>}{state.notice&&<Notice error>{state.notice}</Notice>}{state.listError&&<Notice error>{state.listError.message}</Notice>}{pagesError&&<Notice error>{pagesError}</Notice>}{watchError&&<Notice error>{watchError}</Notice>}{telemetryError&&<Notice error>{telemetryError}</Notice>}{traceError&&state.session&&<Notice>{tr('Trace: ','Trace: ')}{traceError}</Notice>}{state.session&&<p className="text-xs text-slate-500">{tr('Telemetry từ Prometheus; incident trong feed đã tải. Cạnh trace theo span đã ghi nhận.','Telemetry from Prometheus; incidents from loaded feed. Trace edges follow recorded spans.')} {overview?.as_of&&`${tr('Đo lúc','Observed')} ${stamp(overview.as_of,locale)}`}{pagesLoading&&` · ${tr('Đang tải toàn bộ incident…','Loading all incidents…')}`}{remainingCursor&&!pagesLoading&&<Button size="sm" variant="ghost" onClick={()=>void loadMorePages()}>{tr('Tải thêm incident','Load more incidents')}</Button>}</p>}</div>;
+  const lead=episodes&&leadOnset?warningLead(episodes.values,leadOnset):null;
+  const recoveredAt=(state.proposals??[]).map((r:Row)=>r.final?.phase==='recovered'?r.final.recorded_at:null).find(Boolean)??null;
+  const approvedAt=(state.proposals??[]).map((r:Row)=>r.approval?.decision==='approve'?r.approval.approved_at:null).find(Boolean)??null;
+  const steps=state.detail&&lead!==null?incidentTimeline({warning:new Date(Date.parse(leadOnset as string)-lead*1000).toISOString().replace('.000Z','Z'),
+    breach:leadOnset??null,incident:detailPayload?.detected_at??null,approved:approvedAt,recovered:recoveredAt}):[];
+  const notices=<div className="space-y-3 mb-5"><RiskBanner cards={riskCards(risk)} isEn={isEn}/>{state.detail&&<WarningLead lead={lead} steps={steps} isEn={isEn}/>}{error&&<Notice error>{error}</Notice>}{state.notice&&<Notice error>{state.notice}</Notice>}{state.listError&&<Notice error>{state.listError.message}</Notice>}{pagesError&&<Notice error>{pagesError}</Notice>}{watchError&&<Notice error>{watchError}</Notice>}{telemetryError&&<Notice error>{telemetryError}</Notice>}{traceError&&state.session&&<Notice>{tr('Trace: ','Trace: ')}{traceError}</Notice>}{state.session&&<p className="text-xs text-slate-500">{tr('Telemetry từ Prometheus; incident trong feed đã tải. Cạnh trace theo span đã ghi nhận.','Telemetry from Prometheus; incidents from loaded feed. Trace edges follow recorded spans.')} {overview?.as_of&&`${tr('Đo lúc','Observed')} ${stamp(overview.as_of,locale)}`}{pagesLoading&&` · ${tr('Đang tải toàn bộ incident…','Loading all incidents…')}`}{remainingCursor&&!pagesLoading&&<Button size="sm" variant="ghost" onClick={()=>void loadMorePages()}>{tr('Tải thêm incident','Load more incidents')}</Button>}</p>}</div>;
   return <App live={{...data,connected:state.session,selectedId:state.selected||'',onSelect:select,gate,
     header:state.session?<Button size="sm" variant="ghost" onClick={disconnect}><LogOut className="h-4 w-4"/>{tr('Ngắt kết nối','Disconnect')}</Button>:null,
     notice:notices,reviewPanel:review,journal,trend:data.trend,

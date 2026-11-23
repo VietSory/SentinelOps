@@ -1,4 +1,4 @@
-import {Workspace, proposalRemaining} from './workspace.js';
+import {Workspace, proposalOpen} from './workspace.js';
 import {CognitoLogin, IncidentClient, memoryReview, memoryRunbook} from './client.js';
 import {mount as mountDeeplinks} from './deeplinks.js';
 import {mount as mountFilters} from './filters.js';
@@ -668,7 +668,7 @@ function actionHistory(state,opened) {
 function runbookProposals(state, drafts) {
   const panel = node('section',null,'runbook-proposals');
   panel.setAttribute('aria-label','Runbook proposals'); panel.dataset.testid = 'runbook-proposals';
-  const pending = state.proposals?.filter(row => row.status === 'pending' && proposalRemaining(row)).length || 0;
+  const pending = state.proposals?.filter(row => row.status === 'pending' && proposalOpen(row)).length || 0;
   panel.classList.toggle('has-pending',pending > 0);
   const heading = node('div',null,'proposal-heading');
   const title = node('div',null,'proposal-title');
@@ -701,8 +701,10 @@ function runbookProposals(state, drafts) {
     else grid.append(fact('Score',score(p.score)),fact('Margin',score(p.margin)),
       fact('Current image',currentImage || 'Image evidence unavailable'),
       fact('Rollback image',targetImage || 'Image evidence unavailable'));
+    const waiting = p.proposal_version === 'runbook-proposal/v2';
     grid.append(
-      fact('Approval deadline',date(p.expires_at)),fact('Status',row.status));
+      waiting ? fact('Waiting since',date(p.created_at)) : fact('Approval deadline',date(p.expires_at)),
+      fact('Status',row.status));
     card.append(grid,node('h4',memory ? 'Kubernetes evidence' : 'RCA top-3'));
     if (!reviewComplete) card.append(node('p','This proposal needs pinned change evidence for approval. You can reject it and send it to an engineer.','callout uncertain'));
     const ranking = node('ol');
@@ -712,7 +714,14 @@ function runbookProposals(state, drafts) {
       'No root-cause hypotheses recorded.'));
     card.append(ranking,raw('code',`SHA-256: ${row.proposal_sha256}`,'source'));
     const countdown = node('p',null,'proposal-countdown');
-    countdown.dataset.expires = p.expires_at; countdown.dataset.status = row.status; card.append(countdown);
+    if (waiting) {
+      // v2 waits for the on-call decision: no countdown, the controller rechecks evidence on approval.
+      countdown.textContent = row.status === 'pending' ? `Waiting for approval since ${date(p.created_at)}` :
+        row.status === 'obsolete' ? 'Closed: the situation changed before a decision' : 'No longer awaiting approval';
+    } else {
+      countdown.dataset.expires = p.expires_at; countdown.dataset.status = row.status;
+    }
+    card.append(countdown);
     if (row.approval) card.append(raw('p',`${row.approval.decision} · ${row.approval.approved_by} · ${date(row.approval.approved_at)} · ${row.approval.reason}`));
     if (row.status === 'engineer') card.append(node('p',row.approval?.decision === 'reject' ?
       'An engineer will review the rejected proposal. The controller will skip execution.' : 'The controller referred this proposal to an engineer. See the outcome for details.'));
@@ -728,7 +737,7 @@ function runbookProposals(state, drafts) {
       },`button ${decision === 'approve' ? 'primary' : 'secondary'}`);
       item.dataset.decision = decision;
       const locked = !state.canApprove || state.decisionLoading || row.status !== 'pending' || decision === 'approve' && !reviewComplete;
-      item.disabled = locked || !proposalRemaining(row);
+      item.disabled = locked || !proposalOpen(row);
       item.dataset.locked = String(locked); form.append(item);
     }
     form.addEventListener('submit',event => event.preventDefault());

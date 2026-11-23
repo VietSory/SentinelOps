@@ -26,16 +26,20 @@ export function memoryRecoveryReview(row) {
 export function validProposal(row) {
   const p = row?.proposal;
   const memory = p?.executor_runbook === memoryRunbook;
-  return p?.proposal_version === 'runbook-proposal/v1' && /^[a-f0-9]{64}$/.test(p.proposal_id) &&
+  // v1 keeps its 15-minute expiry; v2 waits for a decision and has no expires_at.
+  const v2 = p?.proposal_version === 'runbook-proposal/v2';
+  return (p?.proposal_version === 'runbook-proposal/v1' ||
+          v2 && p.approval_policy === 'pending-until-decision/v1' && !('expires_at' in p)) &&
+    /^[a-f0-9]{64}$/.test(p.proposal_id) &&
     /^[a-f0-9]{64}$/.test(row.proposal_sha256) && typeof p.incident_id === 'string' &&
     Number.isSafeInteger(p.incident_revision) && p.incident_revision > 0 &&
-    Number.isFinite(Date.parse(p.expires_at)) && Number.isFinite(Date.parse(p.created_at)) &&
+    (v2 || Number.isFinite(Date.parse(p.expires_at))) && Number.isFinite(Date.parse(p.created_at)) &&
     typeof p.runbook_id === 'string' && (memory || Number.isFinite(p.score) && Number.isFinite(p.margin)) &&
     (row.recovery_change == null || memory && Boolean(memoryRecoveryReview(row))) &&
     (row.manual_recovery_available === undefined || typeof row.manual_recovery_available === 'boolean') &&
     (memory ? ['pending','approved','engineer','expired','consumed','stale','not_yet_valid',
-      'dispatching','verifying','recovered','blocked','escalated','rejected'] :
-      ['pending','approved','engineer','expired','consumed','stale','not_yet_valid']).includes(row.status);
+      'dispatching','verifying','recovered','blocked','escalated','rejected','obsolete'] :
+      ['pending','approved','engineer','expired','consumed','stale','not_yet_valid','obsolete']).includes(row.status);
 }
 export class ApiFailure extends Error {
   constructor(status, code, requestId = null) {
@@ -239,8 +243,10 @@ export class IncidentClient {
       Number.isSafeInteger(row.current_revision) && row.current_revision > 0 &&
       body.proposal.origin_incident_revision === row.current_revision && body.proposal.incident_revision === 1 &&
       body.proposal.incident_id === `INC-OOM-MANUAL-${body.proposal.proposal_id}` &&
-      Date.parse(body.proposal.expires_at)-Date.parse(body.proposal.created_at) === 15*60*1000 &&
-      Date.parse(body.proposal.expires_at) > Date.now() && Date.parse(body.proposal.created_at) <= Date.now()+1000;
+      (body.proposal.proposal_version === 'runbook-proposal/v2' ? !('expires_at' in body.proposal) :
+        Date.parse(body.proposal.expires_at)-Date.parse(body.proposal.created_at) === 15*60*1000 &&
+        Date.parse(body.proposal.expires_at) > Date.now()) &&
+      Date.parse(body.proposal.created_at) <= Date.now()+1000;
     if ((!child && (body.proposal.proposal_id !== row.proposal.proposal_id || body.proposal_sha256 !== row.proposal_sha256)) ||
         !boundsMatch || body.approval?.decision !== decision ||
         (manualMemory && body.approval?.approval_mode !== 'manual_memory_recovery') ||

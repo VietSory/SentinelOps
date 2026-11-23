@@ -72,8 +72,8 @@ const NAV_ITEMS: NavMeta[] = [
     labelEn: 'Root Cause Analysis',
     pageTitleVi: 'Phân tích nguyên nhân (RCA)',
     pageTitleEn: 'Root Cause Analysis',
-    pageSubtitleVi: 'Xếp hạng giả thuyết nguyên nhân gốc, độ tin cậy (confidence) và timeline suy luận.',
-    pageSubtitleEn: 'Ranked root-cause hypotheses, confidence and coverage gates, and reasoning timeline.',
+    pageSubtitleVi: 'Xếp hạng giả thuyết nguyên nhân gốc, điểm RCA (0-1, không phải xác suất), ngưỡng độ phủ và timeline suy luận.',
+    pageSubtitleEn: 'Ranked root-cause hypotheses, RCA scores (0-1, not probabilities), coverage gates and reasoning timeline.',
     icon: SearchCheck,
   },
   {

@@ -1,6 +1,9 @@
 import {ApiFailure, IncidentClient, memoryRecoveryReview} from './client.js';
 
-export const proposalRemaining = (row, now = Date.now()) => Math.max(0,Math.ceil((Date.parse(row.proposal.expires_at)-now)/1000));
+// v2 proposals have no deadline (null); v1 keeps its countdown in seconds.
+export const proposalRemaining = (row, now = Date.now()) => row.proposal.proposal_version === 'runbook-proposal/v2' ? null :
+  Math.max(0,Math.ceil((Date.parse(row.proposal.expires_at)-now)/1000));
+export const proposalOpen = (row, now = Date.now()) => row.proposal.proposal_version === 'runbook-proposal/v2' || proposalRemaining(row, now) > 0;
 
 const blank = () => ({session:false, canApprove:true, filters:{state:'',service:''}, rows:[], nextCursor:null, listLoading:false,
   listError:null, detail:null, detailLoading:false, detailError:null, historyLoading:false, historyError:null,
@@ -98,7 +101,7 @@ export class Workspace {
     const row = this.state.proposals?.find(item => item.proposal.proposal_id === id), client = this.#client;
     const manual = row && decision === 'approve' && row.manual_recovery_available === true && Boolean(memoryRecoveryReview(row));
     if (!client || !row || !this.state.canApprove ||
-        (!manual && (row.status !== 'pending' || !proposalRemaining(row))) || this.state.decisionLoading) return;
+        (!manual && (row.status !== 'pending' || !proposalOpen(row))) || this.state.decisionLoading) return;
     this.state.decisionLoading = true; this.state.proposalsError = null; this.emit();
     return this.#run('decision',s => client.decideProposal(row,decision,reason,s),value => {
       this.state.proposals = value.proposal.proposal_id === row.proposal.proposal_id

@@ -17,6 +17,7 @@ import { INCIDENTS_PER_PAGE, Pagination } from '@/components/ui/pagination';
 import { cn, formatDateTime } from '@/lib/utils';
 import { useLocale } from '@/i18n/LocaleContext';
 import type { RemediationProposal, RemediationStatus } from '@/types/sentinelops';
+import { scoreValue } from '@/live/demoLogic';
 
 export interface RemediationViewProps {
   live?: boolean;
@@ -296,7 +297,7 @@ export function RemediationView({
                   <CardDescription>
                     Runbook: <code className="font-mono text-slate-700 break-all">{activeProposal.runbookId}</code> ·{' '}
                     {live?(isEn?'Runbook match: ':'Điểm khớp runbook: '):(isEn ? 'RCA Confidence: ' : 'Độ tin cậy RCA: ')}
-                    <strong className="text-orange-700">{Number.isFinite(activeProposal.confidence)?`${activeProposal.confidence}%`:(isEn?'Not provided':'Chưa có điểm')}</strong>
+                    <strong className="text-orange-700">{Number.isFinite(activeProposal.confidence)?scoreValue(activeProposal.confidence,isEn?'en':'vi'):(isEn?'Not provided':'Chưa có điểm')}</strong>
                   </CardDescription>
                 </div>
 
