@@ -211,9 +211,9 @@ def test_record_approval_v2_late_and_early(tmp_path):
     with pytest.raises(ValueError):
         record_approval(store, proposal_id='b' * 64, approved_by='oncall', decision='approve',
                         confirm_oncall_approval=True, now=created - timedelta(seconds=1))
-    receipt = record_approval(store, proposal_id='b' * 64, approved_by='oncall', decision='approve',
-                              confirm_oncall_approval=True, now=created + timedelta(hours=3))
-    assert receipt['proposal_sha256'] == stable_id(proposal)
+    record_approval(store, proposal_id='b' * 64, approved_by='oncall', decision='approve',
+                    confirm_oncall_approval=True, now=created + timedelta(hours=3))
+    assert read_slot(store, 'approval', 'b' * 64)['proposal_sha256'] == stable_id(proposal)
 
 
 def test_v2_kill_switch_blocks_at_approval(tmp_path, monkeypatch):
