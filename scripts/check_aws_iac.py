@@ -641,8 +641,9 @@ def assert_edge(blocks: dict[str, dict]) -> list[str]:
     edge = normalize((ROOT/'edge.tf').read_text())
     paths = re.search(r'edge_paths = \{([^}]+)\}', edge)
     if paths is None or _assignments(paths.group(1)) != {
-            'api': ['["/ui", "/ui/*", "/v1/*"]'], 'grafana': ['["/grafana", "/grafana/*"]']}:
-        raise ValueError('edge allow paths must be exactly UI, v1 API and Grafana')
+            'api': ['["/ui", "/ui/*", "/v1/*", "/ready", "/ready/incidents"]'],
+            'grafana': ['["/grafana", "/grafana/*"]']}:
+        raise ValueError('edge allow paths must be exactly UI, v1 API, the two readiness routes and Grafana')
     backends = re.search(r'edge_backends = \{(.*?)\n\s*\}', edge, re.DOTALL)
     if backends is None or _assignments(backends.group(1)) != {
             'api': ['{ port = var.edge_api_node_port, health = "/health" }'],
@@ -686,7 +687,7 @@ def assert_edge(blocks: dict[str, dict]) -> list[str]:
     return ['edge default-off; private ALB, VPC-origin-only ingress, HTTPS-only uncached allowlisted routes; NodePort/ASG binding']
 
 
-EDGE_FUNCTION_SHA256 = 'b62066fb57afd6aa0f9cc0f66d36be7d3f9037cef0b19780058675849f9efe42'
+EDGE_FUNCTION_SHA256 = '378a11ecb375f2df637c69554f738b14b54f17c096808df32c2333de27f63b40'  # WP6: + /ready, /ready/incidents
 
 
 def assert_grants_no_authority(root: Path = ROOT) -> list[str]:

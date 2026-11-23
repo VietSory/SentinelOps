@@ -7,7 +7,7 @@ locals {
     grafana = { port = var.edge_grafana_node_port, health = "/grafana/api/health" }
   }
   edge_paths = {
-    api     = ["/ui", "/ui/*", "/v1/*"]
+    api     = ["/ui", "/ui/*", "/v1/*", "/ready", "/ready/incidents"]
     grafana = ["/grafana", "/grafana/*"]
   }
   # AWS managed CachingDisabled and AllViewer. Forward Host, Authorization,
@@ -226,7 +226,7 @@ resource "aws_cloudfront_function" "edge_paths" {
       // and origin routing can disagree. OAuth query parameters are untouched.
       if (/[%%\\]/.test(uri) || uri.indexOf('//') !== -1 || /(^|\/)\.{1,2}(\/|$)/.test(uri) ||
           (!grafanaJaegerAsset && /(^|\/)(internal|docs|redoc|openapi\.json|metrics|prometheus|jaeger)(\/|$)/i.test(uri)) ||
-          !/^(\/ui(\/|$)|\/v1\/|\/grafana(\/|$))/.test(uri)) {
+          !/^(\/ui(\/|$)|\/v1\/|\/grafana(\/|$)|\/ready(\/incidents)?$)/.test(uri)) {
         return {statusCode: 403, statusDescription: 'Forbidden', headers: {'cache-control': {value: 'no-store'}}};
       }
       return event.request;

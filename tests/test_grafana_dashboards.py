@@ -28,6 +28,7 @@ DASHBOARD_UIDS = {
     'sentinelops-slo.json': 'sentinelops-slo',
     WORKERS: 'sentinelops-workers',
     OOM: 'sentinelops-oom',
+    'sentinelops-risk.json': 'sentinelops-risk',
 }
 
 
@@ -263,7 +264,7 @@ def test_provisioning_binds_are_individual_read_only_files():
         *(f'./observability/grafana/dashboards/{name}:/var/lib/grafana/dashboards/{name}:ro'
           for name in DASHBOARD_UIDS),
     }
-    assert len(binds) == 6
+    assert len(binds) == 7  # +1 risk dashboard (WP6)
     assert set(binds) == expected
     for mount in binds:
         source, _, mode = mount.split(':')
@@ -339,7 +340,7 @@ def test_runtime_verification_interpolates_every_dashboard_query_without_mutatin
     boards, evaluated = running_grafana(monkeypatch)
     original = copy.deepcopy(boards)
     result = checker.verify_running('http://grafana.invalid', boards)
-    assert result['expressions_evaluated_on_prometheus'] == len(evaluated) == 62
+    assert result['expressions_evaluated_on_prometheus'] == len(evaluated) == 66  # +4 risk dashboard queries (WP6)
     assert sum(len(checker.queries(board)) for board in boards.values()) == len(evaluated)
     assert any('sentinelops_oom_demo_memory_limit_bytes' in expression for expression in evaluated)
     for metric in ('sentinelops_incident_groups_total', 'sentinelops_rca_abstentions_total'):

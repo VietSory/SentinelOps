@@ -1,0 +1,226 @@
+{
+  "uid": "sentinelops-risk",
+  "title": "SentinelOps — Cảnh báo sớm",
+  "description": "Dự báo nguy cơ vi phạm SLO trong khoảng 5 phút tới, tính mỗi phút bằng XGBoost của model release đang chạy. Cảnh báo là dự báo, không phải sự cố: không mở incident, không duyệt hay thực thi hành động. Thiếu số liệu hiển thị là chưa có dự báo, không phải bình thường.",
+  "tags": [
+    "sentinelops",
+    "early-warning"
+  ],
+  "timezone": "utc",
+  "editable": false,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Incident workspace",
+      "type": "link",
+      "url": "/ui/",
+      "targetBlank": true
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "name": "Bắt đầu cảnh báo",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "sentinelops-prometheus"
+        },
+        "enable": true,
+        "iconColor": "red",
+        "expr": "changes(sentinelops_risk_episode_started_unixtime[2m]) > 0",
+        "titleFormat": "Cảnh báo sớm",
+        "textFormat": "{{service}}",
+        "step": "60s"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Dịch vụ đang có cảnh báo sớm",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "description": "Số dịch vụ đang ở trong một đợt cảnh báo. Không có số liệu nghĩa là bộ chấm rủi ro chưa chạy.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(sentinelops_risk_episode_active)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Chưa có dự báo",
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Không có cảnh báo",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "textMode": "value_and_name"
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Điểm rủi ro vi phạm SLO (5 phút tới) và ngưỡng",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 16,
+        "x": 8,
+        "y": 0
+      },
+      "description": "Đường liền: điểm XGBoost theo dịch vụ. Đường đứt: ngưỡng 'theo dõi' và 'sắp vi phạm' lấy từ model release.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sentinelops_risk_score",
+          "legendFormat": "{{service}}"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (level) (sentinelops_risk_threshold)",
+          "legendFormat": "ngưỡng {{level}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "spanNulls": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "state-timeline",
+      "title": "Trạng thái dự báo theo dịch vụ",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "sentinelops-prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "description": "normal / watch (theo dõi) / degrading (sắp vi phạm) / unavailable (chưa có dự báo).",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sentinelops_risk_state == 1",
+          "legendFormat": "{{service}} · {{state}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "Chưa có dự báo",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "đang ở trạng thái này"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "showValue": "never"
+      }
+    }
+  ]
+}

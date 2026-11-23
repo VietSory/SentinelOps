@@ -46,6 +46,11 @@ def exported_metric_names() -> set[str]:
     # Incident-worker instruments, exported with the same suffix rules.
     names |= {'sentinelops_incident_has_local_progress', 'sentinelops_incident_groups_total',
               'sentinelops_rca_abstentions_total'}
+    # Early-warning risk worker and notifier (sentinelops.workers.risk, sentinelops.notifications).
+    names |= {'sentinelops_risk_score', 'sentinelops_risk_state', 'sentinelops_risk_episode_active',
+              'sentinelops_risk_episode_started_unixtime', 'sentinelops_risk_last_scored_unixtime',
+              'sentinelops_risk_threshold', 'sentinelops_notifications_sent_total',
+              'sentinelops_notifications_failed_total'}
     return names
 
 

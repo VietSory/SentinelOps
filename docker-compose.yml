@@ -69,6 +69,7 @@ services:
       - ./observability/grafana/dashboards/sentinelops-incidents.json:/var/lib/grafana/dashboards/sentinelops-incidents.json:ro
       - ./observability/grafana/dashboards/sentinelops-slo.json:/var/lib/grafana/dashboards/sentinelops-slo.json:ro
       - ./observability/grafana/dashboards/sentinelops-oom.json:/var/lib/grafana/dashboards/sentinelops-oom.json:ro
+      - ./observability/grafana/dashboards/sentinelops-risk.json:/var/lib/grafana/dashboards/sentinelops-risk.json:ro
       - sentinelops_grafana:/var/lib/grafana
     depends_on:
       prometheus:
