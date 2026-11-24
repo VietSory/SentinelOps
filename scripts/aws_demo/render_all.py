@@ -17,6 +17,7 @@ from scripts import render_api_manifests as api
 from scripts import render_collector_manifests as collector
 from scripts import render_worker_manifests as workers
 from sentinelops.remediation.domain import image_digest
+from sentinelops.remediation.pod_memory_metrics import COLLECTOR
 
 ROOT = Path(__file__).resolve().parents[2]
 IMAGE_KEYS = testbed.IMAGE_KEYS | {'control-plane', 'aws-collector'}
@@ -77,9 +78,12 @@ def endpoint_with_port(value):
 
 
 def render(images, tf, runtime):
-    # Explicit flat map: support images must be supplied as well as the two ECR images.
-    if set(images) != IMAGE_KEYS:
-        raise ValueError('images.json requires exactly: ' + ', '.join(sorted(IMAGE_KEYS)))
+    early_warning = runtime.get('early_warning', False)
+    if type(early_warning) is not bool:
+        raise ValueError('early_warning must be an explicit boolean')
+    image_keys = IMAGE_KEYS | {'operator-ui'} if early_warning else IMAGE_KEYS
+    if set(images) != image_keys:
+        raise ValueError('images.json requires exactly: ' + ', '.join(sorted(image_keys)))
     for value in images.values():
         image_digest(value)
     bindings = tf['collector_bindings']
@@ -91,17 +95,36 @@ def render(images, tf, runtime):
         raise ValueError('collector role must match Terraform telemetry-exporter output')
     if bindings['workload_log_group'] != '/sentinelops/dev/workloads':
         raise ValueError('unexpected collector workload log group')
-    for key in ('application', 'control-plane'):
-        expected = tf['image_repository_urls'][key]
+    ecr_keys = ('application', 'control-plane', 'operator-ui') if early_warning else ('application', 'control-plane')
+    for key in ecr_keys:
+        expected = tf['image_repository_urls']['control-plane' if key == 'operator-ui' else key]
         if images[key].split('@')[0] != expected:
             raise ValueError(f'{key} digest must match Terraform ECR repository')
     business = testbed.render({key: images[key] for key in testbed.IMAGE_KEYS}, target='eks')
     aws = collector.render(images['aws-collector'], region=bindings['region'],
         environment=bindings['environment'], exporter_role_arn=bindings['exporter_role_arn'],
         trace_sampling_percentage=bindings['trace_sampling_percentage'])
+    api_options = {}
+    worker_options = {key: runtime[key] for key in ('remediation_store_claim', 'known_good_store_claim',
+        'deployment_change_store_claim', 'model_claim', 'model_release_ref', 'policy_enabled') if key in runtime}
+    if early_warning:
+        if images['operator-ui'] == images['control-plane']:
+            raise ValueError('operator-ui must be the distinct live overlay digest')
+        edge_domain, topic = tf.get('edge_domain'), tf.get('demo_alerts_topic_arn')
+        binding = tf.get('operator_oidc_binding')
+        if not edge_domain or not topic or not binding:
+            raise ValueError('early warning requires edge, operator OIDC and SNS Terraform outputs')
+        oidc = {key: binding[key] for key in ('issuer', 'audience', 'jwks_url', 'audience_claim', 'approval_scope')}
+        oidc['login_domain'] = tf.get('operator_login_domain')
+        api_options.update(controller_sidecar=True, service_type='NodePort', node_port=tf.get('edge_api_node_port'))
+        worker_options.update(early_warning=True, demo_ui=True, demo_ui_image=images['operator-ui'],
+            alerts_topic_arn=topic, ui_url=f'https://{edge_domain}/ui/', alerts_otlp_endpoint=f'http://{COLLECTOR}:4317')
+    else:
+        oidc = runtime['oidc']
+        if runtime.get('api_action_read_secret'):
+            api_options['action_read_secret'] = runtime['api_action_read_secret']
     api_docs = api.render(images['control-plane'], environment='dev',
-        control_secret=runtime['api_control_secret'], **runtime['oidc'],
-        **({'action_read_secret': runtime['api_action_read_secret']} if runtime.get('api_action_read_secret') else {}))
+        control_secret=runtime['api_control_secret'], **oidc, **api_options)
     # Build a public, credential-free RDS URL. Secret contents never enter this process.
     database = f"postgresql://{tf['control_database_endpoint']}:5432/sentinelops_control?sslmode=verify-full"
     worker_docs = workers.render(images['control-plane'], environment='dev',
@@ -109,9 +132,7 @@ def render(images, tf, runtime):
         health_store_claim=runtime['health_store_claim'], incident_store_claim=runtime['incident_store_claim'],
         health_stream=runtime['health_stream'], kubernetes_server=endpoint_with_port(tf['cluster_endpoint']),
         cluster_uid=runtime['cluster_uid'], namespace_uid=runtime['namespace_uid'],
-        deployment_uids=runtime['deployment_uids'], observer_secret=runtime['observer_secret'],
-        **{key: runtime[key] for key in ('remediation_store_claim', 'known_good_store_claim',
-            'model_claim', 'model_release_ref', 'policy_enabled') if key in runtime})
+        deployment_uids=runtime['deployment_uids'], observer_secret=runtime['observer_secret'], **worker_options)
     groups = {'10-testbed.yaml': business, '20-collector.yaml': aws,
               '30-api.yaml': api_docs, '40-workers.yaml': worker_docs, '50-traffic.yaml': traffic(images['application'])}
     # One Namespace definition per namespace; keep dependencies in numbered files.

@@ -86,29 +86,44 @@ Chỉ bật `database_skip_final_snapshot` và tắt `database_deletion_protecti
 
 Thêm vào các bước trên, theo [DEMO_UPGRADE_PLAN](../../docs/delivery/DEMO_UPGRADE_PLAN.md):
 
-1. **Email nhận cảnh báo** đặt ngoài Git, ví dụ file bị ignore
-   `infra/aws/demo-alerts.auto.tfvars` với `demo_alert_emails = ["<địa chỉ>"]`,
-   hoặc biến môi trường `TF_VAR_demo_alert_emails`. Plan sẽ có thêm topic SNS,
-   subscription, role `alerts_publisher` và Pod Identity association. Sau apply,
-   mở hộp thư và bấm **Confirm subscription**; chưa xác nhận thì không có email.
-2. **Image:** control-plane build từ commit mới đã chứa `run_risk_worker.py` và
-   `run_notifier.py`. Build thêm Payment v2 chậm dần bằng
-   `docker/Dockerfile.payment-gradual-regression` với `--build-arg BASE=<digest application>`,
-   push vào cùng repo `sentinelops/application`; trước khi build chạy
-   `python -m scripts.check_payment_regression_image --base <digest>` cho bản regression cũ.
-3. **Render worker** thêm `--early-warning --ui-url https://<edge_domain>/ui/
-   --alerts-otlp-endpoint http://otel-collector.sentinelops-b-actions.svc.cluster.local:4317
-   --alerts-topic-arn $(terraform -chdir=infra/aws output -raw demo_alerts_topic_arn)`
-   (cần `--model-claim` và `--model-release-ref`). Pod incident-worker có thêm
-   container `risk-worker`; pod remediation-controller có thêm `notifier`.
-   Log `notifier identity arn:aws:sts::…:assumed-role/<prefix>-alerts-publisher/…`
-   xác nhận Pod Identity hoạt động.
+1. **Email nhận cảnh báo.** Thêm trường `"demo_alert_emails": ["<địa chỉ>"]` vào
+   JSON riêng truyền qua `rebuild_infra.py --inputs`. Kiểm tra plan có đúng số
+   subscription, topic SNS và Pod Identity association. Sau apply, mở hộp thư
+   và bấm **Confirm subscription**.
+2. **Image.** Build control-plane của đúng commit rồi build lớp React/API trên
+   digest vừa xuất. Dùng tag mới trong cùng ECR repo control-plane:
+
+   ```bash
+   npm --prefix web ci
+   VITE_BASE_PATH=/ui/ npm --prefix web run build
+   docker build --platform linux/amd64 -f web/deployment/Dockerfile.live \
+     --build-arg OPERATOR_IMAGE="$CONTROL_PLANE_PIN" --build-arg OPERATOR_USER=10001:10001 \
+     --build-arg SOURCE_REVISION="$(git rev-parse HEAD)" -t "$OPERATOR_UI_TAG" web
+   docker push "$OPERATOR_UI_TAG"
+   ```
+
+   Ghi digest ECR của lớp React/API vào `operator-ui` trong `images.json`,
+   giữ digest gốc ở `control-plane`. Build Payment v2 bằng
+   `docker/Dockerfile.payment-gradual-regression` với `--build-arg BASE=<digest application>`
+   và push vào cùng repo `sentinelops/application`.
+3. **Render demo đầy đủ.** Sau bootstrap model và edge, đặt
+   `"early_warning": true` trong runtime JSON đã có `model_claim` và
+   `model_release_ref`. Chạy lại `render_all.sh` với Terraform outputs của
+   work-dir mới và `images.json` có cả hai digest. `30-api.yaml` tạo OIDC
+   ConfigMap và NodePort cho controller. `40-workers.yaml` thêm `risk-worker`
+   vào incident-worker, `operator-ui` và `notifier` vào controller. Chờ
+   `notifier identity arn:aws:sts::…:assumed-role/<prefix>-alerts-publisher/…`
+   trước khi bắt đầu đo. Khi đã kiểm known-good và được phép chạy rollback trên
+   AWS dev, render với `"policy_enabled": true` để on-call có thể duyệt proposal.
 4. **Fault Console:** đặt `DEMO_CONSOLE_GRADUAL_SCRIPT` (script deploy Payment v2 bằng
    runner với `--scenario gradual-regression --prometheus <url> --image-params '<json>'`)
    và `DEMO_CONSOLE_RESET_SCRIPT` (đưa Payment về known-good, tắt fault, chờ khỏe).
 5. **Nghiệm thu L2/L3** theo [DEMO_UPGRADE_SPEC](../../docs/delivery/DEMO_UPGRADE_SPEC.md) §1.5:
    một giờ khỏe rồi `python -m scripts.check_risk_quiet --prometheus <url> --minutes 60`;
-   sau đó chạy runner và `python -m scripts.check_demo_round <out>/round-*.json --require 3`.
+   sau đó chạy runner trong pod có mount chung PVC remediation để đọc xác nhận
+   gửi SNS của từng lượt. L2 kiểm một receipt bằng
+   `python -m scripts.check_demo_round <out>/round-1.json`; L3 kiểm ba receipt
+   từ cùng runner bằng `python -m scripts.check_demo_round <out>/round-*.json --require 3`.
    Panel "SentinelOps — Cảnh báo sớm" trên Grafana phải có số liệu, UI hiện
    "Chờ duyệt từ …" thay cho đồng hồ.
 

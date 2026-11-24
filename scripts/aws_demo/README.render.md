@@ -14,10 +14,12 @@ bash scripts/aws_demo/render_all.sh images.json terraform-outputs.json runtime.j
   --output artifacts/aws-demo/k8s-next
 ```
 
-- `images.json`: flat map đúng bảy key như `k8s-images.example.json`; tất cả là
+- `images.json`: flat map bảy key như `k8s-images.example.json`; tất cả là
   registry digest. ECR application/control-plane phải khớp Terraform outputs.
   `push_images_ecr.py` chỉ xuất hai image: lấy `images.<key>.pinned` rồi bổ sung
   năm image phụ trợ. Docker image inspect JSON không dùng trực tiếp được.
+  Khi bật `early_warning` trong runtime, thêm key `operator-ui` trỏ tới digest
+  lớp React/API trong cùng ECR repo control-plane theo [REBUILD.md](REBUILD.md).
 - Terraform outputs: JSON đã xuất sẵn theo định dạng `terraform output -json`,
   hoặc map giá trị trực tiếp. Ví dụ cấu trúc trong `k8s-terraform.example.json`.
   Lấy exporter role từ `collector_bindings.exporter_role_arn`, kiểm tra đối chiếu
@@ -28,6 +30,10 @@ bash scripts/aws_demo/render_all.sh images.json terraform-outputs.json runtime.j
   health worker đã được chấp nhận; SHA-256 giả chỉ dành cho kiểm tra offline.
   Worker URL Kubernetes dùng Terraform endpoint, thêm port 443 khi chưa có.
   API cần OIDC HTTPS công khai; audience claim có thể `aud` hoặc `client_id`.
+  `early_warning: true` cần model PVC/release và các output Terraform
+  `edge_domain`, `edge_api_node_port`, `operator_oidc_binding`, `operator_login_domain`,
+  `demo_alerts_topic_arn`. Lúc đó `30-api.yaml` cấp ConfigMap OIDC và NodePort
+  cho `operator-ui` cùng pod/PVC với controller.
 
 **Mọi digest/UID/OIDC trong example đều là dữ liệu thử; không apply kết quả thử.**
 Pipeline từ chối ghi đè thư mục đích, render vào staging, chạy

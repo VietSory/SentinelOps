@@ -28,6 +28,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import asyncpg
 
+from sentinelops.contracts import utc_time
+from sentinelops.notifications import read_notification_record
 from sentinelops.remediation.domain import Blocked, KubernetesUnavailable, Policy, Target, image_digest
 from sentinelops.remediation.journal import ActionJournal
 from sentinelops.remediation.kubernetes import LocalKubernetes
@@ -51,18 +53,20 @@ def _seconds(later, earlier):
         return None
 
 
+def _round_warning(episodes, deploy, breach):
+    return min((at for at in episodes if deploy and breach and _seconds(at, deploy) is not None
+                and _seconds(at, deploy) >= 0 and _seconds(breach, at) >= 0), default=None)
+
+
 def round_receipt(*, invocation, round_number, scenario, clocks, episodes, rca_top1, proposal, action,
                   dispatch_count, notifications, image_params, service='payment-service'):
     """Demo round receipt v2 (DEMO_UPGRADE_SPEC R5.4), checked by scripts.check_demo_round.
 
-    The warning is the last episode of the root service that started after the deploy and
+    The warning is the first episode of the root service that started after the deploy and
     no later than the first breach; derived timings are recomputed by the checker.
     """
     deploy, breach = clocks.get('deploy_started_at'), clocks.get('first_breach_at')
-    candidates = sorted(at for at in episodes.get(service, [])
-                        if deploy and breach and _seconds(at, deploy) is not None
-                        and _seconds(at, deploy) >= 0 and _seconds(breach, at) >= 0)
-    started = candidates[-1] if candidates else None
+    started = _round_warning(episodes.get(service, []), deploy, breach)
     redacted = {k: v for k, v in (proposal or {}).items() if k not in ('current_image', 'rollback_image', 'target')}
     return {'receipt_version': 'runbook-demo-round/v2', 'runner_invocation_id': invocation, 'round': round_number,
             'scenario': scenario, **{k: clocks.get(k) for k in (
@@ -73,6 +77,22 @@ def round_receipt(*, invocation, round_number, scenario, clocks, episodes, rca_t
             'deploy_to_breach_seconds': _seconds(breach, deploy), 'rca_top1': rca_top1, 'proposal': redacted,
             'action': dict(action), 'dispatch_count': dispatch_count, 'notifications': dict(notifications),
             'image_params': dict(image_params), 'demo_mode': True, 'q09_eligible': False}
+
+
+def round_notifications(root, *, proposal_id, service, warning, started):
+    keys = {'early_warning': f'warning:{service}:{warning}' if warning else None,
+            'proposal_pending': f'proposal:{proposal_id}',
+            'outcome': f'outcome:{proposal_id}:recovered'}
+    counts = dict.fromkeys(keys, 0)
+    for kind, key in keys.items():
+        if key is None:
+            continue
+        record = read_notification_record(root, key)
+        if (record and record.get('kind') == kind and record.get('key') == key
+                and record.get('message_id') not in (None, '', 'seeded-existing-event', 'disabled')
+                and utc_time(record['sent_at']) >= utc_time(started)):
+            counts[kind] = 1
+    return counts
 
 
 async def wait_for(read, accept, *, timeout, poll, clock, sleep):
@@ -361,7 +381,6 @@ class Backend:
         payload = json.loads(row['payload']) if isinstance(row['payload'], str) else row['payload']
         ranking = payload.get('root_cause_ranking') or []
         approval = read_slot(self.store, 'approval', decision['proposal_id'])
-        await asyncio.sleep(30)  # let the notifier report the outcome email
         start = datetime.fromisoformat(started.replace('Z', '+00:00')).timestamp()
         end = datetime.now(timezone.utc).timestamp()
         service = ranking[0]['service'] if ranking else 'payment-service'
@@ -370,18 +389,26 @@ class Backend:
             'start': start - 1800, 'end': end, 'step': 60})
         episodes = sorted({datetime.fromtimestamp(float(v), timezone.utc).isoformat().replace('+00:00', 'Z')
                            for item in series for _, v in item['values']})
-        counts = await asyncio.to_thread(self._prometheus, '/api/v1/query', {
-            'query': f'sum by (kind) (increase(sentinelops_notifications_sent_total[{int(end - start) + 60}s]))'})
-        sent = {item['metric'].get('kind'): round(float(item['value'][1])) for item in counts}
         onset = next((item.get('first_anomaly_at') for item in payload.get('service_signals') or []
                       if item.get('service') == service), None)
+        warning = _round_warning(episodes, started, onset)
+
+        async def read_notifications():
+            return await asyncio.to_thread(round_notifications, self.store.root / 'notifier',
+                proposal_id=decision['proposal_id'], service=service, warning=warning, started=started)
+
+        try:
+            sent = await wait_for(read_notifications, lambda counts: counts['outcome'] == 1,
+                timeout=30, poll=2, clock=time.monotonic, sleep=asyncio.sleep)
+        except TimeoutError:
+            sent = await read_notifications()
         return {'clocks': {'first_breach_at': onset,
                            'incident_created_at': timestamp(row['created_at']),
                            'proposal_created_at': decision.get('created_at'),
                            'approved_at': approval.get('approved_at') if approval else None,
                            'recovered_at': receipt.get('verdict_observed_at')},
                 'episodes': {service: episodes}, 'rca_top1': ranking[0]['service'] if ranking else None,
-                'notifications': {kind: sent.get(kind, 0) for kind in ('early_warning', 'proposal_pending', 'outcome')}}
+                'notifications': sent}
 
     async def known_good(self, instant):
         return await self.registry.resolve(self.kube.target, incident_at=instant)

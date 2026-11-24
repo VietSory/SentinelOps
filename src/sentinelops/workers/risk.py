@@ -159,7 +159,7 @@ class RiskMetrics:
                           [Observation(utc_time(v['started_at']).timestamp(), {'service': s})])
 
     def _scored(self, _options):
-        return self._each(lambda s, v: [Observation(v['scored_at'], {'service': s})])
+        return self._each(lambda s, v: [] if v['score'] is None else [Observation(v['scored_at'], {'service': s})])
 
     def _threshold(self, _options):
         return [Observation(value, {'service': service, 'level': level})

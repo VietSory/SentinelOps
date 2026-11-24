@@ -618,7 +618,8 @@ def assert_edge(blocks: dict[str, dict]) -> list[str]:
             raise ValueError('edge permits only the declared internal ALB')
         if key.startswith(('aws_lb_listener.', 'aws_lb_listener_rule.')) and key not in {
                 'aws_lb_listener.edge', 'aws_lb_listener_rule.edge_deny',
-                'aws_lb_listener_rule.edge_allow_grafana_jaeger_module', 'aws_lb_listener_rule.edge_allow'}:
+                'aws_lb_listener_rule.edge_allow_grafana_jaeger_module', 'aws_lb_listener_rule.edge_allow',
+                'aws_lb_listener_rule.edge_allow_readiness'}:
             raise ValueError('edge permits only the declared deny/default and allow path rules')
         if key.startswith(('aws_vpc_security_group_ingress_rule.', 'aws_security_group_rule.')):
             assignments = _assignments(body)
@@ -672,8 +673,14 @@ def assert_edge(blocks: dict[str, dict]) -> list[str]:
         raise ValueError('only GET/HEAD may load Grafana Jaeger plugin assets')
     require('aws_lb_listener_rule.edge_allow', 'for_each', 'var.edge_enabled ? local.edge_paths : {}')
     require('aws_lb_listener_rule.edge_allow', 'type', '"forward"')
-    require('aws_lb_listener_rule.edge_allow', 'values', 'each.value')
+    require('aws_lb_listener_rule.edge_allow', 'values', 'slice(each.value, 0, min(3, length(each.value)))')
     require('aws_lb_listener_rule.edge_allow', 'target_group_arn', 'aws_lb_target_group.edge[each.key].arn')
+    require('aws_lb_listener_rule.edge_allow_readiness', 'count', 'var.edge_enabled ? 1 : 0')
+    require('aws_lb_listener_rule.edge_allow_readiness', 'listener_arn', 'aws_lb_listener.edge[0].arn')
+    require('aws_lb_listener_rule.edge_allow_readiness', 'priority', '11')
+    require('aws_lb_listener_rule.edge_allow_readiness', 'type', '"forward"')
+    require('aws_lb_listener_rule.edge_allow_readiness', 'target_group_arn', 'aws_lb_target_group.edge["api"].arn')
+    require('aws_lb_listener_rule.edge_allow_readiness', 'values', 'slice(local.edge_paths.api, 3, length(local.edge_paths.api))')
     edge = normalize((ROOT/'edge.tf').read_text())
     paths = re.search(r'edge_paths = \{([^}]+)\}', edge)
     if paths is None or _assignments(paths.group(1)) != {

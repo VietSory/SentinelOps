@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from scripts.kubernetes_testbed import NAMESPACE as CONTROLLER_NAMESPACE
 from scripts.render_business_manifests import NAMESPACE, _label
 from sentinelops.api_settings import LOCAL_ENVIRONMENTS
 from sentinelops.oidc import OidcConfig
@@ -76,7 +77,8 @@ def render(image: str, *, environment: str, control_secret: str, issuer: str,
         if not isinstance(model_release_ref, str) or not MODEL_REF.fullmatch(model_release_ref):
             raise ValueError('model release must be a checksummed artifact manifest reference')
     labels = {'app.kubernetes.io/part-of': 'sentinelops'}
-    metadata = lambda name: {'name': name, 'namespace': NAMESPACE, 'labels': dict(labels)}
+    namespace = CONTROLLER_NAMESPACE if controller_sidecar else NAMESPACE
+    metadata = lambda name: {'name': name, 'namespace': namespace, 'labels': dict(labels)}
     data = {'SENTINELOPS_ENV': environment, 'SENTINELOPS_ENABLE_DEMO': 'false',
             'SENTINELOPS_OIDC_ISSUER': oidc.issuer, 'SENTINELOPS_OIDC_AUDIENCE': oidc.audience,
             'SENTINELOPS_OIDC_JWKS_URL': oidc.jwks_url,

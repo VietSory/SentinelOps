@@ -142,8 +142,11 @@ run "private_uncached_https_edge" {
       aws_lb_listener.edge[0].default_action[0].type == "fixed-response" &&
       aws_lb_listener.edge[0].default_action[0].fixed_response[0].status_code == "403" &&
       aws_lb_listener_rule.edge_deny[0].priority < aws_lb_listener_rule.edge_allow["api"].priority &&
+      aws_lb_listener_rule.edge_deny[0].priority < aws_lb_listener_rule.edge_allow_readiness[0].priority &&
       aws_lb_listener_rule.edge_deny[0].priority < aws_lb_listener_rule.edge_allow["grafana"].priority &&
       one(aws_lb_listener_rule.edge_allow["api"].condition).path_pattern[0].values == toset(["/ui", "/ui/*", "/v1/*"]) &&
+      one(aws_lb_listener_rule.edge_allow_readiness[0].condition).path_pattern[0].values == toset(["/ready", "/ready/incidents"]) &&
+      one(aws_lb_listener_rule.edge_allow_readiness[0].action).target_group_arn == aws_lb_target_group.edge["api"].arn &&
       one(aws_lb_listener_rule.edge_allow["grafana"].condition).path_pattern[0].values == toset(["/grafana", "/grafana/*"]) &&
       alltrue([for target in aws_lb_target_group.edge : target.target_type == "instance"]) &&
       alltrue([for attachment in aws_autoscaling_attachment.edge : attachment.autoscaling_group_name == "eks-demo-fixture"])

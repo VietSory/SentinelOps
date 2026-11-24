@@ -36,6 +36,42 @@ def test_namespace_and_observed_uid_composition():
     assert not any(doc['kind'] == 'Secret' for doc in docs)
 
 
+def test_early_warning_manifest_uses_live_ui_on_the_controller_pvc():
+    images, tf, runtime = inputs()
+    repository = tf['image_repository_urls']['control-plane']
+    images['operator-ui'] = repository + '@sha256:' + 'a' * 64
+    tf.update(edge_domain='demo.example.invalid', edge_api_node_port=30081,
+              operator_login_domain='https://login.example.invalid',
+              operator_oidc_binding={**runtime['oidc'], 'audience_claim': 'client_id',
+                                     'audience': 'operator-client', 'approval_scope': 'sentinelops/remediation.approve'},
+              demo_alerts_topic_arn='arn:aws:sns:ap-southeast-1:123456789012:demo-alerts')
+    runtime.update(early_warning=True, model_claim='model-artifacts',
+                   model_release_ref='artifact://manifests/' + 'f' * 64 + '.json')
+
+    groups = pipeline.render(images, tf, runtime)
+    config, service = groups['30-api.yaml']
+    assert config['kind'] == 'ConfigMap'
+    assert config['data']['SENTINELOPS_OIDC_LOGIN_DOMAIN'] == tf['operator_login_domain']
+    assert config['data']['SENTINELOPS_OIDC_AUDIENCE'] == 'operator-client'
+    assert service['spec']['ports'][0]['nodePort'] == 30081
+    assert service['spec']['selector'] == {'app': 'remediation-controller'}
+    deployments = {doc['metadata']['name']: doc for doc in groups['40-workers.yaml'] if doc['kind'] == 'Deployment'}
+    controller = deployments['remediation-controller']
+    assert config['metadata']['namespace'] == service['metadata']['namespace'] == controller['metadata']['namespace']
+    containers = {c['name']: c for c in controller['spec']['template']['spec']['containers']}
+    assert containers['operator-ui']['image'] == images['operator-ui']
+    assert containers['remediation-controller']['image'] == images['control-plane']
+    assert tf['demo_alerts_topic_arn'] in containers['notifier']['args']
+    assert 'https://demo.example.invalid/ui/' in containers['notifier']['args']
+    incident = deployments['sentinelops-incident-worker']['spec']['template']['spec']['containers']
+    assert [c['name'] for c in incident] == ['incident-worker', 'risk-worker']
+    assert runtime['model_release_ref'] in incident[1]['args']
+
+    images['operator-ui'] = images['control-plane']
+    with pytest.raises(ValueError, match='distinct live overlay digest'):
+        pipeline.render(images, tf, runtime)
+
+
 @pytest.mark.parametrize('change', ['image-tag', 'reader-role', 'missing-uid', 'region', 'repository'])
 def test_invalid_bindings_are_rejected(change):
     images, tf, runtime = deepcopy(inputs())

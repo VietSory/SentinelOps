@@ -107,7 +107,8 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
            health_metrics_instance: str = 'health-0',
            incident_metrics_instance: str = 'incidents-0',
            early_warning: bool = False, alerts_topic_arn: str | None = None,
-           ui_url: str | None = None, alerts_otlp_endpoint: str | None = None) -> list[dict]:
+           ui_url: str | None = None, alerts_otlp_endpoint: str | None = None,
+           demo_ui_image: str | None = None) -> list[dict]:
     image_digest(image)
     if type(early_warning) is not bool:
         raise ValueError('early_warning must be an explicit boolean')
@@ -132,6 +133,10 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
         raise ValueError('policy_enabled must be an explicit boolean')
     if type(demo_ui) is not bool:
         raise ValueError('demo_ui must be an explicit boolean')
+    if demo_ui_image is not None:
+        if not demo_ui:
+            raise ValueError('demo_ui_image requires demo_ui')
+        image_digest(demo_ui_image)
     if metrics_otlp_endpoint is not None:
         _validate_metrics(environment, metrics_otlp_endpoint, health_metrics_instance, incident_metrics_instance)
     _label(environment, 'environment')
@@ -347,14 +352,14 @@ def render(image: str, *, environment: str, control_database: str, database_ca_c
     documents += _controller(image, target, metadata, labels, hardening,
         health_store_claim, incident_store_claim, remediation_store_claim,
         known_good_store_claim, database_ca_config, health_stream, environment, policy_enabled,
-        model_claim, model_release_ref, demo_ui,
+        model_claim, model_release_ref, (demo_ui_image or image) if demo_ui else None,
         notifier={'topic_arn': alerts_topic_arn, 'ui_url': ui_url, 'otlp': alerts_otlp_endpoint} if early_warning else None)
     return documents
 
 
 def _controller(image, target, metadata, labels, hardening, health_claim, incident_claim,
                 remediation_claim, known_good_claim, database_ca_config, health_stream, environment,
-                enabled, model_claim, model_release_ref, demo_ui, notifier=None):
+                enabled, model_claim, model_release_ref, demo_ui_image, notifier=None):
     """Use the same non-root private credential copy as PR #70.
 
     remediation-runtime is provisioned separately by the operator: action-database-url
@@ -415,7 +420,7 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
     # Same Pod/PVC as the controller (RWO cannot be attached independently on
     # another node). The API renderer supplies OIDC config and the ALB Service.
     ui = []
-    if demo_ui:
+    if demo_ui_image:
         ui_bootstrap = (
             'import os\nfrom urllib.parse import urlsplit, urlunsplit, quote\n'
             'from sentinelops.api import create_app\nimport uvicorn\n'
@@ -451,7 +456,7 @@ def _controller(image, target, metadata, labels, hardening, health_claim, incide
             ui_env += [{'name': 'SENTINELOPS_MODEL_STORE', 'value': '/models'},
                        {'name': 'SENTINELOPS_MODEL_RELEASE_REF', 'value': model_release_ref}]
             ui_mounts.append({'name': 'models', 'mountPath': '/models', 'readOnly': True})
-        ui = [{'name': 'operator-ui', 'image': image, 'imagePullPolicy': 'IfNotPresent',
+        ui = [{'name': 'operator-ui', 'image': demo_ui_image, 'imagePullPolicy': 'IfNotPresent',
             'command': ['python', '-c', ui_bootstrap], 'env': ui_env,
             'envFrom': [{'configMapRef': {'name': 'sentinelops-api-runtime', 'optional': False}}],
             'ports': [{'name': 'http', 'containerPort': 8000}],
@@ -550,6 +555,7 @@ def main():
     parser.add_argument('--early-warning', action='store_true',
         help='Add the risk-worker and notifier sidecars (requires model claim/release, --ui-url, --alerts-otlp-endpoint)')
     parser.add_argument('--alerts-topic-arn', help='SNS topic for demo emails (terraform output demo_alerts_topic_arn)')
+    parser.add_argument('--demo-ui-image', help='Digest of the optional live React/API overlay')
     parser.add_argument('--ui-url', help='https operator UI URL used in emails')
     parser.add_argument('--alerts-otlp-endpoint', help='In-cluster Collector OTLP endpoint for risk/notifier metrics')
     parser.add_argument('--output', type=Path, required=True)

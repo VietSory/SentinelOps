@@ -190,7 +190,23 @@ resource "aws_lb_listener_rule" "edge_allow" {
   }
   condition {
     path_pattern {
-      values = each.value
+      values = slice(each.value, 0, min(3, length(each.value)))
+    }
+  }
+}
+
+# ALB permits only three comparison strings per condition.
+resource "aws_lb_listener_rule" "edge_allow_readiness" {
+  count        = var.edge_enabled ? 1 : 0
+  listener_arn = aws_lb_listener.edge[0].arn
+  priority     = 11
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.edge["api"].arn
+  }
+  condition {
+    path_pattern {
+      values = slice(local.edge_paths.api, 3, length(local.edge_paths.api))
     }
   }
 }

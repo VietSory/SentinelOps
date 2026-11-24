@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts import run_runbook_demo as demo
+from sentinelops.notifications import Dispatcher, Notification, RecordingNotifier
 from sentinelops.remediation.domain import Target
 from sentinelops.telemetry.core import stable_id
 
@@ -16,6 +17,38 @@ TARGET = Target('cluster', 'sentinelops-b-actions', 'namespace', 'payment-servic
 GOOD = 'registry.invalid/sentinelops/application@sha256:' + 'a' * 64
 # Same repository as GOOD: the executor only rolls back to a distinct same-repository digest.
 BAD = 'registry.invalid/sentinelops/application@sha256:' + 'b' * 64
+
+
+def test_round_counts_first_sns_receipts_and_excludes_other_events(tmp_path):
+    service = 'payment-service'
+    started, warning = '2000-01-01T00:00:00Z', '2000-01-01T00:02:00Z'
+    dispatch = Dispatcher(tmp_path, RecordingNotifier())
+    warning_event = Notification('early_warning', f'warning:{service}:{warning}', '', '')
+    proposal_event = Notification('proposal_pending', 'proposal:p1', '', '')
+    outcome_event = Notification('outcome', 'outcome:p1:recovered', '', '')
+    for kind, key in [('early_warning', 'warning:inventory-service:' + warning),
+                      ('proposal_pending', 'proposal:p2'), ('outcome', 'outcome:p1:escalated')]:
+        assert dispatch.deliver(Notification(kind, key, '', '')) == 'sent'
+    dispatch.record(warning_event, 'seeded-existing-event')
+    dispatch.record(proposal_event, 'disabled')
+    args = dict(proposal_id='p1', service=service, warning=warning, started=started)
+    assert demo.round_notifications(tmp_path, **args) == {'early_warning': 0, 'proposal_pending': 0, 'outcome': 0}
+
+    for event in (warning_event, proposal_event, outcome_event):
+        dispatch.record(event, 'sns-publish-id')
+    assert demo.round_notifications(tmp_path, **args) == {'early_warning': 1, 'proposal_pending': 1, 'outcome': 1}
+
+
+def test_round_uses_the_first_warning_after_deployment():
+    episodes = ['2000-01-01T00:03:00Z', '1999-12-31T23:59:00Z', '2000-01-01T00:02:00Z']
+    receipt = demo.round_receipt(
+        invocation='demo', round_number=1, scenario='gradual-regression',
+        clocks={'deploy_started_at': '2000-01-01T00:00:00Z', 'first_breach_at': '2000-01-01T00:05:00Z'},
+        episodes={'payment-service': episodes}, rca_top1='payment-service', proposal=None,
+        action={}, dispatch_count=0, notifications={}, image_params={},
+    )
+    assert receipt['warning']['episode_started_at'] == '2000-01-01T00:02:00Z'
+    assert receipt['lead_seconds'] == 180
 
 
 class Clock:

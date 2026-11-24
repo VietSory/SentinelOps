@@ -709,9 +709,8 @@ jobs:
       # must never be able to reach an account or create a resource.
       - run: terraform -chdir=infra/aws init -backend=false -input=false
       - run: python -m scripts.check_aws_iac --output artifacts/iac/ci-aws.json
-      # Both AWS/TLS providers are mocked in this specific test file. No cloud
-      # plan/apply or account access: evaluate rendered policy JSON and graph.
-      - run: terraform -chdir=infra/aws test -filter=tests/cloudwatch_kms.tftest.hcl -no-color
+      # Both AWS/TLS providers are mocked in these tests.
+      - run: terraform -chdir=infra/aws test -no-color
       - name: Validate AWS collector configuration offline with the pinned real binary
         run: python -m scripts.check_collector_config --pull
       - name: Validate collector and log-enabled business resources against Kubernetes 1.34 schemas

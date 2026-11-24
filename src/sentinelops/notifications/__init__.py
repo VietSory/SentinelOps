@@ -21,6 +21,17 @@ TOPIC_ARN = re.compile(r'arn:aws:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}')
 MAX_ATTEMPTS = 10
 
 
+def _record_path(root: Path, key: str) -> Path:
+    return root / (hashlib.sha256(key.encode()).hexdigest() + '.json')
+
+
+def read_notification_record(root: Path, key: str) -> dict | None:
+    try:
+        return json.loads(_record_path(root, key).read_text())
+    except FileNotFoundError:
+        return None
+
+
 @dataclass(frozen=True)
 class Notification:
     kind: str
@@ -92,7 +103,7 @@ class Dispatcher:
         self.max_attempts, self.attempts = max_attempts, {}
 
     def _path(self, key):
-        return self.root / (hashlib.sha256(key.encode()).hexdigest() + '.json')
+        return _record_path(self.root, key)
 
     def sent(self, key):
         return self._path(key).exists()
