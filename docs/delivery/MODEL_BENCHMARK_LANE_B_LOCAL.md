@@ -81,6 +81,20 @@ Receipt `detector-projection/development-v1` ghim cùng dataset, clock, windows,
 
 ## Handoff để qua gate còn thiếu
 
+### Kiểm chứng local trước PR
+
+| Kiểm tra | Kết quả |
+| --- | --- |
+| ADSketch gốc `f7bd642c` | 67 chuỗi Yahoo. Precision 0,524, recall 0,682, F1 0,554. SHA-256 của log `339f5f19c2bee239142c4798cde0523de88852d86b188bf30d886a2f4f464cc9` |
+| B01 | 10/10 vị trí subsequence bất thường và 50/50 gán pattern khớp bản tham chiếu. Sai số bán kính lớn nhất `1,776e-15` |
+| Fit và phục hồi trên fixture | 306 score tái tạo với sai số 0. Mỗi detector có 101 negative và 1 positive calibration. Rule giữ tie ở ngân sách 1% đã được kiểm |
+| Regression Python | 127 test benchmark đạt. Ca scoring bundle `de38fc6b` đạt khi chạy riêng với đường dẫn local. Bộ LTFP CPU còn skip vì môi trường local thiếu PyTorch |
+| Demo checker và UI | 58 test Python và 1 test Node đạt. Baseline load và archive/restore thành công. Image chạy offline trả `503 model_unavailable` khi thiếu model |
+
+Log, input B01, receipt image và SHA-256 được giữ trong `artifacts/lane-b/model-benchmark-20261125` trên máy B.
+
+### Dữ liệu và môi trường cần từ A và B
+
 - A giao đủ 120 Parquet và sidecar của snapshot P0, source manifest, split, protocol và tập event oracle. Manifest bundle và fit report trên máy B đã khớp hash P0. Dataset source chưa materialize trên máy B. B dùng cùng split để đối chiếu B02/B06, fit thật, hiệu chuẩn và giao `fit/b` cùng SHA.
 - A+B khóa ứng viên và mở capture chung theo protocol. B chấm ba detector trên cùng group/run, đối chiếu denominator và số mẫu. Nếu làm thí nghiệm không có đủ sự kiện, dùng `INCONCLUSIVE` và giữ baseline phục vụ.
 - B mang đúng cặp Payment image `e520e702…` và `766dd5f5…` từ kho nội bộ được duyệt hoặc cùng owner chốt cặp image đang có trong cache local. Cần namespace/testbed riêng, UID deployment, known-good ledger, stream đã commit và approval của on-call. `scripts.check_risk_quiet` và `scripts.check_demo_round` đọc endpoint và receipt của cùng lần rehearsal.
