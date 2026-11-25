@@ -210,6 +210,8 @@ Bài LTFP dự báo xác suất lỗi trong một cửa sổ tương lai và có
 
 Các ca này kiểm logic oracle và scorer với dữ liệu giả lập, gồm bỏ suffix tương lai và hàng nguồn đến sau cutoff. Chúng không thay thế kiểm chứng graph/worker bằng dữ liệu thật ở A07 hoặc bằng chứng hỗ trợ calibration ở A08.
 
+Checker `python -m scripts.check_ltfp_graph_parity --worker --run <run.json>` phát lại HTTP đã lưu qua `HealthWorker.tick`, native capture, normalization và manifest thực của worker. Transport và DB là các đối tượng giả có trạng thái; đồng hồ là đồng hồ replay. Khi một capture đến muộn, toàn batch chưa khả dụng trước cutoff chấp nhận, rồi khả dụng tại đúng receipt. Mode này không chứng minh DB PostgreSQL, độ trễ live, ledger lịch sử, thời điểm topology từng được nạp hay parity của scorer. Mode `--topology` cũ vẫn là đối chiếu adapter với batch dựng lại.
+
 Nhãn Alibaba dùng mean HTTP latency tương đối với baseline service; rule mặc định có K = 2, 4, 8, 16, 32, 64. Thử nghiệm chính phải ghi cách condition theo K hoặc khoảng cách baseline/SLO, để biết đưa ngưỡng local 750 ms vào model thế nào. K=16 là mốc smoke và mức `degrading`. Mean là input được phép nếu qua parity; oracle local vẫn dùng p95. Mỗi service Alibaba vào đúng bucket `sha256(msname) mod 10`: 0–5 train, 6–7 calibration, 8–9 evaluation. Power/time split nằm trong manifest, có purge cả baseline tối đa 60 phút, chuỗi 5 bước, feature 5 phút, horizon và confirmation tail. Kiểm theo **min/max timestamp thực sự dùng** cho mỗi window. Giữ `ald` ở development; local chỉ đánh giá. [Cấu hình chính xác](../../configs/alibaba_relative_features.json) · [Topology local](../../configs/topology.yaml)
 
 ### D2-B · Tái hiện ADSketch và giao diện detector
