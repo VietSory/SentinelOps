@@ -14,6 +14,28 @@ def project_relative_window(store, batch_ref, service, *, as_of, config):
     """Project the final window only; missing or late observations never become zeros."""
     if service not in BUSINESS_ROUTES:
         raise ValueError("relative projection requires a registered business service")
+    history = _accepted_minutes(store, batch_ref, as_of=as_of, config=config)
+    if history is None:
+        return None
+    end, _, rows = history
+    rows = rows[service]
+    window = config["window_minutes"]
+    anchor_minute = int(end.timestamp()) // 60
+    values = relative_feature_values({minute: (rt, rate) for minute, (rt, rate, _) in rows.items()},
+                                     anchor_minute, config)
+    if values is None:
+        return None
+    return {
+        "projection_version": "accepted-alibaba-feature/v1", "feature_set_version": config["feature_set_version"],
+        "service": service, "source_profile": SOURCE_PROFILE_V2, "batch_ref": batch_ref,
+        "window_start": timestamp(end - timedelta(minutes=window)), "window_end": timestamp(end),
+        "as_of": timestamp(as_of), "raw_refs": [rows[minute][2] for minute in sorted(rows)],
+        "features": dict(zip(config["features"], values)),
+    }
+
+
+def _accepted_minutes(store, batch_ref, *, as_of, config, extra_minutes=0):
+    """Decode the bounded accepted history once for all registered services."""
     anchor = store.read(batch_ref)
     identity = anchor["identity"]
     stream = anchor["stream_id"]
@@ -27,8 +49,8 @@ def project_relative_window(store, batch_ref, service, *, as_of, config):
         return None
 
     window = config["window_minutes"]
-    count = window + config["baseline"]["max_minutes"]
-    rows = {}
+    count = window + config["baseline"]["max_minutes"] + extra_minutes
+    rows = {service: {} for service in BUSINESS_ROUTES}
     batch = anchor
     for offset in range(count):
         bucket_end = end - timedelta(minutes=offset)
@@ -43,7 +65,7 @@ def project_relative_window(store, batch_ref, service, *, as_of, config):
             raise ValueError("relative history contains foreign or duplicated raw captures")
         if utc_time(batch["evaluated_at"]) <= as_of:
             for ref, raw in captures:
-                if raw["service"] != service or utc_time(raw["collected_at"]) > as_of:
+                if utc_time(raw["collected_at"]) > as_of:
                     continue
                 try:
                     observation = decode_capture(raw, environment=identity["environment"])
@@ -52,23 +74,28 @@ def project_relative_window(store, batch_ref, service, *, as_of, config):
                     continue
                 if (observation["quality"]["eligible_for_inference"] and mean is not None
                     and math.isfinite(mean) and mean > 0):
-                    rows[int(bucket_end.timestamp()) // 60] = (mean, observation["measurements"]["request_count"], ref)
+                    rows[raw["service"]][int(bucket_end.timestamp()) // 60] = (
+                        mean, observation["measurements"]["request_count"], ref)
         if not batch["previous_batch_ref"] or offset == count - 1:
             break
         batch = store.read(batch["previous_batch_ref"])
 
-    anchor_minute = int(end.timestamp()) // 60
-    values = relative_feature_values({minute: (rt, rate) for minute, (rt, rate, _) in rows.items()},
-                                     anchor_minute, config)
-    if values is None:
+    return end, identity, rows
+
+
+def project_graph_window(store, batch_ref, *, node_ids, topology, as_of, config, self_only=False):
+    """Project development graph inputs; this does not select or activate an estimator."""
+    from sentinelops.ml.ltfp_graph import build_graph_input
+
+    history = _accepted_minutes(store, batch_ref, as_of=as_of, config=config, extra_minutes=4)
+    if history is None:
         return None
-    return {
-        "projection_version": "accepted-alibaba-feature/v1", "feature_set_version": config["feature_set_version"],
-        "service": service, "source_profile": SOURCE_PROFILE_V2, "batch_ref": batch_ref,
-        "window_start": timestamp(end - timedelta(minutes=window)), "window_end": timestamp(end),
-        "as_of": timestamp(as_of), "raw_refs": [rows[minute][2] for minute in sorted(rows)],
-        "features": dict(zip(config["features"], values)),
-    }
+    end, identity, rows = history
+    observations = {service: {minute: {"rt": rt, "rate": rate, "raw_ref": ref,
+                    "available_at": timestamp(as_of)} for minute, (rt, rate, ref) in minutes.items()}
+                    for service, minutes in rows.items()}
+    return build_graph_input(node_ids, observations, anchor=end, as_of=as_of, config=config,
+                             topology=topology, source_identity=identity, self_only=self_only)
 
 
 def relative_feature_values(minutes, anchor, config):

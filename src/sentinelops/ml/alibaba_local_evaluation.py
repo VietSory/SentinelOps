@@ -126,6 +126,42 @@ def metric_event_cases(cases, service, measure, threshold, persistence):
     return projected
 
 
+def latency_forecast_labels(frame, oracle, health_policy):
+    """Label benchmark latency onsets from verified request truth after freezing inputs."""
+    validate_policy(health_policy)
+    start, end, cutoff = (utc_time(frame[key]) for key in ('window_start', 'window_end', 'as_of'))
+    if end.second or end.microsecond or end - start != timedelta(minutes=5) or cutoff < end:
+        raise ValueError('latency forecast requires a closed five-minute UTC window')
+    projected, = metric_event_cases([{'oracle': oracle}], frame['service'], 'p95_latency_ms',
+                                   health_policy['latency_ms'], health_policy['entry_buckets'])
+    evidence = projected['oracle']['services'][frame['service']]
+    buckets = evidence['buckets']
+    onset = utc_time(evidence['first_violation_at']) if evidence['first_violation_at'] else None
+    future = end + timedelta(seconds=300)
+    positive = onset is not None and cutoff < onset <= future
+    tail = (utc_time(evidence['confirmed_at']) if positive else
+            future + timedelta(minutes=health_policy['entry_buckets']))
+    history = [buckets.get(str(int(start.timestamp()) + offset * 60)) for offset in range(5)]
+    risk, reason = None, None
+    if cutoff >= end + timedelta(seconds=min(60, health_policy['maximum_lag_seconds'])):
+        reason = 'forecast-anchor-minute-advanced'
+    elif not all(item and item['availability'] == 'VERIFIED' for item in history):
+        reason = 'incomplete-history-oracle'
+    elif onset is not None and cutoff >= onset:
+        reason = 'incident-or-post-incident'
+    elif not all(item['breach'] is False for item in history):
+        reason = 'history-not-healthy'
+    elif (utc_time(oracle['ended_at']) < tail or
+          not all(buckets.get(str(instant), {}).get('availability') == 'VERIFIED'
+                  for instant in range(int(end.timestamp()), int(tail.timestamp()), 60))):
+        reason = 'insufficient-future-oracle'
+    else:
+        risk = int(positive)
+    return {'risk_label': risk, 'risk_missing_reason': reason, 'prediction_cutoff': frame['as_of'],
+            'risk_forecast_anchor_at': frame['window_end'], 'slo_onset_at': evidence['first_violation_at'],
+            'future_confirmation_tail': timestamp(tail)}
+
+
 def score_by_route(records, cases, protocol):
     """Keep latency, HTTP errors and gradual-forecast denominators separate."""
     slo = SLOConfig()

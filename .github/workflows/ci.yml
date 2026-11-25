@@ -38,6 +38,36 @@ jobs:
       - run: pytest -q
       - run: python scripts/check_installed_package.py
 
+  ltfp-cpu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements-ltfp-cpu.txt
+      - run: pip install -e '.[ml,dev]' -r requirements-ltfp-cpu.txt
+      - name: Require real CPU PyTorch and run required benchmark, graph, model, CLI and caller checks
+        run: |
+          python -c "import numpy, pandas, pyarrow, sklearn, xgboost, torch; assert torch.__version__ == '2.7.1+cpu'; assert torch.version.cuda is None"
+          test -f tests/test_model_benchmark_protocol.py && test -f tests/test_model_benchmark_launcher.py && test -f tests/test_model_benchmark_runner.py && test -f tests/test_ltfp_training.py
+          pytest -q -ra tests/test_model_benchmark*.py tests/test_ltfp*.py tests/test_alibaba*.py tests/test_ml_pipeline.py tests/test_model_signals.py --junitxml=ltfp-cpu.xml
+          python - <<'PYTEST'
+          from xml.etree import ElementTree
+          skipped = ElementTree.parse('ltfp-cpu.xml').findall('.//testcase/skipped')
+          unexpected = [item.attrib.get('message', '') for item in skipped
+              if item.attrib.get('message') != 'local de38fc6b development bundle unavailable']
+          assert not unexpected, f'Required ML/LTFP tests skipped: {unexpected}'
+          print(f'Optional local development bundle skips: {len(skipped)}; required ML/LTFP skips: 0')
+          PYTEST
+
   public-data:
     needs: changes
     if: needs.changes.outputs.public_data == 'true'
@@ -747,7 +777,7 @@ jobs:
 
   ci-summary:
     if: always()
-    needs: [changes, foundation, public-data, incident-storage, remediation-integration, host-process-integration, observability, multi-fault-development, health-worker-integration, incident-worker-s5, ui, iac]
+    needs: [changes, foundation, ltfp-cpu, public-data, incident-storage, remediation-integration, host-process-integration, observability, multi-fault-development, health-worker-integration, incident-worker-s5, ui, iac]
     runs-on: ubuntu-latest
     steps:
       - name: Require every applicable check and report a stable conclusion
@@ -758,7 +788,7 @@ jobs:
           import json, os
           needs=json.loads(os.environ['NEEDS_JSON'])
           outputs=needs['changes'].get('outputs',{})
-          expected={'changes':True,'foundation':True,
+          expected={'changes':True,'foundation':True,'ltfp-cpu':True,
               'public-data':outputs.get('public_data')=='true','ui':outputs.get('ui')=='true'}
           for name in ('incident-storage','remediation-integration','host-process-integration','observability','multi-fault-development','health-worker-integration','incident-worker-s5','iac'):
               expected[name]=outputs.get('native')=='true'

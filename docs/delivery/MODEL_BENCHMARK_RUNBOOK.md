@@ -201,6 +201,15 @@ Bài LTFP dự báo xác suất lỗi trong một cửa sổ tương lai và có
 | A08 | Lập bảng hỗ trợ sau lọc lịch sử, mỗi split và mỗi khoảng pilot. Đếm distinct service, onset và số negative windows có hàng xóm; đếm cả service cô lập | Báo cả tử số/mẫu số toàn tập và cohort có cạnh. Đề xuất GO thí nghiệm khi cả hai khoảng có cạnh dùng được, fit/cal có positive và negative dùng được, calibration có ≥100 negative để phân giải budget 1%. Báo số group tạo ra positive | Thiếu một lớp hoặc toàn self-loop thì BLOCKED cho kết luận graph; ghi chi phí lấy thêm dữ liệu |
 | A09 | Gọi inference trên service chưa thấy ở fit | Trọng số dùng chung, không phụ thuộc ID embedding của train. Topology local lấy từ manifest đã biết trước. Với service calibration cần topology ngoại sinh có trước cutoff; cấm suy ra cạnh từ nhãn hoặc tương lai | Nếu thiếu topology hợp lệ, báo coverage self-only và chặn claim có cạnh ở split đó |
 
+**Oracle latency-only A01–A03 — HIỆN CÓ.** Dùng `latency_forecast_labels(frame, oracle, health_policy)` trong `sentinelops.ml.alibaba_local_evaluation`, với oracle request đã được xác minh và frame đã đóng băng theo cutoff. Hàm trả `risk_label`, `risk_missing_reason`, onset và confirmation tail. Hàm không yêu cầu nhãn can thiệp hay xu hướng tăng để xác định outcome. Lịch sử phải khỏe theo độ trễ; 5xx riêng không tạo onset độ trễ. Thiếu bucket, confirmation, traffic hoặc follow-up giữ UNKNOWN. Evaluator combined-SLO cũ giữ nguyên; benchmark phải gọi hàm mới khi gắn nhãn cho cả bốn dòng forecast.
+
+```bash
+"$PY" -m pytest -q tests/test_latency_forecast.py tests/test_alibaba_local_evaluation.py \
+  tests/test_local_labels.py tests/test_local_model_evaluation.py
+```
+
+Các ca này kiểm logic oracle và scorer với dữ liệu giả lập, gồm bỏ suffix tương lai và hàng nguồn đến sau cutoff. Chúng không thay thế kiểm chứng graph/worker bằng dữ liệu thật ở A07 hoặc bằng chứng hỗ trợ calibration ở A08.
+
 Nhãn Alibaba dùng mean HTTP latency tương đối với baseline service; rule mặc định có K = 2, 4, 8, 16, 32, 64. Thử nghiệm chính phải ghi cách condition theo K hoặc khoảng cách baseline/SLO, để biết đưa ngưỡng local 750 ms vào model thế nào. K=16 là mốc smoke và mức `degrading`. Mean là input được phép nếu qua parity; oracle local vẫn dùng p95. Mỗi service Alibaba vào đúng bucket `sha256(msname) mod 10`: 0–5 train, 6–7 calibration, 8–9 evaluation. Power/time split nằm trong manifest, có purge cả baseline tối đa 60 phút, chuỗi 5 bước, feature 5 phút, horizon và confirmation tail. Kiểm theo **min/max timestamp thực sự dùng** cho mỗi window. Giữ `ald` ở development; local chỉ đánh giá. [Cấu hình chính xác](../../configs/alibaba_relative_features.json) · [Topology local](../../configs/topology.yaml)
 
 ### D2-B · Tái hiện ADSketch và giao diện detector
@@ -240,6 +249,10 @@ Kỳ vọng tác giả ghi precision, recall, F1 hữu hạn ở log; ghi Python
 ## 3. Ngày 3–4 — đặc tả phần phải xây và đóng băng ứng viên
 
 **CẦN TRIỂN KHAI.** Tại SHA nền `3fc21c9` chưa có trainer/evaluator cuối cho LTFP và ADSketch, cũng chưa có capture holdout với gradual dưới SLO. Các lệnh `bm` bên dưới là **giao diện nghiệm thu đề xuất** để người vận hành gõ y nguyên sau bàn giao. A sở hữu launcher mỏng và contract chung; B cung cấp adapter detector. Dùng lại transform/evaluator/campaign/worker hiện có. Bắt đầu bằng test: bảng A01–A09/B01–B06 là input và kết quả kỳ vọng, phải chạy được cả nhánh lỗi. Không ghi PASS chỉ vì CLI tồn tại.
+
+**Phần mềm development hiện có.** `ltfp_graph` và `ltfp_model` cung cấp input năm bước, mask theo service và inference/export có kiểm digest. `ltfp_training.fit_pair` fit hai biến thể trên cùng các sample đã được caller duyệt; context thiếu dữ liệu được mask, chỉ target có nhãn và đủ input tham gia loss. Mỗi sample có pin topology riêng; metadata giữ topology nguồn của lần fit. Caller vẫn phải chứng minh split, purge, nguồn và việc giữ đầy đủ hàng xóm trước khi gọi trainer. Các helper `model_benchmark_scoring`, `model_benchmark_runner`, `model_benchmark_calibration` và `model_benchmark_reports` chưa tự tạo một benchmark dữ liệu thật đã được duyệt.
+
+Launcher `scripts.model_benchmark` đã thực thi `audit`, `freeze-protocol` và `verify`. Audit kiểm tính nhất quán của khai báo và các byte đã pin; kết quả `ready` không xác nhận nguồn thực nghiệm hoặc cấp quyền mở holdout. Các stage fit/calibration/capture/score/report/package ở launcher còn trả `blocked` với exit code 2 khi thiếu adapter hoặc receipt được duyệt. Chưa có cấu hình dữ liệu thật `configs/model_benchmark_v1.json` được giao. Không dùng fixture có khai báo `real` làm receipt thực nghiệm. PyTorch là dependency nghiên cứu CPU riêng trong `requirements-ltfp-cpu.txt`; CI `ltfp-cpu` bắt buộc chạy các test benchmark với dependency thật, còn dependency phục vụ không đổi.
 
 ```bash
 cd "$CODE"
