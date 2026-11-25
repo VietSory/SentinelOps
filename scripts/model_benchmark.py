@@ -20,33 +20,53 @@ BLOCKED = {
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
-        'audit/freeze-protocol/verify use the protocol validator. Calibration needs '
-        'admitted pinned receipts. Fit/capture/evaluation/report/package are blocked; '
-        'command availability never implies a fitted or frozen candidate.'))
+        'Lane B development stages require an admitted input descriptor. Shared '
+        'capture, candidate freeze, and final reporting are blocked pending handoff.'))
     parser.add_argument('--root', required=True, type=Path)
     parser.add_argument('--protocol', required=True, type=Path)
     commands = parser.add_subparsers(dest='command', required=True)
     for name in ('audit', 'fit', 'calibrate', 'score', 'evaluate'):
         sub = commands.add_parser(name)
         sub.add_argument('--lane', choices=('a', 'b'), required=True)
+        if name != 'audit':
+            sub.add_argument('--lane-b-input', type=Path)
     for name in ('freeze-protocol', 'verify', 'freeze-candidates', 'capture-preflight',
-                 'seal-capture', 'report', 'verify-report', 'package'):
+                 'seal-capture', 'package'):
         commands.add_parser(name)
+    for name in ('report', 'verify-report'):
+        sub = commands.add_parser(name)
+        sub.add_argument('--lane', choices=('b',))
+        sub.add_argument('--lane-b-input', type=Path)
     for name in ('capture', 'verify-group'):
         commands.add_parser(name).add_argument('--group', required=True)
+    prepare = commands.add_parser('prepare-detector-local')
+    prepare.add_argument('--archive', required=True, type=Path)
+    prepare.add_argument('--fit-sha256', required=True)
     args = parser.parse_args(argv)
     result = {'stage': args.command}
-    if hasattr(args, 'lane'):
+    if getattr(args, 'lane', None):
         result['lane'] = args.lane
     if hasattr(args, 'group'):
         result['group'] = args.group
     try:
-        if args.command in BLOCKED:
+        if args.command == 'prepare-detector-local':
+            from sentinelops.ml.model_benchmark_detector_archive import prepare_detector_archive
+
+            result['lane'] = 'b'
+            result.update(prepare_detector_archive(args.root, args.archive, args.fit_sha256))
+        elif getattr(args, 'lane_b_input', None) is not None:
+            if args.lane != 'b':
+                raise ValueError('--lane-b-input requires --lane b')
+            from sentinelops.ml.model_benchmark_detector_stage import run_detector_stage
+
+            result.update(run_detector_stage(args.command, args.root, args.protocol,
+                                             args.lane_b_input))
+        elif args.command in BLOCKED:
             result.update(status='blocked', reasons=[BLOCKED[args.command]])
         elif args.command == 'calibrate':
             result.update(status='blocked', reasons=[
                 'admitted-pinned-score-fit-split-source-receipt-schema-required' if args.lane == 'a'
-                else 'lane-b-calibration-adapter-unavailable'])
+                else 'lane-b-calibration-input-required'])
         else:
             from sentinelops.ml.model_benchmark_protocol import audit_protocol, freeze_protocol, verify_protocol
             if args.command == 'verify':
