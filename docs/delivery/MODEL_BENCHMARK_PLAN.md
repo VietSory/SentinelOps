@@ -2,6 +2,8 @@
 
 Mục tiêu là xác định bằng số liệu liệu **LTFP dùng metrics và đồ thị dịch vụ** có cảnh báo vi phạm SLO độ trễ tốt hơn XGBoost, và **ADSketch gốc** có phát hiện bất thường tốt hơn Isolation Forest. Bàn giao hai bảng benchmark có thể chạy lại, ADR ghi quyết định của từng nhánh và release đã kiểm chứng local để chuẩn bị thử AWS. Hạn 9 ngày tính đến `main` và CI xanh. Nghiệm thu AWS L2/L3 chạy theo [đặc tả demo](DEMO_UPGRADE_SPEC.md#15-nghiệm-thu-live-sau-khi-wp1wp7-lên-main).
 
+Lệnh chạy, dữ liệu đối chiếu, ca kiểm thử, điểm dừng an toàn và tiêu chí GO/BLOCKED của từng lane nằm trong [đặc tả thực thi](MODEL_BENCHMARK_RUNBOOK.md).
+
 ## Phân công
 
 | Chủ trì | Kết quả chịu trách nhiệm | Việc làm song song ngay từ ngày 1 |
