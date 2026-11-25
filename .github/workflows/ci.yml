@@ -58,7 +58,7 @@ jobs:
         run: |
           python -c "import numpy, pandas, pyarrow, sklearn, xgboost, torch; assert torch.__version__ == '2.7.1+cpu'; assert torch.version.cuda is None"
           test -f tests/test_model_benchmark_protocol.py && test -f tests/test_model_benchmark_launcher.py && test -f tests/test_model_benchmark_runner.py && test -f tests/test_ltfp_training.py
-          pytest -q -ra tests/test_model_benchmark*.py tests/test_ltfp*.py tests/test_alibaba*.py tests/test_ml_pipeline.py tests/test_model_signals.py --junitxml=ltfp-cpu.xml
+          pytest -q -ra tests/test_model_benchmark*.py tests/test_ltfp*.py tests/test_alibaba*.py tests/test_ml_pipeline.py tests/test_model_signals.py tests/test_latency_forecast.py --junitxml=ltfp-cpu.xml
           python - <<'PYTEST'
           from xml.etree import ElementTree
           skipped = ElementTree.parse('ltfp-cpu.xml').findall('.//testcase/skipped')

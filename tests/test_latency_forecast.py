@@ -122,7 +122,9 @@ def test_invalid_feature_clocks_are_rejected(field, value):
 
 
 def test_a03_future_suffix_cannot_change_features_or_prediction(tmp_path):
-    import numpy as np
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("sklearn")
+    pytest.importorskip("xgboost")
 
     store = ArtifactStore(tmp_path)
     serving = ArtifactStore(tmp_path / 'capture' / 'serving')
