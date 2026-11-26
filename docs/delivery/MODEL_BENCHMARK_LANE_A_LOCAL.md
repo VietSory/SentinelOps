@@ -51,6 +51,8 @@ Bản draft v3 bổ sung receipt fixture cho A01–A06 và A09. Bản v4 gắn r
 
 Draft v12 ghim source sạch `1c4f73818a29b6ce654ae781f7a94244f9acc6ad` và receipt A07 `artifact://manifests/ddf780f82e3612543270375b961465c293934239b543ba8c51fc9dc542e8ba06.json`. Audit báo Lane A `ready` và Lane B `blocked`; đây là readiness của protocol development, chưa phải freeze hay kết quả holdout. Bản sửa runner sau đó cần một revision protocol mới trước khi chấm chính thức.
 
+Draft v16 ghim source sạch `09b3bef06634eb64ac4f09fb6761befa7982aaf0`, receipt A07 mới và kết quả B01–B06 development. Cả hai lane đã qua audit; protocol và candidates đã freeze tại local. Holdout chưa mở, pilot Inventory còn chạy. Hash và giới hạn được ghi trong [evidence freeze](../reports/evidence/model-benchmark-freeze-development.json).
+
 Launcher dùng lại artifact đã có qua `--lane-a-evidence`. Chạy từng stage `fit`, `calibrate` hoặc `score` để đối chiếu hash và ledger. `artifact_status: verified` xác nhận artifact development. Exit code vẫn là 2 nếu audit Lane A còn gate mở.
 
 `freeze-candidates --lane-a-evidence <evidence.json> --lane-b-fit-sha256 <sha256>` yêu cầu protocol chung đã freeze, checkpoint B đã xác minh và checkpoint A tái lập được từ các artifact hiện có. Manifest ghim ngưỡng và model của hai lane. Capture holdout vẫn cần protocol và luồng nghiệm thu riêng.

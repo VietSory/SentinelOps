@@ -1,0 +1,39 @@
+{
+  "scope": "development-only",
+  "source_commit": "09b3bef06634eb64ac4f09fb6761befa7982aaf0",
+  "protocol": {
+    "draft": "artifacts/lane-a/preflight/protocol-draft-v16/protocol.json",
+    "logical_sha256": "f17f3c6d1ce7bed8399a7c3e2e7ba29c02d42237a2065bb052d63cabd819cd5b",
+    "freeze_path": "artifacts/lane-a/freeze/protocol.json",
+    "freeze_sha256": "e19b31a64a72ee3a5bc6ef906717cbc47af479f5a1f88e2ada0471a6eff20b86"
+  },
+  "candidates": {
+    "path": "artifacts/lane-a/freeze/candidates.json",
+    "sha256": "36a64094b5f9f863f8c89baa0d6615b3df6881cbb26cc45118b3d5432f686d13",
+    "lane_a": "ready",
+    "lane_b": "ready",
+    "activation_allowed": false,
+    "holdout_opened": false
+  },
+  "a07": {
+    "capture_scope": "local-development",
+    "raw_http_count": 150,
+    "max_feature_error": 0.0,
+    "receipt": "artifact://manifests/7327c1bb8b5afcba9fb3a3ffedc45925a961f5dd941ff40425b6b5c7748a0fc1.json"
+  },
+  "lane_b_support": {
+    "path": "artifacts/lane-a/preflight/detector-support-v1.json",
+    "sha256": "f6908c8fc426198d4bdaa3a8cbe55cd0eca93bc7b577d8d097380d434a9169d7",
+    "fit_sha256": "936ae30e86030d3c87b2793ca97c24840ba1491dbe4ee4e70ea2283f1921e719",
+    "fixture_checks": 6,
+    "calibration_anchors": 2039,
+    "known_proxy_positive": 65,
+    "novel_proxy_positive": 6,
+    "unavailable": 72
+  },
+  "limitations": [
+    "Alibaba labels are relative-latency proxies, not local p95 holdout outcomes.",
+    "Local artifacts and raw captures remain outside Git; this file records their identities.",
+    "Pilot Inventory and holdout capture, reporting, release parity and rollback remain unverified."
+  ]
+}
