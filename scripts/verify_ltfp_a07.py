@@ -2,13 +2,14 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 
 from scripts.check_ltfp_graph_parity import check_worker
 from sentinelops.experiments.local_corpus import (
     group_name,
-    inspect_completed_capture,
     load_plan,
     read_binding,
     registration_path,
@@ -25,7 +26,10 @@ def run(root, project, ordinal):
     group = group_name(plan, 'development-validation', ordinal)
     slot = group + '-healthy'
     _, session = read_binding(store, registration_path(store, group))
-    end_context_ref = inspect_completed_capture(store, slot, project=project)
+    environment = {**os.environ, 'PYTHONPATH': os.pathsep.join((str(project / 'src'), str(project)))}
+    end_context_ref = subprocess.check_output(
+        [sys.executable, '-m', 'scripts.inspect_local_capture', '--root', str(store.root), '--slot', slot],
+        cwd=project, env=environment, text=True).strip()
     verified = verify_capture(store, plan, session, 'healthy', project=project)
     source = store.read(verified['source_result_ref'])
     run_path = store.root / source['run_directory'] / 'run.json'
