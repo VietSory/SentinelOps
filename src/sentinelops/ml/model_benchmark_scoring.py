@@ -1,5 +1,8 @@
 """Baseline inference on the exact accepted relative frame used by benchmark labels."""
+import hashlib
+import json
 import math
+import re
 from pathlib import Path
 
 from sentinelops.contracts import utc_time
@@ -51,3 +54,36 @@ def baseline_scores(store, batch_ref, service, *, as_of, bundle, manifest_sha256
     return {**provenance, 'feature_ref': store.write('features', frame), 'scores': {
         'slope': {'score': max(0., projection['features']['rt_slope_rel_per_min']), 'missing_reason': None},
         'xgboost': {'score': probability, 'missing_reason': None}}}
+
+
+def refit_score(store, baseline, config, *, directory, manifest_sha256, fit_input_sha256):
+    """Score the accepted frame with the pinned same-split development refit."""
+    from xgboost import XGBClassifier
+    from sentinelops.ml.models import ExceedanceRisk
+
+    if any(not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value)
+           for value in (manifest_sha256, fit_input_sha256)):
+        raise ValueError('refit manifest and paired training pins required')
+    directory = Path(directory)
+    content = (directory / 'manifest.json').read_bytes()
+    if hashlib.sha256(content).hexdigest() != manifest_sha256:
+        raise ValueError('refit manifest SHA256 mismatch')
+    manifest = json.loads(content)
+    model_path = directory / 'risk.json'
+    if (manifest.get('scope') != 'development-train-only' or manifest.get('activation_allowed') is not False
+            or manifest.get('paired_fit_input_sha256') != fit_input_sha256
+            or manifest.get('config_sha256') != stable_id(config)
+            or hashlib.sha256(model_path.read_bytes()).hexdigest() != manifest.get('model_sha256')):
+        raise ValueError('refit model or paired training identity differs')
+    model = XGBClassifier()
+    model.load_model(model_path)
+    provenance = {'scope': 'development-refit', 'manifest_sha256': manifest_sha256,
+                  'model_sha256': manifest['model_sha256'], 'fit_input_sha256': fit_input_sha256}
+    if baseline['feature_ref'] is None:
+        return baseline['scores']['xgboost'], provenance
+    frame = store.read(baseline['feature_ref'])
+    values = [frame['features'][name] for name in config['features']]
+    probability = float(ExceedanceRisk(model, config['features']).predict_proba([values])[0][1])
+    if not math.isfinite(probability) or not 0 <= probability <= 1:
+        raise ValueError('refit risk probability is invalid')
+    return {'score': probability, 'missing_reason': None}, provenance

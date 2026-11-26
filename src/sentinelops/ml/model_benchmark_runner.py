@@ -5,7 +5,7 @@ from pathlib import Path
 from sentinelops.contracts import utc_time
 from sentinelops.ml.alibaba_live import project_graph_window
 from sentinelops.ml.model_benchmark_forecast import forecast_rows
-from sentinelops.ml.model_benchmark_scoring import baseline_scores
+from sentinelops.ml.model_benchmark_scoring import baseline_scores, refit_score
 from sentinelops.ml.models import read_bundle_manifest
 from sentinelops.telemetry.core import stable_id
 
@@ -13,7 +13,7 @@ from sentinelops.telemetry.core import stable_id
 def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
                 node_ids, topology, expected_graph_sha256, config, bundle,
                 manifest_sha256, oracle, health_policy, run_id, group_id,
-                models=None, fixture_scope=False):
+                models=None, fixture_scope=False, xgboost_refit=None):
     """Score a target with trusted local, digest-pinned artifacts.
 
     models optionally maps ltfp_graph/ltfp_self_only to directory,
@@ -22,6 +22,7 @@ def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
     score only with explicit fixture_scope=True; these rows never imply readiness.
     source_feature_ref is the genuine immutable source clock frame, retained
     separately when baseline inference supplies its exact relative projection.
+    xgboost_refit pins the paired training input, refit manifest and weights.
     """
     end, cutoff = utc_time(anchor), utc_time(as_of)
     if (not run_id or not group_id or type(fixture_scope) is not bool
@@ -57,6 +58,11 @@ def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
     identities = {name: {'model_version': baseline['model_version'],
                         'manifest_sha256': manifest_sha256, 'scope': 'pinned-baseline'}
                   for name in scores}
+    if xgboost_refit is not None:
+        scores['xgboost'], identities['xgboost'] = refit_score(store, baseline, config, **xgboost_refit)
+    elif not fixture_scope:
+        scores['xgboost'] = {'score': None, 'missing_reason': 'benchmark-refit-required'}
+        identities['xgboost'] = {'scope': 'unavailable'}
     graph_provenance = {}
     for name, self_only in (('ltfp_self_only', True), ('ltfp_graph', False)):
         spec = specs.get(name)

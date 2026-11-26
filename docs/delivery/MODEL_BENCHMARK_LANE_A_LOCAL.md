@@ -49,6 +49,8 @@ Phân vùng này được chọn sau các phân tích pilot và chỉ dùng cho 
 
 Bản draft v3 bổ sung receipt fixture cho A01–A06 và A09. Bản v4 gắn receipt A08 và support cho development Alibaba. Bản v5 gắn receipt A07 từ lượt capture thật. Audit trước đây báo Lane A `ready`, nhưng kiểm tra mới phát hiện checker A07 khác source snapshot v3. Draft v5 hiện `blocked` cho cả hai lane. A07 đã replay lại từ commit sạch `5ac49bb2e2ded9ce55c586a7e24510720bba596d` trên cùng 150 raw HTTP, sai số lớn nhất 0; receipt mới là `artifact://manifests/e87297ad5391eb1202722c85b09b0d0f056bd7e6422546384c670a1077a75010.json`. Cần protocol revision mới ghim đúng checker và chạy lại các fixture trước khi freeze.
 
+Draft v12 ghim source sạch `1c4f73818a29b6ce654ae781f7a94244f9acc6ad` và receipt A07 `artifact://manifests/ddf780f82e3612543270375b961465c293934239b543ba8c51fc9dc542e8ba06.json`. Audit báo Lane A `ready` và Lane B `blocked`; đây là readiness của protocol development, chưa phải freeze hay kết quả holdout. Bản sửa runner sau đó cần một revision protocol mới trước khi chấm chính thức.
+
 Launcher dùng lại artifact đã có qua `--lane-a-evidence`. Chạy từng stage `fit`, `calibrate` hoặc `score` để đối chiếu hash và ledger. `artifact_status: verified` xác nhận artifact development. Exit code vẫn là 2 nếu audit Lane A còn gate mở.
 
 `freeze-candidates --lane-a-evidence <evidence.json> --lane-b-fit-sha256 <sha256>` yêu cầu protocol chung đã freeze, checkpoint B đã xác minh và checkpoint A tái lập được từ các artifact hiện có. Manifest ghim ngưỡng và model của hai lane. Capture holdout vẫn cần protocol và luồng nghiệm thu riêng.
@@ -94,6 +96,8 @@ Chấm lại toàn bộ khoảng calibration, gồm 58.897 window. Tập có nh�
 - **A07 đạt trong phạm vi replay development.** Lượt `ald-02-healthy` hoàn tất và được xác minh theo ADR-019. Worker replay dùng 150 raw HTTP profile v2 trong 50 phút cho ba service. Node IDs, mask và feature giữa hai đường khớp, sai số lớn nhất 0. Dữ liệu đến muộn bị loại trước cutoff và khả dụng đúng tại receipt. Receipt được gắn vào draft v5. Replay dùng fakeDB có trạng thái; thời điểm topology được gán lúc thiết lập replay, còn parity scorer và độ trễ live chưa được chứng minh. Lượt `ald-01-healthy` bị gián đoạn được giữ riêng.
 - **Benchmark chính thức chưa chạy.** Bảng development ở trên chưa có event oracle độc lập, lead time, false warnings mỗi giờ hay khoảng tin cậy theo group. Chưa có candidate đã freeze hoặc quyết định thay model. Chưa mở holdout.
 
-Oracle forecast đã được sửa để tính từng vi phạm sau khi có ba bucket khỏe liên tiếp theo health policy. Bucket thiếu hoặc `UNKNOWN` không được dùng để xác nhận phục hồi. Test kiểm hai onset trong cùng lượt và giữ cả hai trong mẫu số khi model không có score. Thay đổi này ở workspace và chưa nằm trong CI của commit `e7aaa71`.
+Oracle forecast đã được sửa để tính từng vi phạm sau khi có ba bucket khỏe liên tiếp theo health policy. Bucket thiếu hoặc `UNKNOWN` không được dùng để xác nhận phục hồi. Test kiểm hai onset trong cùng lượt và giữ cả hai trong mẫu số khi model không có score. CI đã đạt cho commit `bacb10e` chứa thay đổi này.
+
+Runner chấm XGBoost bằng bản refit ghim manifest, trọng số và `fit_input_sha256` của cùng tập train LTFP. Nếu thiếu refit, score XGBoost không khả dụng ngoài fixture; baseline cũ không được tự thay thế. Trên feature Payment replay từ A07, score refit là `0.237899050116539` và khớp phép tính độc lập với sai số 0. Đây chưa phải parity scorer live.
 
 [Kế hoạch](MODEL_BENCHMARK_PLAN.md) · [Runbook](MODEL_BENCHMARK_RUNBOOK.md) · [Kết quả Lane B](MODEL_BENCHMARK_LANE_B_LOCAL.md)

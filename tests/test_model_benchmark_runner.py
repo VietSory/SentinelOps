@@ -1,6 +1,7 @@
 """Artifact-backed fixture caller checks; no fitted-release claim or activation."""
 from copy import deepcopy
 from datetime import timedelta
+import hashlib
 import json
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from sentinelops.ml.alibaba_live import project_graph_window
 from sentinelops.ml.alibaba_training import load_config
 from sentinelops.ml.ltfp_model import Forecast, export, load, metadata, predict
 from sentinelops.ml.model_benchmark_runner import score_batch
+from sentinelops.ml.models import fit_exceedance_risk
 from sentinelops.telemetry.core import BUSINESS_ROUTES, timestamp
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
 from sentinelops.telemetry.store import ArtifactStore
@@ -96,11 +98,48 @@ def test_missing_models_untrained_and_missing_history(batch_case):
                for r in rows if r['model'].startswith('ltfp'))
     rows = score_batch(store, **{**args, 'fixture_scope': False})
     assert all(r['score'] is None for r in rows if r['model'].startswith('ltfp'))
+    xgboost, = (row for row in rows if row['model'] == 'xgboost')
+    assert xgboost['score'] is None and xgboost['score_missing_reason'] == 'benchmark-refit-required'
     anchor = store.read(args['batch_ref'])
     late = store.write('manifests', {**anchor, 'evaluated_at': timestamp(START+timedelta(minutes=6))})
     rows = score_batch(store, **{**args, 'batch_ref': late})
     assert len(rows) == 4 and all(r['score'] is None for r in rows)
     assert all(r['feature_ref'] == args['source_feature_ref'] and r['risk_label'] == 0 for r in rows)
+
+
+def test_xgboost_uses_the_pinned_paired_refit(batch_case, tmp_path):
+    store, args = batch_case
+    config = args['config']
+    values = [[float(index) / 10, 0.0, 0.0, 0.0, float(index) / 10, 0.0] for index in range(40)]
+    risk = fit_exceedance_risk(values, [int(index >= 20) for index in range(40)], [1.0] * 40,
+                               config['features'], monotone_constraints=[1, 1, 1],
+                               estimator={'n_estimators': 4, 'max_depth': 2, 'learning_rate': .1})
+    directory = tmp_path / 'refit'
+    directory.mkdir()
+    risk.save_model(directory / 'risk.json')
+    model_sha = hashlib.sha256((directory / 'risk.json').read_bytes()).hexdigest()
+    from sentinelops.telemetry.core import stable_id
+    manifest = {'scope': 'development-train-only', 'activation_allowed': False,
+                'config_sha256': stable_id(config), 'model_sha256': model_sha,
+                'paired_fit_input_sha256': 'a' * 64}
+    content = json.dumps(manifest, sort_keys=True).encode()
+    (directory / 'manifest.json').write_bytes(content)
+    spec = {'directory': directory, 'manifest_sha256': hashlib.sha256(content).hexdigest(),
+            'fit_input_sha256': 'a' * 64}
+    rows = score_batch(store, **{**args, 'fixture_scope': False, 'xgboost_refit': spec})
+    row, = (item for item in rows if item['model'] == 'xgboost')
+    frame = store.read(row['feature_ref'])
+    expected = risk.predict_proba([[frame['features'][name] for name in config['features']]])[0][1]
+    assert row['score'] == pytest.approx(expected, abs=1e-12)
+    assert row['model_provenance']['scope'] == 'development-refit'
+    assert row['model_provenance']['model_sha256'] == model_sha
+    with pytest.raises(ValueError, match='manifest SHA256'):
+        score_batch(store, **{**args, 'xgboost_refit': {**spec, 'manifest_sha256': '0' * 64}})
+    with pytest.raises(ValueError, match='paired training identity'):
+        score_batch(store, **{**args, 'xgboost_refit': {**spec, 'fit_input_sha256': 'b' * 64}})
+    (directory / 'risk.json').write_bytes(b'changed')
+    with pytest.raises(ValueError, match='paired training identity'):
+        score_batch(store, **{**args, 'xgboost_refit': spec})
 
 
 @pytest.mark.parametrize('bad', ['graph', 'config', 'metadata', 'variant', 'source-cutoff', 'anchor'])
