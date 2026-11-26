@@ -152,6 +152,13 @@ def test_invalid_schema_refs_and_finite_json(tmp_path,change):
 
 def test_alibaba_a07_requires_a_pinned_worker_replay(tmp_path):
     protocol, ref = fixture(tmp_path)
+    (tmp_path / 'snapshot/scripts').mkdir(parents=True)
+    checker = ref('snapshot/scripts/check_ltfp_graph_parity.py', {'checker': 'fixture'})
+    protocol['code']['source_manifest'] = ref('source-worker.json', {'files': [checker]})
+    for item in protocol['checks']:
+        evidence = json.loads((tmp_path / item['evidence']['path']).read_bytes())
+        evidence['source_manifest_sha256'] = protocol['code']['source_manifest']['sha256']
+        item['evidence'] = ref(item['evidence']['path'], evidence)
     report = json.loads((tmp_path / protocol['data']['support']['path']).read_bytes())
     report['lanes']['a']['dataset_scope'] = 'alibaba-proxy-development'
     protocol['data']['support'] = ref('support-alibaba.json', report)
@@ -161,6 +168,7 @@ def test_alibaba_a07_requires_a_pinned_worker_replay(tmp_path):
     check = next(row for row in protocol['checks'] if row['test_id'] == 'A07')
     receipt = json.loads((tmp_path / check['evidence']['path']).read_bytes())
     replay = dict(test_id='A07', status='passed', dataset_scope='alibaba-local-development-validation',
+                  checker_sha256=checker['sha256'],
                   run_id='run-fixture', parity=dict(run_id='run-fixture', shape=[3, 5, 6], max_abs_error=0,
                       source_identity={'source_profile': 'prometheus-increase-60s-5s/v2'},
                       late_batch_unavailable=True, exact_receipt_available=True,
@@ -168,6 +176,12 @@ def test_alibaba_a07_requires_a_pinned_worker_replay(tmp_path):
     receipt['worker_replay'] = ref('worker-replay.json', replay)
     check['evidence'] = ref('a07-worker.json', receipt)
     assert audit_protocol(protocol, tmp_path)['lanes']['a']['status'] == 'ready'
+    replay['checker_sha256'] = '0' * 64
+    receipt['worker_replay'] = ref('worker-replay.json', replay)
+    check['evidence'] = ref('a07-worker.json', receipt)
+    assert audit_protocol(protocol, tmp_path)['lanes']['a']['reasons'] == [
+        'A07: replay checker differs from protocol source']
+    replay['checker_sha256'] = checker['sha256']
     replay['parity']['late_batch_unavailable'] = False
     receipt['worker_replay'] = ref('worker-replay.json', replay)
     with pytest.raises(ValueError, match='missing or changed reference'):

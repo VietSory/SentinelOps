@@ -28,10 +28,12 @@ def _require_support(cohort, fitted, scored):
         raise ValueError('each calibration model requires a positive and at least 100 scored negatives')
 
 
-def run(root):
+def run(root, *, input_revision=3, output_revision=4):
     root = Path(root).resolve()
     preflight = root / 'preflight'
-    protocol = json.loads((preflight / 'protocol-draft-v3/protocol.json').read_bytes())
+    if any(type(value) is not int or value < 1 for value in (input_revision, output_revision)):
+        raise ValueError('positive protocol draft revisions required')
+    protocol = json.loads((preflight / f'protocol-draft-v{input_revision}/protocol.json').read_bytes())
     previous = audit_protocol(protocol, root)
     if previous['lanes']['a']['reasons'] != [
             'A07: evidence missing', 'A08: evidence missing', 'real train/calibration support unavailable']:
@@ -82,7 +84,7 @@ def run(root):
         'limitations': ['No positive calibration anchor has an available same-split neighbor.',
                         'Post-pilot development selections and simulated metric availability.'],
     }
-    output = preflight / 'protocol-draft-v4'
+    output = preflight / f'protocol-draft-v{output_revision}'
     if output.exists():
         raise FileExistsError(output)
     with tempfile.TemporaryDirectory(prefix='.support-', dir=preflight) as temporary:
@@ -108,8 +110,11 @@ def run(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, required=True)
+    parser.add_argument('--input-revision', type=int, default=3)
+    parser.add_argument('--output-revision', type=int, default=4)
     args = parser.parse_args()
-    print(json.dumps(run(args.root), sort_keys=True))
+    print(json.dumps(run(args.root, input_revision=args.input_revision, output_revision=args.output_revision),
+                     sort_keys=True))
 
 
 if __name__ == '__main__':

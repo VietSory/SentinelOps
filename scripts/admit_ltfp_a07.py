@@ -9,7 +9,7 @@ from sentinelops.ml.model_benchmark_protocol import audit_protocol, validate_wor
 from sentinelops.telemetry.store import ArtifactStore
 
 
-def run(root, capture_root, evidence_ref):
+def run(root, capture_root, evidence_ref, *, input_revision=4, output_revision=5):
     root = Path(root).resolve()
     capture = ArtifactStore(capture_root)
     evidence = capture.read(evidence_ref)
@@ -29,10 +29,12 @@ def run(root, capture_root, evidence_ref):
     if hashlib.sha256(run_path.read_bytes()).hexdigest() != evidence['parity']['run_sha256']:
         raise ValueError('A07 replay does not match the captured run')
     preflight = root / 'preflight'
-    protocol = json.loads((preflight / 'protocol-draft-v4/protocol.json').read_bytes())
+    if any(type(value) is not int or value < 1 for value in (input_revision, output_revision)):
+        raise ValueError('positive protocol draft revisions required')
+    protocol = json.loads((preflight / f'protocol-draft-v{input_revision}/protocol.json').read_bytes())
     if audit_protocol(protocol, root)['lanes']['a']['reasons'] != ['A07: evidence missing']:
         raise ValueError('expected an audited protocol awaiting only A07')
-    output = preflight / 'protocol-draft-v5'
+    output = preflight / f'protocol-draft-v{output_revision}'
     if output.exists():
         raise FileExistsError(output)
     check = {'test_id': 'A07', 'status': 'passed', 'scope': 'real'}
@@ -58,8 +60,11 @@ def main():
     parser.add_argument('--root', required=True, type=Path)
     parser.add_argument('--capture-root', required=True, type=Path)
     parser.add_argument('--evidence-ref', required=True)
+    parser.add_argument('--input-revision', type=int, default=4)
+    parser.add_argument('--output-revision', type=int, default=5)
     args = parser.parse_args()
-    print(json.dumps(run(args.root, args.capture_root, args.evidence_ref), sort_keys=True))
+    print(json.dumps(run(args.root, args.capture_root, args.evidence_ref, input_revision=args.input_revision,
+                         output_revision=args.output_revision), sort_keys=True))
 
 
 if __name__ == '__main__':

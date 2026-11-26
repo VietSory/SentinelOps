@@ -212,7 +212,12 @@ def audit_protocol(protocol, root):
             raise ValueError('unknown check status/scope')
         evidence = _json_ref(root, check['evidence'])
         if name == 'A07' and 'worker_replay' in evidence:
-            validate_worker_replay(_json_ref(root, evidence.pop('worker_replay')))
+            replay = _json_ref(root, evidence.pop('worker_replay'))
+            validate_worker_replay(replay)
+            checker = [ref for ref in source['files']
+                       if ref['path'].endswith('/scripts/check_ltfp_graph_parity.py')]
+            if len(checker) != 1 or replay.get('checker_sha256') != checker[0]['sha256']:
+                gap('a', 'A07: replay checker differs from protocol source')
         elif (name == 'A07' and check['status'] == 'passed'
               and support.get('lanes', {}).get('a', {}).get('dataset_scope') == 'alibaba-proxy-development'):
             gap('a', 'A07: verified worker replay receipt missing')

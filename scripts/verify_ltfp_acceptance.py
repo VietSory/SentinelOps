@@ -58,15 +58,21 @@ def _test_results(xml, checks):
     return len(list(ET.fromstring(xml).iter('testcase')))
 
 
-def run(root):
+def run(root, *, input_revision=1, output_revision=3, source_commit=None):
     root = Path(root).resolve()
     repo = Path.cwd().resolve()
     if not Path(sentinelops.__file__).samefile(repo / 'src/sentinelops/__init__.py'):
         raise ValueError('fixture checks must import the workspace source')
-    output = root / 'preflight/protocol-draft-v3'
+    if any(type(value) is not int or value < 1 for value in (input_revision, output_revision)):
+        raise ValueError('positive protocol draft revisions required')
+    if source_commit is not None:
+        from sentinelops.experiments.local_corpus import clean_source
+        if clean_source(repo) != source_commit:
+            raise ValueError('protocol source must match the clean checkout commit')
+    output = root / f'preflight/protocol-draft-v{output_revision}'
     if output.exists():
         raise ValueError('protocol draft already exists')
-    base = json.loads((root / 'preflight/protocol-draft-v1/protocol.json').read_text())
+    base = json.loads((root / f'preflight/protocol-draft-v{input_revision}/protocol.json').read_text())
     if audit_protocol(base, root)['status'] != 'blocked' or base['checks']:
         raise ValueError('unmodified blocked protocol draft required')
     paths = sorted({p for directory in ('src/sentinelops', 'scripts', 'tests')
@@ -99,7 +105,8 @@ def run(root):
                for name, content in sources.items()):
             raise ValueError('workspace source changed during fixture checks')
         protocol = dict(base)
-        protocol['code'] = {**base['code'], 'source_manifest': manifest}
+        protocol['code'] = {**base['code'], 'source_manifest': manifest,
+                            **({'commit': source_commit} if source_commit else {})}
         protocol['checks'] = []
         for test_id in CHECKS:
             evidence = dict(test_id=test_id, status='passed', scope='fixture',
@@ -127,8 +134,12 @@ def run(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True, type=Path)
+    parser.add_argument('--input-revision', type=int, default=1)
+    parser.add_argument('--output-revision', type=int, default=3)
+    parser.add_argument('--source-commit')
     args = parser.parse_args()
-    print(json.dumps(run(args.root), indent=2, sort_keys=True))
+    print(json.dumps(run(args.root, input_revision=args.input_revision, output_revision=args.output_revision,
+                         source_commit=args.source_commit), indent=2, sort_keys=True))
 
 
 if __name__ == '__main__':
