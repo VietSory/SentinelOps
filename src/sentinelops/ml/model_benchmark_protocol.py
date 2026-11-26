@@ -216,7 +216,8 @@ def audit_protocol(protocol, root):
             validate_worker_replay(replay)
             checker = [ref for ref in source['files']
                        if ref['path'].endswith('/scripts/check_ltfp_graph_parity.py')]
-            if len(checker) != 1 or replay.get('checker_sha256') != checker[0]['sha256']:
+            if (len(checker) != 1 or replay.get('checker_sha256') != checker[0]['sha256']
+                    or replay.get('checker_source_commit') != code['commit']):
                 gap('a', 'A07: replay checker differs from protocol source')
         elif (name == 'A07' and check['status'] == 'passed'
               and support.get('lanes', {}).get('a', {}).get('dataset_scope') == 'alibaba-proxy-development'):

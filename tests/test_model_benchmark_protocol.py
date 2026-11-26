@@ -168,7 +168,7 @@ def test_alibaba_a07_requires_a_pinned_worker_replay(tmp_path):
     check = next(row for row in protocol['checks'] if row['test_id'] == 'A07')
     receipt = json.loads((tmp_path / check['evidence']['path']).read_bytes())
     replay = dict(test_id='A07', status='passed', dataset_scope='alibaba-local-development-validation',
-                  checker_sha256=checker['sha256'],
+                  checker_sha256=checker['sha256'], checker_source_commit=protocol['code']['commit'],
                   run_id='run-fixture', parity=dict(run_id='run-fixture', shape=[3, 5, 6], max_abs_error=0,
                       source_identity={'source_profile': 'prometheus-increase-60s-5s/v2'},
                       late_batch_unavailable=True, exact_receipt_available=True,
@@ -182,6 +182,12 @@ def test_alibaba_a07_requires_a_pinned_worker_replay(tmp_path):
     assert audit_protocol(protocol, tmp_path)['lanes']['a']['reasons'] == [
         'A07: replay checker differs from protocol source']
     replay['checker_sha256'] = checker['sha256']
+    replay['checker_source_commit'] = 'b' * 40
+    receipt['worker_replay'] = ref('worker-replay.json', replay)
+    check['evidence'] = ref('a07-worker.json', receipt)
+    assert audit_protocol(protocol, tmp_path)['lanes']['a']['reasons'] == [
+        'A07: replay checker differs from protocol source']
+    replay['checker_source_commit'] = protocol['code']['commit']
     replay['parity']['late_batch_unavailable'] = False
     receipt['worker_replay'] = ref('worker-replay.json', replay)
     with pytest.raises(ValueError, match='missing or changed reference'):
