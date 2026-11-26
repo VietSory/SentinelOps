@@ -11,7 +11,6 @@ import tempfile
 import pandas as pd
 
 from scripts.audit_ltfp_graph_support import read_graph
-from scripts.verify_ltfp_development_score import verify as verify_score
 from sentinelops.ml.alibaba_training import load_config
 from sentinelops.ml.model_benchmark_protocol import audit_protocol
 from sentinelops.public_data.alibaba import file_sha256
@@ -54,6 +53,8 @@ def run(root, base_commit):
     output = root / 'preflight/protocol-draft-v1'
     if output.exists():
         raise ValueError('protocol draft already exists')
+    from scripts.verify_ltfp_development_score import verify as verify_score
+
     if verify_score(root)['status'] != 'verified':
         raise ValueError('verified development scoring required')
     result = json.loads((root / 'preflight/development-k16-result-v5.json').read_text())
