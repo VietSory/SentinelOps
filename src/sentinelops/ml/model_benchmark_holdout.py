@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 import re
 import hashlib
+from dataclasses import asdict
+from datetime import datetime, timezone
 
 from sentinelops.contracts import utc_time
 from sentinelops.experiments.local_labels import oracle_from_requests
@@ -183,6 +185,8 @@ def verify_capture_registration(root, *, registration_sha256, matrix_sha256, can
                 or case.get('source_result_ref') in results or case.get('oracle_ref') in oracles
                 or set(case.get('services', {})) != set(BUSINESS_ROUTES)):
             raise ValueError('incomplete low-ramp pilot evidence')
+        if utc_time(case['ended_at']) > utc_time(registration['registered_at']):
+            raise ValueError('low-ramp pilot completed after holdout registration')
         runs.add(run_id)
         results.add(case['source_result_ref'])
         oracles.add(case['oracle_ref'])
@@ -192,6 +196,55 @@ def verify_capture_registration(root, *, registration_sha256, matrix_sha256, can
                     or type(item.get('latency_episodes')) is not int or item['latency_episodes'] != 0):
                 raise ValueError('low-ramp pilot lacks verified no-breach coverage')
     return registration
+
+
+def verify_holdout_execution(project, config, session_id, output, authorization):
+    """Require frozen prospective group and slot identities before workload execution."""
+    from sentinelops.experiments.local_corpus import clean_source, context_snapshot
+
+    _keys(authorization, 'root candidates_sha256 matrix_sha256 registration_sha256 '
+                         'group_registration_sha256 slot_registration_sha256 slot_id')
+    root = Path(authorization['root']).resolve()
+    commit = clean_source(project)
+    frozen = verify_candidate_freeze(root, authorization['candidates_sha256'])
+    registration = verify_capture_registration(root, registration_sha256=authorization['registration_sha256'],
+        matrix_sha256=authorization['matrix_sha256'], candidates_sha256=authorization['candidates_sha256'],
+        capture_commit=commit, frozen=frozen)
+    matrix = json.loads((root / 'capture/matrix.json').read_bytes())
+    if stable_id(matrix) != authorization['matrix_sha256'] or matrix.get('role') != 'sealed-final':
+        raise ValueError('holdout matrix differs from its registration')
+    groups = [group for group in matrix['groups'] if group['group_id'] == session_id]
+    if len(groups) != 1 or not re.fullmatch('bench-final-[0-9]{2}', session_id):
+        raise ValueError('holdout group is not registered')
+    slots = [slot for slot in groups[0]['slots'] if slot['slot_id'] == authorization['slot_id']]
+    if len(slots) != 1 or stable_id(slots[0]['recipe']) != stable_id(asdict(config)):
+        raise ValueError('holdout slot recipe differs from its registered matrix')
+    group_path = f'capture/groups/{session_id}/registration.json'
+    slot_path = f'capture/groups/{session_id}/slots/{authorization["slot_id"]}/registration.json'
+    group = json.loads(_ref(root, {'path': group_path, 'sha256': authorization['group_registration_sha256']}))
+    slot = json.loads(_ref(root, {'path': slot_path, 'sha256': authorization['slot_registration_sha256']}))
+    _keys(group, 'schema_version group_id capture_registration_sha256 capture_commit registered_at '
+                 'compose_project context initial_payment_rows')
+    _keys(slot, 'schema_version group_id slot_id group_registration_sha256 capture_commit registered_at recipe')
+    group_time, slot_time = utc_time(group['registered_at']), utc_time(slot['registered_at'])
+    if (group['schema_version'] != 'benchmark-holdout-group-registration/v1'
+            or group['group_id'] != session_id or group['capture_commit'] != commit
+            or group['capture_registration_sha256'] != authorization['registration_sha256']
+            or group['compose_project'] != 'sentinelops-corpus-' + session_id
+            or type(group['initial_payment_rows']) is not int or group['initial_payment_rows'] != 0
+            or not utc_time(registration['registered_at']) <= group_time <= slot_time <= datetime.now(timezone.utc)):
+        raise ValueError('holdout group is not prospectively registered')
+    if (slot['schema_version'] != 'benchmark-holdout-slot-registration/v1' or slot['group_id'] != session_id
+            or slot['slot_id'] != authorization['slot_id'] or slot['capture_commit'] != commit
+            or slot['group_registration_sha256'] != authorization['group_registration_sha256']
+            or stable_id(slot['recipe']) != stable_id(slots[0]['recipe'])):
+        raise ValueError('holdout slot is not prospectively registered')
+    target = (root / 'capture/groups' / session_id / 'slots' / authorization['slot_id'] / 'runs').resolve()
+    if not target.is_relative_to(root) or Path(output).resolve() != target:
+        raise ValueError('holdout output escapes its registered slot')
+    if context_snapshot(project, group['compose_project']) != group['context']:
+        raise ValueError('holdout source context changed after registration')
+    return {'capture_commit': commit, 'registered_at': slot['registered_at'], 'slot_id': slot['slot_id']}
 
 
 def verify_frozen_capture_sources(root, matrix, receipts, run_paths, *, matrix_sha256, candidates_sha256,

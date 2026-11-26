@@ -62,7 +62,8 @@ def run(root, *, ordinal, project, output):
         run = json.loads((root / result['run_directory'] / 'run.json').read_bytes())
         if not verified['gradual_control_verified'] or run['parameters']['maximum_delay_ms'] != 400:
             raise ValueError('pilot requires the registered 400 ms gradual control')
-        cases[kind] = {'run_id': verified['run_id'], 'source_result_ref': verified['source_result_ref'],
+        cases[kind] = {'run_id': verified['run_id'], 'ended_at': verified['ended_at'],
+                       'source_result_ref': verified['source_result_ref'],
                        'oracle_ref': verified['oracle_ref'], 'control_steps': verified['observed_gradual_control_steps'],
                        'services': assess(verified['oracle'], run['fault_start_at'], run['recovery_start_at'])}
     if clean_source(checker) != commit:

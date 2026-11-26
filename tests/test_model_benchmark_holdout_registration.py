@@ -22,7 +22,7 @@ def test_registration_is_prospective_and_idempotent(tmp_path, monkeypatch):
     pilot_root = tmp_path / 'pilot'
     pilot_root.mkdir()
     def case(number):
-        return {'run_id': f'run-{number:032x}', 'control_steps': 3,
+        return {'run_id': f'run-{number:032x}', 'control_steps': 3, 'ended_at': '2026-01-01T00:00:00Z',
                 'source_result_ref': f'artifact://manifests/{number:064x}.json',
                 'oracle_ref': f'artifact://manifests/{number + 10:064x}.json',
                 'services': {name: {'verified_minutes': 20, 'unknown_minutes': 0, 'latency_episodes': 0}

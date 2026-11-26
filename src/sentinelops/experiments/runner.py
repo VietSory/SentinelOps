@@ -475,7 +475,7 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
 
 async def execute(config: ExperimentConfig, *, project: Path, output: Path, session_id: str | None = None,
                   allow_dirty: bool = False, source_profile: str = SOURCE_PROFILE,
-                  s4_lead_in: bool = False) -> Path:
+                  s4_lead_in: bool = False, holdout_authorization: dict | None = None) -> Path:
     config.validate()
     if type(s4_lead_in) is not bool or (s4_lead_in and config.scenario != "S4"):
         raise ValueError("the lock lead-in is only available for S4 development")
@@ -487,11 +487,19 @@ async def execute(config: ExperimentConfig, *, project: Path, output: Path, sess
         raise ValueError("S4 requires clean source and the dedicated Compose PostgreSQL connection")
     if source_profile not in (SOURCE_PROFILE, SOURCE_PROFILE_V2):
         raise ValueError("unsupported experiment source profile")
-    if source_profile == SOURCE_PROFILE_V2 and (
-        config.split != "validation" or config.scenario not in ("S0", "S1", "S3", "S4")
-        or config.warmup_seconds < 1800 or not config.all_entry_traffic or allow_dirty
-    ):
-        raise ValueError("ADR-016 capture requires clean S0/S1/S3/S4 validation with all-entry traffic and 30-minute warmup")
+    if source_profile == SOURCE_PROFILE_V2:
+        common = (config.warmup_seconds >= 1800 and config.all_entry_traffic and not allow_dirty)
+        development = config.split == "validation" and config.scenario in ("S0", "S1", "S3", "S4")
+        holdout = config.split == "test" and config.scenario in ("S0", "S1", "S3")
+        if not common or not (development or (holdout and holdout_authorization is not None)):
+            raise ValueError("ADR-016 capture requires clean S0/S1/S3/S4 validation with all-entry traffic and 30-minute warmup")
+        if development and holdout_authorization is not None:
+            raise ValueError("holdout authorization cannot be used for development capture")
+    elif holdout_authorization is not None:
+        raise ValueError("holdout authorization requires the v2 source profile")
     with ExperimentLock(project):
+        if source_profile == SOURCE_PROFILE_V2 and config.split == "test":
+            from sentinelops.ml.model_benchmark_holdout import verify_holdout_execution
+            verify_holdout_execution(project, config, session_id, output, holdout_authorization)
         return await _execute_locked(config, project=project, output=output, session_id=session_id,
                                      allow_dirty=allow_dirty, source_profile=source_profile, s4_lead_in=s4_lead_in)

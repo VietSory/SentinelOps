@@ -156,7 +156,7 @@ def test_source_verification_waits_for_both_freezes_and_all_metadata(tmp_path, m
     protocol_path = path.parent / 'protocol.json'
     protocol_path.write_bytes(b'protocol fixture')
     def pilot_case(number):
-        return {'run_id': f'run-{number:032x}', 'control_steps': 3,
+        return {'run_id': f'run-{number:032x}', 'control_steps': 3, 'ended_at': timestamp(START - timedelta(minutes=1)),
                 'source_result_ref': f'artifact://manifests/{number:064x}.json',
                 'oracle_ref': f'artifact://manifests/{number + 10:064x}.json',
                 'services': {service: {'verified_minutes': 20, 'unknown_minutes': 0, 'latency_episodes': 0}
@@ -194,6 +194,15 @@ def test_source_verification_waits_for_both_freezes_and_all_metadata(tmp_path, m
     registration_path.write_text(json.dumps(registration))
     kwargs['registration_sha256'] = hashlib.sha256(registration_path.read_bytes()).hexdigest()
     with pytest.raises(ValueError, match='incomplete low-ramp pilot'):
+        verify_frozen_capture_sources(tmp_path, matrix, receipts, run_paths, **kwargs)
+    assert not touched
+    pilot['cases']['inventory-gradual'] = pilot_case(2)
+    pilot['cases']['inventory-gradual']['ended_at'] = timestamp(START + timedelta(seconds=1))
+    pilot_path.write_text(json.dumps(pilot))
+    registration['pilot_receipt']['sha256'] = hashlib.sha256(pilot_path.read_bytes()).hexdigest()
+    registration_path.write_text(json.dumps(registration))
+    kwargs['registration_sha256'] = hashlib.sha256(registration_path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match='pilot completed after'):
         verify_frozen_capture_sources(tmp_path, matrix, receipts, run_paths, **kwargs)
     assert not touched
     pilot['cases']['inventory-gradual'] = pilot_case(2)
