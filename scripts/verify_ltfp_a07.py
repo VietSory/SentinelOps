@@ -7,8 +7,11 @@ from pathlib import Path
 import subprocess
 import sys
 
+import sentinelops
+
 from scripts.check_ltfp_graph_parity import check_worker
 from sentinelops.experiments.local_corpus import (
+    clean_source,
     group_name,
     load_plan,
     read_binding,
@@ -22,6 +25,10 @@ from sentinelops.telemetry.store import ArtifactStore
 def run(root, project, ordinal):
     store = ArtifactStore(root)
     project = Path(project).resolve()
+    checker_project = Path(__file__).resolve().parents[1]
+    if not Path(sentinelops.__file__).samefile(checker_project / 'src/sentinelops/__init__.py'):
+        raise ValueError('worker replay must import the checker checkout source')
+    checker_commit = clean_source(checker_project)
     plan = load_plan(project / 'configs/alibaba_local_evaluation.json')
     group = group_name(plan, 'development-validation', ordinal)
     slot = group + '-healthy'
@@ -41,10 +48,13 @@ def run(root, project, ordinal):
         ['git', 'show', session['source_commit'] + ':configs/topology.yaml'], cwd=project)
     parity = check_worker(run_path, expected_run_sha256=hashlib.sha256(run_bytes).hexdigest(),
                           expected_topology_sha256=hashlib.sha256(topology).hexdigest(), project=project)
+    if clean_source(checker_project) != checker_commit:
+        raise ValueError('worker replay source changed during verification')
     evidence = {
         'test_id': 'A07', 'status': 'passed', 'dataset_scope': 'alibaba-local-development-validation',
         'source_result_ref': verified['source_result_ref'], 'end_context_ref': end_context_ref,
         'run_id': verified['run_id'], 'source_commit': session['source_commit'],
+        'checker_source_commit': checker_commit,
         'checker_sha256': hashlib.sha256(Path(__file__).with_name('check_ltfp_graph_parity.py').read_bytes()).hexdigest(),
         'parity': parity,
     }
