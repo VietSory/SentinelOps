@@ -57,6 +57,10 @@ Launcher dùng lại artifact đã có qua `--lane-a-evidence`. Chạy từng st
 
 Plan `configs/alibaba_low_ramp_development.json` khai báo hai lượt pilot 400 ms cho Payment và Inventory trong nhóm `ale` riêng. Cả hai dùng profile v2, warmup 1.980 giây và oracle request hiện có. Plan này chỉ cho development. Checkout pilot sạch dùng commit `cd1b732a853b8f28741b998a17e277c29144d382` trên nhánh `feat/lane-a-low-ramp-pilot`. Lượt pilot được xếp sau A07 và chỉ bắt đầu nếu capture cùng verifier A07 thành công.
 
+Nhóm `ale-01` bị gián đoạn do host khởi động lại. Receipt `artifact://manifests/4535e5e0e97743219db85a39d8047fe095557225e585c8f7625faa1b012ec293.json` đóng toàn bộ nhóm và giữ nguyên dữ liệu gốc. Nhóm thay thế `ale-02` đang thu development; chưa có kết quả nghiệm thu pilot.
+
+Fit thử detector Lane B đã dùng phân vùng train và anchor calibration của draft v5. Checkpoint local `preflight/detector-bound-pilot-v3/fit/b/fit.json` có SHA-256 `936ae30e86030d3c87b2793ca97c24840ba1491dbe4ee4e70ea2283f1921e719`. Cả ba detector có 2.039 anchor, gồm 1.784 negative có score, 183 positive có score và 72 `UNKNOWN` thiếu lịch sử liên tục. Replay checkpoint cho sai số score lớn nhất 0. Fit thử dùng source workspace, chưa có protocol chung ở clean commit và chưa chứng minh B02/B06; không dùng checkpoint này để mở holdout.
+
 Verifier kiểm freeze protocol và ứng viên, sau đó đối chiếu receipt theo ma trận trước khi đọc oracle. Receipt thiếu lượt, có run lặp, bị gián đoạn hoặc thuộc nhóm `ald` bị từ chối. Bước xác minh nguồn kiểm hash raw, replay phục vụ và dựng lại oracle từ request. Caller vẫn phải ghim ma trận và commit capture trước khi thu. Adapter holdout và seal chưa được nối vào launcher.
 
 ```bash

@@ -13,11 +13,13 @@ from sentinelops.ml.model_benchmark_detector_fit import (
     SYNTHETIC_SCOPE,
     DetectorMinute,
     _cohorts,
+    _protocol_cohort_constraints,
     _verified_aggregates,
     fit_detector_benchmark,
     fit_synthetic_detector_benchmark,
     project_detector_run,
     verify_detector_fit,
+    verify_protocol_detector_fit,
 )
 from sentinelops.public_data.alibaba import AGGREGATE_VERSION, SOURCE
 from sentinelops.telemetry.core import stable_id
@@ -108,6 +110,88 @@ def test_cohorts_use_official_splits_and_disjoint_calibration_dependencies():
     assert [key[2] // 60 for key in anchors] == [9, 9 + BASELINE_LOOKBACK + 5, 139, 209]
     assert list(anchors.values()) == [0] * 4
     assert _cohorts(reversed(minutes), source, 5) == (rows, anchors, summary)
+
+
+def test_protocol_cohorts_exclude_other_times_and_bind_calibration_anchors():
+    reference, = _service_names({0, 1, 2}, 1)
+    calibration, = _service_names({6, 7}, 1)
+    records = [
+        dict(service=reference, role='train', parent_split='train', partition_start=0,
+             partition_end=19, anchor_minute=15),
+        dict(service=calibration, role='calibration', parent_split='calibration', partition_start=20,
+             partition_end=59, anchor_minute=35),
+        dict(service=calibration, role='development', parent_split='calibration', partition_start=20,
+             partition_end=59, anchor_minute=45),
+    ]
+    constraints = _protocol_cohort_constraints(records)
+    minutes = _series(reference, [10.0] * 70) + _series(calibration, [10.0] * 70)
+    rows, anchors, summary = _cohorts(minutes, {'scope': SYNTHETIC_SCOPE}, 5, constraints=constraints)
+    assert max(row.timestamp // 60 for row in rows['reference']) == 19
+    assert [key[2] // 60 for key in anchors] == [35]
+    assert max(row.timestamp // 60 for row in rows['calibration']) == 35
+    changed = [DetectorMinute(item.service, item.timestamp, 1000.0)
+               if (item.service == reference and item.timestamp // 60 > 19)
+               or (item.service == calibration and item.timestamp // 60 > 35) else item for item in minutes]
+    assert _cohorts(changed, {'scope': SYNTHETIC_SCOPE}, 5, constraints=constraints) == (rows, anchors, summary)
+    missing = [item for item in minutes if not (item.service == calibration and item.timestamp == 35 * 60)]
+    _, missing_anchors, _ = _cohorts(missing, {'scope': SYNTHETIC_SCOPE}, 5, constraints=constraints)
+    assert list(missing_anchors.values()) == [None]
+    assert [key[2] // 60 for key in missing_anchors] == [35]
+
+
+def test_protocol_bound_fit_pins_splits_and_ignores_outside_minutes(tmp_path, monkeypatch):
+    from sentinelops.ml import model_benchmark_detector_fit as fitting
+
+    minutes = _inputs()
+    services = {item.service for item in minutes if split_of(item.service) != 'evaluation'}
+    records = [dict(service=service, role=split_of(service), parent_split=split_of(service),
+                    partition_start=0, partition_end=44 if split_of(service) == 'train' else 9,
+                    anchor_minute=20 if split_of(service) == 'train' else 9) for service in services]
+    splits = json.dumps({'records': records}, sort_keys=True).encode()
+    pin = hashlib.sha256(splits).hexdigest()
+    source = {'scope': ALIBABA_SCOPE, 'source': SOURCE, 'provenance_sha256': 'a' * 64,
+              'archive_count': 1, 'archives_sha256': 'b' * 64}
+    current = [minutes]
+    monkeypatch.setattr(fitting, '_verified_aggregates', lambda *args: (dict(source), iter(current[0])))
+    def fit(root):
+        return fit_detector_benchmark(root, aggregate_dir=root, provenance=root, provenance_sha256='a' * 64,
+                                      config=_cfg(), protocol_splits=splits, protocol_splits_sha256=pin)
+    first = fit(tmp_path / 'first')
+    verified = verify_detector_fit(tmp_path / 'first', expected_fit_sha256=first['fit_sha256'])
+    assert verified.protocol_splits_sha256 == pin and first['status'] == 'ready'
+    verify_protocol_detector_fit(tmp_path / 'first', expected_fit_sha256=first['fit_sha256'],
+                                 protocol_splits=splits, protocol_splits_sha256=pin)
+    manifest = {'files': [{'path': 'snapshot/source/' + name, 'sha256': digest}
+                          for name, digest in verified.fit_code_sha256.items()]}
+    verify_protocol_detector_fit(tmp_path / 'first', expected_fit_sha256=first['fit_sha256'],
+                                 protocol_splits=splits, protocol_splits_sha256=pin,
+                                 protocol_source_manifest=json.dumps(manifest).encode())
+    manifest['files'][0]['sha256'] = '0' * 64
+    with pytest.raises(ValueError, match='fit code differs'):
+        verify_protocol_detector_fit(tmp_path / 'first', expected_fit_sha256=first['fit_sha256'],
+                                     protocol_splits=splits, protocol_splits_sha256=pin,
+                                     protocol_source_manifest=json.dumps(manifest).encode())
+    current[0] = minutes + [DetectorMinute(service, 45 * 60, 9999.0) for service in services]
+    second = fit(tmp_path / 'second')
+    assert first['model_sha256'] == second['model_sha256']
+    assert first['calibration'] == second['calibration']
+    calibration_service = next(service for service in services if split_of(service) == 'calibration')
+    current[0] = [item for item in minutes if (item.service, item.timestamp) != (calibration_service, 9 * 60)]
+    third = fit(tmp_path / 'missing')
+    assert all(point['rows'] == 102 and point['missing_scores'] == 1 and point['unknown_windows'] == 1
+               for point in third['calibration'].values())
+    path = tmp_path / 'first' / FIT_PATH
+    artifact = json.loads(path.read_bytes())
+    artifact['calibration_rows']['adsketch'][0]['service'] = 'unregistered-service'
+    changed_bytes = json.dumps(artifact, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+    path.write_bytes(changed_bytes)
+    with pytest.raises(ValueError, match='calibration source identity'):
+        verify_protocol_detector_fit(tmp_path / 'first', expected_fit_sha256=hashlib.sha256(changed_bytes).hexdigest(),
+                                     protocol_splits=splits, protocol_splits_sha256=pin)
+    with pytest.raises(ValueError, match='split SHA256 mismatch'):
+        fit_detector_benchmark(tmp_path / 'third', aggregate_dir=tmp_path, provenance=tmp_path,
+                               provenance_sha256='a' * 64, config=_cfg(), protocol_splits=splits,
+                               protocol_splits_sha256='0' * 64)
 
 
 def test_synthetic_fit_reloads_and_preserves_tied_negative_budget(tmp_path):

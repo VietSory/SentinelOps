@@ -53,13 +53,20 @@ def run(root, protocol, evidence_path, detector_sha256):
         raise ValueError('requested protocol differs from the frozen protocol')
     if frozen['status'] != 'ready':
         return {'status': 'blocked', 'reasons': frozen['reasons']}
-    from sentinelops.ml.model_benchmark_detector_fit import FIT_PATH, verify_detector_fit
+    from sentinelops.ml.model_benchmark_detector_fit import FIT_PATH, verify_detector_fit, verify_protocol_detector_fit
+    from sentinelops.ml.model_benchmark_protocol import _ref
 
     if not (root / FIT_PATH).is_file():
         return {'status': 'blocked', 'reasons': ['verified-detector-fit-required']}
     detector = verify_detector_fit(root, expected_fit_sha256=detector_sha256)
     if detector.provenance_sha256 != protocol['data']['manifest']['sha256']:
         raise ValueError('Lane B checkpoint data differs from the frozen protocol')
+    if detector.protocol_splits_sha256 != protocol['data']['splits']['sha256']:
+        return {'status': 'blocked', 'reasons': ['lane-b-protocol-split-binding-required']}
+    detector = verify_protocol_detector_fit(root, expected_fit_sha256=detector_sha256,
+        protocol_splits=_ref(root, protocol['data']['splits']),
+        protocol_splits_sha256=protocol['data']['splits']['sha256'],
+        protocol_source_manifest=_ref(root, protocol['code']['source_manifest']))
     if detector.status != 'ready':
         return {'status': 'blocked', 'reasons': ['lane-b-operating-points-not-ready']}
     lane_a = _lane_a(root, protocol, evidence_path)

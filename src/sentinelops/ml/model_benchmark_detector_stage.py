@@ -80,6 +80,7 @@ def _calibration_status(status, points):
 def _fit(root, protocol_path, spec):
     from sentinelops.ml.model_benchmark_detector import DetectorConfig
     from sentinelops.ml.model_benchmark_detector_fit import fit_detector_benchmark
+    from sentinelops.ml.model_benchmark_protocol import _ref
 
     _require_fields(spec, 'schema_version aggregate_dir provenance config persistence')
     if spec['schema_version'] != 'detector-fit-input/development-v1':
@@ -101,6 +102,8 @@ def _fit(root, protocol_path, spec):
             root, aggregate_dir=_within(root, spec['aggregate_dir']),
             provenance=provenance, provenance_sha256=provenance_sha256,
             config=config, persistence=spec['persistence'],
+            protocol_splits=_ref(root, protocol['data']['splits']),
+            protocol_splits_sha256=protocol['data']['splits']['sha256'],
         )
     except FileNotFoundError as error:
         return _blocked('required fit artifact missing: ' + str(error.filename))
@@ -252,11 +255,15 @@ def _score(command, root, spec):
           or source.get('evaluation_ready') is not True or source.get('holdout_opened') is not False
           or not source.get('source_result_refs') or not source.get('oracle_certificate_refs')):
         raise ValueError('local detector projection requires a verified development archive')
-    from sentinelops.ml.model_benchmark_detector_fit import FIT_PATH, verify_detector_fit
+    from sentinelops.ml.model_benchmark_detector_fit import FIT_PATH, verify_protocol_detector_fit
+    from sentinelops.ml.model_benchmark_protocol import _ref
 
     if not (root / FIT_PATH).is_file():
         return _blocked('verified-detector-fit-required')
-    fit = verify_detector_fit(root, expected_fit_sha256=spec['fit_sha256'])
+    fit = verify_protocol_detector_fit(root, expected_fit_sha256=spec['fit_sha256'],
+        protocol_splits=_ref(root, protocol['data']['splits']),
+        protocol_splits_sha256=protocol['data']['splits']['sha256'],
+        protocol_source_manifest=_ref(root, protocol['code']['source_manifest']))
     if fit.provenance_sha256 not in {_BASELINE_FIT_SHA256, protocol['data']['manifest']['sha256']}:
         raise ValueError('detector fit provenance differs from the development protocol')
     if fit.status != 'ready':
