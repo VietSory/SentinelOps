@@ -1,0 +1,61 @@
+{
+  "plan_version": "local-http-alibaba-low-ramp-development/v1",
+  "authorizing_adr": "MODEL_BENCHMARK_RUNBOOK",
+  "policy_sha256": "b7faba71c1241886eb825903bbfdfcb560a899138942277cbdd60ee9172bda66",
+  "source_profile": "prometheus-increase-60s-5s/v2",
+  "feature_set_version": "http-relative-5m/v2",
+  "environment": "local",
+  "roles_in_order": [
+    "development-validation"
+  ],
+  "group_prefix": "ale",
+  "kinds": [
+    "payment-gradual",
+    "inventory-gradual"
+  ],
+  "minimum_groups": {
+    "development-validation": 1
+  },
+  "maximum_groups": {
+    "development-validation": 2
+  },
+  "healthy_active_seconds": {
+    "development-validation": 900
+  },
+  "abrupt_active_seconds": 600,
+  "gradual_active_seconds": 1200,
+  "abrupt_fault_mode_by_ordinal_parity": {
+    "odd": "latency",
+    "even": "error"
+  },
+  "warmup_seconds": 1980,
+  "minimum_verified_healthy_prefault_minutes": 30,
+  "recovery_seconds": 360,
+  "entry_rps": 1.0,
+  "maximum_delay_ms": 400,
+  "seed_base": 20263100,
+  "candidate": {
+    "model_version": "de38fc6bb89896856556e13e7c6142ba21c8d0fea88ebd082f95e96d4e5b0e57",
+    "manifest_sha256": "d52df5846ac5027507d96b67c751f02f2c5519e3ea970fbdc3599207d18eb84e"
+  },
+  "evaluation_protocol": "alibaba-relative-local-evaluation/v1",
+  "scoring": {
+    "clock": "recorded-source-availability-counterfactual",
+    "event_deadline_seconds": 300,
+    "forecast_horizon_seconds": 300,
+    "latency_detector": [
+      "isolation_forest",
+      "bundled_mad"
+    ],
+    "error_detector": [
+      "objective_slo",
+      "online_error_mad"
+    ],
+    "error_mad_multiplier": 6.0,
+    "error_mad_min_scale": 0.001,
+    "risk_relative_slope_threshold": 0.05
+  },
+  "fitting_allowed": false,
+  "sealed_final_capture_allowed": false,
+  "previous_capture_promotion_allowed": false
+}
