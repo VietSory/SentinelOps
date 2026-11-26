@@ -55,7 +55,37 @@
     "lane_a_sha256": "03071521d9a2ef8c1af7a5a4ac33393cc12386f4fb88fa5c1efa1e9b5b24c3d0",
     "a08_sha256": "cfbb7fdcf37ff3bf09ac5046f39abcc2700e40d4448987f2fd7942236d39c1b6",
     "lane_a_status": "blocked",
-    "missing": ["A07"]
+    "missing": ["A07 at draft v4"]
+  },
+  "worker_replay_a07": {
+    "scope": "alibaba-local-development-validation",
+    "status": "passed",
+    "run_id": "run-16ef8ae7c2a4499f8d1985e2a6f83d9a",
+    "capture_commit": "27d443e433132bb056d8b17f7204b1be03fbe59a",
+    "run_sha256": "27ef6ca20db8cde0f3700ab34fabcdf9473285d0fa01d98e7a4e75abbe5755c2",
+    "receipt": "artifacts/lane-a/a07-development-capture-v2/manifests/7292f6aa7f8247481eeac1076de6579632f6ec74934d8cd599159ac82e12b1c0.json",
+    "receipt_sha256": "7292f6aa7f8247481eeac1076de6579632f6ec74934d8cd599159ac82e12b1c0",
+    "source_profile": "prometheus-increase-60s-5s/v2",
+    "raw_capture_count": 150,
+    "capture_minutes": 50,
+    "shape": [3, 5, 6],
+    "max_abs_error": 0.0,
+    "late_batch_unavailable": true,
+    "exact_receipt_available": true,
+    "future_suffix_invariant": true,
+    "limitations": ["Worker replay uses archived HTTP and a stateful fake database.", "Topology availability was assigned at replay setup; live ingestion latency and scorer parity remain unverified."]
+  },
+  "protocol_draft_v5": {
+    "scope": "development",
+    "protocol_sha256": "b205f3a122cc17d1a697264472920110119e6bd2578dc5f381642cfa2c2b1d96",
+    "lane_a_status": "ready",
+    "lane_b_status": "blocked"
+  },
+  "github_ci": {
+    "commit": "e7aaa71e886ffa27f18d1697edafab4a529bbb33",
+    "run": "https://github.com/VietSory/SentinelOps/actions/runs/45791849971",
+    "status": "success",
+    "limitations": ["Later workspace edits are not included in this CI run."]
   },
   "protocol_draft": {
     "scope": "development-only-not-holdout",

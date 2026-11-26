@@ -126,6 +126,40 @@ def metric_event_cases(cases, service, measure, threshold, persistence):
     return projected
 
 
+def latency_event_intervals(oracle, service, *, threshold, entry_buckets, recovery_buckets):
+    """Derive confirmed latency episodes, retaining later events after recovery."""
+    events, active = [], None
+    streak = recovery = 0
+    previous = None
+    for key, row in sorted(oracle['services'][service]['buckets'].items(), key=lambda item: int(item[0])):
+        minute = int(key)
+        contiguous = previous is not None and minute == previous + 60
+        if not contiguous:
+            streak = recovery = 0
+        if row['availability'] != 'VERIFIED':
+            streak = recovery = 0
+        else:
+            value = row['p95_latency_ms']
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                raise ValueError('verified oracle bucket lacks finite p95 latency')
+            if active is not None:
+                recovery = recovery + 1 if value <= threshold and contiguous else int(value <= threshold)
+                if recovery >= recovery_buckets:
+                    active['recovered_at'] = timestamp(datetime.fromtimestamp(minute + 60, timezone.utc))
+                    active = None
+                    streak = recovery = 0
+            else:
+                streak = streak + 1 if value > threshold and contiguous else int(value > threshold)
+                if streak == entry_buckets:
+                    active = {'onset_at': timestamp(datetime.fromtimestamp(minute - 60 * (entry_buckets - 1), timezone.utc)),
+                              'confirmed_at': timestamp(datetime.fromtimestamp(minute + 60, timezone.utc)),
+                              'recovered_at': None}
+                    events.append(active)
+                    streak = 0
+        previous = minute
+    return events
+
+
 def latency_forecast_labels(frame, oracle, health_policy):
     """Label benchmark latency onsets from verified request truth after freezing inputs."""
     validate_policy(health_policy)
@@ -136,10 +170,17 @@ def latency_forecast_labels(frame, oracle, health_policy):
                                    health_policy['latency_ms'], health_policy['entry_buckets'])
     evidence = projected['oracle']['services'][frame['service']]
     buckets = evidence['buckets']
-    onset = utc_time(evidence['first_violation_at']) if evidence['first_violation_at'] else None
+    events = latency_event_intervals(oracle, frame['service'], threshold=health_policy['latency_ms'],
+                                     entry_buckets=health_policy['entry_buckets'],
+                                     recovery_buckets=health_policy['recovery_buckets'])
+    active = next((event for event in events if utc_time(event['onset_at']) <= cutoff
+                   and (event['recovered_at'] is None or cutoff < utc_time(event['recovered_at']))), None)
+    following = next((event for event in events if utc_time(event['onset_at']) > cutoff), None)
+    selected = active or following
+    onset = utc_time(selected['onset_at']) if selected else None
     future = end + timedelta(seconds=300)
     positive = onset is not None and cutoff < onset <= future
-    tail = (utc_time(evidence['confirmed_at']) if positive else
+    tail = (utc_time(selected['confirmed_at']) if positive else
             future + timedelta(minutes=health_policy['entry_buckets']))
     history = [buckets.get(str(int(start.timestamp()) + offset * 60)) for offset in range(5)]
     risk, reason = None, None
@@ -147,7 +188,7 @@ def latency_forecast_labels(frame, oracle, health_policy):
         reason = 'forecast-anchor-minute-advanced'
     elif not all(item and item['availability'] == 'VERIFIED' for item in history):
         reason = 'incomplete-history-oracle'
-    elif onset is not None and cutoff >= onset:
+    elif active is not None:
         reason = 'incident-or-post-incident'
     elif not all(item['breach'] is False for item in history):
         reason = 'history-not-healthy'
@@ -158,7 +199,7 @@ def latency_forecast_labels(frame, oracle, health_policy):
     else:
         risk = int(positive)
     return {'risk_label': risk, 'risk_missing_reason': reason, 'prediction_cutoff': frame['as_of'],
-            'risk_forecast_anchor_at': frame['window_end'], 'slo_onset_at': evidence['first_violation_at'],
+            'risk_forecast_anchor_at': frame['window_end'], 'slo_onset_at': selected['onset_at'] if selected else None,
             'future_confirmation_tail': timestamp(tail)}
 
 

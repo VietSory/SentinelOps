@@ -16,13 +16,13 @@ Tập calibration development đầy đủ có 55.730 window chung và 89 positi
 
 **KEEP** bundle đã kiểm chứng `de38fc6b` làm baseline. **INCONCLUSIVE** đối với việc thay XGBoost bằng LTFP và đối với giá trị tăng thêm của graph.
 
-Quyết định dựa trên phạm vi bằng chứng hiện có. Chưa có parity A07 trên telemetry v2 đã lưu, oracle latency-only độc lập cho holdout local, bảng lead và false warnings theo giờ, hay khoảng tin cậy ghép cặp theo group. Kết quả development không đủ để áp dụng gate thay model hoặc quy khác biệt cho graph.
+Quyết định dựa trên phạm vi bằng chứng hiện có. A07 đã đạt trên raw telemetry v2 lưu từ lượt development và replay worker với fakeDB có trạng thái. Chưa có oracle latency-only độc lập cho holdout local, bảng lead và false warnings theo giờ, hay khoảng tin cậy ghép cặp theo group. Kết quả development không đủ để áp dụng gate thay model hoặc quy khác biệt cho graph.
 
 Bundle baseline có model version `de38fc6bb89896856556e13e7c6142ba21c8d0fea88ebd082f95e96d4e5b0e57` và manifest SHA-256 `d52df5846ac5027507d96b67c751f02f2c5519e3ea970fbdc3599207d18eb84e`. Gói người dùng cung cấp có bundle và fit report. Digest image, release và bằng chứng rollback của lần triển khai cần được đối chiếu riêng trước bàn giao AWS.
 
 ## Điều kiện review lại
 
-1. Xác minh A07 với raw capture v2 và chứng minh topology calibration ngoại sinh trước cutoff.
+1. Đối chiếu receipt A07 và xác minh thời điểm topology runtime cùng parity scorer trước release.
 2. Khóa protocol, ứng viên và operating point trước khi mở holdout mới. Giữ kết quả `ald` và kết quả Alibaba hiện tại trong phạm vi development.
 3. Chấm bốn dòng trên cùng holdout, giữ UNKNOWN và miss trong mẫu số, đối soát event oracle cùng clock và tính bootstrap ghép cặp theo group.
 4. Xác minh replay và worker, release digest, rollback, local demo và CI của đúng commit. Ghi quyết định cuối theo các gate trong kế hoạch.

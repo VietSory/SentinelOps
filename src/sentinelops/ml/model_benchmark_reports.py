@@ -13,10 +13,9 @@ def forecast_report_from_oracles(store, rows, cases, *, thresholds=None, policy_
     truth, events = [], []
     for case in cases:
         for service, schedule in case['score_schedules'].items():
-            record, event = project_latency_truth(store, case, service, schedule)
+            record, projected_events = project_latency_truth(store, case, service, schedule)
             truth.append(record)
-            if event is not None:
-                events.append(event)
+            events.extend(projected_events)
     return forecast_report(rows, events, thresholds=thresholds, policy_identity=policy_identity,
                            truth=truth, provenance=provenance)
 

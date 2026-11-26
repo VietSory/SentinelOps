@@ -43,11 +43,11 @@ Chạy lại graph 20–23 với train phút 0–179 và calibration phút 180�
 
 Train có 24 event positive thuộc 23 service. Calibration có 26 event thuộc 21 service. Các negative window có thể trùng lặp theo thời gian hoặc chia sẻ graph, nên số window không chứng minh tính độc lập thống kê. Kết quả ở trên đạt điều kiện số lượng hai lớp và có cạnh của A08 cho thí nghiệm development. Chưa có positive calibration với hàng xóm để đánh giá riêng nhóm đó.
 
-Phân vùng này được chọn sau các phân tích pilot và chỉ dùng cho development. Chưa chứng minh điều kiện topology ngoại sinh cho calibration hoặc parity worker A07. Chưa dùng phân vùng này làm giao thức holdout. Lệnh và receipt được ghim tại [evidence cohort](../reports/evidence/ltfp-cohort-causal-development.json). Script [audit cohort](../../scripts/audit_ltfp_cohort.py) kiểm hash fit report, 120 Parquet, split service và ranh giới thời gian.
+Phân vùng này được chọn sau các phân tích pilot và chỉ dùng cho development. Topology calibration đã được đối chiếu với các shard CallGraph trước cutoff trên đồng hồ replay. Chưa chứng minh thời điểm topology khả dụng trong runtime thật. Chưa dùng phân vùng này làm giao thức holdout. Lệnh và receipt được ghim tại [evidence cohort](../reports/evidence/ltfp-cohort-causal-development.json). Script [audit cohort](../../scripts/audit_ltfp_cohort.py) kiểm hash fit report, 120 Parquet, split service và ranh giới thời gian.
 
 Đã dựng protocol draft từ 3.200 record train, 2.039 anchor calibration và 56.858 window development còn lại. Draft giữ topology một bước đã dùng cho từng service và snapshot các file nguồn theo hash. `code.commit` là commit nền `27d443e`; snapshot gồm cả thay đổi chưa commit, nên không phải clean commit nghiệm thu. Availability của Alibaba vẫn được mô phỏng. Chưa gắn receipt A01–A09 hoặc xác nhận support vào draft; audit trả `blocked` và không freeze candidate. Protocol local nằm tại `artifacts/lane-a/preflight/protocol-draft-v1/protocol.json`, với SHA logic `05716e3c8a470b6dd59eb45157d10972593632968d2c21817cb26f2e4fc2a78b`.
 
-Bản draft v3 bổ sung receipt fixture cho A01–A06 và A09. Lệnh `python -m scripts.verify_ltfp_acceptance --root artifacts/lane-a` dùng draft v1 và chạy 27 ca fixture để tạo bản v3. Lệnh `python -m scripts.verify_ltfp_development_support --root artifacts/lane-a` kiểm tra ledger, đối chiếu split với hai cohort đã dùng và tạo draft v4. Bản v4 gắn receipt A08 và support cho development Alibaba. Audit của Lane A còn chặn ở A07.
+Bản draft v3 bổ sung receipt fixture cho A01–A06 và A09. Bản v4 gắn receipt A08 và support cho development Alibaba. Bản v5 gắn receipt A07 từ lượt capture thật. Audit draft v5 báo Lane A `ready` và Lane B `blocked`. Trạng thái này áp dụng cho kiểm tra protocol development.
 
 Launcher dùng lại artifact đã có qua `--lane-a-evidence`. Chạy từng stage `fit`, `calibrate` hoặc `score` để đối chiếu hash và ledger. `artifact_status: verified` xác nhận artifact development. Exit code vẫn là 2 nếu audit Lane A còn gate mở.
 
@@ -61,7 +61,7 @@ Verifier kiểm freeze protocol và ứng viên, sau đó đối chiếu receipt
 
 ```bash
 python -m scripts.model_benchmark --root artifacts/lane-a \
-  --protocol artifacts/lane-a/preflight/protocol-draft-v4/protocol.json \
+  --protocol artifacts/lane-a/preflight/protocol-draft-v5/protocol.json \
   score --lane a --lane-a-evidence docs/reports/evidence/ltfp-alibaba-development.json
 ```
 
@@ -87,8 +87,9 @@ Chấm lại toàn bộ khoảng calibration, gồm 58.897 window. Tập có nh�
 ## Gate còn mở
 
 - **A08 đạt ở phạm vi development.** Đã dựng lại topology từ CallGraph phút 60–71 và xác nhận graph không dùng node train. Trong 1.996 service chưa thấy trong fit có score graph, 35 có hàng xóm khả dụng và 1.961 không có. Thứ tự thời gian đã được xác nhận trên đồng hồ Alibaba replay với availability mô phỏng. Nhóm calibration dương có cạnh vẫn thiếu để đánh giá graph.
-- **A07 chưa xác nhận.** Gói bàn giao thiếu raw capture và artifact GitHub Actions đã kiểm tra dùng profile v1. Checker có thể replay lại một archive v2 độc lập khi được cung cấp SHA-256 của `run.json` và topology từ commit tạo archive. Chạy `python -m scripts.check_ltfp_graph_parity --worker --run "$RUN" --run-sha256 "$RUN_SHA" --topology-sha256 "$TOPOLOGY_SHA"`. Các ca fixture kiểm admission và worker replay. A07 cần kết quả từ raw capture thật.
-- **Xác minh lượt healthy đã đăng ký.** Lượt `ald-01-healthy` dừng giữa warmup. Raw và volume được giữ lại. Lượt `ald-02-healthy` chạy trong store `artifacts/lane-a/a07-development-capture-v2`. Khi có `result.json` và Docker context vẫn chạy, `python -m scripts.verify_ltfp_a07 --root "$CAPTURE_ROOT" --capture-project "$CAPTURE_PROJECT" --ordinal 2` xác minh capture theo ADR-019 rồi replay worker. Sau khi có `evidence_ref`, `python -m scripts.admit_ltfp_a07 --root artifacts/lane-a --capture-root "$CAPTURE_ROOT" --evidence-ref "$A07_REF"` ghi draft v5 với hash receipt. Audit kiểm lại hash và các điều kiện parity khi đọc draft.
+- **A07 đạt trong phạm vi replay development.** Lượt `ald-02-healthy` hoàn tất và được xác minh theo ADR-019. Worker replay dùng 150 raw HTTP profile v2 trong 50 phút cho ba service. Node IDs, mask và feature giữa hai đường khớp, sai số lớn nhất 0. Dữ liệu đến muộn bị loại trước cutoff và khả dụng đúng tại receipt. Receipt được gắn vào draft v5. Replay dùng fakeDB có trạng thái; thời điểm topology được gán lúc thiết lập replay, còn parity scorer và độ trễ live chưa được chứng minh. Lượt `ald-01-healthy` bị gián đoạn được giữ riêng.
 - **Benchmark chính thức chưa chạy.** Bảng development ở trên chưa có event oracle độc lập, lead time, false warnings mỗi giờ hay khoảng tin cậy theo group. Chưa có candidate đã freeze hoặc quyết định thay model. Chưa mở holdout.
+
+Oracle forecast đã được sửa để tính từng vi phạm sau khi có ba bucket khỏe liên tiếp theo health policy. Bucket thiếu hoặc `UNKNOWN` không được dùng để xác nhận phục hồi. Test kiểm hai onset trong cùng lượt và giữ cả hai trong mẫu số khi model không có score. Thay đổi này ở workspace và chưa nằm trong CI của commit `e7aaa71`.
 
 [Kế hoạch](MODEL_BENCHMARK_PLAN.md) · [Runbook](MODEL_BENCHMARK_RUNBOOK.md) · [Kết quả Lane B](MODEL_BENCHMARK_LANE_B_LOCAL.md)
