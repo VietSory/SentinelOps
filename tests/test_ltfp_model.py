@@ -36,6 +36,9 @@ def test_roundtrip_determinism_permutation_and_no_mutation(tmp_path):
     before = deepcopy(data)
     scores = predict(model, identity, data, expected_graph_sha256=identity['graph_sha256'])
     assert scores == predict(model, identity, data, expected_graph_sha256=identity['graph_sha256'])
+    invalid_units = {**data, 'units': {'rt': 'milliseconds', 'rate': 'unknown'}}
+    with pytest.raises(ValueError, match='invalid causal graph identity'):
+        predict(model, identity, invalid_units, expected_graph_sha256=identity['graph_sha256'])
     digest = export(model, identity, tmp_path / 'model')
     restored = load(tmp_path / 'model', metadata_sha256=digest, expected_identity=identity)
     assert scores == predict(restored, identity, data, expected_graph_sha256=identity['graph_sha256'])

@@ -18,6 +18,19 @@ BLOCKED = {
 }
 
 
+def read_protocol(path):
+    def reject_constant(value):
+        raise ValueError('nonfinite JSON constant: ' + value)
+
+    def unique_object(pairs):
+        value = dict(pairs)
+        if len(value) != len(pairs):
+            raise ValueError('duplicate JSON key')
+        return value
+
+    return json.loads(path.read_bytes(), parse_constant=reject_constant, object_pairs_hook=unique_object)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
         'Lane B development stages require an admitted input descriptor. Shared '
@@ -30,9 +43,17 @@ def main(argv=None):
         sub.add_argument('--lane', choices=('a', 'b'), required=True)
         if name != 'audit':
             sub.add_argument('--lane-b-input', type=Path)
-    for name in ('freeze-protocol', 'verify', 'freeze-candidates', 'capture-preflight',
+        if name in ('fit', 'calibrate', 'score'):
+            sub.add_argument('--lane-a-evidence', type=Path,
+                             help='Verify existing Alibaba development artifacts against pinned evidence.')
+    for name in ('freeze-protocol', 'verify',
                  'seal-capture', 'package'):
         commands.add_parser(name)
+    commands.add_parser('capture-preflight').add_argument(
+        '--draft-matrix', action='store_true', help='Print the proposed holdout matrix and time budget.')
+    candidates = commands.add_parser('freeze-candidates')
+    candidates.add_argument('--lane-a-evidence', type=Path)
+    candidates.add_argument('--lane-b-fit-sha256')
     for name in ('report', 'verify-report'):
         sub = commands.add_parser(name)
         sub.add_argument('--lane', choices=('b',))
@@ -54,6 +75,24 @@ def main(argv=None):
 
             result['lane'] = 'b'
             result.update(prepare_detector_archive(args.root, args.archive, args.fit_sha256))
+        elif args.command == 'capture-preflight' and args.draft_matrix:
+            from scripts.draft_benchmark_holdout import draft_matrix
+
+            result.update(draft_matrix())
+        elif args.command == 'freeze-candidates':
+            if not args.lane_a_evidence or not args.lane_b_fit_sha256:
+                result.update(status='blocked', reasons=[BLOCKED[args.command]])
+            else:
+                from scripts.freeze_benchmark_candidates import run
+
+                result.update(run(args.root, read_protocol(args.protocol), args.lane_a_evidence,
+                                  args.lane_b_fit_sha256))
+        elif getattr(args, 'lane_a_evidence', None) is not None:
+            if args.lane != 'a' or args.lane_b_input is not None:
+                raise ValueError('--lane-a-evidence requires --lane a without --lane-b-input')
+            from scripts.verify_ltfp_development_stage import verify_stage
+
+            result.update(verify_stage(args.command, args.root, read_protocol(args.protocol), args.lane_a_evidence))
         elif getattr(args, 'lane_b_input', None) is not None:
             if args.lane != 'b':
                 raise ValueError('--lane-b-input requires --lane b')
@@ -72,17 +111,7 @@ def main(argv=None):
             if args.command == 'verify':
                 result.update(verify_protocol(args.root))
             else:
-                def reject_constant(value):
-                    raise ValueError('nonfinite JSON constant: ' + value)
-                def unique_object(pairs):
-                    value = {}
-                    for key, item in pairs:
-                        if key in value:
-                            raise ValueError('duplicate JSON key: ' + key)
-                        value[key] = item
-                    return value
-                protocol = json.loads(args.protocol.read_text(), parse_constant=reject_constant,
-                                      object_pairs_hook=unique_object)
+                protocol = read_protocol(args.protocol)
                 audit = audit_protocol(protocol, args.root)
                 result.update(audit)
                 if args.command == 'audit':

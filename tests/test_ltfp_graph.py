@@ -34,12 +34,27 @@ def build(node_ids=NODES, observations=None, *, topology=None, self_only=False, 
         source_identity={"stream": "fixture"}, self_only=self_only)
 
 
+def test_source_rate_units_are_explicit_and_do_not_change_relative_features():
+    config, observations, topology = inputs()
+    normalized = build_graph_input(NODES, observations, anchor=ANCHOR, as_of=ANCHOR, config=config,
+        topology=topology, source_identity={'stream': 'fixture'}, rate_unit='normalized_call_rate_sum')
+    assert normalized['units'] == {'rt': 'milliseconds', 'rate': 'normalized_call_rate_sum'}
+    assert normalized['values'] == build()['values']
+    with pytest.raises(ValueError, match='unsupported source rate unit'):
+        build_graph_input(NODES, observations, anchor=ANCHOR, as_of=ANCHOR, config=config,
+            topology=topology, source_identity={'stream': 'fixture'}, rate_unit='unknown')
+
+
 def test_a05_bidirectional_attention_preserves_directed_topology_and_self_only():
     got = build()
     assert got["attention_mask"] == [[1, 1, 1], [1, 1, 0], [1, 0, 1]]
     assert got["topology"]["directed_edges"] == sorted([[NODES[0], NODES[1]], [NODES[0], NODES[2]]])
     assert build(self_only=True)["attention_mask"] == [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
     assert "rds" not in got["node_ids"]
+    _, observations, topology = inputs()
+    topology['directed_edges'].append((NODES[1], 'rds'))
+    with pytest.raises(ValueError, match='unknown endpoint'):
+        build(observations=observations, topology=topology)
 
 
 def test_permutation_is_id_stable_and_masked_node_does_not_hide_other_targets():

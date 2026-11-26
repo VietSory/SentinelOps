@@ -1,10 +1,12 @@
 """Synthetic fitting only; no admitted real data or model activation."""
 from copy import deepcopy
+import json
 
 import pytest
 torch = pytest.importorskip("torch", reason="optional CPU research dependency; required in ltfp-cpu CI")
 
-from sentinelops.ml.ltfp_training import _tensors, fit_pair
+from sentinelops.ml.ltfp_training import _tensors, _training_order, fit_pair
+from sentinelops.ml import ltfp_training
 from sentinelops.ml.ltfp_model import load
 from sentinelops.telemetry.core import stable_id
 from test_ltfp_model import fixture
@@ -91,6 +93,45 @@ def test_paired_deterministic_update_export_and_completed_skip(tmp_path):
     changed[0]['labels']['a'] = 1
     with pytest.raises(ValueError, match='identity mismatch'):
         fit_pair(changed, admission=admission, expected_admission_sha256=pin, output=tmp_path/'first')
+    legacy = deepcopy(first)
+    legacy['settings'].pop('sampling')
+    legacy['input_sha256'] = stable_id({'admission': admission,
+        'samples': sorted(samples, key=lambda sample: sample['record_id']), 'settings': legacy['settings']})
+    (tmp_path/'first'/'receipt.json').write_text(json.dumps(legacy))
+    assert fit_pair(samples, admission=admission, expected_admission_sha256=pin, output=tmp_path/'first') == legacy
+
+
+def test_interrupted_second_export_leaves_no_partial_output_and_can_retry(tmp_path, monkeypatch):
+    samples, admission = inputs()
+    pin = stable_id(admission)
+    output = tmp_path / 'fit'
+    original_export = ltfp_training.export
+
+    def fail_second_export(model, identity, directory):
+        if identity['self_only']:
+            raise OSError('simulated interrupted export')
+        return original_export(model, identity, directory)
+
+    monkeypatch.setattr(ltfp_training, 'export', fail_second_export)
+    with pytest.raises(OSError, match='interrupted export'):
+        fit_pair(samples, admission=admission, expected_admission_sha256=pin, output=output)
+    assert not output.exists()
+    assert not list(tmp_path.iterdir())
+
+    monkeypatch.setattr(ltfp_training, 'export', original_export)
+    result = fit_pair(samples, admission=admission, expected_admission_sha256=pin, output=output)
+    assert set(result['models']) == {'graph', 'self_only'}
+    assert fit_pair(samples, admission=admission, expected_admission_sha256=pin, output=output) == result
+
+
+def test_sampling_is_deterministic_and_does_not_prefer_sorted_record_ids():
+    samples = [{'record_id': f'record-{index:04}'} for index in range(4000)]
+    ordered = _training_order(samples)
+    assert ordered == _training_order(list(reversed(samples)))
+    trained_ids = {sample['record_id'] for sample in ordered[:3200]}
+    assert len(trained_ids) == 3200
+    assert any(record_id >= 'record-3200' for record_id in trained_ids)
+    assert any(sample['record_id'] not in trained_ids for sample in samples[:3200])
 
 
 @pytest.mark.parametrize('bad', ['pin', 'source', 'graph-pin', 'topology-pin', 'mask', 'unknown', 'missing', 'split', 'config'])

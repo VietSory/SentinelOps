@@ -9,6 +9,8 @@ import pytest
 
 from sentinelops.ml.alibaba_local_evaluation import latency_forecast_labels, score_records
 from sentinelops.ml.alibaba_training import load_config
+from sentinelops.ml.model_benchmark_forecast import MODELS, project_latency_truth
+from sentinelops.ml.model_benchmark_reports import forecast_report_from_oracles
 from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
@@ -31,6 +33,47 @@ def set_latency(oracle, offset, values):
     for index, value in enumerate(values):
         instant = START + timedelta(minutes=5, seconds=offset + index * 60)
         oracle['services'][SERVICE]['buckets'][str(int(instant.timestamp()))]['p95_latency_ms'] = value
+
+
+@pytest.mark.parametrize('mode', ['latency', 'errors', 'missing-tail', 'foreign-certificate'])
+def test_independent_latency_events_and_no_breach_exposure(tmp_path, mode):
+    _, oracle = inputs()
+    store = ArtifactStore(tmp_path)
+    schedule = {'start': timestamp(START + timedelta(minutes=5)),
+                'stop': timestamp(START + timedelta(minutes=10)),
+                'cadence_seconds': 60, 'cutoff_delay_seconds': 30}
+    if mode == 'latency':
+        set_latency(oracle, 240, [751., 800.])
+    elif mode == 'missing-tail':
+        del oracle['services'][SERVICE]['buckets'][str(int((START + timedelta(minutes=10)).timestamp()))]
+    else:
+        for row in oracle['services'][SERVICE]['buckets'].values():
+            row.update(error_rate=.9, breach=True)
+    source = store.write('manifests', {'kind': 'admitted-source'})
+    oracle_ref = store.write('manifests', {'certificate_version': 'local-http-oracle/v1',
+        'source_result_ref': source, 'oracle': oracle})
+    case = dict(run_id='run-01', group_id='group-01', oracle_ref=oracle_ref, source_result_ref=source)
+    if mode == 'foreign-certificate':
+        with pytest.raises(ValueError, match='differs from the admitted run'):
+            project_latency_truth(store, {**case, 'source_result_ref': 'foreign'}, SERVICE, schedule)
+        return
+    truth, event = project_latency_truth(store, case, SERVICE, schedule)
+    if mode == 'latency':
+        assert truth['outcome'] == 'breach' and 'healthy_hours' not in truth
+        assert event['onset_at'] == timestamp(START + timedelta(minutes=9))
+        assert event['confirmed_at'] == timestamp(START + timedelta(minutes=11))
+        assert event['eligible'] is True and event['oracle_ref'] == oracle_ref
+        report = forecast_report_from_oracles(store, [], [{**case, 'score_schedules': {SERVICE: schedule}}],
+            thresholds={model: {'watch': .4, 'degrading': .7} for model in MODELS},
+            policy_identity='fixture', provenance=dict(code='c', config='p', data='d', models='m'))
+        assert report['models']['ltfp_graph']['lead']['events'] == 1
+        assert report['models']['ltfp_graph']['lead']['miss'] == 1
+    elif mode == 'errors':
+        assert event is None and truth['outcome'] == 'no-breach'
+        assert truth['healthy_hours'] == 5 / 60
+    else:
+        assert event is None and truth['outcome'] == 'UNKNOWN'
+        assert 'healthy_hours' not in truth
 
 
 @pytest.mark.parametrize('values,label', [([751., 800.], 1), ([750., 750.], 0)])

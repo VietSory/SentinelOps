@@ -5,7 +5,20 @@ from datetime import timedelta
 
 from sentinelops.contracts import utc_time
 
-from sentinelops.ml.model_benchmark_forecast import MODELS, summarize_forecasts
+from sentinelops.ml.model_benchmark_forecast import MODELS, project_latency_truth, summarize_forecasts
+
+
+def forecast_report_from_oracles(store, rows, cases, *, thresholds=None, policy_identity=None, provenance):
+    """Build report denominators for all admitted run/services, including unscored ones."""
+    truth, events = [], []
+    for case in cases:
+        for service, schedule in case['score_schedules'].items():
+            record, event = project_latency_truth(store, case, service, schedule)
+            truth.append(record)
+            if event is not None:
+                events.append(event)
+    return forecast_report(rows, events, thresholds=thresholds, policy_identity=policy_identity,
+                           truth=truth, provenance=provenance)
 
 
 def _quantile(values, probability):

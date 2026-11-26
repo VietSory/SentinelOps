@@ -1,8 +1,11 @@
 """Paired CPU development fitting on caller-admitted in-memory graphs only."""
 from copy import deepcopy
+import hashlib
 import json
 import math
 from pathlib import Path
+import shutil
+import tempfile
 import time
 
 import torch
@@ -11,7 +14,15 @@ from sentinelops.ml.ltfp_model import Forecast, export, load, metadata, predict
 from sentinelops.telemetry.core import stable_id
 
 SETTINGS = dict(seed=42, optimizer='Adam', learning_rate=.001, batch_size=32,
-                steps=100, early_stopping=False, trials=1, dtype='float32')
+                steps=100, early_stopping=False, trials=1, dtype='float32',
+                sampling='seeded-record-hash-v1')
+
+
+def _training_order(samples):
+    """Choose a stable, seed-dependent order independent of record ID ordering."""
+    return sorted(samples, key=lambda sample: (
+        hashlib.sha256(f"{SETTINGS['seed']}:{sample['record_id']}".encode()).digest(),
+        sample['record_id']))
 
 
 def _tensors(graph, self_only):
@@ -72,7 +83,10 @@ def fit_pair(samples, *, admission, expected_admission_sha256, output):
     path = Path(output)
     if path.exists():
         receipt = json.loads((path / 'receipt.json').read_bytes())
-        if (receipt['input_sha256'] != pin or receipt['settings'] != SETTINGS
+        legacy_settings = {key: value for key, value in SETTINGS.items() if key != 'sampling'}
+        settings = receipt['settings']
+        expected_pin = stable_id({'admission': admission, 'samples': ordered, 'settings': settings})
+        if (settings not in (SETTINGS, legacy_settings) or receipt['input_sha256'] != expected_pin
             or receipt['admission_sha256'] != expected_admission_sha256
             or receipt['schema_version'] != 'ltfp-paired-fit/development-v1'
             or set(receipt['models']) != set(identities)):
@@ -84,9 +98,14 @@ def fit_pair(samples, *, admission, expected_admission_sha256, output):
                 raise ValueError('completed model identity mismatch')
             load(path / name, metadata_sha256=entry['metadata_sha256'], expected_identity=identity)
         return receipt
-    path.mkdir(parents=True, exist_ok=False)
+    destination = path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    path = Path(tempfile.mkdtemp(prefix=f'.{destination.name}.', dir=destination.parent))
     result = dict(schema_version='ltfp-paired-fit/development-v1', input_sha256=pin,
-                  admission_sha256=expected_admission_sha256, settings=dict(SETTINGS), models={})
+                  admission_sha256=expected_admission_sha256, settings=dict(SETTINGS), models={},
+                  training_records=len(ordered),
+                  unique_records_used=min(len(ordered), SETTINGS['steps'] * SETTINGS['batch_size']))
+    training_order = _training_order(ordered)
     # Restore caller RNG/thread settings; single-thread CPU gives repeatable tests/fits.
     previous_threads = torch.get_num_threads()
     try:
@@ -105,7 +124,7 @@ def fit_pair(samples, *, admission, expected_admission_sha256, output):
                     total = 0
                     count = 0
                     for offset in range(32):
-                        sample = ordered[(step * 32 + offset) % len(ordered)]
+                        sample = training_order[(step * 32 + offset) % len(training_order)]
                         graph = sample['graph']
                         logits = model(*_tensors(graph, identity['self_only']))
                         selected = [i for i, node in enumerate(graph['node_ids']) if sample['loss_mask'][node]]
@@ -131,6 +150,10 @@ def fit_pair(samples, *, admission, expected_admission_sha256, output):
                 result['models'][name] = dict(identity=identity, metadata_sha256=digest,
                     steps=len(losses), losses=losses, elapsed_seconds=time.perf_counter()-started)
         (path / 'receipt.json').write_text(json.dumps(result, sort_keys=True, allow_nan=False))
+        if destination.exists():
+            raise FileExistsError(f'fit destination already exists: {destination}')
+        path.rename(destination)
     finally:
         torch.set_num_threads(previous_threads)
+        shutil.rmtree(path, ignore_errors=True)
     return result

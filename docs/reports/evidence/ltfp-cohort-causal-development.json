@@ -1,0 +1,26 @@
+{
+  "scope": "exploratory-pinned-baseline-time-partitioned",
+  "base_commit": "27d443e433132bb056d8b17f7204b1be03fbe59a",
+  "fit_report_sha256": "58a30c257fb6e181215c600dd1385faa16f5bc15ccacb35df87db69e6838f315",
+  "audit_script": "scripts/audit_ltfp_cohort.py",
+  "audit_script_sha256": "fcf86bd6bc6d2893b7eddbdb1a3f86d91ea1b187c6f6ed3046a8f40e91d5d7e9",
+  "local_receipt": "artifacts/lane-a/preflight/cohort-causal-time-purged-v5.json",
+  "local_receipt_sha256": "07f4ae2395beaa484dd070653ee60d6e2d3a8cdb3a500951784b6c2f77e53ddd",
+  "multiplier": 16.0,
+  "graph_archives": {
+    "CallGraph_20.tar.gz": "9e262b57b77c0f9d22494cbc2c9cb2eebc80f91c0efb49f581eccce1f9950fbe",
+    "CallGraph_21.tar.gz": "1f4eff5ce8f51e25af3cfd0f1d0d897715c203dd2b16054b56f886cb569bd4e2",
+    "CallGraph_22.tar.gz": "8bf0a73d43d6d266aa72408bc88ebe8b249d075b2d7f07abf1db762961232a34",
+    "CallGraph_23.tar.gz": "365dacdc7c95929dbc08ffeb043ad0c921c2a2c512e931bc0fc84b73077f71bc"
+  },
+  "command": "PYTHONPATH=src:. .venv-ml/bin/python scripts/audit_ltfp_cohort.py --root artifacts/lane-a --graph artifacts/lane-a/input/callgraph/CallGraph_20.tar.gz artifacts/lane-a/input/callgraph/CallGraph_21.tar.gz artifacts/lane-a/input/callgraph/CallGraph_22.tar.gz artifacts/lane-a/input/callgraph/CallGraph_23.tar.gz --train-partition 0 179 --calibration-partition 180 359 --train-window 162 172 --calibration-window 324 352",
+  "results": [
+    {"role": "train", "partition": [0, 179], "window": [162, 172], "services": 6002, "excluded_services_insufficient_partition_minutes": 854, "positive": 81, "positive_services": 23, "positive_events": 24, "positive_with_neighbor": 10, "positive_services_with_neighbor": 3, "positive_events_with_neighbor": 3, "negative": 62556, "negative_services": 5815, "negative_with_neighbor": 2085, "negative_services_with_neighbor": 197, "unknown": 2076},
+    {"role": "calibration", "partition": [180, 359], "window": [324, 352], "services": 2032, "excluded_services_insufficient_partition_minutes": 296, "positive": 89, "positive_services": 21, "positive_events": 26, "positive_with_neighbor": 0, "positive_services_with_neighbor": 0, "positive_events_with_neighbor": 0, "negative": 55641, "negative_services": 1999, "negative_with_neighbor": 920, "negative_services_with_neighbor": 36, "unknown": 1757}
+  ],
+  "limitations": [
+    "The selected partitions were chosen after reviewing pilot results and are development only.",
+    "Windows are not certified statistically independent; neighbors can be shared between services.",
+    "Graph source exogeneity and runtime parity remain unverified."
+  ]
+}

@@ -1,11 +1,57 @@
 """Benchmark-only shared latency outcomes; no model fitting or calibration."""
 import math
+from datetime import timedelta
 
 from sentinelops.contracts import utc_time
 from sentinelops.telemetry.core import stable_id
-from sentinelops.ml.alibaba_local_evaluation import latency_forecast_labels
+from sentinelops.ml.alibaba_local_evaluation import latency_forecast_labels, metric_event_cases
 
 MODELS = ('slope', 'xgboost', 'ltfp_self_only', 'ltfp_graph')
+
+
+def project_latency_truth(store, case, service, schedule):
+    """Project one independently admitted request timeline onto a frozen score schedule."""
+    if not case['oracle_ref'].startswith('artifact://manifests/'):
+        raise ValueError('forecast truth requires a request oracle certificate')
+    certificate = store.read(case['oracle_ref'])
+    if (certificate['certificate_version'] != 'local-http-oracle/v1'
+            or certificate['source_result_ref'] != case['source_result_ref']):
+        raise ValueError('forecast truth certificate differs from the admitted run')
+    oracle = certificate['oracle']
+    start, stop = (utc_time(schedule[key]) for key in ('start', 'stop'))
+    delay = schedule['cutoff_delay_seconds']
+    if (any(point.second or point.microsecond for point in (start, stop)) or stop <= start
+            or schedule['cadence_seconds'] != 60 or type(delay) not in (int, float)
+            or not math.isfinite(delay) or not 0 <= delay < 60):
+        raise ValueError('forecast truth requires a fixed minute schedule')
+    start_minute, stop_minute = (int(point.timestamp()) for point in (start, stop))
+    buckets = oracle['services'][service]['buckets']
+    if any(type(row['p95_latency_ms']) not in (int, float)
+           or not math.isfinite(row['p95_latency_ms']) or row['p95_latency_ms'] < 0
+           for row in buckets.values() if row['availability'] == 'VERIFIED'):
+        raise ValueError('verified oracle bucket lacks finite p95 latency')
+    projected, = metric_event_cases([{'oracle': oracle}], service, 'p95_latency_ms', 750, 2)
+    latency = projected['oracle']['services'][service]
+    onset = utc_time(latency['first_violation_at']) if latency['first_violation_at'] else None
+    identity = {key: case[key] for key in ('group_id', 'run_id')}
+    identity.update(service=service)
+    truth = {**identity, 'evidence_id': case['oracle_ref'], 'score_schedule': dict(schedule)}
+    event = None
+    if onset is not None and start <= onset < stop:
+        event = {**identity, 'onset_at': latency['first_violation_at'],
+                 'confirmed_at': latency['confirmed_at'], 'kind': 'latency-slo',
+                 'oracle_ref': case['oracle_ref'], 'eligible': True, 'reason': None}
+        event['event_id'] = stable_id(event)
+        truth.update(outcome='breach', reason=None)
+    elif onset is not None and onset < start:
+        truth.update(outcome='UNKNOWN', reason='latency-onset-before-schedule')
+    elif (utc_time(oracle['ended_at']) < stop + timedelta(minutes=1)
+          or any(buckets.get(str(minute), {}).get('availability') != 'VERIFIED'
+                 for minute in range(start_minute, stop_minute + 60, 60))):
+        truth.update(outcome='UNKNOWN', reason='incomplete-latency-oracle')
+    else:
+        truth.update(outcome='no-breach', reason=None, healthy_hours=(stop - start).total_seconds() / 3600)
+    return truth, event
 
 
 def forecast_rows(store, row, oracle, health_policy, scores):
@@ -51,7 +97,6 @@ def summarize_forecasts(rows, events, *, thresholds=None, policy_identity=None):
     to watch/degrading. policy_identity identifies caller-frozen calibration;
     this helper does not certify calibration or open any data split.
     """
-    from datetime import timedelta
     from sentinelops.ml.local_evaluation import risk_curve
     from sentinelops.workers.risk import EpisodeTracker
 
