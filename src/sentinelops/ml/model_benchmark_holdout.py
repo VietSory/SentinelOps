@@ -4,10 +4,11 @@ from pathlib import Path
 import re
 import hashlib
 
+from sentinelops.contracts import utc_time
 from sentinelops.experiments.local_labels import oracle_from_requests
 from sentinelops.experiments.verification import verify_source_replay
-from sentinelops.ml.model_benchmark_protocol import _keys, verify_protocol
-from sentinelops.telemetry.core import stable_id
+from sentinelops.ml.model_benchmark_protocol import _keys, _ref, verify_protocol
+from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 from sentinelops.telemetry.store import ArtifactStore
 
 
@@ -75,10 +76,13 @@ def verify_capture_inventory(matrix, receipts, *, matrix_sha256, candidates_sha2
     return inventory
 
 
-def verify_capture_source(run_path, receipt, slot, *, group_id, source_profile, source_commit, certificate_store):
+def verify_capture_source(run_path, receipt, slot, *, group_id, source_profile, source_commit, certificate_store,
+                          registered_at=None):
     """Rebuild one inventoried slot's serving and truth artifacts from archived inputs."""
     run_path = Path(run_path)
     run = json.loads(run_path.read_bytes())
+    if registered_at is not None and utc_time(run['started_at']) < utc_time(registered_at):
+        raise ValueError('holdout capture predates its registered design')
     if (receipt['slot_id'] != slot['slot_id']
             or run_path.name != 'run.json' or run_path.parent.name != receipt['run_id']
             or run['run_id'] != receipt['run_id'] or run['session_id'] != group_id
@@ -124,13 +128,8 @@ def verify_capture_source(run_path, receipt, slot, *, group_id, source_profile, 
             'source_result_ref': result_ref, 'oracle_ref': oracle_ref}
 
 
-def verify_frozen_capture_sources(root, matrix, receipts, run_paths, *, matrix_sha256, candidates_sha256,
-                                  capture_commit, certificate_store):
-    """Check freezes and metadata before source reads.
-
-    The caller must independently pin matrix and capture_commit before collection.
-    This function does not certify prospective registration or seal the capture.
-    """
+def verify_candidate_freeze(root, candidates_sha256):
+    """Verify both candidate and protocol freezes before any capture data is read."""
     root = Path(root).resolve()
     candidate_path = root / 'freeze/candidates.json'
     if not candidate_path.is_file():
@@ -147,8 +146,63 @@ def verify_frozen_capture_sources(root, matrix, receipts, run_paths, *, matrix_s
             or candidate.get('activation_allowed') is not False
             or any(candidate.get('lanes', {}).get(lane, {}).get('status') != 'ready' for lane in ('a', 'b'))):
         raise ValueError('verified protocol and candidates required before reading holdout sources')
+    return frozen
+
+
+def verify_capture_registration(root, *, registration_sha256, matrix_sha256, candidates_sha256,
+                                capture_commit, frozen):
+    """Check the independently pinned prospective design before any run source is read."""
+    root = Path(root).resolve()
+    content = _ref(root, {'path': 'capture/registration.json', 'sha256': registration_sha256})
+    registration = json.loads(content)
+    _keys(registration, 'schema_version protocol_sha256 protocol_file_sha256 candidates_sha256 matrix_sha256 '
+                        'capture_commit registered_at pilot_receipt')
+    protocol_path = root / 'freeze/protocol.json'
+    if (registration['schema_version'] != 'benchmark-holdout-registration/v1'
+            or registration['protocol_sha256'] != frozen['protocol_sha256']
+            or registration['protocol_file_sha256'] != hashlib.sha256(protocol_path.read_bytes()).hexdigest()
+            or registration['candidates_sha256'] != candidates_sha256
+            or registration['matrix_sha256'] != matrix_sha256
+            or registration['capture_commit'] != capture_commit):
+        raise ValueError('holdout registration differs from the frozen identities')
+    utc_time(registration['registered_at'])
+    pilot = json.loads(_ref(root, registration['pilot_receipt']))
+    if (pilot.get('schema_version') != 'benchmark-low-ramp-pilot/development-v1'
+            or pilot.get('status') != 'ready' or pilot.get('maximum_delay_ms') != 400
+            or pilot.get('checker_source_commit') != capture_commit
+            or pilot.get('holdout_opened') is not False or pilot.get('activation_allowed') is not False
+            or set(pilot.get('cases', {})) != {'payment-gradual', 'inventory-gradual'}):
+        raise ValueError('verified 400 ms development pilot receipt required')
+    runs, results, oracles = set(), set(), set()
+    for case in pilot['cases'].values():
+        run_id = case.get('run_id')
+        if (not isinstance(run_id, str) or not re.fullmatch('run-[0-9a-f]{32}', run_id) or run_id in runs
+                or type(case.get('control_steps')) is not int or case['control_steps'] < 3
+                or any(not isinstance(case.get(key), str) or not re.fullmatch(r'artifact://manifests/[0-9a-f]{64}\.json', case[key])
+                       for key in ('source_result_ref', 'oracle_ref'))
+                or case.get('source_result_ref') in results or case.get('oracle_ref') in oracles
+                or set(case.get('services', {})) != set(BUSINESS_ROUTES)):
+            raise ValueError('incomplete low-ramp pilot evidence')
+        runs.add(run_id)
+        results.add(case['source_result_ref'])
+        oracles.add(case['oracle_ref'])
+        for item in case['services'].values():
+            if (type(item.get('verified_minutes')) is not int or item['verified_minutes'] < 1
+                    or type(item.get('unknown_minutes')) is not int or item['unknown_minutes'] != 0
+                    or type(item.get('latency_episodes')) is not int or item['latency_episodes'] != 0):
+                raise ValueError('low-ramp pilot lacks verified no-breach coverage')
+    return registration
+
+
+def verify_frozen_capture_sources(root, matrix, receipts, run_paths, *, matrix_sha256, candidates_sha256,
+                                  capture_commit, registration_sha256, certificate_store):
+    """Check freezes, prospective registration and complete inventory before source reads."""
+    root = Path(root).resolve()
+    frozen = verify_candidate_freeze(root, candidates_sha256)
     if not isinstance(capture_commit, str) or not re.fullmatch('[0-9a-f]{40}', capture_commit):
         raise ValueError('holdout capture requires an explicit committed source')
+    registration = verify_capture_registration(root, registration_sha256=registration_sha256,
+        matrix_sha256=matrix_sha256, candidates_sha256=candidates_sha256, capture_commit=capture_commit, frozen=frozen)
     inventory = verify_capture_inventory(matrix, receipts, matrix_sha256=matrix_sha256,
                                          candidates_sha256=candidates_sha256)
     slots = {slot['slot_id']: (group['group_id'], slot)
@@ -162,5 +216,5 @@ def verify_frozen_capture_sources(root, matrix, receipts, run_paths, *, matrix_s
             verified.append(verify_capture_source(
                 run_paths[receipt['slot_id']], receipt, slot, group_id=group_id,
                 source_profile=matrix['source_profile'], source_commit=capture_commit,
-                certificate_store=certificate_store))
+                certificate_store=certificate_store, registered_at=registration['registered_at']))
     return verified

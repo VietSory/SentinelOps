@@ -9,7 +9,7 @@ from scripts.draft_benchmark_holdout import draft_matrix
 from sentinelops.ml.model_benchmark_holdout import (
     verify_capture_inventory, verify_capture_source, verify_frozen_capture_sources,
 )
-from sentinelops.telemetry.core import stable_id, timestamp
+from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.store import ArtifactStore
 from test_local_labels import START, derive, fixture_oracle
 
@@ -102,6 +102,8 @@ def test_holdout_source_rebuilds_request_oracle_and_detects_tampering(tmp_path, 
                   source_commit='a' * 40, certificate_store=certificates)
     assert verify_capture_source(run_path, receipt, slot, **kwargs)['oracle_ref'] == oracle_ref
     assert replay == [run_id]
+    with pytest.raises(ValueError, match='predates its registered design'):
+        verify_capture_source(run_path, receipt, slot, registered_at=timestamp(START + timedelta(seconds=1)), **kwargs)
     altered = deepcopy(certificate)
     altered['oracle']['ended_at'] = timestamp(START + timedelta(minutes=13))
     forged_ref = certificates.write('manifests', altered)
@@ -144,13 +146,61 @@ def test_source_verification_waits_for_both_freezes_and_all_metadata(tmp_path, m
     monkeypatch.setattr(holdout, 'verify_protocol', lambda root: {'status': 'ready', 'protocol_sha256': 'a' * 64})
     monkeypatch.setattr(holdout, 'verify_capture_source', lambda *args, **kwargs: touched.append(args[1]['run_id']))
     kwargs = dict(matrix_sha256=draft['matrix_sha256'], candidates_sha256=pin,
-                  capture_commit='f' * 40, certificate_store=None)
+                  capture_commit='f' * 40, registration_sha256='d' * 64, certificate_store=None)
     with pytest.raises(ValueError, match='candidate freeze required'):
         verify_frozen_capture_sources(tmp_path, matrix, receipts, run_paths, **kwargs)
     assert not touched
     path = tmp_path / 'freeze/candidates.json'
     path.parent.mkdir()
     path.write_bytes(candidate_bytes)
+    protocol_path = path.parent / 'protocol.json'
+    protocol_path.write_bytes(b'protocol fixture')
+    def pilot_case(number):
+        return {'run_id': f'run-{number:032x}', 'control_steps': 3,
+                'source_result_ref': f'artifact://manifests/{number:064x}.json',
+                'oracle_ref': f'artifact://manifests/{number + 10:064x}.json',
+                'services': {service: {'verified_minutes': 20, 'unknown_minutes': 0, 'latency_episodes': 0}
+                             for service in BUSINESS_ROUTES}}
+    pilot = {'schema_version': 'benchmark-low-ramp-pilot/development-v1', 'status': 'ready',
+             'maximum_delay_ms': 400, 'checker_source_commit': 'f' * 40, 'holdout_opened': False,
+             'activation_allowed': False, 'cases': {'payment-gradual': pilot_case(1), 'inventory-gradual': pilot_case(2)}}
+    pilot_path = tmp_path / 'pilot.json'
+    pilot_path.write_text(json.dumps(pilot))
+    registration = {'schema_version': 'benchmark-holdout-registration/v1', 'protocol_sha256': 'a' * 64,
+                    'protocol_file_sha256': hashlib.sha256(protocol_path.read_bytes()).hexdigest(),
+                    'candidates_sha256': pin, 'matrix_sha256': draft['matrix_sha256'],
+                    'capture_commit': 'f' * 40, 'registered_at': timestamp(START),
+                    'pilot_receipt': {'path': 'pilot.json', 'sha256': hashlib.sha256(pilot_path.read_bytes()).hexdigest()}}
+    registration_path = tmp_path / 'capture/registration.json'
+    registration_path.parent.mkdir()
+    registration_path.write_text(json.dumps(registration))
+    kwargs['registration_sha256'] = hashlib.sha256(registration_path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match='changed reference'):
+        verify_frozen_capture_sources(tmp_path, matrix, receipts, run_paths,
+                                      **{**kwargs, 'registration_sha256': '0' * 64})
+    assert not touched
+    pilot['cases']['payment-gradual']['services']['payment-service']['unknown_minutes'] = 1
+    pilot_path.write_text(json.dumps(pilot))
+    registration['pilot_receipt']['sha256'] = hashlib.sha256(pilot_path.read_bytes()).hexdigest()
+    registration_path.write_text(json.dumps(registration))
+    kwargs['registration_sha256'] = hashlib.sha256(registration_path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match='no-breach coverage'):
+        verify_frozen_capture_sources(tmp_path, matrix, receipts, run_paths, **kwargs)
+    assert not touched
+    pilot['cases']['payment-gradual']['services']['payment-service']['unknown_minutes'] = 0
+    pilot['cases']['inventory-gradual']['source_result_ref'] = pilot['cases']['payment-gradual']['source_result_ref']
+    pilot_path.write_text(json.dumps(pilot))
+    registration['pilot_receipt']['sha256'] = hashlib.sha256(pilot_path.read_bytes()).hexdigest()
+    registration_path.write_text(json.dumps(registration))
+    kwargs['registration_sha256'] = hashlib.sha256(registration_path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match='incomplete low-ramp pilot'):
+        verify_frozen_capture_sources(tmp_path, matrix, receipts, run_paths, **kwargs)
+    assert not touched
+    pilot['cases']['inventory-gradual'] = pilot_case(2)
+    pilot_path.write_text(json.dumps(pilot))
+    registration['pilot_receipt']['sha256'] = hashlib.sha256(pilot_path.read_bytes()).hexdigest()
+    registration_path.write_text(json.dumps(registration))
+    kwargs['registration_sha256'] = hashlib.sha256(registration_path.read_bytes()).hexdigest()
     bad = deepcopy(receipts)
     bad['bench-final-05']['slots'][0]['status'] = 'interrupted'
     with pytest.raises(ValueError, match='incomplete holdout'):
