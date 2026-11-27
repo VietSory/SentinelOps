@@ -146,9 +146,21 @@ def test_lane_a_recommendation_requires_paired_gain_and_no_higher_warning_cost()
     assert decide()['benchmark'] == 'REPLACE' and decide()['release'] == 'KEEP'
     assert decide({'status': 'FAIL'})['benchmark'] == 'KEEP'
     assert decide({'status': 'INCONCLUSIVE'})['benchmark'] == 'INCONCLUSIVE'
-    gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']['lower'] = 0
-    assert decide()['reason'] == 'recall-improvement-not-established'
-    gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']['lower'] = .1
+    interval = gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']
+    interval['lower'] = -.051
+    assert decide()['reason'] == 'recall-non-inferiority-not-established'
+    interval['lower'] = -.05
+    assert decide()['benchmark'] == 'INCONCLUSIVE'
+    assert decide()['reason'] == 'non-inferior-without-measured-advantage'
+    gradual['run_no_breach']['ltfp_graph']['warned_runs'] = 0
+    assert decide()['reason'] == 'recall-non-inferior-with-lower-warning-cost'
+    gradual['run_no_breach']['ltfp_graph']['warned_runs'] = 1
+    healthy['models']['ltfp_graph']['healthy_exposure']['per_service_hour'] = .1
+    assert decide()['benchmark'] == 'REPLACE'
+    healthy['models']['ltfp_graph']['healthy_exposure']['per_service_hour'] = .2
+    interval['lower'] = 0
+    assert decide()['reason'] == 'non-inferior-without-measured-advantage'
+    interval['lower'] = .1
     gradual['run_no_breach']['ltfp_graph']['unknown_runs'] = 1
     assert decide()['reason'] == 'false-warning-comparison-incomplete'
     gradual['run_no_breach']['ltfp_graph']['unknown_runs'] = 0

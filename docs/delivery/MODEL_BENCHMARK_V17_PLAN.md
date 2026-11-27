@@ -108,3 +108,22 @@ B-1 đến B-4 cần xong trước freeze v17. B-5 đến B-8 cần xong trướ
 2. Freeze protocol và candidates v17 cho cả hai lane.
 3. Đăng ký capture mới, thu 5 group (khoảng 34 giờ). Group `bench-final-01` đăng ký với candidates `36a64094…` nên không dùng cho chấm v17; giữ nguyên dữ liệu.
 4. Chấm: gate trên holdout local, xếp hạng trên split Alibaba chưa dùng. Viết ADR từng lane.
+
+## 4. Phản hồi review ngày 27-11 và sự cố capture
+
+**Capture v17 dừng.** Máy khởi động lại lúc khoảng 18:00 ngày 27-11. Slot healthy của `bench-final-01` (registration `5a2d7629…`) đang warmup thì dừng. Code không chạy lại slot dở dang, nên registration này bỏ. Dữ liệu giữ nguyên, chưa có slot nào hoàn tất.
+
+| # | Góp ý | Xử lý |
+| --- | --- | --- |
+| 1 | Event F1 trên Alibaba chưa có định nghĩa | Thuộc Lane B. B chốt định nghĩa event và luật match trước khi freeze Lane B. |
+| 2 | Gate trong code vẫn đòi cận dưới CI > 0 | Đã sửa `lane_a_recommendation`. `REPLACE` khi cận dưới CI Δ recall ≥ −0,05, chi phí cảnh báo sai không tăng, và có một ưu điểm đo được: cận dưới > 0, hoặc số lượt không breach bị cảnh báo, hoặc false warning trên giờ-service khỏe thấp hơn hẳn. Không kém nhưng không có ưu điểm thì ghi `INCONCLUSIVE`. Runbook đã cập nhật. |
+| 3 | Ứng viên Lane B | Owner chốt ngày 27-11: ứng viên chính **ADSketch + MAD**. Cảnh báo khi một trong hai vượt ngưỡng; hai ngưỡng hiệu chuẩn chung để tổng flag trên negative ≤1% ở calibration; lưới chọn ngưỡng có trường hợp chỉ MAD. Bảng khai báo trước bốn hàng IF, MAD, ADSketch, ADSketch + MAD và báo riêng phần ADSketch đóng góp thêm so với MAD, kể cả khi bằng 0. Development: chỉ MAD recall 0,464; ADSketch bắt thêm 2 positive ngoài MAD. B triển khai. |
+| 4 | Ưu điểm khai báo của Lane B | B thay bằng một chỉ số đo được có ngưỡng khai báo trước, hoặc bỏ. |
+| 5 | Split evaluation có sẵn | Đúng: `split_of()` gán bucket 8–9. Split này **đã được dùng** để báo cáo baseline cũ `de38fc6b` (layer 1, XGB so với slope) và IF/MAD trong kế hoạch. Chưa ai chấm ứng viên v17 (LTFP, ADSketch) trên split này. Support ở phút 324–352, K=16: 55.901 window có nhãn, 96 positive trên 21 service, 621 window có hàng xóm, 0 positive có hàng xóm. Tác dụng graph trên Alibaba khai NA. Bootstrap theo service chỉ có 21 service dương. |
+| 6a | Early stopping có dùng phút 324–352 không | Không. `fit_weighted_pair` chọn epoch trên 20% service của tập train (hash tên service), cửa sổ train 162–172. Calibration không được đọc khi fit. |
+| 6b | Positive có hàng xóm ở evaluation | 0. Xem mục 5. |
+| 7 | Có nên đăng ký capture sau khi chốt Lane B | Capture cũ đã dừng nên phải đăng ký lại. Owner quyết định chạy riêng Lane A ngay hay gộp với Lane B. |
+
+**Lệch 75 và 71 của ADSketch.** Hai số đo hai thứ khác nhau. 75 là `positive_flags` trong `freeze/candidates.json`: số positive có score ≥ ngưỡng ở budget 1%. 71 là số positive được xếp loại pattern known (65) hoặc novel (6), không xét ngưỡng. 112 positive còn lại xếp loại normal; 65 + 6 + 112 = 183.
+
+**Bundle cho Lane B** nằm ở `artifacts/handoff-lane-b-v17` trên máy A. Gồm 120 Parquet và sidecar, `report.json` của fit, `splits.json` (`3ab8606e…`, giống v16 và v17), protocol draft v16 kèm B01–B06, freeze protocol v17 Lane A, `fit.json` của `936ae30e…`, receipt support, và `SHA256SUMS`.
