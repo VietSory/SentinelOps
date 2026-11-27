@@ -194,6 +194,26 @@ def test_pause_closes_verified_group_before_reporting_boundary(tmp_path, monkeyp
     assert not corpus.registration_path(store, 'ald-02').exists()
 
 
+def test_low_ramp_plan_has_two_separate_400ms_scenarios(tmp_path):
+    import json
+    from sentinelops.experiments.local_corpus import ALIBABA_LOW_RAMP_PLAN, group_name, recipe
+
+    plan = load_plan(ALIBABA_LOW_RAMP_PLAN)
+    assert group_name(plan, 'development-validation', 1) == 'ale-01'
+    assert [slot[2] for slot in planned_slots(plan)] == ['payment-gradual', 'inventory-gradual']
+    for kind in plan['kinds']:
+        value = recipe(plan, 'development-validation', 1, kind)
+        value.validate()
+        assert value.scenario == 'S3' and value.maximum_delay_ms == 400
+        assert value.target_service == kind.removesuffix('-gradual') + '-service'
+    with pytest.raises(ValueError):
+        group_name(plan, 'sealed-final', 1)
+    path = tmp_path / 'altered.json'
+    path.write_text(json.dumps(dict(plan, maximum_delay_ms=1200)))
+    with pytest.raises(ValueError, match='committed evaluation-only plan'):
+        load_plan(path)
+
+
 def test_alibaba_plan_keeps_five_acquired_groups_with_a_replacement_budget():
     from sentinelops.experiments.local_corpus import ALIBABA_PLAN, group_name
     plan = load_plan(ALIBABA_PLAN)

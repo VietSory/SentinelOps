@@ -1,0 +1,152 @@
+{
+  "scope": "alibaba-proxy-development",
+  "activation_allowed": false,
+  "holdout_opened": false,
+  "fit_report_sha256": "58a30c257fb6e181215c600dd1385faa16f5bc15ccacb35df87db69e6838f315",
+  "fit_input_sha256": "29f8e4ae7e535eb3e44522c2fb1ee74e290e35b978727c911226ec6d18995fd1",
+  "fit_receipt_sha256": "f61c0bf35e53f51fcc57421d482ea0749d33717116f6b682498a38ce757fcfcc",
+  "completed_fit_replay": {
+    "status": "matched",
+    "command": ".venv-ml/bin/python -m scripts.fit_ltfp_development --root artifacts/lane-a",
+    "compared_fields": ["protocol", "admission", "fit_input_sha256", "candidate_counts", "selected_counts", "selected_records", "model_metadata_sha256"],
+    "scope": "completed fit reuse; no mid-training checkpoint resume"
+  },
+  "independent_fit_replay": {
+    "scope": "development-only; no mid-training checkpoint resume",
+    "local_artifacts": "artifacts/lane-a/preflight/independent-replay-v5/",
+    "input_sha256": "29f8e4ae7e535eb3e44522c2fb1ee74e290e35b978727c911226ec6d18995fd1",
+    "steps_per_model": 100,
+    "losses_equal": true,
+    "metadata_digests_equal": true,
+    "weights_bitwise_equal": true,
+    "calibration_rows": 2039,
+    "calibration_ledger_sha256": "fff63ef67300266c50d1cf208b323ec8d06e62ada759f73944657c9fa3860909",
+    "calibration_ledger_bitwise_equal": true
+  },
+  "fixture_acceptance": {
+    "scope": "fixture-only",
+    "passed_checks": ["A01", "A02", "A03", "A04", "A05", "A06", "A09"],
+    "passed_test_cases": 27,
+    "protocol_path": "artifacts/lane-a/preflight/protocol-draft-v3/protocol.json",
+    "protocol_sha256": "0ace1ef837b884ba3c6aadb0af7430f98def7e7cdee99d6d3b6404048866ad72",
+    "test_results_sha256": "94469e643892b1706c9113c83dc31f848db833690076b2f92a56720039e1a2fa",
+    "lane_a_status": "blocked",
+    "missing": ["A07", "A08", "admitted real train/calibration support"]
+  },
+  "calibration_topology_verification": {
+    "scope": "alibaba-proxy-development",
+    "source_clock": "relative-minute-replay",
+    "availability": "simulated-at-bucket-time",
+    "command": ".venv-ml/bin/python -m scripts.verify_ltfp_calibration_topology --root artifacts/lane-a",
+    "receipt": "artifacts/lane-a/preflight/calibration-topology-verified-v1.json",
+    "receipt_sha256": "1b2e52e7c60d4077d7f19f39d3c264196532c6ed0a06c6d15aa39d00430fd66c",
+    "last_graph_minute": 71,
+    "scored_unseen_targets": 1996,
+    "scored_targets_with_neighbors": 35
+  },
+  "development_support": {
+    "scope": "alibaba-proxy-development",
+    "command": ".venv-ml/bin/python -m scripts.verify_ltfp_development_support --root artifacts/lane-a",
+    "verifier_sha256": "80e0b81e32467cd23ace24a36740ab06ca27dc0e3262992d28785fbdd95bc6b0",
+    "protocol_path": "artifacts/lane-a/preflight/protocol-draft-v4/protocol.json",
+    "protocol_sha256": "6bd05485fb16ba831bf10a572c40eacb38c60d05c55e350b6ea5473f3ba370f0",
+    "split_sha256": "3ab8606ed07ca65bbd8fec9900775c9b9a945dbbe349712c8832bfd06688c2d7",
+    "support_sha256": "9a8f50dac47c57fc43117da9e23cf6596c3cb639337977fe126f1bd350609d30",
+    "lane_a_sha256": "03071521d9a2ef8c1af7a5a4ac33393cc12386f4fb88fa5c1efa1e9b5b24c3d0",
+    "a08_sha256": "cfbb7fdcf37ff3bf09ac5046f39abcc2700e40d4448987f2fd7942236d39c1b6",
+    "lane_a_status": "blocked",
+    "missing": ["A07 at draft v4"]
+  },
+  "worker_replay_a07": {
+    "scope": "alibaba-local-development-validation",
+    "status": "passed",
+    "run_id": "run-16ef8ae7c2a4499f8d1985e2a6f83d9a",
+    "capture_commit": "27d443e433132bb056d8b17f7204b1be03fbe59a",
+    "run_sha256": "27ef6ca20db8cde0f3700ab34fabcdf9473285d0fa01d98e7a4e75abbe5755c2",
+    "receipt": "artifacts/lane-a/a07-development-capture-v2/manifests/7292f6aa7f8247481eeac1076de6579632f6ec74934d8cd599159ac82e12b1c0.json",
+    "receipt_sha256": "7292f6aa7f8247481eeac1076de6579632f6ec74934d8cd599159ac82e12b1c0",
+    "source_profile": "prometheus-increase-60s-5s/v2",
+    "raw_capture_count": 150,
+    "capture_minutes": 50,
+    "shape": [3, 5, 6],
+    "max_abs_error": 0.0,
+    "late_batch_unavailable": true,
+    "exact_receipt_available": true,
+    "future_suffix_invariant": true,
+    "limitations": ["Worker replay uses archived HTTP and a stateful fake database.", "Topology availability was assigned at replay setup; live ingestion latency and scorer parity remain unverified."]
+  },
+  "protocol_draft_v5": {
+    "scope": "development",
+    "protocol_sha256": "b205f3a122cc17d1a697264472920110119e6bd2578dc5f381642cfa2c2b1d96",
+    "lane_a_status": "ready",
+    "lane_b_status": "blocked"
+  },
+  "github_ci": {
+    "commit": "e7aaa71e886ffa27f18d1697edafab4a529bbb33",
+    "run": "https://github.com/VietSory/SentinelOps/actions/runs/45791849971",
+    "status": "success",
+    "limitations": ["Later workspace edits are not included in this CI run."]
+  },
+  "protocol_draft": {
+    "scope": "development-only-not-holdout",
+    "status": "blocked",
+    "protocol_sha256": "05716e3c8a470b6dd59eb45157d10972593632968d2c21817cb26f2e4fc2a78b",
+    "base_commit": "27d443e433132bb056d8b17f7204b1be03fbe59a",
+    "train_records": 3200,
+    "calibration_records": 2039,
+    "other_development_records": 56858,
+    "limitations": ["Source snapshot includes uncommitted changes.", "Source availability is simulated.", "Required test receipts and support are not yet admitted."]
+  },
+  "fit_metadata_sha256": {
+    "graph": "899f0b81312801efdecb1712ed43261ab92028ec058b4592c3c0d0c6b0eb0bde",
+    "self_only": "ecfafaa938cc36444c01dd9da26a4c123a424ab5973456abfbc4cb28b786d5f6"
+  },
+  "xgboost_model_sha256": "535f11abdb8467acddcaab20fd8ac94bb15e9faa4da80cc6eb6400fd6deb62bc",
+  "train": {
+    "partition_minutes": [0, 179],
+    "window_minutes": [162, 172],
+    "candidate_positive_windows": 81,
+    "candidate_negative_windows": 62556,
+    "selected_positive_windows": 81,
+    "selected_negative_windows": 3119,
+    "selection": "all positives and seed-42 hash-ranked negatives",
+    "steps_per_ltfp_model": 100
+  },
+  "calibration": {
+    "partition_minutes": [180, 359],
+    "window_minutes": [324, 352],
+    "selected_services": 2039,
+    "selection": "one seed-42 hash-ranked anchor per service, independent of label",
+    "negative_scored_windows": 1923,
+    "positive_scored_windows": 1,
+    "unknown_windows": 115,
+    "thresholds": {"slope": 0.05, "xgboost": 0.8543160557746887, "ltfp_self_only": 0.2514435946941376, "ltfp_graph": 0.25175946950912476},
+    "ledger_sha256": "fff63ef67300266c50d1cf208b323ec8d06e62ada759f73944657c9fa3860909",
+    "manifest_sha256": "62a874a6a091776f82146d9c96a74e2faf1f06fbc8bc35d67b5123ae21d5e4ed"
+  },
+  "score": {
+    "windows": 58897,
+    "labelled_windows": 55757,
+    "common_windows": 55730,
+    "common_positives": 89,
+    "common_prevalence": 0.001596985465637897,
+    "average_precision": {"slope": 0.01607267364649915, "xgboost": 0.024225682562094182, "ltfp_self_only": 0.0023280504215170013, "ltfp_graph": 0.0023229497110414227},
+    "reference_rows_checked": 2039,
+    "reference_max_abs_delta": 0.0,
+    "manifest_sha256": "cd49b88be718a5827073fa176d1573bd6cb66f68bd8bc86d130bc9e18351d600",
+    "predictions_sha256": "1a8925e9d16503aff896e5ea082db7a7e65f8c102dd0151b1abcb62c172f991b",
+    "score_script_sha256": "d999bf435a52574a998df69d0131839ac7b4dd84a38278d8bc2c57f4b93b5554",
+    "verify_script_sha256": "99c70d8dd8803f3eddd427cb44003d72984a6e5c55c037cf592be16c351f7bea"
+  },
+  "forecast_report": {
+    "csv_sha256": "409f5e9d563b483b3c82459ce53810296fefcf3dc07d6dd1c694b944656a4c43",
+    "manifest_sha256": "93bcc143119435b6c178afb58c83a5cf543b4450e05daefa02259a7d12938b61"
+  },
+  "limitations": [
+    "Development windows informed calibration and graph investigation; results do not measure heldout performance.",
+    "Training negatives were subsampled and XGBoost uses its existing class-balancing rule.",
+    "Alibaba call rates are normalized and source availability is simulated at bucket time.",
+    "Positive calibration windows have no same-split graph neighbor in the tested topology.",
+    "An independent local latency event oracle, live runtime parity, event lead, false warnings per healthy service-hour and confidence intervals remain unavailable."
+  ]
+}

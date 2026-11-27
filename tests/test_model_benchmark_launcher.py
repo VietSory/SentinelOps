@@ -40,6 +40,77 @@ def test_help_and_parser_do_not_claim_success(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize('options', [
+    ('--lane', 'b', '--lane-a-evidence', 'missing.json'),
+    ('--lane', 'a', '--lane-a-evidence', 'missing.json', '--lane-b-input', 'missing.json'),
+])
+def test_lane_a_evidence_cannot_be_used_for_lane_b_or_mixed_input(tmp_path, options):
+    result = run(tmp_path, 'fit', *options)
+    assert result.returncode == 1
+    assert json.loads(result.stdout)['reasons'] == [
+        '--lane-a-evidence requires --lane a without --lane-b-input']
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_lane_a_development_evidence_rejects_holdout(tmp_path):
+    from scripts.verify_ltfp_development_stage import verify_stage
+
+    evidence = tmp_path / 'evidence.json'
+    evidence.write_text(json.dumps({'scope': 'alibaba-proxy-development',
+                                    'activation_allowed': False, 'holdout_opened': True}))
+    with pytest.raises(ValueError, match='development-only'):
+        verify_stage('score', tmp_path, {}, evidence)
+
+
+def test_holdout_matrix_is_deterministic_and_cannot_start_capture(tmp_path):
+    command = ('capture-preflight', '--draft-matrix')
+    response = run(tmp_path, *command)
+    assert response.returncode == 2, response.stderr
+    result = json.loads(response.stdout)
+    assert result['capture_allowed'] is False
+    assert run(tmp_path, *command).stdout == response.stdout
+    matrix = result['matrix']
+    assert matrix['slot_count'] == 35 and matrix['budget_seconds'] == 122700
+    assert matrix['role'] == 'sealed-final'
+    assert [group['ordinal'] for group in matrix['groups']] == [1, 2, 3, 4, 5]
+    slots = [slot for group in matrix['groups'] for slot in group['slots']]
+    assert len({slot['slot_id'] for slot in slots}) == len({slot['recipe']['seed'] for slot in slots}) == 35
+    for group in matrix['groups']:
+        assert group['group_id'].startswith('bench-final-')
+        assert group['budget_seconds'] == 24540
+        for slot in group['slots']:
+            recipe = slot['recipe']
+            assert recipe['split'] == 'test'
+            if slot['kind'].endswith('-low'):
+                assert recipe['scenario'] == 'S3' and recipe['maximum_delay_ms'] == 400
+            elif slot['kind'].endswith('-abrupt'):
+                assert recipe['fault_mode'] == ('latency' if group['ordinal'] % 2 else 'error')
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_capture_commands_require_registration_and_dispatch_group(tmp_path, monkeypatch, capsys):
+    from scripts import model_benchmark
+    from sentinelops.ml import model_benchmark_holdout_capture as capture
+
+    calls = []
+    def action(root, group, pin, *, project):
+        calls.append((root, group, pin, project))
+        return {'slots': [{}] * 7}
+    monkeypatch.setattr(capture, 'capture_group', action)
+    monkeypatch.setattr(capture, 'verify_group', action)
+    common = ['--root', str(tmp_path), '--protocol', str(tmp_path / 'unused.json')]
+    for command in ('capture', 'verify-group'):
+        assert model_benchmark.main(common + [command, '--group', '01', '--registration-sha256', 'a' * 64]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result['status'] == 'ready' and result['verified_slots'] == 7
+        assert result['group'] == 'bench-final-01'
+    assert len(calls) == 2 and all(call[2] == 'a' * 64 for call in calls)
+    monkeypatch.setattr(capture, 'seal_capture', lambda *args, **kwargs: {'slot_count': 35})
+    assert model_benchmark.main(common + ['seal-capture', '--registration-sha256', 'a' * 64]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['capture_sealed'] is True and result['verified_slots'] == 35
+
+
 def test_actual_protocol_api_invalid_and_verify_missing(tmp_path):
     # Until integration, resolve the real W2 module without copying its source.
     protocol_module = PROJECT / 'src/sentinelops/ml/model_benchmark_protocol.py'

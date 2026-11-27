@@ -29,5 +29,6 @@ Breaking changes require a new ADR before code is merged.
 | [017](ADR-017-cumulative-service-evaluation.md) | Accepted 2026-11-10 — explicit owner approval (D-24), before layer-2 epoch 2 data | Evidence per (system version, service, epoch); new services add a supplementary epoch on the same bundle, no full rerun or silent pooling |
 | [018](ADR-018-proposed-monotone-latency-detector.md) | **Rejected** 2026-11-12 by owner | Proposed serving the bundled MAD/slope controls; owner requires trained models to drive detection. `alc` capture stopped unevaluated and deleted |
 | [019](ADR-019-breach-relative-retrain.md) | Accepted 2026-11-13 — explicit owner approval | Retrain IF on latency level/peak and XGBoost as a monotone breach-relative exceedance model (`http-relative-5m/v2`); calibrated thresholds; synthetic pre-capture gate; `alb` as development data; confirm on epoch `ald` |
+| [020](ADR-020-ltfp-development.md) | Proposed 2026-11-26 | Keep the verified baseline pending heldout and runtime evidence for LTFP. |
 
 ADR-001…005 remain current. ADR-007 supersedes the contradictory unknown-field rule and example wire formats in historical PRODUCT_SPEC v1.0; that source is archived. Numeric thresholds/performance targets are not automatically accepted or measured by these ADRs.

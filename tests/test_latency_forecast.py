@@ -9,6 +9,8 @@ import pytest
 
 from sentinelops.ml.alibaba_local_evaluation import latency_forecast_labels, score_records
 from sentinelops.ml.alibaba_training import load_config
+from sentinelops.ml.model_benchmark_forecast import MODELS, project_latency_truth
+from sentinelops.ml.model_benchmark_reports import forecast_report_from_oracles
 from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.telemetry.pipeline import process_captures
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
@@ -31,6 +33,48 @@ def set_latency(oracle, offset, values):
     for index, value in enumerate(values):
         instant = START + timedelta(minutes=5, seconds=offset + index * 60)
         oracle['services'][SERVICE]['buckets'][str(int(instant.timestamp()))]['p95_latency_ms'] = value
+
+
+@pytest.mark.parametrize('mode', ['latency', 'errors', 'missing-tail', 'foreign-certificate'])
+def test_independent_latency_events_and_no_breach_exposure(tmp_path, mode):
+    _, oracle = inputs()
+    store = ArtifactStore(tmp_path)
+    schedule = {'start': timestamp(START + timedelta(minutes=5)),
+                'stop': timestamp(START + timedelta(minutes=10)),
+                'cadence_seconds': 60, 'cutoff_delay_seconds': 30}
+    if mode == 'latency':
+        set_latency(oracle, 240, [751., 800.])
+    elif mode == 'missing-tail':
+        del oracle['services'][SERVICE]['buckets'][str(int((START + timedelta(minutes=10)).timestamp()))]
+    else:
+        for row in oracle['services'][SERVICE]['buckets'].values():
+            row.update(error_rate=.9, breach=True)
+    source = store.write('manifests', {'kind': 'admitted-source'})
+    oracle_ref = store.write('manifests', {'certificate_version': 'local-http-oracle/v1',
+        'source_result_ref': source, 'oracle': oracle})
+    case = dict(run_id='run-01', group_id='group-01', oracle_ref=oracle_ref, source_result_ref=source)
+    if mode == 'foreign-certificate':
+        with pytest.raises(ValueError, match='differs from the admitted run'):
+            project_latency_truth(store, {**case, 'source_result_ref': 'foreign'}, SERVICE, schedule)
+        return
+    truth, events = project_latency_truth(store, case, SERVICE, schedule)
+    if mode == 'latency':
+        event, = events
+        assert truth['outcome'] == 'breach' and 'healthy_hours' not in truth
+        assert event['onset_at'] == timestamp(START + timedelta(minutes=9))
+        assert event['confirmed_at'] == timestamp(START + timedelta(minutes=11))
+        assert event['eligible'] is True and event['oracle_ref'] == oracle_ref
+        report = forecast_report_from_oracles(store, [], [{**case, 'score_schedules': {SERVICE: schedule}}],
+            thresholds={model: {'watch': .4, 'degrading': .7} for model in MODELS},
+            policy_identity='fixture', provenance=dict(code='c', config='p', data='d', models='m'))
+        assert report['models']['ltfp_graph']['lead']['events'] == 1
+        assert report['models']['ltfp_graph']['lead']['miss'] == 1
+    elif mode == 'errors':
+        assert events == [] and truth['outcome'] == 'no-breach'
+        assert truth['healthy_hours'] == 5 / 60
+    else:
+        assert events == [] and truth['outcome'] == 'UNKNOWN'
+        assert 'healthy_hours' not in truth
 
 
 @pytest.mark.parametrize('values,label', [([751., 800.], 1), ([750., 750.], 0)])
@@ -66,6 +110,60 @@ def test_a02_http_errors_do_not_create_latency_precursors():
     result = latency_forecast_labels(frame, oracle, POLICY)
     assert result['risk_label'] == 0
     assert result['slo_onset_at'] is None
+
+
+def test_latency_events_after_recovery_remain_in_denominator_and_labels(tmp_path):
+    from sentinelops.experiments.local_labels import oracle_from_requests
+
+    oracle = oracle_from_requests(*fixture_oracle(minutes=36), started_at=timestamp(START),
+                                  ended_at=timestamp(START + timedelta(minutes=36)))
+    for minute in (8, 9, 20, 21):
+        key = str(int((START + timedelta(minutes=minute)).timestamp()))
+        oracle['services'][SERVICE]['buckets'][key]['p95_latency_ms'] = 800.
+    frame = {'service': SERVICE, 'window_start': timestamp(START + timedelta(minutes=10)),
+             'window_end': timestamp(START + timedelta(minutes=15)),
+             'as_of': timestamp(START + timedelta(minutes=15, seconds=30))}
+    label = latency_forecast_labels(frame, oracle, POLICY)
+    assert label['risk_label'] == 1
+    assert label['slo_onset_at'] == timestamp(START + timedelta(minutes=20))
+    store = ArtifactStore(tmp_path)
+    source = store.write('manifests', {'kind': 'admitted-source'})
+    ref = store.write('manifests', {'certificate_version': 'local-http-oracle/v1',
+                                   'source_result_ref': source, 'oracle': oracle})
+    schedule = dict(start=timestamp(START + timedelta(minutes=5)),
+                    stop=timestamp(START + timedelta(minutes=25)), cadence_seconds=60,
+                    cutoff_delay_seconds=30)
+    truth, events = project_latency_truth(store, dict(run_id='r', group_id='g', oracle_ref=ref,
+                                         source_result_ref=source), SERVICE, schedule)
+    assert truth['outcome'] == 'breach'
+    assert [event['onset_at'] for event in events] == [timestamp(START + timedelta(minutes=8)),
+                                                       timestamp(START + timedelta(minutes=20))]
+    case = dict(run_id='r', group_id='g', oracle_ref=ref, source_result_ref=source,
+                score_schedules={SERVICE: schedule})
+    report = forecast_report_from_oracles(store, [], [case],
+        thresholds={model: {'watch': .4, 'degrading': .7} for model in MODELS},
+        policy_identity='fixture', provenance=dict(code='c', config='p', data='d', models='m'))
+    assert report['models']['ltfp_graph']['lead']['events'] == 2
+    assert report['models']['ltfp_graph']['lead']['miss'] == 2
+
+
+@pytest.mark.parametrize('interruption', ['unknown', 'missing', 'none'])
+def test_latency_recovery_requires_three_consecutive_verified_healthy_buckets(interruption):
+    from sentinelops.experiments.local_labels import oracle_from_requests
+    from sentinelops.ml.alibaba_local_evaluation import latency_event_intervals
+
+    oracle = oracle_from_requests(*fixture_oracle(minutes=24), started_at=timestamp(START),
+                                  ended_at=timestamp(START + timedelta(minutes=24)))
+    buckets = oracle['services'][SERVICE]['buckets']
+    for minute in (8, 9, 13, 14):
+        buckets[str(int((START + timedelta(minutes=minute)).timestamp()))]['p95_latency_ms'] = 800.
+    key = str(int((START + timedelta(minutes=12)).timestamp()))
+    if interruption == 'unknown':
+        buckets[key]['availability'] = 'UNKNOWN'
+    elif interruption == 'missing':
+        del buckets[key]
+    events = latency_event_intervals(oracle, SERVICE, threshold=750, entry_buckets=2, recovery_buckets=3)
+    assert len(events) == (2 if interruption == 'none' else 1)
 
 
 @pytest.mark.parametrize('missing', ['history', 'confirmation', 'traffic', 'tail', 'gap'])

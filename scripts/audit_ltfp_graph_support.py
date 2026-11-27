@@ -22,10 +22,12 @@ def checked(path, digest):
         raise ValueError(f'checksum mismatch: {path.name}')
 
 
-def read_graph(archives):
+def read_graph(archives, *, role='train'):
+    if role not in ('train', 'calibration'):
+        raise ValueError('only train or calibration graph sources are supported')
     graph = defaultdict(set)
     receipts = {}
-    train = {}
+    selected = {}
     for path in archives:
         match = re.fullmatch(r'CallGraph_([0-9]+)\.tar\.gz', path.name)
         if not match or path.name in receipts:
@@ -51,9 +53,9 @@ def read_graph(archives):
                          & rows.rpctype.str.lower().isin(('rpc', 'http')))
                 pairs = rows.loc[valid, ['um', 'dm']].assign(minute=minute[valid]).drop_duplicates()
                 for name in set(pairs.um) | set(pairs.dm):
-                    if name not in train:
-                        train[name] = split_of(name) == 'train'
-                for row in pairs[pairs.um.map(train) & pairs.dm.map(train)].itertuples(index=False):
+                    if name not in selected:
+                        selected[name] = split_of(name) == role
+                for row in pairs[pairs.um.map(selected) & pairs.dm.map(selected)].itertuples(index=False):
                     graph[int(row.minute)].add((row.um, row.dm))
         if observed_minutes != set(range(first, first + 3)):
             raise ValueError(f'missing trace minutes in {path.name}')

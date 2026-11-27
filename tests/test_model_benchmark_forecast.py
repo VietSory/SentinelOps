@@ -91,6 +91,63 @@ def test_common_cohort_unknown_and_missing_thresholds(tmp_path):
     assert rows == before
 
 
+def test_missing_source_clock_remains_unavailable_without_fabricating_time(tmp_path):
+    from sentinelops.ml.model_benchmark_forecast import summarize_forecasts
+
+    rows = timeline(tmp_path, [(5, None, None)])
+    for row in rows:
+        row['prediction_cutoff'] = None
+        row['score_missing_reason'] = 'incomplete-source-bucket'
+    result = summarize_forecasts(rows, [])
+    assert result['windows'] == result['unknown_windows'] == 1
+    assert all(result['models'][name]['unavailable_windows'] == 1 for name in MODELS)
+    rows[0]['score'] = .5
+    with pytest.raises(ValueError, match='invalid cutoff'):
+        summarize_forecasts(rows, [])
+
+
+def test_frozen_slope_strict_comparison_preserves_boundary(tmp_path):
+    from sentinelops.ml.model_benchmark_forecast import summarize_forecasts
+
+    rows = timeline(tmp_path, [(5, .05, 0), (6, .05, 0)])
+    thresholds = {model: {'watch': .05, 'degrading': .05} for model in MODELS}
+    thresholds['slope']['comparison'] = '>'
+    result = summarize_forecasts(rows, [], thresholds=thresholds, policy_identity='frozen')
+    assert result['models']['slope']['episodes']['alerts'] == 0
+    assert result['models']['xgboost']['episodes']['alerts'] == 1
+    thresholds['slope']['comparison'] = '='
+    with pytest.raises(ValueError, match='invalid watch/degrading thresholds'):
+        summarize_forecasts(rows, [], thresholds=thresholds, policy_identity='frozen')
+
+
+def test_forecast_rules_are_derived_from_verified_freezes(tmp_path, monkeypatch):
+    import hashlib
+    import json
+    from sentinelops.ml import model_benchmark_holdout
+    from sentinelops.ml.model_benchmark_forecast import thresholds_from_freeze
+    from sentinelops.telemetry.core import stable_id
+
+    protocol = {'scoring': {'fixed_slope': {'threshold': .05, 'comparison': '>'}}}
+    candidates = {'lanes': {'a': {'slope_comparison': '>', 'thresholds': {
+        'slope': .05, 'xgboost': .8, 'ltfp_self_only': .2, 'ltfp_graph': .3}}}}
+    directory = tmp_path / 'freeze'
+    directory.mkdir()
+    (directory / 'protocol.json').write_text(json.dumps({'protocol': protocol}))
+    path = directory / 'candidates.json'
+    path.write_text(json.dumps(candidates))
+    pin = hashlib.sha256(path.read_bytes()).hexdigest()
+    monkeypatch.setattr(model_benchmark_holdout, 'verify_candidate_freeze',
+                        lambda *args: {'protocol_sha256': stable_id(protocol)})
+    result = thresholds_from_freeze(tmp_path, pin)
+    assert result['policy_identity'] == pin
+    assert result['thresholds']['slope'] == {'watch': .05, 'degrading': .05, 'comparison': '>'}
+    assert result['thresholds']['xgboost']['comparison'] == '>='
+    protocol['scoring']['fixed_slope']['comparison'] = '>='
+    (directory / 'protocol.json').write_text(json.dumps({'protocol': protocol}))
+    with pytest.raises(ValueError, match='differ from the protocol'):
+        thresholds_from_freeze(tmp_path, pin)
+
+
 def test_episode_tracker_parity_matching_and_unavailable_denominator(tmp_path):
     from datetime import timedelta
     from sentinelops.telemetry.core import timestamp
@@ -153,6 +210,8 @@ def test_summary_rejects_duplicates_and_reports_single_class_na(tmp_path):
     rows = timeline(tmp_path, [(5, .8, 1)])
     assert summarize_forecasts(rows, [])['models']['slope']['average_precision'] is None
     with pytest.raises(ValueError, match='duplicate'): summarize_forecasts(rows + rows[:1], [])
+    shifted = {**rows[0], 'prediction_cutoff': rows[0]['prediction_cutoff'].replace(':30Z', ':31Z')}
+    with pytest.raises(ValueError, match='duplicate'): summarize_forecasts(rows + [shifted], [])
     with pytest.raises(ValueError, match='missing model'): summarize_forecasts(rows[:-1], [])
     altered = deepcopy(rows)
     altered[-1]['risk_label'] = 0

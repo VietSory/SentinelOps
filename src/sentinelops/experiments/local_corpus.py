@@ -30,16 +30,19 @@ DETECTOR_PLAN_VERSION = 'local-http-detector-events-plan/v1'
 DETECTOR_KINDS = ('healthy', 'payment-abrupt', 'inventory-abrupt')
 DETECTOR_ROLES = ('development-validation',)
 ALIBABA_PLAN_VERSION = 'local-http-alibaba-evaluation/v1'
+ALIBABA_LOW_RAMP_VERSION = 'local-http-alibaba-low-ramp-development/v1'
 ALIBABA_KINDS = (*DETECTOR_KINDS, 'payment-gradual', 'inventory-gradual')
+ALIBABA_LOW_RAMP_KINDS = ('payment-gradual', 'inventory-gradual')
 PROJECT = Path(__file__).resolve().parents[3]
 DEFAULT_PLAN = PROJECT / 'configs/local_http_capture_plan.json'
 DETECTOR_PLAN = PROJECT / 'configs/local_http_detector_events_plan.json'
 ALIBABA_PLAN = PROJECT / 'configs/alibaba_local_evaluation.json'
+ALIBABA_LOW_RAMP_PLAN = PROJECT / 'configs/alibaba_low_ramp_development.json'
 ALIBABA_BINDING = 'alibaba-epoch.json'
 SOURCE_SERVICES = (*sorted(BUSINESS_ROUTES), 'postgres', 'prometheus', 'otel-collector', 'jaeger')
 SLOT_PATTERN = re.compile(r'(?:(?:train|cal|dev)-[0-9]{2}-(?:healthy|payment-gradual|inventory-gradual)'
                           r'|det-[0-9]{2}-(?:healthy|payment-abrupt|inventory-abrupt)'
-                          r'|(?:ali-0[1-5]|alb-0[1-7]|alc-0[1-7]|ald-0[1-7])-(?:healthy|payment-abrupt|inventory-abrupt|payment-gradual|inventory-gradual))')
+                          r'|(?:ali-0[1-5]|alb-0[1-7]|alc-0[1-7]|ald-0[1-7]|ale-0[1-2])-(?:healthy|payment-abrupt|inventory-abrupt|payment-gradual|inventory-gradual))')
 
 
 def is_detector_plan(plan):
@@ -47,12 +50,12 @@ def is_detector_plan(plan):
 
 
 def is_alibaba_plan(plan):
-    return plan.get('plan_version') == ALIBABA_PLAN_VERSION
+    return plan.get('plan_version') in (ALIBABA_PLAN_VERSION, ALIBABA_LOW_RAMP_VERSION)
 
 
 def plan_kinds(plan):
     if is_alibaba_plan(plan):
-        return ALIBABA_KINDS
+        return ALIBABA_LOW_RAMP_KINDS if plan['plan_version'] == ALIBABA_LOW_RAMP_VERSION else ALIBABA_KINDS
     return DETECTOR_KINDS if is_detector_plan(plan) else KINDS
 
 
@@ -91,10 +94,21 @@ def _load_detector_plan(plan):
 def load_plan(path=DEFAULT_PLAN):
     plan = json.loads(Path(path).read_text())
     if is_alibaba_plan(plan):
-        if (plan != json.loads(ALIBABA_PLAN.read_bytes()) or plan['source_profile'] != SOURCE_PROFILE_V2
+        accepted = (ALIBABA_LOW_RAMP_PLAN if plan['plan_version'] == ALIBABA_LOW_RAMP_VERSION
+                    else ALIBABA_PLAN)
+        if (plan != json.loads(accepted.read_bytes()) or plan['source_profile'] != SOURCE_PROFILE_V2
             or plan['fitting_allowed'] is not False or plan['sealed_final_capture_allowed'] is not False
             or plan['previous_capture_promotion_allowed'] is not False):
             raise ValueError('ADR-016 acquisition requires the committed evaluation-only plan')
+        if plan['plan_version'] == ALIBABA_LOW_RAMP_VERSION:
+            expected = json.loads(ALIBABA_PLAN.read_bytes())
+            expected.update(plan_version=ALIBABA_LOW_RAMP_VERSION, authorizing_adr='MODEL_BENCHMARK_RUNBOOK',
+                            group_prefix='ale', kinds=list(ALIBABA_LOW_RAMP_KINDS),
+                            minimum_groups={'development-validation': 1},
+                            maximum_groups={'development-validation': 2},
+                            maximum_delay_ms=400, seed_base=20263100)
+            if plan != expected:
+                raise ValueError('low-ramp development plan differs from the fixed 400 ms protocol')
         return plan
     if is_detector_plan(plan):
         return _load_detector_plan(plan)
@@ -305,7 +319,7 @@ def require_role_order(store, plan, role):
         if role not in DETECTOR_ROLES:
             raise ValueError('detector-event epoch has only a development-validation role')
         return
-    if any(s['group_id'].startswith(('det-', 'ali-', 'alb-', 'alc-', 'ald-')) for s in sessions):
+    if any(s['group_id'].startswith(('det-', 'ali-', 'alb-', 'alc-', 'ald-', 'ale-')) for s in sessions):
         raise ValueError('fitting corpus cannot share a store with a detector-event epoch')
     index = ROLES.index(role)
     if any(ROLES.index(s['role']) > index for s in sessions):

@@ -1,11 +1,112 @@
 """Benchmark-only shared latency outcomes; no model fitting or calibration."""
 import math
+from datetime import timedelta
 
 from sentinelops.contracts import utc_time
 from sentinelops.telemetry.core import stable_id
-from sentinelops.ml.alibaba_local_evaluation import latency_forecast_labels
+from sentinelops.ml.alibaba_local_evaluation import latency_event_intervals, latency_forecast_labels
 
 MODELS = ('slope', 'xgboost', 'ltfp_self_only', 'ltfp_graph')
+
+
+def schedule_cutoffs(schedule):
+    """Return the exact per-minute cutoff, including unavailable source clocks."""
+    start, stop = (utc_time(schedule[key]) for key in ('start', 'stop'))
+    seconds = (stop - start).total_seconds()
+    if (start.second or start.microsecond or stop.second or stop.microsecond
+            or seconds <= 0 or seconds % 60 or type(schedule['cadence_seconds']) is not int
+            or schedule['cadence_seconds'] != 60):
+        raise ValueError('invalid minute score schedule')
+    anchors = [start + timedelta(minutes=index) for index in range(int(seconds // 60))]
+    if 'cutoffs' in schedule:
+        if 'cutoff_delay_seconds' in schedule or not isinstance(schedule['cutoffs'], dict):
+            raise ValueError('score schedule requires one cutoff policy')
+        parsed = {}
+        for key, value in schedule['cutoffs'].items():
+            if not isinstance(key, str) or (value is not None and not isinstance(value, str)):
+                raise ValueError('invalid recorded source cutoff')
+            anchor = utc_time(key)
+            cutoff = utc_time(value) if value is not None else None
+            if anchor in parsed or (cutoff is not None and not anchor <= cutoff < anchor + timedelta(minutes=1)):
+                raise ValueError('invalid recorded source cutoff')
+            parsed[anchor] = cutoff
+        if set(parsed) != set(anchors):
+            raise ValueError('recorded source cutoffs do not cover the score schedule')
+        return parsed
+    delay = schedule.get('cutoff_delay_seconds')
+    if type(delay) not in (int, float) or not math.isfinite(delay) or not 0 <= delay < 60:
+        raise ValueError('invalid fixed score cutoff')
+    return {anchor: anchor + timedelta(seconds=delay) for anchor in anchors}
+
+
+def thresholds_from_freeze(root, candidates_sha256):
+    """Derive episode rules from the verified candidates and protocol freezes."""
+    import json
+    from pathlib import Path
+    from sentinelops.ml.model_benchmark_holdout import verify_candidate_freeze
+    from sentinelops.ml.model_benchmark_protocol import _ref
+
+    root = Path(root).resolve()
+    frozen = verify_candidate_freeze(root, candidates_sha256)
+    candidates = json.loads(_ref(root, {'path': 'freeze/candidates.json', 'sha256': candidates_sha256}))
+    lane = candidates['lanes']['a']
+    values = lane['thresholds']
+    protocol = json.loads((root / 'freeze/protocol.json').read_bytes())['protocol']
+    slope = protocol['scoring']['fixed_slope']
+    if (stable_id(protocol) != frozen['protocol_sha256'] or set(values) != set(MODELS)
+            or slope != {'comparison': '>', 'threshold': values['slope']}
+            or lane.get('slope_comparison') != '>'
+            or any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
+                   for value in values.values())):
+        raise ValueError('frozen forecast thresholds differ from the protocol')
+    return {'policy_identity': candidates_sha256, 'thresholds': {
+        model: {'watch': values[model], 'degrading': values[model],
+                'comparison': '>' if model == 'slope' else '>='} for model in MODELS}}
+
+
+def project_latency_truth(store, case, service, schedule):
+    """Project one independently admitted request timeline onto a frozen score schedule."""
+    if not case['oracle_ref'].startswith('artifact://manifests/'):
+        raise ValueError('forecast truth requires a request oracle certificate')
+    certificate = store.read(case['oracle_ref'])
+    if (certificate['certificate_version'] != 'local-http-oracle/v1'
+            or certificate['source_result_ref'] != case['source_result_ref']):
+        raise ValueError('forecast truth certificate differs from the admitted run')
+    oracle = certificate['oracle']
+    start, stop = (utc_time(schedule[key]) for key in ('start', 'stop'))
+    schedule_cutoffs(schedule)
+    start_minute, stop_minute = (int(point.timestamp()) for point in (start, stop))
+    buckets = oracle['services'][service]['buckets']
+    if any(type(row['p95_latency_ms']) not in (int, float)
+           or not math.isfinite(row['p95_latency_ms']) or row['p95_latency_ms'] < 0
+           for row in buckets.values() if row['availability'] == 'VERIFIED'):
+        raise ValueError('verified oracle bucket lacks finite p95 latency')
+    intervals = latency_event_intervals(oracle, service, threshold=750, entry_buckets=2, recovery_buckets=3)
+    identity = {key: case[key] for key in ('group_id', 'run_id')}
+    identity.update(service=service)
+    truth = {**identity, 'evidence_id': case['oracle_ref'], 'score_schedule': dict(schedule)}
+    events = []
+    for interval in intervals:
+        if start <= utc_time(interval['onset_at']) < stop:
+            event = {**identity, 'onset_at': interval['onset_at'],
+                     'confirmed_at': interval['confirmed_at'], 'kind': 'latency-slo',
+                     'oracle_ref': case['oracle_ref'], 'eligible': True, 'reason': None}
+            event['event_id'] = stable_id(event)
+            events.append(event)
+    prior_active = any(utc_time(interval['onset_at']) < start and
+                       (interval['recovered_at'] is None or start < utc_time(interval['recovered_at']))
+                       for interval in intervals)
+    if events:
+        truth.update(outcome='breach', reason=None)
+    elif prior_active:
+        truth.update(outcome='UNKNOWN', reason='latency-onset-before-schedule')
+    elif (utc_time(oracle['ended_at']) < stop + timedelta(minutes=1)
+          or any(buckets.get(str(minute), {}).get('availability') != 'VERIFIED'
+                 for minute in range(start_minute, stop_minute + 60, 60))):
+        truth.update(outcome='UNKNOWN', reason='incomplete-latency-oracle')
+    else:
+        truth.update(outcome='no-breach', reason=None, healthy_hours=(stop - start).total_seconds() / 3600)
+    return truth, events
 
 
 def forecast_rows(store, row, oracle, health_policy, scores):
@@ -48,20 +149,20 @@ def summarize_forecasts(rows, events, *, thresholds=None, policy_identity=None):
     """Summarize adapter rows; events are independent eligible latency onsets.
 
     Events require event_id, run_id, service, onset_at. Thresholds map each model
-    to watch/degrading. policy_identity identifies caller-frozen calibration;
+    to watch/degrading and an optional comparison ('>=' by default, or '>').
+    policy_identity identifies caller-frozen calibration;
     this helper does not certify calibration or open any data split.
     """
-    from datetime import timedelta
     from sentinelops.ml.local_evaluation import risk_curve
     from sentinelops.workers.risk import EpisodeTracker
 
     keyed = {}
     for row in rows:
-        key = (row['run_id'], row['service'], utc_time(row['window_end']),
-               utc_time(row['prediction_cutoff']))
+        key = (row['run_id'], row['service'], utc_time(row['window_end']))
+        cutoff = utc_time(row['prediction_cutoff']) if row['prediction_cutoff'] is not None else None
         if row['model'] not in MODELS or (key, row['model']) in keyed:
             raise ValueError('unknown model or duplicate forecast key')
-        if not key[2] <= key[3] < key[2] + timedelta(minutes=1):
+        if cutoff is None or not key[2] <= cutoff < key[2] + timedelta(minutes=1):
             if row['risk_label'] is not None or row['score'] is not None:
                 raise ValueError('available forecast has invalid cutoff')
         if row['score'] is not None and (type(row['score']) not in (int, float) or not math.isfinite(row['score'])):
@@ -74,6 +175,9 @@ def summarize_forecasts(rows, events, *, thresholds=None, policy_identity=None):
         cohort = [keyed.get((key, model)) for model in MODELS]
         if any(row is None for row in cohort):
             raise ValueError('missing model row; use explicit unavailable score')
+        cutoffs = {utc_time(row['prediction_cutoff']) if row['prediction_cutoff'] is not None else None for row in cohort}
+        if len(cutoffs) != 1:
+            raise ValueError('forecast cutoff differs across models')
         fields = ('group_id', 'feature_ref', 'oracle_sha256', 'health_policy_sha256',
                   'risk_label', 'risk_missing_reason', 'slo_onset_at')
         if any(any(row[field] != cohort[0][field] for field in fields) for row in cohort[1:]):
@@ -101,18 +205,20 @@ def summarize_forecasts(rows, events, *, thresholds=None, policy_identity=None):
             models[model] = metrics
             continue
         watch, degrading = threshold['watch'], threshold['degrading']
+        comparison = threshold.get('comparison', '>=')
         if (any(type(value) not in (int, float) or not math.isfinite(value) for value in (watch, degrading))
-            or watch > degrading):
+            or watch > degrading or comparison not in ('>', '>=')):
             raise ValueError('invalid watch/degrading thresholds')
         tracker, alerts = EpisodeTracker(), []
         for key in keys:
             row = keyed[key, model]
             score = row['score']
-            state = ('unavailable' if score is None else 'degrading' if score >= degrading
-                     else 'watch' if score >= watch else 'normal')
+            above_degrading = score is not None and (score > degrading if comparison == '>' else score >= degrading)
+            above_watch = score is not None and (score > watch if comparison == '>' else score >= watch)
+            state = 'unavailable' if score is None else 'degrading' if above_degrading else 'watch' if above_watch else 'normal'
             episode = tracker.update((key[0], key[1]), key[2], state)
             if episode['event'] == 'started':
-                alerts.append((key[0], key[1], key[3]))
+                alerts.append((key[0], key[1], utc_time(row['prediction_cutoff'])))
         used, matches = set(), []
         for event in ordered_events:
             onset = utc_time(event['onset_at'])

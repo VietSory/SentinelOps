@@ -38,6 +38,9 @@ _TRANSFORM = 'causal-log1p-relative-latency/v1'
 _SPLIT = 'sha256(msname)%10:0-2=reference,3-5=discovery,6-7=calibration,8-9=excluded'
 _MODEL_IDS = ('adsketch', 'isolation_forest', 'median_mad')
 _ROLE_NAMES = ('reference', 'discovery', 'calibration')
+_FIT_CODE_PATHS = ('src/sentinelops/ml/model_benchmark_detector_fit.py',
+                   'src/sentinelops/ml/model_benchmark_detector.py',
+                   'src/sentinelops/ml/model_benchmark_calibration.py')
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,8 @@ class VerifiedDetectorFit:
     scope: str
     status: str
     provenance_sha256: str | None
+    protocol_splits_sha256: str | None = None
+    fit_code_sha256: dict | None = None
 
 
 def _sha(content):
@@ -210,12 +215,42 @@ def _segments(minutes):
             yield segment
 
 
-def _cohorts(minutes, source, window_length):
+def _protocol_cohort_constraints(records):
+    """Bind training partitions and calibration anchors to admitted protocol records."""
+    constraints = {}
+    for row in records:
+        role = row['role']
+        if role == 'development':
+            continue
+        service = row['service']
+        start, end, anchor = (row[key] for key in ('partition_start', 'partition_end', 'anchor_minute'))
+        if (role not in ('train', 'calibration') or row['parent_split'] != role
+                or split_of(service) != role or any(type(value) is not int for value in (start, end, anchor))
+                or not 0 <= start <= anchor <= end):
+            raise ValueError('invalid protocol detector partition')
+        entry = constraints.setdefault(service, {'role': role, 'start': start, 'end': end, 'anchors': set()})
+        if (entry['role'], entry['start'], entry['end']) != (role, start, end):
+            raise ValueError('conflicting protocol detector partitions')
+        if anchor in entry['anchors']:
+            raise ValueError('duplicate protocol detector anchor')
+        entry['anchors'].add(anchor)
+    if {item['role'] for item in constraints.values()} != {'train', 'calibration'}:
+        raise ValueError('protocol detector requires train and calibration records')
+    return constraints
+
+
+def _cohorts(minutes, source, window_length, *, constraints=None):
     selected = (minute for minute in minutes if not isinstance(minute, DetectorMinute)
-                or not isinstance(minute.service, str) or split_of(minute.service) != 'evaluation')
+                or not isinstance(minute.service, str) or (split_of(minute.service) != 'evaluation'
+                and (constraints is None or (minute.service in constraints
+                    and constraints[minute.service]['start'] <= minute.timestamp // BUCKET_SECONDS
+                    <= (max(constraints[minute.service]['anchors']) if constraints[minute.service]['role'] == 'calibration'
+                        else constraints[minute.service]['end'])))))
     rows = {role: [] for role in _ROLE_NAMES}
     segments = {role: [] for role in _ROLE_NAMES}
     anchors = {}
+    covered = set()
+    calibration_rows = {}
     for segment in _segments(_ordered_minutes(selected)):
         first = segment[0]
         split = split_of(first.service)
@@ -231,20 +266,32 @@ def _cohorts(minutes, source, window_length):
         if role != 'calibration':
             rows[role].extend(projected)
             continue
-        stride = BASELINE_LOOKBACK + window_length
+        stride = BASELINE_LOOKBACK + window_length if constraints is None else 1
         for index in range(BASELINE_MINIMUM + window_length - 1, len(projected), stride):
+            minute = projected[index].timestamp // BUCKET_SECONDS
+            if constraints is not None and minute not in constraints[first.service]['anchors']:
+                continue
             window = projected[index - window_length + 1:index + 1]
             labels = {row.label for row in window}
             label = 1 if 1 in labels else None if None in labels else 0
             anchors[(run_id, first.service, window[-1].timestamp)] = label
-            rows[role].extend(window)
+            covered.add((first.service, minute))
+            for row in window:
+                calibration_rows[(row.run_id, row.service, row.timestamp)] = row
+    if constraints is not None:
+        expected = {(service, anchor) for service, entry in constraints.items()
+                    if entry['role'] == 'calibration' for anchor in entry['anchors']}
+        for service, minute in sorted(expected - covered):
+            run_id = stable_id({'scope': source['scope'], 'service': service, 'missing_anchor': minute})
+            anchors[(run_id, service, minute * BUCKET_SECONDS)] = None
+    rows['calibration'] = list(calibration_rows.values())
     summary = {role: {'segments': len(items), 'services': len({item['service'] for item in items}),
                       'minutes': sum(item['rows'] for item in items), 'sha256': stable_id(items)}
                for role, items in segments.items()}
     return rows, anchors, summary
 
 
-def _calibration_ledger(model, rows, anchors):
+def _calibration_ledger(model, rows, anchors, *, include_sources=False):
     from sentinelops.ml.model_benchmark_detector import predict_detectors
 
     ledger = {name: [] for name in _MODEL_IDS}
@@ -258,11 +305,24 @@ def _calibration_ledger(model, rows, anchors):
             raise ValueError('unexpected or duplicate calibration prediction')
         seen.add((model_id, key))
         run_id, service, timestamp = key
-        ledger[model_id].append({'record_id': stable_id({'run_id': run_id, 'service': service, 'timestamp': timestamp}),
-                                 'eligible': True, 'risk_label': anchors[key],
-                                 'score': prediction.score, 'missing_reason': prediction.reason})
-    if len(seen) != len(anchors) * len(_MODEL_IDS):
+        row = {'record_id': stable_id({'run_id': run_id, 'service': service, 'timestamp': timestamp}),
+               'eligible': True, 'risk_label': anchors[key],
+               'score': prediction.score, 'missing_reason': prediction.reason}
+        if include_sources:
+            row.update(run_id=run_id, service=service, timestamp=timestamp)
+        ledger[model_id].append(row)
+    if not include_sources and len(seen) != len(anchors) * len(_MODEL_IDS):
         raise ValueError('incomplete calibration prediction timeline')
+    for key, label in anchors.items():
+        for model_id in _MODEL_IDS:
+            if (model_id, key) not in seen:
+                run_id, service, timestamp = key
+                row = {'record_id': stable_id({'run_id': run_id, 'service': service, 'timestamp': timestamp}),
+                       'eligible': True, 'risk_label': label, 'score': None,
+                       'missing_reason': 'missing-contiguous-detector-history'}
+                if include_sources:
+                    row.update(run_id=run_id, service=service, timestamp=timestamp)
+                ledger[model_id].append(row)
     return {name: sorted(items, key=lambda item: item['record_id']) for name, items in ledger.items()}
 
 
@@ -317,14 +377,14 @@ def _write_checkpoint(path, content):
             temporary.unlink(missing_ok=True)
 
 
-def _fit(root, minutes, source, config, persistence):
+def _fit(root, minutes, source, config, persistence, *, constraints=None):
     from sentinelops.ml.model_benchmark_detector import FrozenDetectors, fit_detectors
 
     if config.bucket_seconds != BUCKET_SECONDS or config.seed != 42:
         raise ValueError('benchmark detector requires minute buckets and seed 42')
     if type(persistence) is not int or persistence < 1:
         raise ValueError('positive detector persistence required')
-    rows, anchors, summary = _cohorts(minutes, source, config.window_length)
+    rows, anchors, summary = _cohorts(minutes, source, config.window_length, constraints=constraints)
     identity = {'source': source, 'split_assignment': _SPLIT, 'transform': _TRANSFORM,
                 'config': asdict(config), 'persistence': persistence, 'cohorts': summary}
     identity_sha256 = stable_id(identity)
@@ -337,8 +397,8 @@ def _fit(root, minutes, source, config, persistence):
         restored = FrozenDetectors.from_dict(json.loads(_encode(payload)))
         if restored.digest != model.digest:
             raise ValueError('restored detector model IDs changed')
-        ledger = _calibration_ledger(model, rows['calibration'], anchors)
-        replay = _calibration_ledger(restored, rows['calibration'], anchors)
+        ledger = _calibration_ledger(model, rows['calibration'], anchors, include_sources=constraints is not None)
+        replay = _calibration_ledger(restored, rows['calibration'], anchors, include_sources=constraints is not None)
         recovery = _verify_replay(ledger, replay)
         points = _operating_points(ledger, identity_sha256, model.digest)
         restored_points = _operating_points(replay, identity_sha256, model.digest)
@@ -357,7 +417,8 @@ def _fit(root, minutes, source, config, persistence):
     result, artifact = _verify(content, _sha(content), allow_synthetic=source['scope'] == SYNTHETIC_SCOPE)
     if artifact['input_sha256'] != identity_sha256:
         raise ValueError('a different detector fit is already present')
-    if _calibration_ledger(result.model, rows['calibration'], anchors) != artifact['calibration_rows']:
+    if _calibration_ledger(result.model, rows['calibration'], anchors,
+                           include_sources=constraints is not None) != artifact['calibration_rows']:
         raise ValueError('saved detector does not reproduce its bound calibration timeline')
     return {'fit_sha256': result.fit_sha256, 'model_sha256': result.model.digest, 'scope': result.scope,
             'status': result.status, 'calibration': result.calibration, 'fit_seconds': artifact['fit_seconds'],
@@ -366,10 +427,24 @@ def _fit(root, minutes, source, config, persistence):
 
 
 def fit_detector_benchmark(root, *, aggregate_dir, provenance, provenance_sha256,
-                           config: DetectorConfig, persistence: int = 2):
+                           config: DetectorConfig, persistence: int = 2, protocol_splits=None,
+                           protocol_splits_sha256=None):
     """Fit from an operator-approved ADR-019 report pin and its exact aggregate shards."""
     source, minutes = _verified_aggregates(aggregate_dir, provenance, provenance_sha256)
-    return _fit(root, minutes, source, config, persistence)
+    if (protocol_splits is None) != (protocol_splits_sha256 is None):
+        raise ValueError('protocol records and split SHA256 must be supplied together')
+    constraints = None
+    if protocol_splits is not None:
+        if not _is_sha(protocol_splits_sha256) or _sha(protocol_splits) != protocol_splits_sha256:
+            raise ValueError('protocol split SHA256 mismatch')
+        splits = json.loads(protocol_splits)
+        if not isinstance(splits, dict) or set(splits) != {'records'} or not isinstance(splits['records'], list):
+            raise ValueError('protocol split records required')
+        constraints = _protocol_cohort_constraints(splits['records'])
+        source['protocol_splits_sha256'] = protocol_splits_sha256
+        project = Path(__file__).resolve().parents[3]
+        source['fit_code_sha256'] = {name: _sha((project / name).read_bytes()) for name in _FIT_CODE_PATHS}
+    return _fit(root, minutes, source, config, persistence, constraints=constraints)
 
 
 def fit_synthetic_detector_benchmark(root, *, minutes, config: DetectorConfig, persistence: int = 2):
@@ -396,6 +471,12 @@ def _verify(content, expected_fit_sha256, *, allow_synthetic):
           or not _is_sha(source.get('provenance_sha256')) or not _is_sha(source.get('archives_sha256'))
           or type(source.get('archive_count')) is not int or source['archive_count'] < 1):
         raise ValueError('verified Alibaba source required')
+    if 'protocol_splits_sha256' in source and not _is_sha(source['protocol_splits_sha256']):
+        raise ValueError('invalid detector protocol split SHA256')
+    if 'fit_code_sha256' in source and (not isinstance(source['fit_code_sha256'], dict)
+            or set(source['fit_code_sha256']) != set(_FIT_CODE_PATHS)
+            or not all(_is_sha(value) for value in source['fit_code_sha256'].values())):
+        raise ValueError('invalid detector fit code SHA256')
     persistence = identity['persistence']
     if (stable_id(identity) != artifact['input_sha256'] or identity['split_assignment'] != _SPLIT
             or identity['transform'] != _TRANSFORM or type(persistence) is not int or persistence < 1):
@@ -413,7 +494,8 @@ def _verify(content, expected_fit_sha256, *, allow_synthetic):
             or not math.isfinite(artifact['fit_seconds']) or artifact['fit_seconds'] < 0):
         raise ValueError('detector calibration or recovery receipt mismatch')
     result = VerifiedDetectorFit(model, points, persistence, expected_fit_sha256, scope, artifact['status'],
-                                 source.get('provenance_sha256'))
+                                 source.get('provenance_sha256'), source.get('protocol_splits_sha256'),
+                                 source.get('fit_code_sha256'))
     return result, artifact
 
 
@@ -424,4 +506,48 @@ def verify_detector_fit(root, *, expected_fit_sha256, allow_synthetic=False) -> 
         result, _ = _verify(content, expected_fit_sha256, allow_synthetic=allow_synthetic)
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError('malformed detector artifact') from exc
+    return result
+
+
+def verify_protocol_detector_fit(root, *, expected_fit_sha256, protocol_splits, protocol_splits_sha256,
+                                 protocol_source_manifest=None):
+    """Verify the checkpoint's training segments and calibration timeline against pinned splits."""
+    if not _is_sha(protocol_splits_sha256) or _sha(protocol_splits) != protocol_splits_sha256:
+        raise ValueError('protocol split SHA256 mismatch')
+    result, artifact = _verify((Path(root) / FIT_PATH).read_bytes(), expected_fit_sha256, allow_synthetic=False)
+    if result.protocol_splits_sha256 != protocol_splits_sha256:
+        raise ValueError('detector fit split differs from the development protocol')
+    if protocol_source_manifest is not None:
+        manifest = json.loads(protocol_source_manifest)
+        refs = manifest['files']
+        if not isinstance(result.fit_code_sha256, dict):
+            raise ValueError('detector fit lacks pinned source code')
+        for name, digest in result.fit_code_sha256.items():
+            matches = [ref for ref in refs if ref['path'].endswith('/source/' + name)]
+            if len(matches) != 1 or matches[0]['sha256'] != digest:
+                raise ValueError('detector fit code differs from the development protocol')
+    splits = json.loads(protocol_splits)
+    if not isinstance(splits, dict) or set(splits) != {'records'} or not isinstance(splits['records'], list):
+        raise ValueError('protocol split records required')
+    constraints = _protocol_cohort_constraints(splits['records'])
+    for segment in result.model.training_segments:
+        entry = constraints.get(segment.service)
+        if (not entry or entry['role'] != 'train' or segment.split != 'train'
+                or not entry['start'] * BUCKET_SECONDS <= segment.start_timestamp
+                <= segment.end_timestamp <= entry['end'] * BUCKET_SECONDS):
+            raise ValueError('detector training segment crosses the protocol partition')
+    expected = {(service, minute * BUCKET_SECONDS) for service, entry in constraints.items()
+                if entry['role'] == 'calibration' for minute in entry['anchors']}
+    for ledger in artifact['calibration_rows'].values():
+        actual = set()
+        for row in ledger:
+            service, timestamp, run_id = row.get('service'), row.get('timestamp'), row.get('run_id')
+            key = (service, timestamp)
+            if (not isinstance(service, str) or type(timestamp) is not int or not isinstance(run_id, str)
+                    or row['record_id'] != stable_id({'run_id': run_id, 'service': service, 'timestamp': timestamp})
+                    or key in actual):
+                raise ValueError('detector calibration source identity differs')
+            actual.add(key)
+        if actual != expected:
+            raise ValueError('detector calibration anchors differ from the protocol')
     return result

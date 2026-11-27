@@ -67,6 +67,9 @@ def predict(model, identity, graph_input, *, expected_graph_sha256):
     if (data['projection_version'] != 'ltfp-graph-input/development-v1'
         or len(steps) != 5 or any(type(step) is not int for step in steps)
         or steps != list(range(steps[0], steps[0] + 5))
+        or (data.get('units') is not None and data['units'] not in (
+            {'rt': 'milliseconds', 'rate': 'request_count'},
+            {'rt': 'milliseconds', 'rate': 'normalized_call_rate_sum'}))
         or not data['source_identity'] or steps[-1] * 60 > utc_time(data['as_of']).timestamp()
         or utc_time(data['topology']['observed_at']) > utc_time(data['as_of'])
         or stable_id(data['topology']) != data['graph_sha256']

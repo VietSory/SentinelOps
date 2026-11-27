@@ -2,11 +2,12 @@ from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
+import random
 
 import pytest
 
 from sentinelops.ml.alibaba_training import load_config, split_of
-from sentinelops.ml.model_benchmark_protocol import audit_protocol, freeze_protocol, verify_protocol
+from sentinelops.ml.model_benchmark_protocol import _overlapping_partitions, audit_protocol, freeze_protocol, verify_protocol
 
 
 def fixture(root):
@@ -71,6 +72,38 @@ def test_exact_dependency_boundaries_and_purge(tmp_path,field,value):
     assert not (tmp_path/'freeze').exists()
 
 
+def test_partition_overlap_sweep_matches_pairwise_reference():
+    rng = random.Random(42)
+    for _ in range(200):
+        partitions = [(rng.choice(('a', 'b')), rng.choice(('g1', 'g2')),
+                       rng.choice(('train', 'calibration')), rng.randrange(12), rng.randrange(12))
+                      for _ in range(30)]
+        expected = any(a[:2] == b[:2] and a[2] != b[2] and max(a[3], b[3]) <= min(a[4], b[4])
+                       for index, a in enumerate(partitions) for b in partitions[index + 1:])
+        assert _overlapping_partitions(partitions) == expected
+
+
+def test_partition_overlap_scales_and_counts_touching_boundary():
+    partitions = [('service', f'g{index}', 'train', 0, 179) for index in range(60000)]
+    partitions += [('service', f'g{index}', 'calibration', 180, 359) for index in range(60000)]
+    assert not _overlapping_partitions(partitions)
+    partitions[-1] = ('service', 'g59999', 'calibration', 179, 359)
+    assert _overlapping_partitions(partitions)
+
+
+def test_partition_overlap_blocks_both_lanes(tmp_path):
+    protocol, ref = fixture(tmp_path)
+    data = json.loads((tmp_path / 'splits.json').read_text())
+    service = next(f'MS_{i}' for i in range(100) if split_of(f'MS_{i}') == 'calibration')
+    data['records'].append(dict(data['records'][0], record_id='r2', service=service,
+        role='calibration', parent_split='calibration', anchor_minute=175,
+        required_start=107, required_end=182, partition_start=107, partition_end=250))
+    protocol['data']['splits'] = ref('splits.json', data)
+    result = audit_protocol(protocol, tmp_path)
+    for lane in ('a', 'b'):
+        assert 'overlapping source group partitions' in result['lanes'][lane]['reasons']
+
+
 def test_cross_split_neighbor_and_unknown_parent_rejected(tmp_path):
     protocol,ref=fixture(tmp_path)
     data=json.loads((tmp_path/'splits.json').read_text())
@@ -81,6 +114,27 @@ def test_cross_split_neighbor_and_unknown_parent_rejected(tmp_path):
     data['records'][0].update(role='development',parent_split='holdout')
     protocol['data']['splits']=ref('splits.json',data)
     with pytest.raises(ValueError,match='holdout'): audit_protocol(protocol,tmp_path)
+
+
+def test_topology_requires_all_directed_edges_between_record_nodes(tmp_path):
+    protocol, ref = fixture(tmp_path)
+    data = json.loads((tmp_path / 'splits.json').read_text())
+    row = data['records'][0]
+    other = next(f'MS_{i}' for i in range(100)
+                 if split_of(f'MS_{i}') == 'train' and f'MS_{i}' != row['service'])
+    edges = [[row['service'], other], [other, row['service']]]
+    topology = json.loads((tmp_path / 'topology.json').read_text())
+    topology['directed_edges'] = edges
+    graph = ref('topology.json', topology)
+    protocol['graph']['train_topology'] = graph
+    protocol['graph']['inference_topologies'] = [graph]
+    row['contributors'] = [{'service': other, 'role': 'train'}]
+    row['directed_edges'] = edges
+    protocol['data']['splits'] = ref('splits.json', data)
+    assert audit_protocol(protocol, tmp_path)['lanes']['a']['status'] == 'ready'
+    row['directed_edges'] = edges[:1]
+    protocol['data']['splits'] = ref('splits.json', data)
+    assert 'record graph/topology mismatch' in str(audit_protocol(protocol, tmp_path)['reasons'])
 
 
 @pytest.mark.parametrize('change',['missing','hash','traversal','absolute','unknown','finite'])
@@ -94,6 +148,53 @@ def test_invalid_schema_refs_and_finite_json(tmp_path,change):
     if change=='finite': protocol['training']['learning_rate']=float('inf')
     with pytest.raises(ValueError): audit_protocol(protocol,tmp_path)
     assert not (tmp_path/'freeze').exists()
+
+
+def test_alibaba_a07_requires_a_pinned_worker_replay(tmp_path):
+    protocol, ref = fixture(tmp_path)
+    (tmp_path / 'snapshot/scripts').mkdir(parents=True)
+    checker = ref('snapshot/scripts/check_ltfp_graph_parity.py', {'checker': 'fixture'})
+    protocol['code']['source_manifest'] = ref('source-worker.json', {'files': [checker]})
+    for item in protocol['checks']:
+        evidence = json.loads((tmp_path / item['evidence']['path']).read_bytes())
+        evidence['source_manifest_sha256'] = protocol['code']['source_manifest']['sha256']
+        item['evidence'] = ref(item['evidence']['path'], evidence)
+    report = json.loads((tmp_path / protocol['data']['support']['path']).read_bytes())
+    report['lanes']['a']['dataset_scope'] = 'alibaba-proxy-development'
+    protocol['data']['support'] = ref('support-alibaba.json', report)
+    assert audit_protocol(protocol, tmp_path)['lanes']['a']['reasons'] == [
+        'A07: verified worker replay receipt missing']
+
+    check = next(row for row in protocol['checks'] if row['test_id'] == 'A07')
+    receipt = json.loads((tmp_path / check['evidence']['path']).read_bytes())
+    replay = dict(test_id='A07', status='passed', dataset_scope='alibaba-local-development-validation',
+                  checker_sha256=checker['sha256'], checker_source_commit=protocol['code']['commit'],
+                  run_id='run-fixture', parity=dict(run_id='run-fixture', shape=[3, 5, 6], max_abs_error=0,
+                      source_identity={'source_profile': 'prometheus-increase-60s-5s/v2'},
+                      late_batch_unavailable=True, exact_receipt_available=True,
+                      original_and_perturbed_suffix_invariant=True))
+    receipt['worker_replay'] = ref('worker-replay.json', replay)
+    check['evidence'] = ref('a07-worker.json', receipt)
+    assert audit_protocol(protocol, tmp_path)['lanes']['a']['status'] == 'ready'
+    replay['checker_sha256'] = '0' * 64
+    receipt['worker_replay'] = ref('worker-replay.json', replay)
+    check['evidence'] = ref('a07-worker.json', receipt)
+    assert audit_protocol(protocol, tmp_path)['lanes']['a']['reasons'] == [
+        'A07: replay checker differs from protocol source']
+    replay['checker_sha256'] = checker['sha256']
+    replay['checker_source_commit'] = 'b' * 40
+    receipt['worker_replay'] = ref('worker-replay.json', replay)
+    check['evidence'] = ref('a07-worker.json', receipt)
+    assert audit_protocol(protocol, tmp_path)['lanes']['a']['reasons'] == [
+        'A07: replay checker differs from protocol source']
+    replay['checker_source_commit'] = protocol['code']['commit']
+    replay['parity']['late_batch_unavailable'] = False
+    receipt['worker_replay'] = ref('worker-replay.json', replay)
+    with pytest.raises(ValueError, match='missing or changed reference'):
+        audit_protocol(protocol, tmp_path)
+    check['evidence'] = ref('a07-worker.json', receipt)
+    with pytest.raises(ValueError, match='did not establish parity'):
+        audit_protocol(protocol, tmp_path)
 
 
 def test_symlink_escape_source_drift_and_fixture_evidence(tmp_path):

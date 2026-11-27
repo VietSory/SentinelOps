@@ -255,7 +255,7 @@ def run_campaign(store, *, project=PROJECT, follow_existing=False, plan_path=Non
                             '--root',str(store.root),'--role',role,'--group',str(ordinal),'--kind',kind]
                         if not session_path.exists(): command.append('--prepare')
                         if detector:
-                            selected_plan = ALIBABA_PLAN if alibaba else DETECTOR_PLAN
+                            selected_plan = plan_file if alibaba else DETECTOR_PLAN
                             command.extend(['--plan', str(capture_project/'configs'/selected_plan.name)])
                         environment = {**os.environ,'PYTHONPATH':str(capture_project/'src')+os.pathsep+str(capture_project)}
                         log = attempt_log(store, slot)

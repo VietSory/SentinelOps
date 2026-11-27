@@ -33,7 +33,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-      - run: pip install -e '.[dev]'
+      - run: pip install -e '.[ml,dev]'
       - run: python scripts/validate_contracts.py
       - run: pytest -q
       - run: python scripts/check_installed_package.py

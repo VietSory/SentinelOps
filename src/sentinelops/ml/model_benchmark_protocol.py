@@ -52,6 +52,34 @@ def _json_ref(root, ref):
     return value
 
 
+def validate_worker_replay(replay):
+    parity = replay['parity']
+    if (replay['test_id'] != 'A07' or replay['status'] != 'passed'
+            or replay['dataset_scope'] != 'alibaba-local-development-validation'
+            or replay['run_id'] != parity['run_id']
+            or parity['source_identity']['source_profile'] != 'prometheus-increase-60s-5s/v2'
+            or parity['shape'] != [3, 5, 6] or not 0 <= parity['max_abs_error'] <= 1e-6
+            or parity['late_batch_unavailable'] is not True
+            or parity['exact_receipt_available'] is not True
+            or parity['original_and_perturbed_suffix_invariant'] is not True):
+        raise ValueError('A07 worker replay receipt did not establish parity')
+
+
+def _overlapping_partitions(partitions):
+    """Find any overlap between roles in the same source group."""
+    latest_end = {}
+    for unit, group, role, start, end in sorted(partitions, key=lambda item: item[3]):
+        if end < start:
+            continue
+        other_role = 'calibration' if role == 'train' else 'train'
+        other_end = latest_end.get((unit, group, other_role))
+        if other_end is not None and other_end >= start:
+            return True
+        key = (unit, group, role)
+        latest_end[key] = max(end, latest_end.get(key, end))
+    return False
+
+
 def audit_protocol(protocol, root):
     """Validate declared bytes and split dependencies; report independent lane gaps."""
     root = Path(root).resolve()
@@ -142,10 +170,8 @@ def audit_protocol(protocol, root):
         t = row['anchor_minute']
         if not (row['partition_start'] <= row['required_start'] <= t-68 and t+7 <= row['required_end'] <= row['partition_end']):
             gap('a', row['record_id'] + ': missing dependency coverage or purge')
-    for i, (unit, group, role, start, end) in enumerate(partitions):
-        for other_unit, other_group, other_role, other_start, other_end in partitions[i+1:]:
-            if (unit, group) == (other_unit, other_group) and role != other_role and max(start, other_start) <= min(end, other_end):
-                for lane in lanes: gap(lane, 'overlapping source group partitions')
+    if _overlapping_partitions(partitions):
+        for lane in lanes: gap(lane, 'overlapping source group partitions')
     if topologies[0].get('role') != 'train':
         raise ValueError('train topology requires train role')
     for topology in topologies:
@@ -159,9 +185,14 @@ def audit_protocol(protocol, root):
         if not applicable:
             gap('a', 'topology has no applicable split records')
         topology_edges = {tuple(edge) for edge in topology['directed_edges']}
+        outgoing = {}
+        for edge in topology_edges:
+            if len(edge) != 2:
+                raise ValueError('topology edges must have two endpoints')
+            outgoing.setdefault(edge[0], set()).add(edge)
         for row in applicable:
             nodes = {row['service'], *(node['service'] for node in row['contributors'])}
-            expected = {edge for edge in topology_edges if edge[0] in nodes and edge[1] in nodes}
+            expected = {edge for node in nodes for edge in outgoing.get(node, ()) if edge[1] in nodes}
             if {tuple(edge) for edge in row['directed_edges']} != expected:
                 gap('a', row['record_id'] + ': record graph/topology mismatch')
         declared_edges = {tuple(edge) for row in applicable for edge in row['directed_edges']}
@@ -180,6 +211,17 @@ def audit_protocol(protocol, root):
         if check['status'] not in ('passed', 'blocked', 'not-run') or check['scope'] not in ('real', 'fixture', 'counterfactual', 'input-only'):
             raise ValueError('unknown check status/scope')
         evidence = _json_ref(root, check['evidence'])
+        if name == 'A07' and 'worker_replay' in evidence:
+            replay = _json_ref(root, evidence.pop('worker_replay'))
+            validate_worker_replay(replay)
+            checker = [ref for ref in source['files']
+                       if ref['path'].endswith('/scripts/check_ltfp_graph_parity.py')]
+            if (len(checker) != 1 or replay.get('checker_sha256') != checker[0]['sha256']
+                    or replay.get('checker_source_commit') != code['commit']):
+                gap('a', 'A07: replay checker differs from protocol source')
+        elif (name == 'A07' and check['status'] == 'passed'
+              and support.get('lanes', {}).get('a', {}).get('dataset_scope') == 'alibaba-proxy-development'):
+            gap('a', 'A07: verified worker replay receipt missing')
         _keys(evidence, 'test_id status scope source_manifest_sha256')
         if evidence != {**{key:check[key] for key in ('test_id','status','scope')}, 'source_manifest_sha256':code['source_manifest']['sha256']}:
             raise ValueError('check/source identity mismatch')
@@ -199,18 +241,11 @@ def audit_protocol(protocol, root):
     return {'status':'blocked' if reasons else 'ready', 'protocol_sha256':stable_id(protocol), 'reasons':reasons, 'lanes':lanes}
 
 
-def freeze_protocol(protocol, root):
-    result = audit_protocol(protocol, root)
-    if result['status'] != 'ready':
-        return result
-    wrapper = {'schema_version':'benchmark-protocol-freeze/development-v1', 'protocol':protocol,
-               'protocol_content_sha256':result['protocol_sha256']}
-    content = _bytes(wrapper)
-    path = _path(Path(root).resolve(), 'freeze/protocol.json')
+def publish_freeze(path, content, *, conflict):
     path.parent.mkdir(parents=True, exist_ok=True)
     # Root directories are trusted against hostile concurrent symlink replacement.
     # Publish only complete bytes; a hard link refuses replacement atomically.
-    with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.protocol-', delete=False) as output:
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix='.freeze-', delete=False) as output:
         temporary = Path(output.name)
         try:
             output.write(content)
@@ -224,9 +259,19 @@ def freeze_protocol(protocol, root):
             os.link(temporary, path)
         except FileExistsError:
             if path.read_bytes() != content:
-                raise ValueError('different protocol already frozen')
+                raise ValueError(conflict)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def freeze_protocol(protocol, root):
+    result = audit_protocol(protocol, root)
+    if result['status'] != 'ready':
+        return result
+    wrapper = {'schema_version':'benchmark-protocol-freeze/development-v1', 'protocol':protocol,
+               'protocol_content_sha256':result['protocol_sha256']}
+    path = _path(Path(root).resolve(), 'freeze/protocol.json')
+    publish_freeze(path, _bytes(wrapper), conflict='different protocol already frozen')
     return result
 
 

@@ -8,11 +8,12 @@ from sentinelops.telemetry.core import stable_id, timestamp
 
 
 def build_graph_input(node_ids, observations, *, anchor, as_of, config, topology,
-                      source_identity, self_only=False):
+                      source_identity, self_only=False, rate_unit='request_count'):
     """Build N×5×F values and validity without treating padding as observed data.
 
-    Observations map service IDs and UTC epoch minutes to rt (ms), rate (request
-    count), raw_ref and available_at. Topology contains only feature-node edges;
+    Observations map service IDs and UTC epoch minutes to rt (ms), rate,
+    raw_ref and available_at. Rate units identify the source measurement.
+    Topology contains only feature-node edges;
     callers explicitly exclude components without telemetry, including RDS.
     """
     nodes = list(node_ids)
@@ -22,6 +23,8 @@ def build_graph_input(node_ids, observations, *, anchor, as_of, config, topology
         raise ValueError("graph requires an available minute-aligned anchor")
     if not source_identity or not topology.get("identity"):
         raise ValueError("graph requires source and topology identity")
+    if rate_unit not in ('request_count', 'normalized_call_rate_sum'):
+        raise ValueError('unsupported source rate unit')
     observed = utc_time(topology["observed_at"])
     if observed > as_of:
         raise ValueError("topology was unavailable at cutoff")
@@ -59,7 +62,7 @@ def build_graph_input(node_ids, observations, *, anchor, as_of, config, topology
     return {"projection_version": "ltfp-graph-input/development-v1", "node_ids": nodes,
             "step_minutes": steps, "as_of": timestamp(as_of), "source_identity": source_identity,
             "feature_names": list(config["features"]), "config_sha256": stable_id(config),
-            "units": {"rt": "milliseconds", "rate": "request_count"},
+            "units": {"rt": "milliseconds", "rate": rate_unit},
             "topology": topology_record, "graph_sha256": stable_id(topology_record),
             "self_only": self_only, "attention_mask": mask,
             "mask_sha256": stable_id({"node_ids": nodes, "mask": mask}),

@@ -3,6 +3,7 @@ import asyncio
 from collections import defaultdict
 from copy import deepcopy
 from datetime import timedelta
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import Mock
@@ -14,6 +15,7 @@ import scripts.check_ltfp_graph_parity as checker
 from sentinelops.ml.alibaba_training import load_config
 from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
+from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.workers import health
 from test_health_source import capture
 from test_ltfp_graph import ANCHOR
@@ -38,6 +40,41 @@ def topology():
             'observed_at': timestamp(ANCHOR-timedelta(minutes=35)),
             'directed_edges': [['checkout-service', 'payment-service'],
                                ['checkout-service', 'inventory-service']]}
+
+
+def test_archive_admission_requires_pins_and_v2_and_replays_worker(tmp_path, monkeypatch):
+    store = ArtifactStore(tmp_path / 'serving')
+    refs = [store.write('raw', raw) for rows in captures().values() for _, raw in rows]
+    run_path = tmp_path / 'run.json'
+    run = dict(source_commit='a' * 40, environment='fixture', run_id='fixture-01',
+               started_at=topology()['observed_at'], warmup_end_at=timestamp(ANCHOR - timedelta(minutes=2)))
+    topology_bytes = b'dependencies:\n  checkout-service: [payment-service, inventory-service]\n'
+    topology_pin = hashlib.sha256(topology_bytes).hexdigest()
+
+    def git(command, *, text=False, cwd=None):
+        assert command[-1] == run['source_commit'] + ':configs/topology.yaml'
+        return 'b' * 40 if text else topology_bytes
+
+    def pin(raw_refs):
+        run['source_manifest_ref'] = store.write('manifests', {'raw_refs': raw_refs})
+        run_path.write_text(json.dumps(run))
+        return hashlib.sha256(run_path.read_bytes()).hexdigest()
+
+    monkeypatch.setattr(checker.subprocess, 'check_output', git)
+    run_pin = pin(refs)
+    with pytest.raises(ValueError, match='trusted run and topology'):
+        checker.check_worker(run_path)
+    with pytest.raises(ValueError, match='pin missing or mismatched'):
+        checker.check_worker(run_path, expected_run_sha256='0' * 64, expected_topology_sha256=topology_pin)
+    with pytest.raises(ValueError, match='committed topology SHA'):
+        checker.check_worker(run_path, expected_run_sha256=run_pin, expected_topology_sha256='0' * 64)
+    v1 = store.write('raw', {**store.read(refs[0]), 'source_profile': 'prometheus-increase-60s-5s/v1'})
+    with pytest.raises(ValueError, match='v2 captures'):
+        checker.check_worker(run_path, expected_run_sha256=pin([v1, *refs[1:]]),
+                             expected_topology_sha256=topology_pin)
+    result = checker.check_worker(run_path, expected_run_sha256=pin(refs), expected_topology_sha256=topology_pin)
+    assert result['run_sha256'] == run_pin
+    assert result['max_abs_error'] == 0 and result['late_batch_unavailable']
 
 
 def test_actual_worker_native_normalization_commits_and_causal_boundaries(tmp_path, monkeypatch):

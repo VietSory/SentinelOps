@@ -6,6 +6,7 @@ import argparse
 import asyncio
 from contextlib import asynccontextmanager, ExitStack
 import hashlib
+import re
 import subprocess
 import tempfile
 import threading
@@ -22,6 +23,11 @@ from sentinelops.ml.alibaba_training import load_config
 from sentinelops.ml.ltfp_graph import build_graph_input
 from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2, decode_capture, mean_latency_ms
+from sentinelops.telemetry.store import ArtifactStore
+
+
+LEGACY_CAPTURE_COMMIT = '202650d81a642068c352246791c5bafa6f2c6228'
+LEGACY_TOPOLOGY_SHA256 = 'd1265592881a04d07bb6ed992baa59d43610c90cd76cb3565cc75dd53d0df9a3'
 
 
 class Replay:
@@ -372,39 +378,60 @@ async def replay_worker_cases(root, captures, *, anchor, topology, environment, 
         'original_and_perturbed_suffix_invariant': True}
 
 
-def check_worker(run_path):
+def check_worker(run_path, *, expected_run_sha256=None, expected_topology_sha256=None, project=None):
     run_bytes = run_path.read_bytes()
+    run_sha = hashlib.sha256(run_bytes).hexdigest()
     run = json.loads(run_bytes)
-    assert run['source_commit'] == '202650d81a642068c352246791c5bafa6f2c6228'
-    store = Replay(run_path.parent / 'serving')
+    commit = run['source_commit']
+    if not isinstance(commit, str) or not re.fullmatch('[0-9a-f]{40}', commit):
+        raise ValueError('capture requires a full source commit')
+    if expected_run_sha256 is None and expected_topology_sha256 is None:
+        if commit != LEGACY_CAPTURE_COMMIT:
+            raise ValueError('capture requires trusted run and topology SHA-256 pins')
+        expected_topology_sha256 = LEGACY_TOPOLOGY_SHA256
+    elif run_sha != expected_run_sha256 or not re.fullmatch('[0-9a-f]{64}', expected_topology_sha256 or ''):
+        raise ValueError('capture run or topology SHA-256 pin missing or mismatched')
+    store = ArtifactStore(run_path.parent / 'serving')
     source = store.read(run['source_manifest_ref'])
-    assert len(source['raw_refs']) <= 3 * 70
+    refs = source['raw_refs']
+    if not 0 < len(refs) <= 3 * 70 or len(refs) != len(set(refs)):
+        raise ValueError('expected one bounded archive with unique raw refs')
     captures = defaultdict(list)
-    for ref in source['raw_refs']:
+    for ref in refs:
         raw = store.read(ref)
+        if not ref.startswith('artifact://raw/') or raw.get('source_profile') != SOURCE_PROFILE_V2:
+            raise ValueError('worker replay requires raw Prometheus v2 captures')
         captures[raw['bucket_end']].append((ref, raw))
-    assert len(captures) <= 70
+    if len(captures) > 70:
+        raise ValueError('worker replay is limited to 70 minutes')
     for bucket, rows in captures.items():
-        assert len(rows) == 3 and {raw['service'] for _, raw in rows} == set(NODES)
-        assert all(30 <= (utc_time(raw['collected_at']) - utc_time(bucket)).total_seconds() <= 60
-                   for _, raw in rows)
+        if len(rows) != 3 or {raw['service'] for _, raw in rows} != set(NODES):
+            raise ValueError('every replay bucket requires the three feature services')
+        if not all(30 <= (utc_time(raw['collected_at']) - utc_time(bucket)).total_seconds() <= 60
+                   for _, raw in rows):
+            raise ValueError('raw collection clock is outside the worker replay window')
     minutes = sorted(utc_time(bucket) for bucket in captures)
-    assert all(b - a == timedelta(minutes=1) for a, b in zip(minutes, minutes[1:]))
-    topology_bytes = subprocess.check_output(['git', 'show', run['source_commit'] + ':configs/topology.yaml'])
+    if not all(b - a == timedelta(minutes=1) for a, b in zip(minutes, minutes[1:])):
+        raise ValueError('archive has a missing minute')
+    revision = commit + ':configs/topology.yaml'
+    topology_bytes = subprocess.check_output(['git', 'show', revision], cwd=project)
     topology_sha = hashlib.sha256(topology_bytes).hexdigest()
-    assert topology_sha == 'd1265592881a04d07bb6ed992baa59d43610c90cd76cb3565cc75dd53d0df9a3'
+    if topology_sha != expected_topology_sha256:
+        raise ValueError('committed topology SHA-256 differs from the trusted pin')
     edges = [[up, down] for up, targets in yaml.safe_load(topology_bytes)['dependencies'].items() for down in targets]
-    topology = {'identity': {'source_commit': run['source_commit'], 'blob':
-        'f96d95847e061dde9679e26250db9618a06518ec', 'sha256': topology_sha,
+    blob = subprocess.check_output(['git', 'rev-parse', revision], text=True, cwd=project).strip()
+    topology = {'identity': {'source_commit': commit, 'blob': blob, 'sha256': topology_sha,
         'scope': 'source-pinned declared graph; availability assigned at replay setup'},
         'observed_at': run['started_at'],
         'directed_edges': [edge for edge in edges if all(node in NODES for node in edge)]}
     anchor = utc_time(run['warmup_end_at']).replace(second=0, microsecond=0) + timedelta(minutes=2)
+    if anchor not in minutes or len([minute for minute in minutes if minute <= anchor]) < 5:
+        raise ValueError('capture lacks the required replay anchor or feature sequence')
     with tempfile.TemporaryDirectory(prefix='sentinelops-worker-parity-') as root:
         result = asyncio.run(replay_worker_cases(root, captures, anchor=anchor, topology=topology,
             environment=run['environment'], policy=json.loads(Path('configs/slo_health_policy.json').read_bytes()),
             config=load_config()))
-    result.update(run_id=run['run_id'], run_sha256=hashlib.sha256(run_bytes).hexdigest(),
+    result.update(run_id=run['run_id'], run_sha256=run_sha,
                   source_ref=run['source_manifest_ref'], raw_count=len(source['raw_refs']),
                   minute_count=len(captures), excluded_topology_edges=[edge for edge in edges if edge not in topology['directed_edges']])
     return result
@@ -414,10 +441,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', required=True, type=Path)
     parser.add_argument('--worker', action='store_true', help='Run actual worker with archived HTTP/fakeDB')
+    parser.add_argument('--run-sha256', help='Trusted byte SHA-256 of a worker replay run.json')
+    parser.add_argument('--topology-sha256', help='Trusted byte SHA-256 of the run commit topology')
     parser.add_argument('--topology', type=Path,
                         help='Pinned development topology identity, observed_at and directed_edges JSON')
     args = parser.parse_args()
     if not args.worker and args.topology is None:
         parser.error('--topology required for reconstructed adapter mode')
-    print(json.dumps(check_worker(args.run) if args.worker else check(args.run, args.topology),
+    if (args.run_sha256 or args.topology_sha256) and not args.worker:
+        parser.error('archive SHA-256 pins require --worker')
+    print(json.dumps(check_worker(args.run, expected_run_sha256=args.run_sha256,
+                                  expected_topology_sha256=args.topology_sha256)
+                     if args.worker else check(args.run, args.topology),
                      sort_keys=True, indent=2))
