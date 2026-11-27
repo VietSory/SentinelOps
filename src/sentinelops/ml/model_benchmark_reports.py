@@ -1,11 +1,9 @@
 """Pure forecast reports over caller-certified truth; no fitting or calibration."""
 import math
 import random
-from datetime import timedelta
-
 from sentinelops.contracts import utc_time
 
-from sentinelops.ml.model_benchmark_forecast import MODELS, project_latency_truth, summarize_forecasts
+from sentinelops.ml.model_benchmark_forecast import MODELS, project_latency_truth, schedule_cutoffs, summarize_forecasts
 
 
 def forecast_report_from_oracles(store, rows, cases, *, thresholds=None, policy_identity=None, provenance):
@@ -37,12 +35,10 @@ def _coverage(record, rows):
         return {'complete': False, 'expected_windows': None, 'scored_windows': 0,
                 'scored_service_hours': 0, 'missing_reason': 'score-schedule-required'}
     start, stop = utc_time(schedule['start']), utc_time(schedule['stop'])
-    cadence, delay = schedule['cadence_seconds'], schedule['cutoff_delay_seconds']
+    cadence = schedule['cadence_seconds']
+    cutoffs = schedule_cutoffs(schedule)
     seconds = (stop - start).total_seconds()
-    if (type(cadence) is not int or cadence != 60 or
-            type(delay) not in (int, float) or not math.isfinite(delay) or not 0 <= delay < 60 or
-            seconds <= 0 or seconds % cadence or start.second or start.microsecond or
-            record.get('healthy_hours') is not None and
+    if (record.get('healthy_hours') is not None and
             not math.isclose(record['healthy_hours'], seconds / 3600, rel_tol=1e-12, abs_tol=1e-12)):
         raise ValueError('invalid minute score schedule or inconsistent exposure')
     expected = int(seconds / cadence)
@@ -53,8 +49,8 @@ def _coverage(record, rows):
         if anchor in anchors or not start <= anchor < stop or (anchor - start).total_seconds() % cadence:
             invalid = True
         anchors[anchor] = row
-    scored = sum(row['score'] is not None and utc_time(row['prediction_cutoff']) ==
-                 anchor + timedelta(seconds=delay) for anchor, row in anchors.items()
+    scored = sum(row['score'] is not None and cutoffs[anchor] is not None and
+                 utc_time(row['prediction_cutoff']) == cutoffs[anchor] for anchor, row in anchors.items()
                  if start <= anchor < stop and not (anchor - start).total_seconds() % cadence)
     complete = not invalid and len(anchors) == expected and scored == expected
     return {'complete': complete, 'expected_windows': expected, 'scored_windows': scored,
@@ -71,7 +67,8 @@ def forecast_report(rows, events, *, thresholds=None, policy_identity=None,
     evidence_id, and optional healthy_hours. Healthy exposure is accepted only
     for a wholly verified no-breach run/service timeline (not partial intervals).
     score_schedule declares start/stop (exclusive), cadence_seconds=60 and
-    cutoff_delay_seconds. Rates require full score coverage on these clocks.
+    either cutoff_delay_seconds or exact recorded cutoffs. Rates require full
+    score coverage on these clocks.
     provenance supplies code/config/data/model identities. These identities and
     truth are caller attestations, not evidence verified by this pure function.
     """

@@ -15,6 +15,7 @@ def write_json(path, value):
 
 
 def test_sealed_forecast_inputs_check_all_metadata_before_sources(tmp_path, monkeypatch):
+    from sentinelops.ml import model_benchmark_forecast
     draft = draft_matrix()
     matrix = draft['matrix']
     candidate_pin, registration_pin = 'a' * 64, None
@@ -25,6 +26,9 @@ def test_sealed_forecast_inputs_check_all_metadata_before_sources(tmp_path, monk
     monkeypatch.setattr(inputs, 'verify_candidate_freeze', lambda *args: {'protocol_sha256': 'c' * 64})
     monkeypatch.setattr(inputs, 'verify_capture_registration', lambda *args, **kwargs: registration)
     touched = []
+    monkeypatch.setattr(inputs, 'load_frozen_models', lambda *args, **kwargs: touched.append('models') or {})
+    monkeypatch.setattr(model_benchmark_forecast, 'thresholds_from_freeze',
+                        lambda *args, **kwargs: touched.append('thresholds') or {})
     def replay(root, matrix, receipts, paths, **kwargs):
         touched.append('sources')
         return [{'group_id': group['group_id'], 'run_id': row['run_id'],
@@ -56,10 +60,17 @@ def test_sealed_forecast_inputs_check_all_metadata_before_sources(tmp_path, monk
     seal_pin = write_json(tmp_path / 'capture/sealed.json', seal)
     result = inputs.load_sealed_inputs(tmp_path, candidates_sha256=candidate_pin,
                                        registration_sha256=registration_pin, seal_sha256=seal_pin)
-    assert len(result['cases']) == 35 and touched == ['sources']
+    assert len(result['cases']) == 35 and touched == ['models', 'thresholds', 'sources']
     assert [case['kind'] for case in result['cases'][:7]] == [slot['kind'] for slot in matrix['groups'][0]['slots']]
-    (tmp_path / 'capture/groups/bench-final-05/receipt.json').write_text('{}')
     touched.clear()
+    def reject_model(*args, **kwargs):
+        raise ValueError('changed model')
+    monkeypatch.setattr(inputs, 'load_frozen_models', reject_model)
+    with pytest.raises(ValueError, match='changed model'):
+        inputs.load_sealed_inputs(tmp_path, candidates_sha256=candidate_pin,
+                                  registration_sha256=registration_pin, seal_sha256=seal_pin)
+    assert touched == []
+    (tmp_path / 'capture/groups/bench-final-05/receipt.json').write_text('{}')
     with pytest.raises(ValueError, match='changed reference'):
         inputs.load_sealed_inputs(tmp_path, candidates_sha256=candidate_pin,
                                   registration_sha256=registration_pin, seal_sha256=seal_pin)
@@ -93,3 +104,47 @@ def test_source_topology_uses_pinned_commit_and_excludes_unobserved_nodes(tmp_pa
     assert graph['graph_sha256'] == projection['graph_sha256'] == stable_id(graph['topology'])
     with pytest.raises(ValueError, match='registered clean capture source'):
         inputs.source_topology({**run, 'dirty_worktree': True}, project=tmp_path, capture_commit=commit)
+
+
+def test_frozen_models_bind_bundle_refit_and_both_ltfp_variants(tmp_path, monkeypatch):
+    from sentinelops.ml import ltfp_model, models
+    from sentinelops.telemetry.core import stable_id
+    import xgboost
+
+    config = {'features': ['one', 'two']}
+    config_sha = stable_id(config)
+    identities = {name: {'weights_status': 'development-fitted', 'self_only': name == 'self_only',
+                         'config_sha256': config_sha} for name in ('graph', 'self_only')}
+    metadata = {'graph': '1' * 64, 'self_only': '2' * 64}
+    fit = {'input_sha256': '3' * 64, 'models': {name: {'identity': identities[name],
+           'metadata_sha256': metadata[name]} for name in identities}}
+    fit_sha = write_json(tmp_path / 'preflight/development-k16-fit-v5/receipt.json', fit)
+    xgb_dir = tmp_path / 'preflight/development-k16-xgboost-v5'
+    xgb_dir.mkdir(parents=True)
+    weights = b'frozen-xgboost-fixture'
+    (xgb_dir / 'risk.json').write_bytes(weights)
+    weight_sha = hashlib.sha256(weights).hexdigest()
+    manifest = {'scope': 'development-train-only', 'activation_allowed': False, 'model_sha256': weight_sha,
+                'paired_fit_input_sha256': fit['input_sha256'], 'config_sha256': config_sha}
+    manifest_sha = write_json(xgb_dir / 'manifest.json', manifest)
+    candidate = {'lanes': {'a': {'fit_sha256': fit_sha, 'ltfp_metadata_sha256': metadata,
+                                 'xgboost_sha256': weight_sha}},
+                 'baseline_bundle': {'manifest_sha256': '4' * 64, 'model_version': 'baseline'}}
+    candidate_sha = write_json(tmp_path / 'freeze/candidates.json', candidate)
+    monkeypatch.setattr(inputs, 'verify_candidate_freeze', lambda *args: {})
+    monkeypatch.setattr(models, 'load_bundle', lambda *args, **kwargs: (
+        {'model_version': 'baseline', 'ordered_features': config['features'],
+         'provenance': {'config': config, 'config_sha256': config_sha}}, None, object()))
+    loaded = []
+    monkeypatch.setattr(ltfp_model, 'load', lambda path, **kwargs: loaded.append((path.name, kwargs['metadata_sha256'])))
+    class XGB:
+        def load_model(self, path):
+            loaded.append(('xgb', path.name))
+    monkeypatch.setattr(xgboost, 'XGBClassifier', XGB)
+    result = inputs.load_frozen_models(tmp_path, candidates_sha256=candidate_sha)
+    assert loaded == [('graph', metadata['graph']), ('self_only', metadata['self_only']), ('xgb', 'risk.json')]
+    assert result['xgboost_refit']['manifest_sha256'] == manifest_sha
+    assert result['models']['ltfp_graph']['fitted_verified'] is True
+    (xgb_dir / 'risk.json').write_bytes(b'changed')
+    with pytest.raises(ValueError, match='changed reference'):
+        inputs.load_frozen_models(tmp_path, candidates_sha256=candidate_sha)

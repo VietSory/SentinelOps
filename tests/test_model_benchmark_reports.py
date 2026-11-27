@@ -70,6 +70,27 @@ def test_independent_truth_unknown_and_exposure():
     with pytest.raises(ValueError): report(rows, fixture((60,))[1], truth=truth)
 
 
+def test_exposure_uses_each_recorded_source_cutoff():
+    rows, _ = fixture((60,))
+    cutoffs = {'2026-01-01T00:05:00Z': '2026-01-01T00:05:30.125Z',
+               '2026-01-01T00:06:00Z': '2026-01-01T00:06:31.875Z'}
+    for row in rows:
+        anchor = datetime.fromisoformat(row['window_end']).strftime('%Y-%m-%dT%H:%M:%SZ')
+        row.update(risk_label=None, prediction_cutoff=cutoffs[anchor])
+    truth = [dict(run_id='0', service='s', group_id='0', outcome='no-breach',
+                  healthy_hours=2 / 60, evidence_id='verified-fixture',
+                  score_schedule=dict(start='2026-01-01T00:05:00Z', stop='2026-01-01T00:07:00Z',
+                                      cadence_seconds=60, cutoffs=cutoffs))]
+    result = report(rows, [], truth=truth)['models']['slope']['healthy_exposure']
+    assert result['coverage_complete'] is True and result['scored_service_hours'] == 2 / 60
+    cutoffs['2026-01-01T00:06:00Z'] = None
+    result = report(rows, [], truth=truth)['models']['slope']['healthy_exposure']
+    assert result['coverage_complete'] is False and result['scored_service_hours'] == 1 / 60
+    cutoffs['2026-01-01T00:06:00Z'] = '2026-01-01T00:07:00Z'
+    with pytest.raises(ValueError, match='invalid recorded source cutoff'):
+        report(rows, [], truth=truth)
+
+
 @pytest.mark.parametrize('label', [0, 1, None])
 def test_class_na_and_unsupported_ci(label):
     rows, events = fixture((60,))

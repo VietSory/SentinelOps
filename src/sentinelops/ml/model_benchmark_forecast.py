@@ -9,6 +9,36 @@ from sentinelops.ml.alibaba_local_evaluation import latency_event_intervals, lat
 MODELS = ('slope', 'xgboost', 'ltfp_self_only', 'ltfp_graph')
 
 
+def schedule_cutoffs(schedule):
+    """Return the exact per-minute cutoff, including unavailable source clocks."""
+    start, stop = (utc_time(schedule[key]) for key in ('start', 'stop'))
+    seconds = (stop - start).total_seconds()
+    if (start.second or start.microsecond or stop.second or stop.microsecond
+            or seconds <= 0 or seconds % 60 or type(schedule['cadence_seconds']) is not int
+            or schedule['cadence_seconds'] != 60):
+        raise ValueError('invalid minute score schedule')
+    anchors = [start + timedelta(minutes=index) for index in range(int(seconds // 60))]
+    if 'cutoffs' in schedule:
+        if 'cutoff_delay_seconds' in schedule or not isinstance(schedule['cutoffs'], dict):
+            raise ValueError('score schedule requires one cutoff policy')
+        parsed = {}
+        for key, value in schedule['cutoffs'].items():
+            if not isinstance(key, str) or (value is not None and not isinstance(value, str)):
+                raise ValueError('invalid recorded source cutoff')
+            anchor = utc_time(key)
+            cutoff = utc_time(value) if value is not None else None
+            if anchor in parsed or (cutoff is not None and not anchor <= cutoff < anchor + timedelta(minutes=1)):
+                raise ValueError('invalid recorded source cutoff')
+            parsed[anchor] = cutoff
+        if set(parsed) != set(anchors):
+            raise ValueError('recorded source cutoffs do not cover the score schedule')
+        return parsed
+    delay = schedule.get('cutoff_delay_seconds')
+    if type(delay) not in (int, float) or not math.isfinite(delay) or not 0 <= delay < 60:
+        raise ValueError('invalid fixed score cutoff')
+    return {anchor: anchor + timedelta(seconds=delay) for anchor in anchors}
+
+
 def thresholds_from_freeze(root, candidates_sha256):
     """Derive episode rules from the verified candidates and protocol freezes."""
     import json
@@ -44,11 +74,7 @@ def project_latency_truth(store, case, service, schedule):
         raise ValueError('forecast truth certificate differs from the admitted run')
     oracle = certificate['oracle']
     start, stop = (utc_time(schedule[key]) for key in ('start', 'stop'))
-    delay = schedule['cutoff_delay_seconds']
-    if (any(point.second or point.microsecond for point in (start, stop)) or stop <= start
-            or schedule['cadence_seconds'] != 60 or type(delay) not in (int, float)
-            or not math.isfinite(delay) or not 0 <= delay < 60):
-        raise ValueError('forecast truth requires a fixed minute schedule')
+    schedule_cutoffs(schedule)
     start_minute, stop_minute = (int(point.timestamp()) for point in (start, stop))
     buckets = oracle['services'][service]['buckets']
     if any(type(row['p95_latency_ms']) not in (int, float)

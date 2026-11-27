@@ -16,6 +16,51 @@ from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.store import ArtifactStore
 
 
+def load_frozen_models(root, *, candidates_sha256):
+    """Validate the four Lane A estimators before accessing sealed outcomes."""
+    from sentinelops.ml.ltfp_model import load as load_ltfp
+    from sentinelops.ml.models import load_bundle
+    from xgboost import XGBClassifier
+
+    root = Path(root).resolve()
+    verify_candidate_freeze(root, candidates_sha256)
+    candidate = json.loads(_ref(root, {'path': 'freeze/candidates.json', 'sha256': candidates_sha256}))
+    lane = candidate['lanes']['a']
+    fit = json.loads(_ref(root, {'path': 'preflight/development-k16-fit-v5/receipt.json',
+                                 'sha256': lane['fit_sha256']}))
+    bundle = root / 'data/bundle-20261113'
+    manifest, _, risk = load_bundle(bundle, expected_manifest_sha256=candidate['baseline_bundle']['manifest_sha256'])
+    config = manifest['provenance']['config']
+    if (risk is None or manifest['model_version'] != candidate['baseline_bundle']['model_version']
+            or stable_id(config) != manifest['provenance']['config_sha256']
+            or config['features'] != manifest['ordered_features']):
+        raise ValueError('frozen baseline bundle or feature config differs')
+    models = {}
+    for name, key, self_only in (('ltfp_graph', 'graph', False), ('ltfp_self_only', 'self_only', True)):
+        entry = fit['models'][key]
+        identity, pin = entry['identity'], lane['ltfp_metadata_sha256'][key]
+        directory = root / 'preflight/development-k16-fit-v5' / key
+        if (entry['metadata_sha256'] != pin or identity.get('weights_status') != 'development-fitted'
+                or identity.get('self_only') is not self_only or identity.get('config_sha256') != stable_id(config)):
+            raise ValueError('frozen LTFP identity differs from its fitted receipt')
+        load_ltfp(directory, metadata_sha256=pin, expected_identity=identity)
+        models[name] = {'directory': directory, 'metadata_sha256': pin, 'identity': identity, 'fitted_verified': True}
+    xgb_dir = root / 'preflight/development-k16-xgboost-v5'
+    xgb_bytes = (xgb_dir / 'manifest.json').read_bytes()
+    xgb = json.loads(xgb_bytes)
+    _ref(root, {'path': 'preflight/development-k16-xgboost-v5/risk.json', 'sha256': lane['xgboost_sha256']})
+    if (xgb.get('scope') != 'development-train-only' or xgb.get('activation_allowed') is not False
+            or xgb.get('model_sha256') != lane['xgboost_sha256']
+            or xgb.get('paired_fit_input_sha256') != fit['input_sha256']
+            or xgb.get('config_sha256') != stable_id(config)):
+        raise ValueError('frozen XGBoost refit differs from the paired training input')
+    model = XGBClassifier()
+    model.load_model(xgb_dir / 'risk.json')
+    return {'bundle': bundle, 'manifest_sha256': candidate['baseline_bundle']['manifest_sha256'],
+            'config': config, 'models': models, 'xgboost_refit': {'directory': xgb_dir,
+                'manifest_sha256': hashlib.sha256(xgb_bytes).hexdigest(), 'fit_input_sha256': fit['input_sha256']}}
+
+
 def source_topology(run, *, project, capture_commit):
     """Use the capture revision's declared service graph, not post-run observations."""
     if (not isinstance(capture_commit, str) or not re.fullmatch('[0-9a-f]{40}', capture_commit)
@@ -86,6 +131,9 @@ def load_sealed_inputs(root, *, candidates_sha256, registration_sha256, seal_sha
                                                      'sha256': pin['receipt_sha256']}))
     inventory = verify_capture_inventory(matrix, receipts, matrix_sha256=registration['matrix_sha256'],
                                          candidates_sha256=candidates_sha256)
+    models = load_frozen_models(root, candidates_sha256=candidates_sha256)
+    from sentinelops.ml.model_benchmark_forecast import thresholds_from_freeze
+    thresholds = thresholds_from_freeze(root, candidates_sha256)
     slots = {slot['slot_id']: slot for group in groups for slot in group['slots']}
     paths = {row['slot_id']: root / 'capture/groups' / group_id / 'slots' / row['slot_id'] /
              'runs' / row['run_id'] / 'run.json' for group_id, rows in inventory.items() for row in rows}
@@ -106,4 +154,4 @@ def load_sealed_inputs(root, *, candidates_sha256, registration_sha256, seal_sha
     return {'schema_version': 'benchmark-forecast-inputs/sealed-v1', 'candidates_sha256': candidates_sha256,
             'registration_sha256': registration_sha256, 'seal_sha256': seal_sha256,
             'capture_commit': registration['capture_commit'], 'matrix_sha256': registration['matrix_sha256'],
-            'cases': cases}
+            'models': models, 'thresholds': thresholds, 'cases': cases}
