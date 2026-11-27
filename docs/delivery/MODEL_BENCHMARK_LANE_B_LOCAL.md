@@ -2,7 +2,9 @@
 
 Worktree `/tmp/sentinelops-model-benchmark-b`, nhánh `feat/model-benchmark-b`, nền `f5615ae`. Đặc tả đối chiếu là [runbook tại 5f9067c](https://github.com/VietSory/SentinelOps/blob/5f9067cac29f05f975a8dddbdc610ea1d8e819d2/docs/delivery/MODEL_BENCHMARK_RUNBOOK.md). B phát triển detector ADSketch frozen, Isolation Forest và Median/MAD ngoài đường inference phục vụ. Quyết định release hiện tại là **KEEP** đối với baseline `de38fc6b`. Hiệu quả của ứng viên mới còn **INCONCLUSIVE**.
 
-Cập nhật development: B01–B06 đã được kiểm tra lại trên source `09b3bef`; B02 và B06 có support từ Alibaba proxy thật. Trong 2.039 anchor calibration, có 65 known và 6 novel mang nhãn proxy dương, cùng 72 anchor thiếu score. Protocol và candidates chung đã freeze; chưa mở holdout, chưa có kết quả detector trên holdout. [Evidence và hash](../reports/evidence/model-benchmark-freeze-development.json). Bảng dưới ghi trạng thái bàn giao lịch sử trước cập nhật này.
+Cập nhật development: B01–B06 đã được kiểm tra lại trên source `09b3bef`; B02 và B06 có support từ Alibaba proxy thật. Trong 2.039 anchor calibration, có 65 known và 6 novel mang nhãn proxy dương, cùng 72 anchor thiếu score. Protocol và candidates chung đã freeze. [Evidence và hash](../reports/evidence/model-benchmark-freeze-development.json). Bảng dưới ghi trạng thái bàn giao lịch sử trước cập nhật này.
+
+Cập nhật ngày 27-11-2026: A đã đăng ký ma trận chung 35 slot và bắt đầu thu nhóm `bench-final-01` trên capture revision `45294cc`. Slot đầu tiên đang warmup; chưa có group receipt hoặc kết quả detector holdout. B dùng cùng group, run, raw refs và oracle đã xác minh của A sau khi capture được seal; không thu lại dữ liệu riêng.
 
 | Chặng | Bằng chứng cần bàn giao | Tình trạng |
 | --- | --- | --- |
