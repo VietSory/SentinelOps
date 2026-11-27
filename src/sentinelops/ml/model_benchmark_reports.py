@@ -60,8 +60,16 @@ def primary_event_coverage(cases):
             'incomplete_event_ids': sorted(incomplete)}
 
 
+# v17: recall at lead >= 60 s may be at most this much below XGBoost (95% CI lower bound).
+NON_INFERIORITY_MARGIN = .05
+
+
 def lane_a_recommendation(gradual, healthy, q07, rules):
-    """Apply the frozen primary comparison without authorizing a release."""
+    """Apply the frozen primary comparison without authorizing a release.
+
+    REPLACE needs a recall lower bound >= -NON_INFERIORITY_MARGIN, no higher false-warning
+    cost, and one measured advantage: a lower bound above 0, or strictly lower warning cost.
+    """
     result = {'benchmark': 'INCONCLUSIVE', 'release': 'KEEP', 'runtime_parity': 'NOT_RUN',
               'reason': None, 'activation_allowed': False}
     if q07['status'] == 'FAIL':
@@ -75,8 +83,8 @@ def lane_a_recommendation(gradual, healthy, q07, rules):
         return {**result, 'reason': 'primary-event-score-coverage-incomplete'}
     interval = gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']
     lower = interval['lower']
-    if lower is None or lower <= 0:
-        return {**result, 'reason': 'recall-improvement-not-established'}
+    if lower is None or lower < -NON_INFERIORITY_MARGIN:
+        return {**result, 'reason': 'recall-non-inferiority-not-established'}
     no_breach = gradual['run_no_breach']
     graph, baseline = (no_breach[name] for name in ('ltfp_graph', 'xgboost'))
     graph_exposure, baseline_exposure = (healthy['models'][name]['healthy_exposure']
@@ -89,7 +97,12 @@ def lane_a_recommendation(gradual, healthy, q07, rules):
     if (graph['warned_runs'] > baseline['warned_runs']
             or graph_exposure['per_service_hour'] > baseline_exposure['per_service_hour']):
         return {**result, 'benchmark': 'KEEP', 'reason': 'higher-false-warning-cost'}
-    return {**result, 'benchmark': 'REPLACE', 'reason': 'qualified-recall-improved-without-higher-warning-cost'}
+    if lower > 0:
+        return {**result, 'benchmark': 'REPLACE', 'reason': 'qualified-recall-improved-without-higher-warning-cost'}
+    if (graph['warned_runs'] < baseline['warned_runs']
+            or graph_exposure['per_service_hour'] < baseline_exposure['per_service_hour']):
+        return {**result, 'benchmark': 'REPLACE', 'reason': 'recall-non-inferior-with-lower-warning-cost'}
+    return {**result, 'reason': 'non-inferior-without-measured-advantage'}
 
 
 def summarize_sealed_forecasts(scored):
