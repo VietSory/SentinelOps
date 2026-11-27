@@ -39,6 +39,20 @@ PAYMENT = "http://127.0.0.1:8002"
 INVENTORY = "http://127.0.0.1:8003"
 
 
+def _reject_healthy_breach(config, source_profile, slo_by_service):
+    """Retain unexpected holdout outcomes; development health still gates admission."""
+    holdout = source_profile == SOURCE_PROFILE_V2 and config.split == "test"
+    return (config.scenario == "S0" and not holdout
+            and any(value["first_violation_at"] for value in slo_by_service.values()))
+
+
+def _unexpected_workload(config, source_profile, counts, outcomes):
+    if source_profile == SOURCE_PROFILE_V2 and config.split == "test":
+        return any(not code.isascii() or not code.isdigit() or not 100 <= int(code) <= 599 for code in counts)
+    return (any(code not in ("200", "502", "504", "503") for code in counts)
+            or (counts.get("503") and not s1_error_responses(outcomes, config)))
+
+
 @dataclass(frozen=True)
 class ExperimentConfig:
     scenario: str
@@ -453,9 +467,9 @@ async def _execute_locked(config: ExperimentConfig, *, project: Path, output: Pa
         run["parameters"]["workload_outcomes"] = dict(counts)
         if config.scenario=="S5":
             if not s5_expected_responses(outcomes,config.fault_mode):failure=failure or "UnexpectedWorkloadOutcome"
-        elif any(key not in ("200","502","504","503") for key in counts) or (counts.get("503") and not s1_error_responses(outcomes,config)):
+        elif _unexpected_workload(config, source_profile, counts, outcomes):
             failure = failure or "UnexpectedWorkloadOutcome"
-        if config.scenario == "S0" and any(value["first_violation_at"] for value in run["slo_by_service"].values()): failure = failure or "HealthyRunBreachedSLO"
+        if _reject_healthy_breach(config, source_profile, run["slo_by_service"]): failure = failure or "HealthyRunBreachedSLO"
     except Exception as exc:
         failure = failure or type(exc).__name__
         run["parameters"]["evidence_failure_context"] = failure_context(exc,project)
@@ -501,5 +515,8 @@ async def execute(config: ExperimentConfig, *, project: Path, output: Path, sess
         if source_profile == SOURCE_PROFILE_V2 and config.split == "test":
             from sentinelops.ml.model_benchmark_holdout import verify_holdout_execution
             verify_holdout_execution(project, config, session_id, output, holdout_authorization)
+            # Reserve the slot before any workload. A crash or competing checkout
+            # must not be able to start a second run in the same slot.
+            Path(output).mkdir(exist_ok=False)
         return await _execute_locked(config, project=project, output=output, session_id=session_id,
                                      allow_dirty=allow_dirty, source_profile=source_profile, s4_lead_in=s4_lead_in)

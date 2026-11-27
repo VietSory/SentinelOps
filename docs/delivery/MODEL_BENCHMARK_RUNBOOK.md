@@ -305,6 +305,8 @@ A và B có thể chạy `fit`/`calibrate` trên hai máy. B giao nguyên output
 
 Đề xuất **5 nhóm × 7 lượt = 35 lượt**. Giữ warmup 1.980 s, recovery 360 s mỗi lượt. Với overhead dự trù 180 s/lượt như campaign hiện hành, mỗi nhóm khoảng **6 giờ 49 phút**, cả đợt **34 giờ 05 phút**. Đây là dự toán; epoch trước 25 lượt mất gần 23 giờ. Đặt riêng slot hai ngày hoặc năm slot mỗi slot khoảng 7 giờ có dự phòng. Chạy thử recipe thấp trên development trước khi khóa. Nếu holdout thực tế thiếu no-breach, báo thiếu mẫu, giữ nguyên toàn bộ run và không tuyển bù theo score. Seed/ID, host/context, tách volume, giới hạn thay thế do hỏng nguồn phải ghi trước. Cùng máy và cùng nhóm có thể tạo phụ thuộc thống kê.
 
+Preflight hiện nhận `--candidates-sha256`, `--pilot-root` và `--pilot-ordinal`; chạy trên checkout sạch của revision dùng capture. Preflight phát lại pilot, kiểm hai freeze và trả `registration_sha256` trước khi tạo nguồn holdout. Với từng nhóm, `capture --group 01 --registration-sha256 <SHA>` thu theo thứ tự đã đăng ký; `verify-group` nhận cùng hai tham số và phát lại receipt cùng dữ liệu nguồn. Sau năm nhóm, `seal-capture --registration-sha256 <SHA>` kiểm toàn bộ inventory và nguồn trước khi ghi seal. Adapter giữ lại mọi kết quả HTTP và SLO hợp lệ, kể cả breach bất ngờ. Nếu slot gián đoạn, giữ nguyên dữ liệu và điều tra; không tự chạy lại. Score holdout và report cuối vẫn chưa được tích hợp.
+
 ```bash
 bm capture-preflight
 for group in 01 02 03 04 05; do

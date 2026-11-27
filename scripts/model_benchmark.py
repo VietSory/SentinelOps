@@ -46,11 +46,17 @@ def main(argv=None):
         if name in ('fit', 'calibrate', 'score'):
             sub.add_argument('--lane-a-evidence', type=Path,
                              help='Verify existing Alibaba development artifacts against pinned evidence.')
-    for name in ('freeze-protocol', 'verify',
-                 'seal-capture', 'package'):
+    for name in ('freeze-protocol', 'verify', 'package'):
         commands.add_parser(name)
-    commands.add_parser('capture-preflight').add_argument(
-        '--draft-matrix', action='store_true', help='Print the proposed holdout matrix and time budget.')
+    seal = commands.add_parser('seal-capture')
+    seal.add_argument('--registration-sha256')
+    seal.add_argument('--capture-project', type=Path, default=Path(__file__).resolve().parents[1])
+    preflight = commands.add_parser('capture-preflight')
+    preflight.add_argument('--draft-matrix', action='store_true', help='Print the proposed holdout matrix and time budget.')
+    preflight.add_argument('--candidates-sha256')
+    preflight.add_argument('--pilot-root', type=Path)
+    preflight.add_argument('--pilot-ordinal', type=int)
+    preflight.add_argument('--capture-project', type=Path, default=Path(__file__).resolve().parents[1])
     candidates = commands.add_parser('freeze-candidates')
     candidates.add_argument('--lane-a-evidence', type=Path)
     candidates.add_argument('--lane-b-fit-sha256')
@@ -59,7 +65,10 @@ def main(argv=None):
         sub.add_argument('--lane', choices=('b',))
         sub.add_argument('--lane-b-input', type=Path)
     for name in ('capture', 'verify-group'):
-        commands.add_parser(name).add_argument('--group', required=True)
+        sub = commands.add_parser(name)
+        sub.add_argument('--group', required=True)
+        sub.add_argument('--registration-sha256')
+        sub.add_argument('--capture-project', type=Path, default=Path(__file__).resolve().parents[1])
     prepare = commands.add_parser('prepare-detector-local')
     prepare.add_argument('--archive', required=True, type=Path)
     prepare.add_argument('--fit-sha256', required=True)
@@ -79,6 +88,28 @@ def main(argv=None):
             from scripts.draft_benchmark_holdout import draft_matrix
 
             result.update(draft_matrix())
+        elif args.command == 'capture-preflight' and any(
+                value is not None for value in (args.candidates_sha256, args.pilot_root, args.pilot_ordinal)):
+            if not args.candidates_sha256 or args.pilot_root is None or args.pilot_ordinal is None:
+                raise ValueError('capture preflight requires candidates SHA, pilot root and pilot ordinal')
+            from scripts.register_benchmark_capture import run
+
+            result.update(run(args.root, candidates_sha256=args.candidates_sha256, pilot_root=args.pilot_root,
+                              pilot_ordinal=args.pilot_ordinal, capture_project=args.capture_project))
+        elif args.command in ('capture', 'verify-group') and args.registration_sha256:
+            from sentinelops.ml.model_benchmark_holdout_capture import capture_group, verify_group
+
+            group = args.group if args.group.startswith('bench-final-') else 'bench-final-' + args.group
+            action = capture_group if args.command == 'capture' else verify_group
+            receipt = action(args.root, group, args.registration_sha256, project=args.capture_project)
+            result.update(status='ready', group=group, verified_slots=len(receipt['slots']),
+                          registration_sha256=args.registration_sha256)
+        elif args.command == 'seal-capture' and args.registration_sha256:
+            from sentinelops.ml.model_benchmark_holdout_capture import seal_capture
+
+            receipt = seal_capture(args.root, args.registration_sha256, project=args.capture_project)
+            result.update(status='ready', verified_slots=receipt['slot_count'],
+                          registration_sha256=args.registration_sha256, capture_sealed=True)
         elif args.command == 'freeze-candidates':
             if not args.lane_a_evidence or not args.lane_b_fit_sha256:
                 result.update(status='blocked', reasons=[BLOCKED[args.command]])

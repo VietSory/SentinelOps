@@ -78,6 +78,44 @@ def verify_capture_inventory(matrix, receipts, *, matrix_sha256, candidates_sha2
     return inventory
 
 
+def verify_capture_order(root, matrix, group_id, slot_id, *, matrix_sha256, candidates_sha256):
+    """Check earlier metadata without opening serving or outcome artifacts."""
+    root = Path(root)
+    groups = matrix['groups']
+    selected = [index for index, group in enumerate(groups) if group['group_id'] == group_id]
+    if len(selected) != 1:
+        raise ValueError('group is not part of the registered holdout matrix')
+    group = groups[selected[0]]
+    slots = [index for index, slot in enumerate(group['slots']) if slot['slot_id'] == slot_id]
+    if len(slots) != 1:
+        raise ValueError('slot is not part of the registered holdout group')
+    used_runs = set()
+    for earlier in groups[:selected[0]]:
+        path = root / 'capture/groups' / earlier['group_id'] / 'receipt.json'
+        if not path.is_file():
+            raise ValueError('earlier holdout group is not complete')
+        rows = verify_capture_group(earlier, json.loads(path.read_bytes()), matrix_sha256=matrix_sha256,
+                                    candidates_sha256=candidates_sha256, source_profile=matrix['source_profile'])
+        runs = {row['run_id'] for row in rows}
+        if runs & used_runs:
+            raise ValueError('earlier holdout groups reuse a run')
+        used_runs.update(runs)
+    for earlier in group['slots'][:slots[0]]:
+        path = root / 'capture/groups' / group_id / 'slots' / earlier['slot_id'] / 'receipt.json'
+        if not path.is_file():
+            raise ValueError('earlier holdout slot is not complete')
+        receipt = json.loads(path.read_bytes())
+        envelope = {'schema_version': 'benchmark-holdout-group/v1', 'role': 'sealed-final',
+                    'group_id': group_id, 'matrix_sha256': matrix_sha256, 'candidates_sha256': candidates_sha256,
+                    'source_profile': matrix['source_profile'], 'clock': 'arrival-aware', 'slots': [receipt]}
+        rows = verify_capture_group({'group_id': group_id, 'slots': [earlier]}, envelope,
+                                    matrix_sha256=matrix_sha256, candidates_sha256=candidates_sha256,
+                                    source_profile=matrix['source_profile'])
+        if rows[0]['run_id'] in used_runs:
+            raise ValueError('earlier holdout slots reuse a run')
+        used_runs.add(rows[0]['run_id'])
+
+
 def verify_capture_source(run_path, receipt, slot, *, group_id, source_profile, source_commit, certificate_store,
                           registered_at=None):
     """Rebuild one inventoried slot's serving and truth artifacts from archived inputs."""
@@ -219,6 +257,9 @@ def verify_holdout_execution(project, config, session_id, output, authorization)
     slots = [slot for slot in groups[0]['slots'] if slot['slot_id'] == authorization['slot_id']]
     if len(slots) != 1 or stable_id(slots[0]['recipe']) != stable_id(asdict(config)):
         raise ValueError('holdout slot recipe differs from its registered matrix')
+    verify_capture_order(root, matrix, session_id, authorization['slot_id'],
+                         matrix_sha256=authorization['matrix_sha256'],
+                         candidates_sha256=authorization['candidates_sha256'])
     group_path = f'capture/groups/{session_id}/registration.json'
     slot_path = f'capture/groups/{session_id}/slots/{authorization["slot_id"]}/registration.json'
     group = json.loads(_ref(root, {'path': group_path, 'sha256': authorization['group_registration_sha256']}))
@@ -242,8 +283,14 @@ def verify_holdout_execution(project, config, session_id, output, authorization)
     target = (root / 'capture/groups' / session_id / 'slots' / authorization['slot_id'] / 'runs').resolve()
     if not target.is_relative_to(root) or Path(output).resolve() != target:
         raise ValueError('holdout output escapes its registered slot')
+    if target.exists():
+        raise ValueError('holdout slot already has capture output; no automatic restart')
     if context_snapshot(project, group['compose_project']) != group['context']:
         raise ValueError('holdout source context changed after registration')
+    from sentinelops.ml.model_benchmark_capture_context import ensure_previous_contexts_stopped, inspect_group_continuity
+    pilot = json.loads(_ref(root, registration['pilot_receipt']))
+    ensure_previous_contexts_stopped(matrix, session_id, pilot['group_id'])
+    inspect_group_continuity(group)
     return {'capture_commit': commit, 'registered_at': slot['registered_at'], 'slot_id': slot['slot_id']}
 
 
@@ -262,10 +309,14 @@ def verify_frozen_capture_sources(root, matrix, receipts, run_paths, *, matrix_s
              for group in matrix['groups'] for slot in group['slots']}
     if set(run_paths) != set(slots):
         raise ValueError('holdout source paths do not cover the registered slots')
+    from sentinelops.ml.model_benchmark_capture_context import verify_slot_context
     verified = []
     for group_id, rows in inventory.items():
         for receipt in rows:
             _, slot = slots[receipt['slot_id']]
+            verify_slot_context(root, group_id, slot, receipt['run_id'], registration_sha256,
+                                capture_commit=capture_commit, run_path=run_paths[receipt['slot_id']],
+                                source_profile=matrix['source_profile'], registered_at=registration['registered_at'])
             verified.append(verify_capture_source(
                 run_paths[receipt['slot_id']], receipt, slot, group_id=group_id,
                 source_profile=matrix['source_profile'], source_commit=capture_commit,

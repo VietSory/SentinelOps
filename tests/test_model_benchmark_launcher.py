@@ -88,6 +88,29 @@ def test_holdout_matrix_is_deterministic_and_cannot_start_capture(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_capture_commands_require_registration_and_dispatch_group(tmp_path, monkeypatch, capsys):
+    from scripts import model_benchmark
+    from sentinelops.ml import model_benchmark_holdout_capture as capture
+
+    calls = []
+    def action(root, group, pin, *, project):
+        calls.append((root, group, pin, project))
+        return {'slots': [{}] * 7}
+    monkeypatch.setattr(capture, 'capture_group', action)
+    monkeypatch.setattr(capture, 'verify_group', action)
+    common = ['--root', str(tmp_path), '--protocol', str(tmp_path / 'unused.json')]
+    for command in ('capture', 'verify-group'):
+        assert model_benchmark.main(common + [command, '--group', '01', '--registration-sha256', 'a' * 64]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result['status'] == 'ready' and result['verified_slots'] == 7
+        assert result['group'] == 'bench-final-01'
+    assert len(calls) == 2 and all(call[2] == 'a' * 64 for call in calls)
+    monkeypatch.setattr(capture, 'seal_capture', lambda *args, **kwargs: {'slot_count': 35})
+    assert model_benchmark.main(common + ['seal-capture', '--registration-sha256', 'a' * 64]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['capture_sealed'] is True and result['verified_slots'] == 35
+
+
 def test_actual_protocol_api_invalid_and_verify_missing(tmp_path):
     # Until integration, resolve the real W2 module without copying its source.
     protocol_module = PROJECT / 'src/sentinelops/ml/model_benchmark_protocol.py'

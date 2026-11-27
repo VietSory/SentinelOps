@@ -122,6 +122,7 @@ def test_holdout_source_rebuilds_request_oracle_and_detects_tampering(tmp_path, 
 
 def test_source_verification_waits_for_both_freezes_and_all_metadata(tmp_path, monkeypatch):
     import sentinelops.ml.model_benchmark_holdout as holdout
+    import sentinelops.ml.model_benchmark_capture_context as capture_context
 
     draft = draft_matrix()
     matrix = draft['matrix']
@@ -143,8 +144,10 @@ def test_source_verification_waits_for_both_freezes_and_all_metadata(tmp_path, m
             group_id=group['group_id'], matrix_sha256=draft['matrix_sha256'], candidates_sha256=pin,
             source_profile=matrix['source_profile'], clock='arrival-aware', slots=rows)
     touched = []
+    contexts = []
     monkeypatch.setattr(holdout, 'verify_protocol', lambda root: {'status': 'ready', 'protocol_sha256': 'a' * 64})
     monkeypatch.setattr(holdout, 'verify_capture_source', lambda *args, **kwargs: touched.append(args[1]['run_id']))
+    monkeypatch.setattr(capture_context, 'verify_slot_context', lambda *args, **kwargs: contexts.append(args[3]))
     kwargs = dict(matrix_sha256=draft['matrix_sha256'], candidates_sha256=pin,
                   capture_commit='f' * 40, registration_sha256='d' * 64, certificate_store=None)
     with pytest.raises(ValueError, match='candidate freeze required'):
@@ -216,4 +219,4 @@ def test_source_verification_waits_for_both_freezes_and_all_metadata(tmp_path, m
         verify_frozen_capture_sources(tmp_path, matrix, bad, run_paths, **kwargs)
     assert not touched
     verify_frozen_capture_sources(tmp_path, matrix, receipts, run_paths, **kwargs)
-    assert len(touched) == 35 and len(set(touched)) == 35
+    assert len(touched) == 35 and len(set(touched)) == 35 and contexts == touched
