@@ -2,6 +2,13 @@
 
 > Cập nhật 27-11-2026: tiêu chí non-inferiority và việc cần làm trước freeze v17 nằm trong [kế hoạch v17](MODEL_BENCHMARK_V17_PLAN.md).
 
+> Cập nhật 28-11-2026: Lane A v17 đã freeze riêng (protocol `70ac0da3…`, candidates `72edc9d5…`). Capture holdout đã hỏng hai lần và chưa có kết quả holdout:
+>
+> - Registration `5a2d7629…`: máy vào sleep lúc khoảng 18:00 ngày 27-11 khi slot đầu đang warmup.
+> - Registration `f5511cfb…` (commit `374da5b`): group 01 hoàn tất 7/7 slot và qua `verify-group`. Slot `payment-abrupt` của group 02 dừng với `ClientClockDiscontinuity`: một request có thời điểm kết thúc sớm hơn bắt đầu 1,4 s.
+>
+> Nguyên nhân: WSL dùng clocksource `tsc` bị trôi, Hyper-V chỉnh đồng hồ khoảng 32 s một lần, mỗi lần 0,5–2,1 s. Cần chuyển sang `hyperv_clocksource_tsc_page` và kiểm đồng hồ trước khi đăng ký lại. Dữ liệu các lần hỏng giữ trong `artifacts/lane-a-v17/attempts/` và không dùng để chấm.
+
 Lane A đang ở chặng D2-A. Snapshot Alibaba và audit graph đã được khôi phục từ bundle bàn giao cùng nguồn Alibaba. Kết quả cohort dưới đây là phân tích development, chưa phải kết quả holdout hoặc quyết định release.
 
 ## Dữ liệu và preflight
