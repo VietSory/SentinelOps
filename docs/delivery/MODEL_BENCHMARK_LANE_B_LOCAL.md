@@ -1,5 +1,7 @@
 # Lane B benchmark và nghiệm thu local
 
+> Cập nhật 27-11-2026: tiêu chí non-inferiority và việc cần làm trước freeze v17 nằm trong [kế hoạch v17](MODEL_BENCHMARK_V17_PLAN.md).
+
 Worktree `/tmp/sentinelops-model-benchmark-b`, nhánh `feat/model-benchmark-b`, nền `f5615ae`. Đặc tả đối chiếu là [runbook tại 5f9067c](https://github.com/VietSory/SentinelOps/blob/5f9067cac29f05f975a8dddbdc610ea1d8e819d2/docs/delivery/MODEL_BENCHMARK_RUNBOOK.md). B phát triển detector ADSketch frozen, Isolation Forest và Median/MAD ngoài đường inference phục vụ. Quyết định release hiện tại là **KEEP** đối với baseline `de38fc6b`. Hiệu quả của ứng viên mới còn **INCONCLUSIVE**.
 
 Cập nhật development: B01–B06 đã được kiểm tra lại trên source `09b3bef`; B02 và B06 có support từ Alibaba proxy thật. Trong 2.039 anchor calibration, có 65 known và 6 novel mang nhãn proxy dương, cùng 72 anchor thiếu score. Protocol và candidates chung đã freeze. [Evidence và hash](../reports/evidence/model-benchmark-freeze-development.json). Bảng dưới ghi trạng thái bàn giao lịch sử trước cập nhật này.
