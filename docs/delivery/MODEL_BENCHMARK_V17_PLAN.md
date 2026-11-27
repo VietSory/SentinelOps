@@ -117,7 +117,8 @@ B-1 đến B-4 cần xong trước freeze v17. B-5 đến B-8 cần xong trướ
 | --- | --- | --- |
 | 1 | Event F1 trên Alibaba chưa có định nghĩa | Thuộc Lane B. B chốt định nghĩa event và luật match trước khi freeze Lane B. |
 | 2 | Gate trong code vẫn đòi cận dưới CI > 0 | Đã sửa `lane_a_recommendation`. `REPLACE` khi cận dưới CI Δ recall ≥ −0,05, chi phí cảnh báo sai không tăng, và có một ưu điểm đo được: cận dưới > 0, hoặc số lượt không breach bị cảnh báo, hoặc false warning trên giờ-service khỏe thấp hơn hẳn. Không kém nhưng không có ưu điểm thì ghi `INCONCLUSIVE`. Runbook đã cập nhật. |
-| 3, 4 | Ứng viên và ưu điểm của Lane B | Owner và B chốt. Các số liệu liên quan nằm ở mục 1. |
+| 3 | Ứng viên Lane B | Owner chốt ngày 27-11: ứng viên chính **ADSketch + MAD**. Cảnh báo khi một trong hai vượt ngưỡng; hai ngưỡng hiệu chuẩn chung để tổng flag trên negative ≤1% ở calibration; lưới chọn ngưỡng có trường hợp chỉ MAD. Bảng khai báo trước bốn hàng IF, MAD, ADSketch, ADSketch + MAD và báo riêng phần ADSketch đóng góp thêm so với MAD, kể cả khi bằng 0. Development: chỉ MAD recall 0,464; ADSketch bắt thêm 2 positive ngoài MAD. B triển khai. |
+| 4 | Ưu điểm khai báo của Lane B | B thay bằng một chỉ số đo được có ngưỡng khai báo trước, hoặc bỏ. |
 | 5 | Split evaluation có sẵn | Đúng: `split_of()` gán bucket 8–9. Split này **đã được dùng** để báo cáo baseline cũ `de38fc6b` (layer 1, XGB so với slope) và IF/MAD trong kế hoạch. Chưa ai chấm ứng viên v17 (LTFP, ADSketch) trên split này. Support ở phút 324–352, K=16: 55.901 window có nhãn, 96 positive trên 21 service, 621 window có hàng xóm, 0 positive có hàng xóm. Tác dụng graph trên Alibaba khai NA. Bootstrap theo service chỉ có 21 service dương. |
 | 6a | Early stopping có dùng phút 324–352 không | Không. `fit_weighted_pair` chọn epoch trên 20% service của tập train (hash tên service), cửa sổ train 162–172. Calibration không được đọc khi fit. |
 | 6b | Positive có hàng xóm ở evaluation | 0. Xem mục 5. |
