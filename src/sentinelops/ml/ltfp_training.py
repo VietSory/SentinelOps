@@ -10,12 +10,19 @@ import time
 
 import torch
 
-from sentinelops.ml.ltfp_model import Forecast, export, load, metadata, predict
+from sentinelops.ml.ltfp_model import Forecast, SeedMean, export, load, metadata, predict
 from sentinelops.telemetry.core import stable_id
 
 SETTINGS = dict(seed=42, optimizer='Adam', learning_rate=.001, batch_size=32,
                 steps=100, early_stopping=False, trials=1, dtype='float32',
                 sampling='seeded-record-hash-v1')
+
+
+# Class-weighted fit: imbalance handled like the paired XGBoost refit (scale_pos_weight).
+WEIGHTED_SETTINGS = dict(seeds=[42, 7, 13], optimizer='Adam', learning_rate=.001, batch_size=32,
+                         epochs=30, loss='bce-pos-weight-negative-over-positive',
+                         selection='max-ap-on-train-service-hash-byte0-lt-51', dtype='float32',
+                         ordering='seed42-record-hash-then-seeded-permutation-v1', combine='mean-probability')
 
 
 def _training_order(samples):
@@ -149,6 +156,178 @@ def fit_pair(samples, *, admission, expected_admission_sha256, output):
                 digest = export(model, identity, path / name)
                 result['models'][name] = dict(identity=identity, metadata_sha256=digest,
                     steps=len(losses), losses=losses, elapsed_seconds=time.perf_counter()-started)
+        (path / 'receipt.json').write_text(json.dumps(result, sort_keys=True, allow_nan=False))
+        if destination.exists():
+            raise FileExistsError(f'fit destination already exists: {destination}')
+        path.rename(destination)
+    finally:
+        torch.set_num_threads(previous_threads)
+        shutil.rmtree(path, ignore_errors=True)
+    return result
+
+
+def _selected_target(sample):
+    targets = [node for node in sample['graph']['node_ids'] if sample['loss_mask'][node]]
+    if len(targets) != 1:
+        raise ValueError('weighted fit requires exactly one loss target per sample')
+    return targets[0]
+
+
+def _in_selection(sample):
+    return hashlib.sha256(_selected_target(sample).encode()).digest()[0] < 51
+
+
+def _average_precision(labels, scores):
+    from sklearn.metrics import average_precision_score
+    return float(average_precision_score(labels, scores))
+
+
+def _fit_member(fit, select, self_only, seed, positive_weight):
+    """One seeded member; returns the epoch with the best train-internal AP."""
+    import numpy as np
+    order = _training_order(fit)
+    torch.manual_seed(seed)
+    model = Forecast()
+    optimizer = torch.optim.Adam(model.parameters(), lr=WEIGHTED_SETTINGS['learning_rate'])
+    best, best_state, history = -1., None, []
+    batch = WEIGHTED_SETTINGS['batch_size']
+    for epoch in range(WEIGHTED_SETTINGS['epochs']):
+        model.train()
+        indices = (np.arange(len(order)) if epoch == 0
+                   else np.random.default_rng(seed * 1000 + epoch).permutation(len(order)))
+        losses = []
+        for start in range(0, len(indices), batch):
+            optimizer.zero_grad()
+            total, count = 0, 0
+            for position in indices[start:start + batch]:
+                sample = order[position]
+                graph = sample['graph']
+                index = graph['node_ids'].index(_selected_target(sample))
+                logit = model(*_tensors(graph, self_only))[index:index + 1]
+                label = torch.tensor([float(sample['labels'][graph['node_ids'][index]])])
+                total = total + torch.nn.functional.binary_cross_entropy_with_logits(
+                    logit, label, pos_weight=positive_weight, reduction='sum')
+                count += 1
+            loss = total / count
+            if not torch.isfinite(loss):
+                raise ValueError('nonfinite training loss')
+            loss.backward()
+            optimizer.step()
+            losses.append(float(loss.detach()))
+        model.eval()
+        with torch.no_grad():
+            scores = [float(torch.sigmoid(model(*_tensors(sample['graph'], self_only)))[
+                sample['graph']['node_ids'].index(_selected_target(sample))]) for sample in select]
+        metric = _average_precision([sample['labels'][_selected_target(sample)] for sample in select], scores)
+        history.append({'epoch': epoch, 'mean_loss': sum(losses) / len(losses), 'selection_ap': metric})
+        if metric > best:
+            best, best_state = metric, {key: value.clone() for key, value in model.state_dict().items()}
+    return best_state, history
+
+
+def fit_weighted_pair(samples, *, admission, expected_admission_sha256, output):
+    """Class-weighted paired fit with train-internal model selection and a seed mean.
+
+    The same validation as fit_pair applies. Selection uses only train services
+    (sha256 of the target name, first byte below 51); calibration is never read.
+    """
+    fields = {'protocol_sha256', 'source_identity', 'config_sha256', 'graph_sha256',
+              'train_split', 'calibration_split', 'role'}
+    if (set(admission) != fields or admission['role'] != 'train'
+        or any(not admission[key] for key in fields)
+        or stable_id(admission) != expected_admission_sha256
+        or admission['train_split'] == admission['calibration_split']):
+        raise ValueError('invalid pinned train admission')
+    ordered = sorted(deepcopy(samples), key=lambda sample: sample['record_id'])
+    if not ordered or len({sample['record_id'] for sample in ordered}) != len(ordered):
+        raise ValueError('unique train records required')
+    seeds = WEIGHTED_SETTINGS['seeds']
+    identities = {name: metadata(config_sha256=admission['config_sha256'],
+        graph_sha256=admission['graph_sha256'], self_only=variant, seed=seeds[0],
+        train_split=admission['train_split'], calibration_split=admission['calibration_split'],
+        weights_status='development-fitted', member_seeds=seeds)
+        for name, variant in (('graph', False), ('self_only', True))}
+    with torch.random.fork_rng():
+        torch.manual_seed(42)
+        validator = Forecast()
+    plain = metadata(config_sha256=admission['config_sha256'], graph_sha256=admission['graph_sha256'],
+        self_only=False, seed=42, train_split=admission['train_split'],
+        calibration_split=admission['calibration_split'], weights_status='development-fitted')
+    for sample in ordered:
+        if set(sample) != {'record_id', 'graph', 'graph_sha256', 'labels', 'loss_mask'} or not isinstance(sample['record_id'], str) or not sample['record_id']:
+            raise ValueError('invalid train sample')
+        graph = sample['graph']
+        if (stable_id(graph) != sample['graph_sha256'] or graph['source_identity'] != admission['source_identity']
+            or graph['self_only'] is not False):
+            raise ValueError('unadmitted source/graph')
+        predict(validator, plain, graph, expected_graph_sha256=graph['graph_sha256'])
+        nodes = graph['node_ids']
+        if set(sample['labels']) != set(nodes) or set(sample['loss_mask']) != set(nodes):
+            raise ValueError('labels/masks must align by node ID')
+        for index, node in enumerate(nodes):
+            label, selected = sample['labels'][node], sample['loss_mask'][node]
+            if (type(selected) is not bool or (label is not None and (type(label) is not int or label not in (0, 1)))
+                or selected and label is None):
+                raise ValueError('UNKNOWN or invalid label in loss')
+            if selected and not graph['target_available'][index]:
+                raise ValueError('missing loss target')
+        _selected_target(sample)
+    select = [sample for sample in ordered if _in_selection(sample)]
+    chosen = {sample['record_id'] for sample in select}
+    fit = [sample for sample in ordered if sample['record_id'] not in chosen]
+    for part in (fit, select):
+        labels = [sample['labels'][_selected_target(sample)] for sample in part]
+        if not part or not any(labels) or all(labels):
+            raise ValueError('fit and selection parts each need both classes')
+    positives = sum(sample['labels'][_selected_target(sample)] for sample in fit)
+    positive_weight = torch.tensor((len(fit) - positives) / positives)
+    pin = stable_id({'admission': admission, 'samples': ordered, 'settings': WEIGHTED_SETTINGS})
+    destination = Path(output)
+    if destination.exists():
+        receipt = json.loads((destination / 'receipt.json').read_bytes())
+        if (receipt['settings'] != WEIGHTED_SETTINGS or receipt['input_sha256'] != pin
+            or receipt['admission_sha256'] != expected_admission_sha256
+            or receipt['schema_version'] != 'ltfp-paired-fit/development-v2'
+            or set(receipt['models']) != set(identities)):
+            raise ValueError('completed fit identity mismatch')
+        for name, identity in identities.items():
+            entry = receipt['models'][name]
+            if entry['identity'] != identity or len(entry['members']) != len(seeds):
+                raise ValueError('completed model identity mismatch')
+            load(destination / name, metadata_sha256=entry['metadata_sha256'], expected_identity=identity)
+        return receipt
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    path = Path(tempfile.mkdtemp(prefix=f'.{destination.name}.', dir=destination.parent))
+    result = dict(schema_version='ltfp-paired-fit/development-v2', input_sha256=pin,
+                  admission_sha256=expected_admission_sha256, settings=deepcopy(WEIGHTED_SETTINGS), models={},
+                  training_records=len(ordered), fit_records=len(fit), selection_records=len(select),
+                  fit_positives=positives, positive_weight=float(positive_weight))
+    previous_threads = torch.get_num_threads()
+    try:
+        torch.set_num_threads(1)
+        for name, identity in identities.items():
+            started = time.perf_counter()
+            ensemble = SeedMean(len(seeds))
+            members = []
+            with torch.random.fork_rng():
+                for member, seed in zip(ensemble.members, seeds):
+                    state, history = _fit_member(fit, select, identity['self_only'], seed, positive_weight)
+                    member.load_state_dict(state)
+                    best = max(history, key=lambda item: item['selection_ap'])
+                    if any(not math.isfinite(item['mean_loss']) for item in history):
+                        raise ValueError('nonfinite training loss')
+                    members.append(dict(seed=seed, selected_epoch=best['epoch'],
+                                        selection_ap=best['selection_ap'], history=history))
+            for sample in ordered:
+                graph = deepcopy(sample['graph'])
+                if identity['self_only']:
+                    graph['self_only'] = True
+                    graph['attention_mask'] = _tensors(graph, True)[1].to(torch.int).tolist()
+                    graph['mask_sha256'] = stable_id({'node_ids': graph['node_ids'], 'mask': graph['attention_mask']})
+                predict(ensemble, identity, graph, expected_graph_sha256=graph['graph_sha256'])
+            digest = export(ensemble, identity, path / name)
+            result['models'][name] = dict(identity=identity, metadata_sha256=digest, members=members,
+                                          elapsed_seconds=time.perf_counter() - started)
         (path / 'receipt.json').write_text(json.dumps(result, sort_keys=True, allow_nan=False))
         if destination.exists():
             raise FileExistsError(f'fit destination already exists: {destination}')

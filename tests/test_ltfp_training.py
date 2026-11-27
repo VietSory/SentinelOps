@@ -154,3 +154,61 @@ def test_invalid_admission_or_loss_rejected_before_write(tmp_path, bad):
     pin = 'wrong' if bad == 'pin' else stable_id(admission)
     with pytest.raises(ValueError): fit_pair(samples, admission=admission, expected_admission_sha256=pin, output=tmp_path/'out')
     assert not (tmp_path/'out').exists()
+
+
+def weighted_inputs(count=8):
+    samples, admission = sparse_inputs()
+    base = samples[0]
+    result = []
+    for index in range(count):
+        sample = deepcopy(base)
+        sample['record_id'] = f'r{index}'
+        sample['graph']['values'][0][4] = [.1 * index] * 6
+        sample['graph_sha256'] = stable_id(sample['graph'])
+        sample['labels']['a'] = index % 2
+        result.append(sample)
+    return result, admission
+
+
+def test_weighted_seed_mean_fit_is_deterministic_and_scores_mean_probability(tmp_path, monkeypatch):
+    from sentinelops.ml.ltfp_model import SeedMean, predict
+    monkeypatch.setitem(ltfp_training.WEIGHTED_SETTINGS, 'epochs', 2)
+    monkeypatch.setitem(ltfp_training.WEIGHTED_SETTINGS, 'seeds', [42, 7])
+    monkeypatch.setattr(ltfp_training, '_in_selection', lambda sample: sample['record_id'] in ('r0', 'r1', 'r2', 'r3'))
+    samples, admission = weighted_inputs()
+    pin = stable_id(admission)
+    first = ltfp_training.fit_weighted_pair(samples, admission=admission, expected_admission_sha256=pin, output=tmp_path/'first')
+    second = ltfp_training.fit_weighted_pair(samples, admission=admission, expected_admission_sha256=pin, output=tmp_path/'second')
+    assert first['schema_version'] == 'ltfp-paired-fit/development-v2'
+    assert first['fit_records'] == 4 and first['selection_records'] == 4 and first['positive_weight'] == 1.0
+    assert ltfp_training.fit_weighted_pair(samples, admission=admission, expected_admission_sha256=pin,
+                                           output=tmp_path/'first') == first
+    graph = samples[0]['graph']
+    for name in ('graph', 'self_only'):
+        a, b = first['models'][name], second['models'][name]
+        assert a['identity']['member_seeds'] == [42, 7] and [m['seed'] for m in a['members']] == [42, 7]
+        assert [m['history'] for m in a['members']] == [m['history'] for m in b['members']]
+        model = load(tmp_path/'first'/name, metadata_sha256=a['metadata_sha256'], expected_identity=a['identity'])
+        other = load(tmp_path/'second'/name, metadata_sha256=b['metadata_sha256'], expected_identity=b['identity'])
+        assert isinstance(model, SeedMean)
+        assert all(torch.equal(value, other.state_dict()[key]) for key, value in model.state_dict().items())
+        if name == 'graph':
+            values, mask = _tensors(graph, False)
+            with torch.no_grad():
+                expected = torch.stack([torch.sigmoid(m(values, mask)) for m in model.members]).mean(0)[0]
+            score = predict(model, a['identity'], graph, expected_graph_sha256=graph['graph_sha256'])['a']
+            assert abs(score - float(expected)) < 1e-6
+    changed = deepcopy(samples)
+    changed[0]['labels']['a'] = 1
+    with pytest.raises(ValueError, match='identity mismatch'):
+        ltfp_training.fit_weighted_pair(changed, admission=admission, expected_admission_sha256=pin, output=tmp_path/'first')
+
+
+def test_weighted_fit_requires_both_classes_in_fit_and_selection(tmp_path, monkeypatch):
+    monkeypatch.setitem(ltfp_training.WEIGHTED_SETTINGS, 'epochs', 1)
+    monkeypatch.setattr(ltfp_training, '_in_selection', lambda sample: sample['record_id'] in ('r0', 'r2'))
+    samples, admission = weighted_inputs()
+    with pytest.raises(ValueError, match='both classes'):
+        ltfp_training.fit_weighted_pair(samples, admission=admission, expected_admission_sha256=stable_id(admission),
+                                        output=tmp_path/'out')
+    assert not (tmp_path/'out').exists()
