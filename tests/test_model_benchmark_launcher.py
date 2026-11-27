@@ -125,8 +125,12 @@ def test_sealed_score_requires_lane_a_and_all_pins(tmp_path, monkeypatch, capsys
         calls.append(kwargs)
         return {'scored': True}
     monkeypatch.setattr(model_benchmark_forecast_replay, 'score_sealed', score)
-    monkeypatch.setattr(model_benchmark_forecast_export, 'write_forecast_artifacts', lambda root, data: {
-        'dataset': 'local-latency-holdout', 'runs': 35, 'row_counts': {'predictions': 10}, 'q07_status': 'INCONCLUSIVE'})
+    verify_modes = []
+    def write(root, data, *, verify_only=False):
+        verify_modes.append(verify_only)
+        return {'dataset': 'local-latency-holdout', 'runs': 35, 'row_counts': {'predictions': 10},
+                'q07_status': 'INCONCLUSIVE'}
+    monkeypatch.setattr(model_benchmark_forecast_export, 'write_forecast_artifacts', write)
     common = ['--root', str(tmp_path), '--protocol', str(tmp_path / 'unused.json')]
     pins = ['--candidates-sha256', 'a' * 64, '--registration-sha256', 'b' * 64, '--seal-sha256', 'c' * 64]
     assert model_benchmark.main(common + ['score', '--lane', 'a', *pins]) == 0
@@ -137,6 +141,9 @@ def test_sealed_score_requires_lane_a_and_all_pins(tmp_path, monkeypatch, capsys
     assert json.loads(capsys.readouterr().out)['status'] == 'invalid'
     assert model_benchmark.main(common + ['score', '--lane', 'a', '--seal-sha256', 'c' * 64]) == 1
     assert json.loads(capsys.readouterr().out)['status'] == 'invalid' and len(calls) == 1
+    assert model_benchmark.main(common + ['verify-report', '--lane', 'a', *pins]) == 0
+    assert json.loads(capsys.readouterr().out)['verified'] is True
+    assert verify_modes == [False, True] and len(calls) == 2
 
 
 def test_actual_protocol_api_invalid_and_verify_missing(tmp_path):

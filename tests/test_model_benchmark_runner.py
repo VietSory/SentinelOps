@@ -119,6 +119,11 @@ def test_replayed_batch_scores_all_services_with_real_fixture_models(batch_case,
     assert len(result['rows']) == 12 and all(row['score'] is not None for row in result['rows'])
     assert {row['service'] for row in result['rows']} == set(BUSINESS_ROUTES)
     assert all(row['source_available_at'] == cutoff for row in result['rows'])
+    graph_rows = [row for row in result['rows'] if row['model'] in ('ltfp_graph', 'ltfp_self_only')]
+    for service in BUSINESS_ROUTES:
+        neighbors = [row['graph_provenance']['neighbor_count'] for row in graph_rows if row['service'] == service]
+        expected_count = 2 if service == 'checkout-service' else 1
+        assert neighbors == [expected_count, expected_count]
 
 
 def test_preloaded_models_match_uncached_scores_without_reloading(batch_case, monkeypatch):

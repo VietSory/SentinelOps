@@ -106,7 +106,10 @@ def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
                         value = predict(model, identity, graph,
                                         expected_graph_sha256=expected_graph_sha256)[service]
                         index = graph['node_ids'].index(service)
-                        neighbor_count = (sum(graph['attention_mask'][index]) - graph['attention_mask'][index][index]
+                        connected = {other for edge in graph['topology']['directed_edges'] if service in edge
+                                     for other in edge if other != service}
+                        neighbor_count = (sum(available and node in connected for node, available in
+                                              zip(graph['node_ids'], graph['target_available']))
                                           if graph['target_available'][index] else None)
                         graph_provenance[name] = {'graph_sha256': graph['graph_sha256'],
                             'mask_sha256': graph['mask_sha256'], 'input_sha256': stable_id(graph),

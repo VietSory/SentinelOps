@@ -4,6 +4,7 @@ import random
 from sentinelops.contracts import utc_time
 
 from sentinelops.ml.model_benchmark_forecast import MODELS, project_latency_truth, schedule_cutoffs, summarize_forecasts
+from sentinelops.telemetry.core import BUSINESS_ROUTES
 
 
 def forecast_report_from_oracles(store, rows, cases, *, thresholds=None, policy_identity=None, provenance):
@@ -16,6 +17,79 @@ def forecast_report_from_oracles(store, rows, cases, *, thresholds=None, policy_
             events.extend(projected_events)
     return forecast_report(rows, events, thresholds=thresholds, policy_identity=policy_identity,
                            truth=truth, provenance=provenance)
+
+
+def primary_event_coverage(cases):
+    """Check both compared models over each independently eligible event horizon."""
+    from datetime import timedelta
+
+    total, incomplete = 0, []
+    for case in cases:
+        truth = {item['service']: item for item in case['truth']}
+        lookup = {(row['service'], row['model'], utc_time(row['window_end'])): row for row in case['rows']}
+        for event in case['events']:
+            total += 1
+            onset, service = utc_time(event['onset_at']), event['service']
+            record = truth.get(service)
+            if record is None or not record.get('score_schedule'):
+                incomplete.append(event['event_id'])
+                continue
+            schedule = record['score_schedule']
+            cutoffs = schedule_cutoffs(schedule)
+            if utc_time(schedule['start']) > onset - timedelta(minutes=5):
+                incomplete.append(event['event_id'])
+                continue
+            considered, valid = 0, True
+            for anchor, cutoff in cutoffs.items():
+                if not onset - timedelta(minutes=6) <= anchor < onset:
+                    continue
+                if cutoff is None:
+                    valid = False
+                    continue
+                if not onset - timedelta(minutes=5) <= cutoff < onset:
+                    continue
+                considered += 1
+                for model in ('ltfp_graph', 'xgboost'):
+                    row = lookup.get((service, model, anchor))
+                    if (row is None or row['score'] is None or row['prediction_cutoff'] is None
+                            or utc_time(row['prediction_cutoff']) != cutoff):
+                        valid = False
+            if not valid or not considered:
+                incomplete.append(event['event_id'])
+    return {'events': total, 'complete_events': total - len(incomplete), 'incomplete_events': len(incomplete),
+            'incomplete_event_ids': sorted(incomplete)}
+
+
+def lane_a_recommendation(gradual, healthy, q07, rules):
+    """Apply the frozen primary comparison without authorizing a release."""
+    result = {'benchmark': 'INCONCLUSIVE', 'release': 'KEEP', 'runtime_parity': 'NOT_RUN',
+              'reason': None, 'activation_allowed': False}
+    if q07['status'] == 'FAIL':
+        return {**result, 'benchmark': 'KEEP', 'reason': 'q07-failed'}
+    if q07['status'] != 'PASS':
+        return {**result, 'reason': 'q07-inconclusive'}
+    if rules.get('calibration_budget') != .01 or not rules.get('calibration_cohort'):
+        return {**result, 'reason': 'common-calibration-budget-unverified'}
+    coverage = gradual['primary_event_coverage']
+    if not coverage['events'] or coverage['incomplete_events']:
+        return {**result, 'reason': 'primary-event-score-coverage-incomplete'}
+    interval = gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']
+    lower = interval['lower']
+    if lower is None or lower <= 0:
+        return {**result, 'reason': 'recall-improvement-not-established'}
+    no_breach = gradual['run_no_breach']
+    graph, baseline = (no_breach[name] for name in ('ltfp_graph', 'xgboost'))
+    graph_exposure, baseline_exposure = (healthy['models'][name]['healthy_exposure']
+                                        for name in ('ltfp_graph', 'xgboost'))
+    if (graph['missing_reason'] or baseline['missing_reason'] or graph['unknown_runs'] or baseline['unknown_runs']
+            or graph['runs'] != baseline['runs'] or not graph_exposure['coverage_complete']
+            or not baseline_exposure['coverage_complete']
+            or graph_exposure['per_service_hour'] is None or baseline_exposure['per_service_hour'] is None):
+        return {**result, 'reason': 'false-warning-comparison-incomplete'}
+    if (graph['warned_runs'] > baseline['warned_runs']
+            or graph_exposure['per_service_hour'] > baseline_exposure['per_service_hour']):
+        return {**result, 'benchmark': 'KEEP', 'reason': 'higher-false-warning-cost'}
+    return {**result, 'benchmark': 'REPLACE', 'reason': 'qualified-recall-improved-without-higher-warning-cost'}
 
 
 def summarize_sealed_forecasts(scored):
@@ -52,6 +126,32 @@ def summarize_sealed_forecasts(scored):
                thresholds=rules['thresholds'], policy_identity=rules['policy_identity'], provenance=provenance)
                for name, items in subsets.items()}
     gradual = reports['gradual']
+    gradual_cases = [case for case in scored['cases'] if kinds[case['kind']] == 'gradual']
+    gradual['primary_event_coverage'] = primary_event_coverage(gradual_cases)
+    no_breach, unknown = [], 0
+    for case in gradual_cases:
+        truth = {item['service']: item for item in case['truth']}
+        if len(truth) != len(case['truth']):
+            raise ValueError('duplicate service truth in sealed forecast case')
+        if any(item['outcome'] == 'breach' for item in truth.values()):
+            continue
+        if set(truth) != set(BUSINESS_ROUTES) or any(item['outcome'] != 'no-breach' for item in truth.values()):
+            unknown += 1
+            continue
+        no_breach.append(case['run_id'])
+    gradual['run_no_breach'] = {}
+    for model in MODELS:
+        model_result = gradual['models'][model]
+        coverage = {(item['run_id'], item['service']): item for item in model_result['no_breach']['coverage']}
+        complete = bool(no_breach) and model_result['episodes']['status'] == 'ready' and all(
+            coverage.get((run, service), {}).get('complete') and
+            coverage.get((run, service), {}).get('warnings') is not None
+            for run in no_breach for service in BUSINESS_ROUTES)
+        warned = sum(any(coverage[run, service]['warnings'] > 0 for service in BUSINESS_ROUTES)
+                     for run in no_breach) if complete else None
+        gradual['run_no_breach'][model] = {'runs': len(no_breach), 'warned_runs': warned,
+            'unknown_runs': unknown, 'missing_reason': None if complete else
+                'no-verified-no-breach-runs' if not no_breach else 'incomplete-scored-exposure'}
     graph, slope = gradual['models']['ltfp_graph'], gradual['models']['slope']
     recall, average_precision = graph['lead']['recall_ge60'], graph['average_precision']
     prevalence, slope_precision = graph['prevalence'], slope['average_precision']
@@ -66,9 +166,10 @@ def summarize_sealed_forecasts(scored):
                 'criteria': criteria, 'eligible_events': graph['lead']['events'],
                 'groups': gradual['bootstrap']['groups'],
                 'reason': None if available else 'insufficient-groups-events-or-labelled-common-windows'}
+    recommendation = lane_a_recommendation(gradual, reports['healthy'], decision, rules)
     return {'schema_version': 'benchmark-forecast-report/sealed-v1', 'scope': scored['scope'],
             'clock': scored['clock'], 'provenance': provenance, 'cases': len(run_ids),
-            'reports': reports, 'q07': decision, 'activation_allowed': False}
+            'reports': reports, 'q07': decision, 'recommendation': recommendation, 'activation_allowed': False}
 
 
 def _quantile(values, probability):
@@ -177,6 +278,9 @@ def forecast_report(rows, events, *, thresholds=None, policy_identity=None,
                     (r['run_id'], r['service']) == key]) for key in certified}
         available = ready and bool(certified) and all(value['complete'] for value in coverage.values())
         alerts = [per_run[key]['models'][model]['episodes'].get('alerts', 0) for key in certified]
+        for key in certified:
+            coverage[key]['warnings'] = (per_run[key]['models'][model]['episodes'].get('alerts', 0)
+                                         if ready and coverage[key]['complete'] else None)
         exposures = [key for key in certified if runs[key].get('healthy_hours') is not None]
         hours = sum(runs[key]['healthy_hours'] for key in exposures)
         metrics['no_breach'] = {'runs': len(certified), 'warned_runs': sum(x > 0 for x in alerts) if available and certified else None,

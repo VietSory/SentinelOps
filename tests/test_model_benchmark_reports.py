@@ -102,6 +102,84 @@ def test_sealed_summary_separates_gradual_and_healthy_denominators():
         summarize_sealed_forecasts({**scored, 'cases': cases + cases[:1]})
 
 
+def test_no_breach_counts_runs_once_and_excludes_breached_or_unknown_runs():
+    from sentinelops.telemetry.core import BUSINESS_ROUTES
+
+    base, events = fixture((60,))
+    schedule = dict(start='2026-01-01T00:05:00Z', stop='2026-01-01T00:07:00Z',
+                    cadence_seconds=60, cutoff_delay_seconds=30)
+    services = sorted(BUSINESS_ROUTES)
+    def case(run, outcomes):
+        rows = [{**row, 'run_id': run, 'group_id': run, 'service': service, 'risk_label': 0}
+                for service in services for row in base]
+        truth = [dict(run_id=run, service=service, group_id=run, outcome=outcome, evidence_id='oracle',
+                      score_schedule=schedule) for service, outcome in zip(services, outcomes)]
+        actual_events = [{**events[0], 'event_id': run, 'run_id': run, 'group_id': run, 'service': services[0]}]
+        return dict(run_id=run, group_id=run, kind='payment-gradual-low', policy_sha256='policy', rows=rows,
+                    events=actual_events if 'breach' in outcomes else [], truth=truth)
+    cases = [case('no-breach', ['no-breach'] * 3),
+             case('breached', ['breach', 'no-breach', 'no-breach']),
+             case('unknown', ['no-breach', 'UNKNOWN', 'no-breach'])]
+    scored = dict(scope='sealed-local-latency-holdout', clock='recorded-source-availability-replay',
+                  scorer_commit='code', capture_commit='capture', candidates_sha256='models', seal_sha256='seal',
+                  activation_allowed=False, cases=cases, thresholds={'thresholds': THRESHOLDS, 'policy_identity': 'frozen'})
+    result = summarize_sealed_forecasts(scored)['reports']['gradual']['run_no_breach']['slope']
+    assert result == {'runs': 1, 'warned_runs': 1, 'unknown_runs': 1, 'missing_reason': None}
+    cases[0]['rows'][0]['score'] = None
+    result = summarize_sealed_forecasts(scored)['reports']['gradual']['run_no_breach']['slope']
+    assert result['runs'] == 1 and result['warned_runs'] is None
+    assert result['missing_reason'] == 'incomplete-scored-exposure'
+
+
+def test_lane_a_recommendation_requires_paired_gain_and_no_higher_warning_cost():
+    from sentinelops.ml.model_benchmark_reports import lane_a_recommendation
+
+    sample = {'runs': 5, 'warned_runs': 1, 'unknown_runs': 0, 'missing_reason': None}
+    gradual = {'bootstrap': {'intervals': {'ltfp_graph_minus_xgboost': {'lower': .1}}},
+               'primary_event_coverage': {'events': 1, 'incomplete_events': 0},
+               'run_no_breach': {'ltfp_graph': dict(sample), 'xgboost': dict(sample)}}
+    exposure = {'coverage_complete': True, 'per_service_hour': .2}
+    healthy = {'models': {'ltfp_graph': {'healthy_exposure': dict(exposure)},
+                          'xgboost': {'healthy_exposure': dict(exposure)}}}
+    rules = {'calibration_budget': .01, 'calibration_cohort': 'shared'}
+    decide = lambda q07={'status': 'PASS'}: lane_a_recommendation(gradual, healthy, q07, rules)
+    assert decide()['benchmark'] == 'REPLACE' and decide()['release'] == 'KEEP'
+    assert decide({'status': 'FAIL'})['benchmark'] == 'KEEP'
+    assert decide({'status': 'INCONCLUSIVE'})['benchmark'] == 'INCONCLUSIVE'
+    gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']['lower'] = 0
+    assert decide()['reason'] == 'recall-improvement-not-established'
+    gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']['lower'] = .1
+    gradual['run_no_breach']['ltfp_graph']['unknown_runs'] = 1
+    assert decide()['reason'] == 'false-warning-comparison-incomplete'
+    gradual['run_no_breach']['ltfp_graph']['unknown_runs'] = 0
+    healthy['models']['ltfp_graph']['healthy_exposure']['per_service_hour'] = .3
+    assert decide()['benchmark'] == 'KEEP' and decide()['reason'] == 'higher-false-warning-cost'
+    healthy['models']['ltfp_graph']['healthy_exposure']['per_service_hour'] = .2
+    rules['calibration_budget'] = None
+    assert decide()['reason'] == 'common-calibration-budget-unverified'
+
+
+def test_primary_event_coverage_detects_missing_comparator_scores():
+    from sentinelops.ml.model_benchmark_reports import primary_event_coverage
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    schedule = {'start': start.isoformat(), 'stop': (start + timedelta(minutes=8)).isoformat(),
+                'cadence_seconds': 60, 'cutoff_delay_seconds': 30}
+    rows = []
+    for minute in range(8):
+        for model in ('ltfp_graph', 'xgboost'):
+            rows.append({'service': 'payment-service', 'model': model,
+                         'window_end': (start + timedelta(minutes=minute)).isoformat(),
+                         'prediction_cutoff': (start + timedelta(minutes=minute, seconds=30)).isoformat(), 'score': .5})
+    case = {'truth': [{'service': 'payment-service', 'score_schedule': schedule}], 'rows': rows,
+            'events': [{'event_id': 'event', 'service': 'payment-service',
+                        'onset_at': (start + timedelta(minutes=7)).isoformat()}]}
+    result = primary_event_coverage([case])
+    assert result == {'events': 1, 'complete_events': 1, 'incomplete_events': 0, 'incomplete_event_ids': []}
+    next(row for row in rows if row['model'] == 'xgboost' and row['window_end'] == (start + timedelta(minutes=4)).isoformat())['score'] = None
+    assert primary_event_coverage([case])['incomplete_event_ids'] == ['event']
+
+
 def test_exposure_uses_each_recorded_source_cutoff():
     rows, _ = fixture((60,))
     cutoffs = {'2026-01-01T00:05:00Z': '2026-01-01T00:05:30.125Z',

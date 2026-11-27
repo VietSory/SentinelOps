@@ -58,7 +58,8 @@ def forecast_tables(scored, summary):
             'clock': scored['clock'], 'eligible': row['risk_label'] is not None,
             'reason': row['risk_missing_reason'] or row.get('score_missing_reason'), 'y': row['risk_label'],
             'score': row['score'], 'state': state, 'episode_id': episode_id, 'alert_id': alert_id,
-            'graph_neighbor_count': graph.get('neighbor_count'), 'feature_ref': row.get('feature_ref')})
+            'graph_neighbor_count': graph.get('neighbor_count'),
+            'feature_ref': row.get('source_feature_ref', row.get('feature_ref'))})
     events = []
     for case in scored['cases']:
         for event in case['events']:
@@ -115,12 +116,14 @@ def forecast_tables(scored, summary):
     return {'predictions': predictions, 'events': events, 'matches': matches}
 
 
-def write_forecast_artifacts(root, scored):
-    """Publish immutable local-only Lane A tables after a complete sealed replay."""
+def write_forecast_artifacts(root, scored, *, verify_only=False):
+    """Publish or read-only verify Lane A tables after a complete sealed replay."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
     root = Path(root).resolve()
+    if type(verify_only) is not bool:
+        raise ValueError('forecast verification mode must be boolean')
     expected_kinds = {'healthy', 'payment-abrupt', 'inventory-abrupt', 'payment-gradual-high',
                       'inventory-gradual-high', 'payment-gradual-low', 'inventory-gradual-low'}
     groups = {}
@@ -163,7 +166,9 @@ def write_forecast_artifacts(root, scored):
                   'ranking_missing_reason',
                   'eligible_events', 'recall_ge60', 'recall_ge180', 'lead_p10_seconds', 'lead_p50_seconds',
                   'late', 'miss', 'lead_missing_reason', 'no_breach_runs', 'no_breach_warned_runs',
+                  'no_breach_unknown_runs', 'no_breach_missing_reason',
                   'healthy_service_hours', 'false_warnings', 'false_warnings_per_hour', 'exposure_missing_reason',
+                  'delta_recall_vs_xgboost', 'delta_recall_graph_vs_self',
                   'delta_recall_vs_xgboost_ci_lower', 'delta_recall_vs_xgboost_ci_upper',
                   'delta_recall_graph_vs_self_ci_lower', 'delta_recall_graph_vs_self_ci_upper',
                   'paired_vs_xgboost_events', 'paired_vs_xgboost_lead_p50_seconds',
@@ -175,8 +180,11 @@ def write_forecast_artifacts(root, scored):
     gradual_runs = {case['run_id'] for case in scored['cases'] if '-gradual-' in case['kind']}
     for model in MODELS:
         metrics = gradual['models'][model]
-        lead, no_breach = metrics['lead'], metrics['no_breach']
+        lead, no_breach = metrics['lead'], gradual['run_no_breach'][model]
         exposure = healthy['models'][model]['healthy_exposure']
+        own_recall = lead['recall_ge60']
+        xgb_recall = gradual['models']['xgboost']['lead']['recall_ge60']
+        self_recall = gradual['models']['ltfp_self_only']['lead']['recall_ge60']
         intervals = gradual['bootstrap']['intervals']
         versus_xgb = intervals.get(model + '_minus_xgboost', {})
         versus_self = intervals.get('ltfp_graph_minus_ltfp_self_only', {}) if model == 'ltfp_graph' else {}
@@ -194,8 +202,13 @@ def write_forecast_artifacts(root, scored):
             'lead_p10_seconds': lead['p10'], 'lead_p50_seconds': lead['p50'], 'late': lead['late'], 'miss': lead['miss'],
             'lead_missing_reason': lead['missing_reason'],
             'no_breach_runs': no_breach['runs'], 'no_breach_warned_runs': no_breach['warned_runs'],
+            'no_breach_unknown_runs': no_breach['unknown_runs'], 'no_breach_missing_reason': no_breach['missing_reason'],
             'healthy_service_hours': exposure['service_hours'], 'false_warnings': exposure['false_warnings'],
             'false_warnings_per_hour': exposure['per_service_hour'], 'exposure_missing_reason': exposure['missing_reason'],
+            'delta_recall_vs_xgboost': own_recall - xgb_recall
+                if model != 'xgboost' and own_recall is not None and xgb_recall is not None else None,
+            'delta_recall_graph_vs_self': own_recall - self_recall
+                if model == 'ltfp_graph' and own_recall is not None and self_recall is not None else None,
             'delta_recall_vs_xgboost_ci_lower': versus_xgb.get('lower'),
             'delta_recall_vs_xgboost_ci_upper': versus_xgb.get('upper'),
             'delta_recall_graph_vs_self_ci_lower': versus_self.get('lower'),
@@ -223,10 +236,20 @@ def write_forecast_artifacts(root, scored):
         'seal_sha256': scored['seal_sha256'], 'groups': sorted(groups), 'runs': len(scored['cases']),
         'kind_counts': dict(sorted(Counter(case['kind'] for case in scored['cases']).items())),
         'row_counts': counts, 'artifacts': artifacts, 'q07_status': summary['q07']['status'],
+        'benchmark_recommendation': summary['recommendation']['benchmark'],
+        'release_decision': summary['recommendation']['release'],
         'python_version': platform.python_version(),
         'pyarrow_version': pa.__version__, 'activation_allowed': False}
-    for relative, data in sorted(payloads.items()):
-        publish_freeze(root / relative, data, conflict='different forecast artifact already exists')
-    publish_freeze(root / 'report/forecast-manifest.json', _bytes(manifest),
-                   conflict='different forecast manifest already exists')
+    outputs = [*sorted(payloads.items()), ('report/forecast-manifest.json', _bytes(manifest))]
+    for relative, data in outputs:
+        path = root / relative
+        if verify_only:
+            try:
+                existing = path.read_bytes()
+            except FileNotFoundError as error:
+                raise ValueError('forecast verification artifact missing: ' + relative) from error
+            if existing != data:
+                raise ValueError('forecast verification artifact differs: ' + relative)
+        else:
+            publish_freeze(path, data, conflict='different forecast artifact already exists')
     return manifest
