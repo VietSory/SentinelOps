@@ -166,6 +166,7 @@ def write_forecast_artifacts(root, scored, *, verify_only=False):
                   'ranking_missing_reason',
                   'eligible_events', 'recall_ge60', 'recall_ge180', 'lead_p10_seconds', 'lead_p50_seconds',
                   'late', 'miss', 'lead_missing_reason', 'no_breach_runs', 'no_breach_warned_runs',
+                  'no_breach_unknown_runs', 'no_breach_missing_reason',
                   'healthy_service_hours', 'false_warnings', 'false_warnings_per_hour', 'exposure_missing_reason',
                   'delta_recall_vs_xgboost_ci_lower', 'delta_recall_vs_xgboost_ci_upper',
                   'delta_recall_graph_vs_self_ci_lower', 'delta_recall_graph_vs_self_ci_upper',
@@ -178,7 +179,7 @@ def write_forecast_artifacts(root, scored, *, verify_only=False):
     gradual_runs = {case['run_id'] for case in scored['cases'] if '-gradual-' in case['kind']}
     for model in MODELS:
         metrics = gradual['models'][model]
-        lead, no_breach = metrics['lead'], metrics['no_breach']
+        lead, no_breach = metrics['lead'], gradual['run_no_breach'][model]
         exposure = healthy['models'][model]['healthy_exposure']
         intervals = gradual['bootstrap']['intervals']
         versus_xgb = intervals.get(model + '_minus_xgboost', {})
@@ -197,6 +198,7 @@ def write_forecast_artifacts(root, scored, *, verify_only=False):
             'lead_p10_seconds': lead['p10'], 'lead_p50_seconds': lead['p50'], 'late': lead['late'], 'miss': lead['miss'],
             'lead_missing_reason': lead['missing_reason'],
             'no_breach_runs': no_breach['runs'], 'no_breach_warned_runs': no_breach['warned_runs'],
+            'no_breach_unknown_runs': no_breach['unknown_runs'], 'no_breach_missing_reason': no_breach['missing_reason'],
             'healthy_service_hours': exposure['service_hours'], 'false_warnings': exposure['false_warnings'],
             'false_warnings_per_hour': exposure['per_service_hour'], 'exposure_missing_reason': exposure['missing_reason'],
             'delta_recall_vs_xgboost_ci_lower': versus_xgb.get('lower'),

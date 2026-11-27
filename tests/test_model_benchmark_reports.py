@@ -102,6 +102,35 @@ def test_sealed_summary_separates_gradual_and_healthy_denominators():
         summarize_sealed_forecasts({**scored, 'cases': cases + cases[:1]})
 
 
+def test_no_breach_counts_runs_once_and_excludes_breached_or_unknown_runs():
+    from sentinelops.telemetry.core import BUSINESS_ROUTES
+
+    base, events = fixture((60,))
+    schedule = dict(start='2026-01-01T00:05:00Z', stop='2026-01-01T00:07:00Z',
+                    cadence_seconds=60, cutoff_delay_seconds=30)
+    services = sorted(BUSINESS_ROUTES)
+    def case(run, outcomes):
+        rows = [{**row, 'run_id': run, 'group_id': run, 'service': service, 'risk_label': 0}
+                for service in services for row in base]
+        truth = [dict(run_id=run, service=service, group_id=run, outcome=outcome, evidence_id='oracle',
+                      score_schedule=schedule) for service, outcome in zip(services, outcomes)]
+        actual_events = [{**events[0], 'event_id': run, 'run_id': run, 'group_id': run, 'service': services[0]}]
+        return dict(run_id=run, group_id=run, kind='payment-gradual-low', policy_sha256='policy', rows=rows,
+                    events=actual_events if 'breach' in outcomes else [], truth=truth)
+    cases = [case('no-breach', ['no-breach'] * 3),
+             case('breached', ['breach', 'no-breach', 'no-breach']),
+             case('unknown', ['no-breach', 'UNKNOWN', 'no-breach'])]
+    scored = dict(scope='sealed-local-latency-holdout', clock='recorded-source-availability-replay',
+                  scorer_commit='code', capture_commit='capture', candidates_sha256='models', seal_sha256='seal',
+                  activation_allowed=False, cases=cases, thresholds={'thresholds': THRESHOLDS, 'policy_identity': 'frozen'})
+    result = summarize_sealed_forecasts(scored)['reports']['gradual']['run_no_breach']['slope']
+    assert result == {'runs': 1, 'warned_runs': 1, 'unknown_runs': 1, 'missing_reason': None}
+    cases[0]['rows'][0]['score'] = None
+    result = summarize_sealed_forecasts(scored)['reports']['gradual']['run_no_breach']['slope']
+    assert result['runs'] == 1 and result['warned_runs'] is None
+    assert result['missing_reason'] == 'incomplete-scored-exposure'
+
+
 def test_exposure_uses_each_recorded_source_cutoff():
     rows, _ = fixture((60,))
     cutoffs = {'2026-01-01T00:05:00Z': '2026-01-01T00:05:30.125Z',
