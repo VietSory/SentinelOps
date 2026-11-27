@@ -179,3 +179,22 @@ def test_capture_index_preserves_missing_minutes_and_late_cutoffs(tmp_path):
     duplicate = {**store.read(refs[0]), 'extra': 'different-content'}
     with pytest.raises(ValueError, match='duplicates a service bucket'):
         inputs.index_recorded_captures(store, run_for(refs + [store.write('raw', duplicate)]))
+
+
+def test_health_policy_is_read_from_capture_commit_and_matches_protocol(tmp_path, monkeypatch):
+    from test_health_source import POLICY
+
+    commit = 'a' * 40
+    data = json.dumps(POLICY, sort_keys=True).encode()
+    calls = []
+    def git(args, **kwargs):
+        calls.append(args)
+        return data
+    monkeypatch.setattr(inputs.subprocess, 'check_output', git)
+    protocol = {'scoring': {'latency_ms': 750, 'entry_buckets': 2}}
+    result = inputs.source_health_policy(project=tmp_path, capture_commit=commit, protocol=protocol)
+    assert result['policy'] == POLICY and result['sha256'] == hashlib.sha256(data).hexdigest()
+    assert calls[0][-1] == commit + ':configs/slo_health_policy.json'
+    protocol['scoring']['latency_ms'] = 751
+    with pytest.raises(ValueError, match='differs from the frozen latency oracle'):
+        inputs.source_health_policy(project=tmp_path, capture_commit=commit, protocol=protocol)

@@ -18,6 +18,44 @@ def forecast_report_from_oracles(store, rows, cases, *, thresholds=None, policy_
                            truth=truth, provenance=provenance)
 
 
+def summarize_sealed_forecasts(scored):
+    """Keep gradual, healthy and abrupt holdout denominators separate."""
+    if (scored.get('scope') != 'sealed-local-latency-holdout' or scored.get('activation_allowed') is not False
+            or not all(scored.get(key) for key in ('scorer_commit', 'capture_commit', 'candidates_sha256', 'seal_sha256'))):
+        raise ValueError('sealed forecast provenance is incomplete')
+    kinds = {'healthy': 'healthy', 'payment-abrupt': 'abrupt', 'inventory-abrupt': 'abrupt',
+             'payment-gradual-high': 'gradual', 'inventory-gradual-high': 'gradual',
+             'payment-gradual-low': 'gradual', 'inventory-gradual-low': 'gradual'}
+    subsets = {name: {'rows': [], 'events': [], 'truth': []} for name in ('gradual', 'healthy', 'abrupt')}
+    run_ids, policies = set(), set()
+    for case in scored['cases']:
+        run_id, group_id, kind = case['run_id'], case['group_id'], case['kind']
+        if not run_id or not group_id or run_id in run_ids or kind not in kinds or not case.get('policy_sha256'):
+            raise ValueError('duplicate or invalid sealed forecast case')
+        run_ids.add(run_id)
+        policies.add(case['policy_sha256'])
+        subset = subsets[kinds[kind]]
+        for key in ('rows', 'events', 'truth'):
+            for item in case[key]:
+                if item['run_id'] != run_id or item['group_id'] != group_id:
+                    raise ValueError('forecast row belongs to another sealed case')
+                value = dict(item)
+                if key == 'truth' and kind != 'healthy':
+                    value.pop('healthy_hours', None)
+                subset[key].append(value)
+    if len(policies) != 1:
+        raise ValueError('sealed forecast cases must use one pinned health policy')
+    provenance = {'code': scored['scorer_commit'], 'config': next(iter(policies)),
+                  'data': scored['seal_sha256'], 'models': scored['candidates_sha256']}
+    rules = scored['thresholds']
+    reports = {name: forecast_report(items['rows'], items['events'], truth=items['truth'],
+               thresholds=rules['thresholds'], policy_identity=rules['policy_identity'], provenance=provenance)
+               for name, items in subsets.items()}
+    return {'schema_version': 'benchmark-forecast-report/sealed-v1', 'scope': scored['scope'],
+            'clock': scored['clock'], 'provenance': provenance, 'cases': len(run_ids),
+            'reports': reports, 'activation_allowed': False}
+
+
 def _quantile(values, probability):
     """Linear interpolation at (n - 1) * probability."""
     if not values:
