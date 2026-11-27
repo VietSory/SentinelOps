@@ -9,6 +9,22 @@ from sentinelops.ml.alibaba_local_evaluation import latency_event_intervals, lat
 MODELS = ('slope', 'xgboost', 'ltfp_self_only', 'ltfp_graph')
 
 
+def forecast_state(score, threshold):
+    """Apply one frozen comparison consistently to reports and ledgers."""
+    watch, degrading = threshold['watch'], threshold['degrading']
+    comparison = threshold.get('comparison', '>=')
+    if (any(type(value) not in (int, float) or not math.isfinite(value) for value in (watch, degrading))
+            or watch > degrading or comparison not in ('>', '>=')):
+        raise ValueError('invalid watch/degrading thresholds')
+    if score is None:
+        return 'unavailable'
+    if type(score) not in (int, float) or not math.isfinite(score):
+        raise ValueError('forecast score must be finite')
+    above_degrading = score > degrading if comparison == '>' else score >= degrading
+    above_watch = score > watch if comparison == '>' else score >= watch
+    return 'degrading' if above_degrading else 'watch' if above_watch else 'normal'
+
+
 def schedule_cutoffs(schedule):
     """Return the exact per-minute cutoff, including unavailable source clocks."""
     start, stop = (utc_time(schedule[key]) for key in ('start', 'stop'))
@@ -204,18 +220,11 @@ def summarize_forecasts(rows, events, *, thresholds=None, policy_identity=None):
                                    'recall': None, 'events': len(events)}
             models[model] = metrics
             continue
-        watch, degrading = threshold['watch'], threshold['degrading']
-        comparison = threshold.get('comparison', '>=')
-        if (any(type(value) not in (int, float) or not math.isfinite(value) for value in (watch, degrading))
-            or watch > degrading or comparison not in ('>', '>=')):
-            raise ValueError('invalid watch/degrading thresholds')
+        forecast_state(None, threshold)
         tracker, alerts = EpisodeTracker(), []
         for key in keys:
             row = keyed[key, model]
-            score = row['score']
-            above_degrading = score is not None and (score > degrading if comparison == '>' else score >= degrading)
-            above_watch = score is not None and (score > watch if comparison == '>' else score >= watch)
-            state = 'unavailable' if score is None else 'degrading' if above_degrading else 'watch' if above_watch else 'normal'
+            state = forecast_state(row['score'], threshold)
             episode = tracker.update((key[0], key[1]), key[2], state)
             if episode['event'] == 'started':
                 alerts.append((key[0], key[1], utc_time(row['prediction_cutoff'])))

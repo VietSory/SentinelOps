@@ -106,3 +106,76 @@ def test_scoring_keeps_every_service_and_missing_clock(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match='cutoffs do not cover'):
         forecast_replay.score_batches(store, batches[:1], case=case, run=run, graph=graph, models=models,
                                       oracle={'oracle': 'fixture'}, policy={'policy': 'fixture'})
+
+
+def test_sealed_scoring_rejects_unverified_input_before_case_replay(tmp_path, monkeypatch):
+    import json
+    from sentinelops.telemetry.core import stable_id
+
+    monkeypatch.setattr(forecast_replay, 'clean_source', lambda project: 'a' * 40)
+    calls = []
+    async def score_case(root, case, **kwargs):
+        calls.append(case['run_id'])
+        return {'run_id': case['run_id']}
+    monkeypatch.setattr(forecast_replay, '_score_verified_case', score_case)
+    def reject(*args, **kwargs):
+        raise ValueError('holdout seal missing')
+    monkeypatch.setattr(forecast_replay, 'load_sealed_inputs', reject)
+    options = {'candidates_sha256': 'b' * 64, 'registration_sha256': 'c' * 64,
+               'seal_sha256': 'd' * 64, 'capture_project': tmp_path}
+    with pytest.raises(ValueError, match='seal missing'):
+        forecast_replay.score_sealed(tmp_path, **options)
+    assert calls == []
+    protocol = {'scoring': 'fixture'}
+    (tmp_path / 'freeze').mkdir()
+    (tmp_path / 'freeze/protocol.json').write_text(json.dumps({'protocol': protocol}))
+    monkeypatch.setattr(forecast_replay, 'verify_candidate_freeze', lambda *args: {'protocol_sha256': stable_id(protocol)})
+    monkeypatch.setattr(forecast_replay, 'load_sealed_inputs', lambda *args, **kwargs: {
+        'capture_commit': 'e' * 40, 'models': {}, 'thresholds': {},
+        'cases': [{'run_id': 'one'}, {'run_id': 'two'}]})
+    result = forecast_replay.score_sealed(tmp_path, **options)
+    assert calls == ['one', 'two'] and [case['run_id'] for case in result['cases']] == calls
+    assert result['activation_allowed'] is False and result['scorer_commit'] == 'a' * 40
+
+
+def test_verified_case_rejects_changed_run_before_replay(tmp_path, monkeypatch):
+    import json
+    from sentinelops.telemetry.core import stable_id
+    from sentinelops.telemetry.store import ArtifactStore
+
+    run_id, group_id, slot_id, commit = 'run-' + '1' * 32, 'bench-final-01', 'bench-final-01-healthy', 'a' * 40
+    run_path = tmp_path / 'capture/groups' / group_id / 'slots' / slot_id / 'runs' / run_id / 'run.json'
+    serving = ArtifactStore(run_path.parent / 'serving')
+    raw_ref = serving.write('raw', {'sample': 'fixture'})
+    manifest_ref = serving.write('manifests', {'raw_refs': [raw_ref]})
+    run = {'run_id': run_id, 'session_id': group_id, 'source_commit': commit, 'source_manifest_ref': manifest_ref,
+           'environment': 'local'}
+    run_path.write_text(json.dumps(run))
+    artifacts = ArtifactStore(tmp_path)
+    result_ref = artifacts.write('manifests', {'status': 'completed', 'run_sha256': stable_id(run)})
+    oracle_ref = artifacts.write('manifests', {'certificate_version': 'local-http-oracle/v1',
+                                                 'source_result_ref': result_ref, 'oracle': {}})
+    case = {'run_id': run_id, 'group_id': group_id, 'slot_id': slot_id, 'kind': 'healthy',
+            'run_path': str(run_path), 'source_result_ref': result_ref, 'oracle_ref': oracle_ref,
+            'source_manifest_sha256': manifest_ref.split('/')[-1].removesuffix('.json'), 'raw_refs': [raw_ref]}
+    calls = []
+    monkeypatch.setattr(forecast_replay, 'source_health_policy', lambda **kwargs: {'policy': {}, 'sha256': 'policy'})
+    monkeypatch.setattr(forecast_replay, 'source_topology', lambda *args, **kwargs: {
+        'graph_sha256': 'graph', 'excluded_edges': []})
+    monkeypatch.setattr(forecast_replay, 'index_recorded_captures', lambda *args: ['index'])
+    async def replay(index, **kwargs):
+        calls.append(index)
+        return serving, ['batches']
+    monkeypatch.setattr(forecast_replay, 'replay_batches', replay)
+    monkeypatch.setattr(forecast_replay, 'score_batches', lambda *args, **kwargs: {'score_schedule': {}, 'rows': []})
+    monkeypatch.setattr(forecast_replay, 'project_latency_truth',
+                        lambda store, case, service, schedule: ({'service': service}, []))
+    result = asyncio.run(forecast_replay._score_verified_case(tmp_path, case, capture_commit=commit,
+                         project=tmp_path, protocol={}, models={}, output_root=tmp_path / 'replay'))
+    assert calls == [['index']] and len(result['truth']) == 3 and result['kind'] == 'healthy'
+    run['environment'] = 'changed'
+    run_path.write_text(json.dumps(run))
+    with pytest.raises(ValueError, match='changed after sealed source verification'):
+        asyncio.run(forecast_replay._score_verified_case(tmp_path, case, capture_commit=commit,
+                    project=tmp_path, protocol={}, models={}, output_root=tmp_path / 'replay'))
+    assert calls == [['index']]

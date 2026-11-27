@@ -6,6 +6,7 @@ pytest.importorskip("sklearn")
 
 from sentinelops.ml.model_benchmark_forecast import MODELS
 from sentinelops.ml.model_benchmark_reports import forecast_report
+from sentinelops.ml.model_benchmark_reports import summarize_sealed_forecasts
 
 PROVENANCE = dict(code='fixture', config='fixture', data='fixture', models='fixture')
 THRESHOLDS = {model: dict(watch=.4, degrading=.7) for model in MODELS}
@@ -68,6 +69,34 @@ def test_independent_truth_unknown_and_exposure():
         with pytest.raises(ValueError): report(rows, [], truth=[{**truth[0], **mutation}])
     with pytest.raises(ValueError): report(rows, [], truth=truth * 2)
     with pytest.raises(ValueError): report(rows, fixture((60,))[1], truth=truth)
+
+
+def test_sealed_summary_separates_gradual_and_healthy_denominators():
+    rows, events = fixture((60,))
+    schedule = dict(start='2026-01-01T00:05:00Z', stop='2026-01-01T00:07:00Z',
+                    cadence_seconds=60, cutoff_delay_seconds=30)
+    breach = dict(run_id='0', service='s', group_id='0', outcome='breach', evidence_id='oracle',
+                  score_schedule=schedule)
+    def nonbreach(run, group, kind):
+        copied = [{**row, 'run_id': run, 'group_id': group, 'risk_label': 0} for row in rows]
+        truth = dict(run_id=run, service='s', group_id=group, outcome='no-breach', evidence_id='oracle',
+                     healthy_hours=2 / 60, score_schedule=schedule)
+        return dict(run_id=run, group_id=group, kind=kind, policy_sha256='policy', rows=copied, events=[], truth=[truth])
+    cases = [dict(run_id='0', group_id='0', kind='payment-gradual-high', policy_sha256='policy',
+                  rows=rows, events=events, truth=[breach]),
+             nonbreach('low', 'g1', 'payment-gradual-low'), nonbreach('healthy', 'g2', 'healthy')]
+    scored = dict(scope='sealed-local-latency-holdout', clock='recorded-source-availability-replay',
+                  scorer_commit='code', capture_commit='capture', candidates_sha256='models', seal_sha256='seal',
+                  activation_allowed=False, cases=cases,
+                  thresholds={'thresholds': THRESHOLDS, 'policy_identity': 'frozen'})
+    result = summarize_sealed_forecasts(scored)
+    gradual = result['reports']['gradual']['models']['slope']
+    healthy = result['reports']['healthy']['models']['slope']
+    assert gradual['lead']['events'] == 1 and gradual['no_breach']['runs'] == 1
+    assert gradual['healthy_exposure']['runs'] == 0 and healthy['healthy_exposure']['runs'] == 1
+    assert healthy['healthy_exposure']['service_hours'] == 2 / 60
+    with pytest.raises(ValueError, match='duplicate or invalid'):
+        summarize_sealed_forecasts({**scored, 'cases': cases + cases[:1]})
 
 
 def test_exposure_uses_each_recorded_source_cutoff():

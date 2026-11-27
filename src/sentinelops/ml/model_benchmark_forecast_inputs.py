@@ -18,6 +18,25 @@ from sentinelops.telemetry.store import ArtifactStore
 from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
 
 
+def source_health_policy(*, project, capture_commit, protocol):
+    """Load the declared health policy from the registered capture commit."""
+    from sentinelops.incidents.health import validate_policy
+
+    if not isinstance(capture_commit, str) or not re.fullmatch('[0-9a-f]{40}', capture_commit):
+        raise ValueError('health policy requires a full registered capture commit')
+    try:
+        data = subprocess.check_output(['git', 'show', capture_commit + ':configs/slo_health_policy.json'],
+                                       cwd=project, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as error:
+        raise ValueError('capture source health policy is unavailable') from error
+    policy = json.loads(data)
+    validate_policy(policy)
+    scoring = protocol['scoring']
+    if policy['latency_ms'] != scoring['latency_ms'] or policy['entry_buckets'] != scoring['entry_buckets']:
+        raise ValueError('capture health policy differs from the frozen latency oracle')
+    return {'policy': policy, 'sha256': hashlib.sha256(data).hexdigest(), 'source_commit': capture_commit}
+
+
 def index_recorded_captures(store, run):
     """Index every elapsed minute, retaining explicit gaps and late source clocks."""
     if (run.get('status') != 'completed' or run.get('declared_split') != 'test'
