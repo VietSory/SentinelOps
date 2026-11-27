@@ -12,6 +12,7 @@ from sentinelops.ml.model_benchmark_capture_context import (
 )
 from sentinelops.ml.model_benchmark_capture_receipt import seal_slot
 from sentinelops.ml.model_benchmark_holdout import (
+    holdout_compose_project,
     verify_capture_group, verify_capture_inventory, verify_capture_source, verify_frozen_capture_sources,
 )
 from sentinelops.ml.model_benchmark_protocol import _bytes, publish_freeze
@@ -48,11 +49,11 @@ def close_group(root, group_id, registration_sha256, *, project):
     """Stop only verified group containers; preserve source files and volumes."""
     root, project = Path(root).resolve(), Path(project).resolve()
     receipt = verify_group(root, group_id, registration_sha256, project=project)
-    name = 'sentinelops-corpus-' + group_id
+    name = holdout_compose_project(registration_sha256, group_id)
     if not docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + name).strip():
         return receipt
     group = json.loads((root / 'capture/groups' / group_id / 'registration.json').read_bytes())
-    configure_compose(project, root / 'capture', group_id)
+    configure_compose(project, root / 'capture', group_id, name)
     inspect_group_continuity(group)
     docker('stop', *[item['container_id'] for item in group['context']['containers'].values()])
     if docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + name).strip():
@@ -126,7 +127,7 @@ def seal_capture(root, registration_sha256, *, project):
                 if json.loads(slot_path.read_bytes()) != row:
                     raise ValueError('group receipt differs from its slot receipt')
         for group in matrix['groups']:
-            name = 'sentinelops-corpus-' + group['group_id']
+            name = holdout_compose_project(registration_sha256, group['group_id'])
             if docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + name).strip():
                 raise ValueError('cannot seal while a holdout source context is running')
         run_paths = {row['slot_id']: root / 'capture/groups' / group_id / 'slots' / row['slot_id'] /

@@ -35,7 +35,7 @@ def test_holdout_execution_requires_bound_slot_and_live_context(tmp_path, monkey
     (tmp_path / 'capture/matrix.json').write_text(json.dumps(matrix))
     group_doc = {'schema_version': 'benchmark-holdout-group-registration/v1', 'group_id': group['group_id'],
                  'capture_registration_sha256': capture_pin, 'capture_commit': commit,
-                 'registered_at': '2026-01-01T00:01:00Z', 'compose_project': 'sentinelops-corpus-' + group['group_id'],
+                 'registered_at': '2026-01-01T00:01:00Z', 'compose_project': holdout.holdout_compose_project(capture_pin, group['group_id']),
                  'context': {'context': 'intact'}, 'initial_payment_rows': 0}
     group_path.write_text(json.dumps(group_doc))
     group_sha = hashlib.sha256(group_path.read_bytes()).hexdigest()

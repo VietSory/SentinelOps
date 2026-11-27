@@ -35,6 +35,9 @@ def continue_groups(root, project, *, registration_sha256, source_commit, first_
     head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=project, text=True).strip()
     if head != source_commit:
         raise ValueError('capture checkout differs from its registered revision')
+    sys.path.insert(0, str(project / 'src'))
+    from sentinelops.ml.model_benchmark_holdout import holdout_compose_project
+
     environment = dict(os.environ, PYTHONPATH=str(project / 'src') + os.pathsep + str(project),
                        PYTHONDONTWRITEBYTECODE='1')
     prefix = [python, '-u', '-m', 'scripts.model_benchmark', '--root', str(root), '--protocol',
@@ -58,7 +61,7 @@ def continue_groups(root, project, *, registration_sha256, source_commit, first_
             run(['verify-group', '--group', group, '--registration-sha256', registration_sha256],
                 root / 'capture' / f'sequence-{group}-verify.log')
             running = subprocess.check_output(['docker', 'ps', '-q', '--filter',
-                'label=com.docker.compose.project=sentinelops-corpus-' + group], text=True)
+                'label=com.docker.compose.project=' + holdout_compose_project(registration_sha256, group)], text=True)
             if running.strip():
                 raise ValueError('verified group still has running containers: ' + group)
             print(json.dumps({'group': group, 'status': 'verified-and-stopped'}), flush=True)
