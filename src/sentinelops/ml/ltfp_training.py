@@ -166,6 +166,25 @@ def fit_pair(samples, *, admission, expected_admission_sha256, output):
     return result
 
 
+def protocol_training(receipt):
+    """Protocol training block implied by a completed paired fit receipt."""
+    settings = receipt['settings']
+    base = dict(seed=42, hidden_size=8, attention_size=8, optimizer=settings['optimizer'],
+                learning_rate=settings['learning_rate'], batch_size=settings['batch_size'])
+    if receipt['schema_version'] == 'ltfp-paired-fit/development-v1':
+        return dict(base, max_steps=settings['steps'], early_stopping='none', trials=settings['trials'])
+    if receipt['schema_version'] == 'ltfp-paired-fit/development-v2':
+        steps = settings['epochs'] * math.ceil(receipt['fit_records'] / settings['batch_size'])
+        return dict(base, max_steps=steps, early_stopping=settings['selection'], trials=len(settings['seeds']))
+    raise ValueError('unsupported paired fit receipt')
+
+
+def repeated_fit_identity(receipt):
+    """Fields two independent runs of the same paired fit must reproduce."""
+    keys = ('steps', 'losses') if receipt['schema_version'] == 'ltfp-paired-fit/development-v1' else ('members',)
+    return {name: {key: model[key] for key in (*keys, 'metadata_sha256')} for name, model in receipt['models'].items()}
+
+
 def _selected_target(sample):
     targets = [node for node in sample['graph']['node_ids'] if sample['loss_mask'][node]]
     if len(targets) != 1:

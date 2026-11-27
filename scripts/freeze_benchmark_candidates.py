@@ -9,6 +9,8 @@ from sentinelops.telemetry.core import stable_id
 
 
 def _lane_a(root, protocol, evidence_path):
+    from sentinelops.ml.ltfp_training import protocol_training, repeated_fit_identity
+
     stage = verify_stage('calibrate', root, protocol, evidence_path)
     preflight = root / 'preflight'
     fit_dir = preflight / 'development-k16-fit-v5'
@@ -16,20 +18,18 @@ def _lane_a(root, protocol, evidence_path):
     original = json.loads((fit_dir / 'receipt.json').read_bytes())
     settings = original['settings']
     training = protocol['training']
-    if (any(settings[key] != training[key] for key in ('batch_size', 'learning_rate', 'optimizer', 'seed', 'trials'))
-            or settings['steps'] != training['max_steps']
-            or settings['dtype'] != protocol['features']['dtype']
-            or settings['early_stopping'] is not False or training['early_stopping'] != 'none'):
+    if protocol_training(original) != training or settings['dtype'] != protocol['features']['dtype']:
         raise ValueError('Lane A fitted settings differ from the frozen protocol')
     repeated_fit = replay / fit_dir.name
     repeated = json.loads((repeated_fit / 'receipt.json').read_bytes())
-    if any(original[key] != repeated[key] for key in ('input_sha256', 'settings', 'unique_records_used')):
+    if (original['input_sha256'] != repeated['input_sha256'] or original['settings'] != repeated['settings']
+            or original['training_records'] != repeated['training_records']):
         raise ValueError('Lane A repeated fit training identity differs')
-    for name, model in original['models'].items():
-        replica = repeated['models'][name]
-        if (any(model[key] != replica[key] for key in ('steps', 'losses', 'metadata_sha256'))
-                or any(file_sha256(fit_dir / name / filename) != file_sha256(repeated_fit / name / filename)
-                       for filename in ('metadata.json', 'weights.pt'))):
+    if repeated_fit_identity(original) != repeated_fit_identity(repeated):
+        raise ValueError('Lane A repeated fit differs from the verified model')
+    for name in original['models']:
+        if any(file_sha256(fit_dir / name / filename) != file_sha256(repeated_fit / name / filename)
+               for filename in ('metadata.json', 'weights.pt')):
             raise ValueError('Lane A repeated fit differs from the verified model')
     cal = 'development-k16-calibration-v5/predictions.json'
     if file_sha256(preflight / cal) != file_sha256(replay / cal):

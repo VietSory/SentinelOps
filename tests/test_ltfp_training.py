@@ -88,6 +88,8 @@ def test_paired_deterministic_update_export_and_completed_skip(tmp_path):
         model_b = load(tmp_path/'second'/name, metadata_sha256=b['metadata_sha256'], expected_identity=b['identity'])
         assert all(torch.equal(value, model_b.state_dict()[key]) for key, value in model_a.state_dict().items())
     assert first['models']['graph']['losses'] != first['models']['self_only']['losses']
+    assert ltfp_training.protocol_training(first)['max_steps'] == 100
+    assert ltfp_training.protocol_training(first)['early_stopping'] == 'none'
     assert samples == before
     changed = deepcopy(samples)
     changed[0]['labels']['a'] = 1
@@ -198,6 +200,10 @@ def test_weighted_seed_mean_fit_is_deterministic_and_scores_mean_probability(tmp
                 expected = torch.stack([torch.sigmoid(m(values, mask)) for m in model.members]).mean(0)[0]
             score = predict(model, a['identity'], graph, expected_graph_sha256=graph['graph_sha256'])['a']
             assert abs(score - float(expected)) < 1e-6
+    assert ltfp_training.protocol_training(first) == dict(seed=42, hidden_size=8, attention_size=8,
+        optimizer='Adam', learning_rate=.001, batch_size=32, max_steps=2,
+        early_stopping='max-ap-on-train-service-hash-byte0-lt-51', trials=2)
+    assert ltfp_training.repeated_fit_identity(first) == ltfp_training.repeated_fit_identity(second)
     changed = deepcopy(samples)
     changed[0]['labels']['a'] = 1
     with pytest.raises(ValueError, match='identity mismatch'):
