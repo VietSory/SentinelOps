@@ -1,5 +1,7 @@
 # Tiến độ Lane A — 26/11/2026
 
+> Cập nhật 27-11-2026: tiêu chí non-inferiority và việc cần làm trước freeze v17 nằm trong [kế hoạch v17](MODEL_BENCHMARK_V17_PLAN.md).
+
 Lane A đang ở chặng D2-A. Snapshot Alibaba và audit graph đã được khôi phục từ bundle bàn giao cùng nguồn Alibaba. Kết quả cohort dưới đây là phân tích development, chưa phải kết quả holdout hoặc quyết định release.
 
 ## Dữ liệu và preflight
