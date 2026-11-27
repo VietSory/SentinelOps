@@ -88,7 +88,7 @@ def test_scoring_keeps_every_service_and_missing_clock(tmp_path, monkeypatch):
         'risk_forecast_anchor_at': frame['window_end'], 'slo_onset_at': None, 'future_confirmation_tail': None})
     case = {'run_id': 'run-one', 'group_id': 'group-one'}
     run = {'run_id': 'run-one', 'session_id': 'group-one', 'warmup_end_at': '2026-01-01T00:01:10Z',
-           'ended_at': '2026-01-01T00:04:59Z'}
+           'ended_at': '2026-01-01T00:05:59Z'}
     graph = {'node_ids': [], 'topology': {}, 'graph_sha256': 'graph'}
     models = {'config': {}, 'bundle': tmp_path, 'manifest_sha256': 'manifest', 'models': {}, 'xgboost_refit': {}}
     result = forecast_replay.score_batches(store, batches, case=case, run=run, graph=graph, models=models,
@@ -106,6 +106,29 @@ def test_scoring_keeps_every_service_and_missing_clock(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match='cutoffs do not cover'):
         forecast_replay.score_batches(store, batches[:1], case=case, run=run, graph=graph, models=models,
                                       oracle={'oracle': 'fixture'}, policy={'policy': 'fixture'})
+
+
+def test_schedule_leaves_the_complete_oracle_tail_for_no_breach(tmp_path):
+    from datetime import timedelta
+    from sentinelops.ml.model_benchmark_forecast import project_latency_truth
+    from sentinelops.telemetry.core import timestamp
+    from sentinelops.telemetry.store import ArtifactStore
+    from test_health_source import POLICY
+    from test_local_labels import START, derive, fixture_oracle
+
+    store, oracle = ArtifactStore(tmp_path), derive(fixture_oracle())
+    source_ref = store.write('manifests', {'status': 'completed'})
+    oracle_ref = store.write('manifests', {'certificate_version': 'local-http-oracle/v1',
+                                           'source_result_ref': source_ref, 'oracle': oracle})
+    case = {'run_id': 'run-one', 'group_id': 'group-one', 'source_result_ref': source_ref, 'oracle_ref': oracle_ref}
+    run = {'run_id': 'run-one', 'session_id': 'group-one', 'warmup_end_at': timestamp(START + timedelta(minutes=5)),
+           'ended_at': timestamp(START + timedelta(minutes=14))}
+    batches = [{'bucket_end': timestamp(START + timedelta(minutes=minute)), 'prediction_cutoff': None,
+                'batch_ref': None, 'missing_reason': 'incomplete-source-bucket'} for minute in range(5, 13)]
+    result = forecast_replay.score_batches(store, batches, case=case, run=run, graph={}, models={},
+                                            oracle=oracle, policy=POLICY)
+    truth, events = project_latency_truth(store, case, 'payment-service', result['score_schedule'])
+    assert truth['outcome'] == 'no-breach' and truth['healthy_hours'] == 8 / 60 and not events
 
 
 def test_sealed_scoring_rejects_unverified_input_before_case_replay(tmp_path, monkeypatch):

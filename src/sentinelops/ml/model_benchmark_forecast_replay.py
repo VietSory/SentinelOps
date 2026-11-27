@@ -63,7 +63,9 @@ def score_batches(store, batches, *, case, run, graph, models, oracle, policy):
     start = warmup.replace(second=0, microsecond=0)
     if start < warmup:
         start += timedelta(minutes=1)
-    stop = utc_time(run['ended_at']).replace(second=0, microsecond=0)
+    # The independent oracle needs one complete minute beyond the exclusive
+    # score schedule to certify a no-breach timeline.
+    stop = utc_time(run['ended_at']).replace(second=0, microsecond=0) - timedelta(minutes=1)
     if stop <= start or run['run_id'] != case['run_id'] or run['session_id'] != case['group_id']:
         raise ValueError('forecast score schedule differs from the verified run')
     selected = [row for row in batches if start <= utc_time(row['bucket_end']) < stop]
@@ -99,7 +101,7 @@ def score_batches(store, batches, *, case, run, graph, models, oracle, policy):
                     node_ids=graph['node_ids'], topology=graph['topology'], expected_graph_sha256=graph['graph_sha256'],
                     config=models['config'], bundle=models['bundle'], manifest_sha256=models['manifest_sha256'],
                     oracle=oracle, health_policy=policy, run_id=case['run_id'], group_id=case['group_id'],
-                    models=models['models'], xgboost_refit=models['xgboost_refit'])
+                    models=models['models'], xgboost_refit=models['xgboost_refit'], runtime=models.get('runtime'))
                 rows.extend({**row, 'source_available_at': batch.get('source_available_at', cutoff)} for row in scored)
                 continue
             frame = {'service': service, 'window_start': timestamp(end - timedelta(minutes=5)),

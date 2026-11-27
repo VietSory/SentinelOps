@@ -11,13 +11,19 @@ from sentinelops.ml.models import load_bundle
 from sentinelops.telemetry.core import stable_id
 
 
-def baseline_scores(store, batch_ref, service, *, as_of, bundle, manifest_sha256):
+def baseline_scores(store, batch_ref, service, *, as_of, bundle, manifest_sha256, loaded=None):
     """Load a trusted pinned bundle; return scores and its immutable causal frame.
 
     The caller supplies a trusted local bundle, never a user-uploaded pickle.
     No release is activated; model identity is returned for explicit comparison.
     """
-    manifest, _, risk = load_bundle(Path(bundle), expected_manifest_sha256=manifest_sha256)
+    if loaded is None:
+        manifest, _, risk = load_bundle(Path(bundle), expected_manifest_sha256=manifest_sha256)
+    else:
+        if (Path(loaded['directory']).resolve() != Path(bundle).resolve()
+                or loaded['manifest_sha256'] != manifest_sha256):
+            raise ValueError('preloaded baseline differs from the pinned bundle')
+        manifest, risk = loaded['manifest'], loaded['risk']
     config = manifest['provenance']['config']
     if (stable_id(config) != manifest['provenance']['config_sha256']
             or config['features'] != manifest['ordered_features']):
@@ -56,7 +62,7 @@ def baseline_scores(store, batch_ref, service, *, as_of, bundle, manifest_sha256
         'xgboost': {'score': probability, 'missing_reason': None}}}
 
 
-def refit_score(store, baseline, config, *, directory, manifest_sha256, fit_input_sha256):
+def refit_score(store, baseline, config, *, directory, manifest_sha256, fit_input_sha256, loaded=None):
     """Score the accepted frame with the pinned same-split development refit."""
     from xgboost import XGBClassifier
     from sentinelops.ml.models import ExceedanceRisk
@@ -65,18 +71,28 @@ def refit_score(store, baseline, config, *, directory, manifest_sha256, fit_inpu
            for value in (manifest_sha256, fit_input_sha256)):
         raise ValueError('refit manifest and paired training pins required')
     directory = Path(directory)
-    content = (directory / 'manifest.json').read_bytes()
-    if hashlib.sha256(content).hexdigest() != manifest_sha256:
-        raise ValueError('refit manifest SHA256 mismatch')
-    manifest = json.loads(content)
-    model_path = directory / 'risk.json'
+    if loaded is None:
+        content = (directory / 'manifest.json').read_bytes()
+        if hashlib.sha256(content).hexdigest() != manifest_sha256:
+            raise ValueError('refit manifest SHA256 mismatch')
+        manifest = json.loads(content)
+        model_path = directory / 'risk.json'
+    else:
+        if (Path(loaded['directory']).resolve() != directory.resolve()
+                or loaded['manifest_sha256'] != manifest_sha256 or loaded['fit_input_sha256'] != fit_input_sha256):
+            raise ValueError('preloaded refit differs from its pinned identity')
+        manifest = loaded['manifest']
+        model_path = None
     if (manifest.get('scope') != 'development-train-only' or manifest.get('activation_allowed') is not False
             or manifest.get('paired_fit_input_sha256') != fit_input_sha256
             or manifest.get('config_sha256') != stable_id(config)
-            or hashlib.sha256(model_path.read_bytes()).hexdigest() != manifest.get('model_sha256')):
+            or (model_path is not None and hashlib.sha256(model_path.read_bytes()).hexdigest() != manifest.get('model_sha256'))):
         raise ValueError('refit model or paired training identity differs')
-    model = XGBClassifier()
-    model.load_model(model_path)
+    if loaded is None:
+        model = XGBClassifier()
+        model.load_model(model_path)
+    else:
+        model = loaded['model']
     provenance = {'scope': 'development-refit', 'manifest_sha256': manifest_sha256,
                   'model_sha256': manifest['model_sha256'], 'fit_input_sha256': fit_input_sha256}
     if baseline['feature_ref'] is None:

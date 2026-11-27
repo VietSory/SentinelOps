@@ -117,3 +117,37 @@ def test_missing_risk_estimator_rejected(tmp_path, portable_bundle, monkeypatch)
     with pytest.raises(ValueError, match='risk estimator'):
         scoring.baseline_scores(ArtifactStore(tmp_path), 'unused', 'payment-service', as_of=START,
                                 bundle=portable_bundle, manifest_sha256=digest)
+
+
+def test_preloaded_refit_matches_verified_disk_model(tmp_path, monkeypatch):
+    import numpy as np
+    import xgboost
+    from sentinelops.ml.model_benchmark_scoring import refit_score
+    from sentinelops.ml.models import ExceedanceRisk
+    from sentinelops.telemetry.core import stable_id
+
+    config = {'features': list(ExceedanceRisk.INPUTS)}
+    (tmp_path / 'risk.json').write_bytes(b'frozen-model')
+    weights_sha = hashlib.sha256((tmp_path / 'risk.json').read_bytes()).hexdigest()
+    fit_pin = 'a' * 64
+    manifest = {'scope': 'development-train-only', 'activation_allowed': False, 'model_sha256': weights_sha,
+                'paired_fit_input_sha256': fit_pin, 'config_sha256': stable_id(config)}
+    (tmp_path / 'manifest.json').write_text(json.dumps(manifest))
+    manifest_sha = hashlib.sha256((tmp_path / 'manifest.json').read_bytes()).hexdigest()
+    calls = []
+    class Model:
+        def load_model(self, path): calls.append(path)
+        def predict_proba(self, values): return np.array([[.25, .75]])
+    monkeypatch.setattr(xgboost, 'XGBClassifier', Model)
+    store = ArtifactStore(tmp_path / 'features')
+    feature_ref = store.write('features', {'features': {name: 1.0 for name in config['features']}})
+    baseline = {'feature_ref': feature_ref, 'scores': {'xgboost': {'score': None, 'missing_reason': 'fixture'}}}
+    options = {'directory': tmp_path, 'manifest_sha256': manifest_sha, 'fit_input_sha256': fit_pin}
+    expected = refit_score(store, baseline, config, **options)
+    loaded = {'directory': tmp_path, 'manifest_sha256': manifest_sha, 'fit_input_sha256': fit_pin,
+              'manifest': manifest, 'model': Model()}
+    assert refit_score(store, baseline, config, **options, loaded=loaded) == expected
+    assert len(calls) == 1 and expected[0]['score'] == .75
+    loaded['fit_input_sha256'] = 'b' * 64
+    with pytest.raises(ValueError, match='preloaded refit differs'):
+        refit_score(store, baseline, config, **options, loaded=loaded)

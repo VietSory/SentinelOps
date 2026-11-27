@@ -46,6 +46,11 @@ def main(argv=None):
         if name in ('fit', 'calibrate', 'score'):
             sub.add_argument('--lane-a-evidence', type=Path,
                              help='Verify existing Alibaba development artifacts against pinned evidence.')
+        if name == 'score':
+            sub.add_argument('--candidates-sha256')
+            sub.add_argument('--registration-sha256')
+            sub.add_argument('--seal-sha256')
+            sub.add_argument('--capture-project', type=Path, default=Path(__file__).resolve().parents[1])
     for name in ('freeze-protocol', 'verify', 'package'):
         commands.add_parser(name)
     seal = commands.add_parser('seal-capture')
@@ -105,11 +110,28 @@ def main(argv=None):
             result.update(status='ready', group=group, verified_slots=len(receipt['slots']),
                           registration_sha256=args.registration_sha256)
         elif args.command == 'seal-capture' and args.registration_sha256:
+            import hashlib
             from sentinelops.ml.model_benchmark_holdout_capture import seal_capture
 
             receipt = seal_capture(args.root, args.registration_sha256, project=args.capture_project)
             result.update(status='ready', verified_slots=receipt['slot_count'],
-                          registration_sha256=args.registration_sha256, capture_sealed=True)
+                          registration_sha256=args.registration_sha256, capture_sealed=True,
+                          seal_sha256=hashlib.sha256((args.root / 'capture/sealed.json').read_bytes()).hexdigest())
+        elif args.command == 'score' and any(value is not None for value in
+                (args.candidates_sha256, args.registration_sha256, args.seal_sha256)):
+            if (args.lane != 'a' or args.lane_a_evidence is not None or args.lane_b_input is not None
+                    or not all((args.candidates_sha256, args.registration_sha256, args.seal_sha256))):
+                raise ValueError('sealed scoring requires Lane A and all three pins without development inputs')
+            from sentinelops.ml.model_benchmark_forecast_export import write_forecast_artifacts
+            from sentinelops.ml.model_benchmark_forecast_replay import score_sealed
+
+            scored = score_sealed(args.root, candidates_sha256=args.candidates_sha256,
+                registration_sha256=args.registration_sha256, seal_sha256=args.seal_sha256,
+                capture_project=args.capture_project)
+            manifest = write_forecast_artifacts(args.root, scored)
+            result.update(status='ready', scope=manifest['dataset'], runs=manifest['runs'],
+                          row_counts=manifest['row_counts'], q07_status=manifest['q07_status'],
+                          manifest='report/forecast-manifest.json', activation_allowed=False)
         elif args.command == 'freeze-candidates':
             if not args.lane_a_evidence or not args.lane_b_fit_sha256:
                 result.update(status='blocked', reasons=[BLOCKED[args.command]])

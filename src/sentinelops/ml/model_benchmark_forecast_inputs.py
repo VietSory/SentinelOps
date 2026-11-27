@@ -101,7 +101,7 @@ def load_frozen_models(root, *, candidates_sha256):
             or stable_id(config) != manifest['provenance']['config_sha256']
             or config['features'] != manifest['ordered_features']):
         raise ValueError('frozen baseline bundle or feature config differs')
-    models = {}
+    models, loaded_models = {}, {}
     for name, key, self_only in (('ltfp_graph', 'graph', False), ('ltfp_self_only', 'self_only', True)):
         entry = fit['models'][key]
         identity, pin = entry['identity'], lane['ltfp_metadata_sha256'][key]
@@ -109,8 +109,10 @@ def load_frozen_models(root, *, candidates_sha256):
         if (entry['metadata_sha256'] != pin or identity.get('weights_status') != 'development-fitted'
                 or identity.get('self_only') is not self_only or identity.get('config_sha256') != stable_id(config)):
             raise ValueError('frozen LTFP identity differs from its fitted receipt')
-        load_ltfp(directory, metadata_sha256=pin, expected_identity=identity)
+        model = load_ltfp(directory, metadata_sha256=pin, expected_identity=identity)
         models[name] = {'directory': directory, 'metadata_sha256': pin, 'identity': identity, 'fitted_verified': True}
+        loaded_models[name] = {'directory': directory, 'metadata_sha256': pin,
+                               'identity_sha256': stable_id(identity), 'model': model}
     xgb_dir = root / 'preflight/development-k16-xgboost-v5'
     xgb_bytes = (xgb_dir / 'manifest.json').read_bytes()
     xgb = json.loads(xgb_bytes)
@@ -122,9 +124,15 @@ def load_frozen_models(root, *, candidates_sha256):
         raise ValueError('frozen XGBoost refit differs from the paired training input')
     model = XGBClassifier()
     model.load_model(xgb_dir / 'risk.json')
+    xgb_pin = hashlib.sha256(xgb_bytes).hexdigest()
     return {'bundle': bundle, 'manifest_sha256': candidate['baseline_bundle']['manifest_sha256'],
             'config': config, 'models': models, 'xgboost_refit': {'directory': xgb_dir,
-                'manifest_sha256': hashlib.sha256(xgb_bytes).hexdigest(), 'fit_input_sha256': fit['input_sha256']}}
+                'manifest_sha256': xgb_pin, 'fit_input_sha256': fit['input_sha256']},
+            'runtime': {'bundle': {'directory': bundle, 'manifest_sha256': candidate['baseline_bundle']['manifest_sha256'],
+                                   'manifest': manifest, 'risk': risk},
+                        'ltfp': loaded_models,
+                        'xgboost': {'directory': xgb_dir, 'manifest_sha256': xgb_pin,
+                                    'fit_input_sha256': fit['input_sha256'], 'manifest': xgb, 'model': model}}}
 
 
 def source_topology(run, *, project, capture_commit):

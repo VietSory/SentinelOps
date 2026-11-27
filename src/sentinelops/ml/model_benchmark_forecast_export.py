@@ -1,6 +1,15 @@
 """Build deterministic Lane A prediction, event and match ledgers."""
+from collections import Counter
+import csv
+import hashlib
+import io
+from pathlib import Path
+import platform
+
 from sentinelops.contracts import utc_time
 from sentinelops.ml.model_benchmark_forecast import MODELS, forecast_state
+from sentinelops.ml.model_benchmark_protocol import _bytes, publish_freeze
+from sentinelops.ml.model_benchmark_reports import summarize_sealed_forecasts
 from sentinelops.telemetry.core import stable_id, timestamp
 from sentinelops.workers.risk import EpisodeTracker
 
@@ -104,3 +113,120 @@ def forecast_tables(scored, summary):
     matches.sort(key=lambda row: (row['group_id'], row['run_id'], row['service'], row['model_id'],
                                   row['event_id'] or '', row['decision_at'] or ''))
     return {'predictions': predictions, 'events': events, 'matches': matches}
+
+
+def write_forecast_artifacts(root, scored):
+    """Publish immutable local-only Lane A tables after a complete sealed replay."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    root = Path(root).resolve()
+    expected_kinds = {'healthy', 'payment-abrupt', 'inventory-abrupt', 'payment-gradual-high',
+                      'inventory-gradual-high', 'payment-gradual-low', 'inventory-gradual-low'}
+    groups = {}
+    for case in scored['cases']:
+        groups.setdefault(case['group_id'], []).append(case['kind'])
+    if (len(scored['cases']) != 35 or len(groups) != 5
+            or any(len(kinds) != 7 or set(kinds) != expected_kinds for kinds in groups.values())):
+        raise ValueError('forecast export requires all 35 registered slots across five groups')
+    summary = summarize_sealed_forecasts(scored)
+    tables = forecast_tables(scored, summary)
+    time = pa.timestamp('us', tz='UTC')
+    string = pa.string()
+    schemas = {
+        'predictions': pa.schema([(name, kind) for name, kind in (
+            ('dataset', string), ('group_id', string), ('run_id', string), ('service', string),
+            ('bucket_end', time), ('model_id', string), ('available_at', time), ('decision_at', time),
+            ('clock', string), ('eligible', pa.bool_()), ('reason', string), ('y', pa.int8()),
+            ('score', pa.float64()), ('state', string), ('episode_id', string), ('alert_id', string),
+            ('graph_neighbor_count', pa.int16()), ('feature_ref', string))]),
+        'events': pa.schema([(name, kind) for name, kind in (
+            ('dataset', string), ('subset', string), ('event_id', string), ('group_id', string), ('run_id', string),
+            ('service', string), ('onset_at', time), ('confirmed_at', time), ('kind', string),
+            ('oracle_ref', string), ('eligible', pa.bool_()), ('reason', string))]),
+        'matches': pa.schema([(name, kind) for name, kind in (
+            ('dataset', string), ('subset', string), ('model_id', string), ('group_id', string), ('run_id', string),
+            ('service', string), ('event_id', string), ('alert_id', string), ('decision_at', time),
+            ('lead_seconds', pa.float64()), ('status', string))]),
+    }
+    payloads = {}
+    for name, schema in schemas.items():
+        converted = []
+        for row in tables[name]:
+            converted.append({field.name: (utc_time(row[field.name]) if pa.types.is_timestamp(field.type)
+                              and row.get(field.name) is not None else row.get(field.name)) for field in schema})
+        buffer = io.BytesIO()
+        pq.write_table(pa.Table.from_pylist(converted, schema=schema), buffer, compression='zstd')
+        payloads[f'score/a/{name}.parquet'] = buffer.getvalue()
+    gradual, healthy = summary['reports']['gradual'], summary['reports']['healthy']
+    fieldnames = ('model_id', 'common_windows', 'unavailable_windows', 'average_precision', 'pr_auc_trapezoidal', 'prevalence',
+                  'ranking_missing_reason',
+                  'eligible_events', 'recall_ge60', 'recall_ge180', 'lead_p10_seconds', 'lead_p50_seconds',
+                  'late', 'miss', 'lead_missing_reason', 'no_breach_runs', 'no_breach_warned_runs',
+                  'healthy_service_hours', 'false_warnings', 'false_warnings_per_hour', 'exposure_missing_reason',
+                  'delta_recall_vs_xgboost_ci_lower', 'delta_recall_vs_xgboost_ci_upper',
+                  'delta_recall_graph_vs_self_ci_lower', 'delta_recall_graph_vs_self_ci_upper',
+                  'paired_vs_xgboost_events', 'paired_vs_xgboost_lead_p50_seconds',
+                  'paired_graph_vs_self_events', 'paired_graph_vs_self_lead_p50_seconds',
+                  'graph_connected_windows', 'graph_isolated_windows', 'graph_unavailable_windows')
+    stream = io.StringIO(newline='')
+    writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator='\n')
+    writer.writeheader()
+    gradual_runs = {case['run_id'] for case in scored['cases'] if '-gradual-' in case['kind']}
+    for model in MODELS:
+        metrics = gradual['models'][model]
+        lead, no_breach = metrics['lead'], metrics['no_breach']
+        exposure = healthy['models'][model]['healthy_exposure']
+        intervals = gradual['bootstrap']['intervals']
+        versus_xgb = intervals.get(model + '_minus_xgboost', {})
+        versus_self = intervals.get('ltfp_graph_minus_ltfp_self_only', {}) if model == 'ltfp_graph' else {}
+        paired = gradual['paired_lead']
+        paired_xgb = paired.get(model + '_minus_xgboost', {})
+        paired_self = paired.get('ltfp_graph_minus_ltfp_self_only', {}) if model == 'ltfp_graph' else {}
+        model_rows = [row for row in tables['predictions'] if row['model_id'] == model and row['run_id'] in gradual_runs]
+        graph_rows = [row for row in model_rows if row['graph_neighbor_count'] is not None]
+        writer.writerow({'model_id': model, 'common_windows': gradual['summary']['common_windows'],
+            'unavailable_windows': metrics['unavailable_windows'],
+            'average_precision': metrics['average_precision'], 'pr_auc_trapezoidal': metrics['pr_auc_trapezoidal'],
+            'prevalence': metrics['prevalence'], 'ranking_missing_reason': metrics['missing_reason'],
+            'eligible_events': lead['events'],
+            'recall_ge60': lead['recall_ge60'], 'recall_ge180': lead['recall_ge180'],
+            'lead_p10_seconds': lead['p10'], 'lead_p50_seconds': lead['p50'], 'late': lead['late'], 'miss': lead['miss'],
+            'lead_missing_reason': lead['missing_reason'],
+            'no_breach_runs': no_breach['runs'], 'no_breach_warned_runs': no_breach['warned_runs'],
+            'healthy_service_hours': exposure['service_hours'], 'false_warnings': exposure['false_warnings'],
+            'false_warnings_per_hour': exposure['per_service_hour'], 'exposure_missing_reason': exposure['missing_reason'],
+            'delta_recall_vs_xgboost_ci_lower': versus_xgb.get('lower'),
+            'delta_recall_vs_xgboost_ci_upper': versus_xgb.get('upper'),
+            'delta_recall_graph_vs_self_ci_lower': versus_self.get('lower'),
+            'delta_recall_graph_vs_self_ci_upper': versus_self.get('upper'),
+            'paired_vs_xgboost_events': paired_xgb.get('common_matched_events'),
+            'paired_vs_xgboost_lead_p50_seconds': paired_xgb.get('delta_p50_seconds'),
+            'paired_graph_vs_self_events': paired_self.get('common_matched_events'),
+            'paired_graph_vs_self_lead_p50_seconds': paired_self.get('delta_p50_seconds'),
+            'graph_connected_windows': sum(row['graph_neighbor_count'] > 0 for row in graph_rows) if model.startswith('ltfp_') else None,
+            'graph_isolated_windows': sum(row['graph_neighbor_count'] == 0 for row in graph_rows) if model.startswith('ltfp_') else None,
+            'graph_unavailable_windows': len(model_rows) - len(graph_rows) if model.startswith('ltfp_') else None})
+    payloads['report/forecast.csv'] = stream.getvalue().encode()
+    payloads['report/forecast.json'] = _bytes(summary)
+    counts = {'predictions': len(tables['predictions']), 'events': len(tables['events']),
+              'matches': len(tables['matches']), 'forecast_rows': len(MODELS)}
+    artifacts = []
+    for relative, data in sorted(payloads.items()):
+        target = (root / relative).resolve()
+        if not target.is_relative_to(root):
+            raise ValueError('forecast artifact escapes its benchmark root')
+        artifacts.append({'path': relative, 'sha256': hashlib.sha256(data).hexdigest(), 'bytes': len(data)})
+    manifest = {'schema_version': 'benchmark-forecast-artifacts/sealed-v1', 'dataset': 'local-latency-holdout',
+        'clock': scored['clock'], 'scorer_commit': scored['scorer_commit'], 'capture_commit': scored['capture_commit'],
+        'candidates_sha256': scored['candidates_sha256'], 'registration_sha256': scored['registration_sha256'],
+        'seal_sha256': scored['seal_sha256'], 'groups': sorted(groups), 'runs': len(scored['cases']),
+        'kind_counts': dict(sorted(Counter(case['kind'] for case in scored['cases']).items())),
+        'row_counts': counts, 'artifacts': artifacts, 'q07_status': summary['q07']['status'],
+        'python_version': platform.python_version(),
+        'pyarrow_version': pa.__version__, 'activation_allowed': False}
+    for relative, data in sorted(payloads.items()):
+        publish_freeze(root / relative, data, conflict='different forecast artifact already exists')
+    publish_freeze(root / 'report/forecast-manifest.json', _bytes(manifest),
+                   conflict='different forecast manifest already exists')
+    return manifest

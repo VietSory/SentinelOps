@@ -105,10 +105,38 @@ def test_capture_commands_require_registration_and_dispatch_group(tmp_path, monk
         assert result['status'] == 'ready' and result['verified_slots'] == 7
         assert result['group'] == 'bench-final-01'
     assert len(calls) == 2 and all(call[2] == 'a' * 64 for call in calls)
-    monkeypatch.setattr(capture, 'seal_capture', lambda *args, **kwargs: {'slot_count': 35})
+    def seal(*args, **kwargs):
+        path = tmp_path / 'capture/sealed.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('fixture')
+        return {'slot_count': 35}
+    monkeypatch.setattr(capture, 'seal_capture', seal)
     assert model_benchmark.main(common + ['seal-capture', '--registration-sha256', 'a' * 64]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result['capture_sealed'] is True and result['verified_slots'] == 35
+
+
+def test_sealed_score_requires_lane_a_and_all_pins(tmp_path, monkeypatch, capsys):
+    from scripts import model_benchmark
+    from sentinelops.ml import model_benchmark_forecast_export, model_benchmark_forecast_replay
+
+    calls = []
+    def score(root, **kwargs):
+        calls.append(kwargs)
+        return {'scored': True}
+    monkeypatch.setattr(model_benchmark_forecast_replay, 'score_sealed', score)
+    monkeypatch.setattr(model_benchmark_forecast_export, 'write_forecast_artifacts', lambda root, data: {
+        'dataset': 'local-latency-holdout', 'runs': 35, 'row_counts': {'predictions': 10}, 'q07_status': 'INCONCLUSIVE'})
+    common = ['--root', str(tmp_path), '--protocol', str(tmp_path / 'unused.json')]
+    pins = ['--candidates-sha256', 'a' * 64, '--registration-sha256', 'b' * 64, '--seal-sha256', 'c' * 64]
+    assert model_benchmark.main(common + ['score', '--lane', 'a', *pins]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['status'] == 'ready' and result['runs'] == 35 and result['activation_allowed'] is False
+    assert len(calls) == 1 and calls[0]['seal_sha256'] == 'c' * 64
+    assert model_benchmark.main(common + ['score', '--lane', 'b', *pins]) == 1
+    assert json.loads(capsys.readouterr().out)['status'] == 'invalid'
+    assert model_benchmark.main(common + ['score', '--lane', 'a', '--seal-sha256', 'c' * 64]) == 1
+    assert json.loads(capsys.readouterr().out)['status'] == 'invalid' and len(calls) == 1
 
 
 def test_actual_protocol_api_invalid_and_verify_missing(tmp_path):

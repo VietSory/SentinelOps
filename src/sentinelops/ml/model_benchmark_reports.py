@@ -51,9 +51,24 @@ def summarize_sealed_forecasts(scored):
     reports = {name: forecast_report(items['rows'], items['events'], truth=items['truth'],
                thresholds=rules['thresholds'], policy_identity=rules['policy_identity'], provenance=provenance)
                for name, items in subsets.items()}
+    gradual = reports['gradual']
+    graph, slope = gradual['models']['ltfp_graph'], gradual['models']['slope']
+    recall, average_precision = graph['lead']['recall_ge60'], graph['average_precision']
+    prevalence, slope_precision = graph['prevalence'], slope['average_precision']
+    available = (gradual['bootstrap']['groups'] >= 5 and graph['lead']['events'] > 0
+                 and all(value is not None for value in (recall, average_precision, prevalence, slope_precision)))
+    criteria = {'recall_ge60_at_least_070': recall >= .70 if recall is not None else None,
+                'average_precision_above_prevalence': average_precision > prevalence
+                    if average_precision is not None and prevalence is not None else None,
+                'average_precision_above_slope': average_precision > slope_precision
+                    if average_precision is not None and slope_precision is not None else None}
+    decision = {'status': 'INCONCLUSIVE' if not available else 'PASS' if all(criteria.values()) else 'FAIL',
+                'criteria': criteria, 'eligible_events': graph['lead']['events'],
+                'groups': gradual['bootstrap']['groups'],
+                'reason': None if available else 'insufficient-groups-events-or-labelled-common-windows'}
     return {'schema_version': 'benchmark-forecast-report/sealed-v1', 'scope': scored['scope'],
             'clock': scored['clock'], 'provenance': provenance, 'cases': len(run_ids),
-            'reports': reports, 'activation_allowed': False}
+            'reports': reports, 'q07': decision, 'activation_allowed': False}
 
 
 def _quantile(values, probability):
@@ -182,12 +197,22 @@ def forecast_report(rows, events, *, thresholds=None, policy_identity=None,
         output[model] = metrics
     declared_groups = sorted(set(groups.values()))
     pairs = [(m, 'xgboost') for m in MODELS if m != 'xgboost'] + [('ltfp_graph', 'ltfp_self_only')]
-    intervals = {}
+    intervals, paired_lead = {}, {}
     rng = random.Random(42)
     draws = [[rng.choice(declared_groups) for _ in declared_groups] for _ in range(1000)] if declared_groups else []
     by_event = {e['event_id']: e['group_id'] for e in events}
     for left, right in pairs:
         ready = all(output[m]['episodes']['status'] == 'ready' for m in (left, right))
+        lead_maps = {model: {match['event_id']: match['lead_seconds']
+                            for match in output[model]['episodes'].get('matches', [])} for model in (left, right)}
+        common_events = sorted(event_id for event_id in by_event
+                               if all(lead_maps[model].get(event_id) is not None for model in (left, right))) if ready else []
+        lead_delta = [lead_maps[left][event_id] - lead_maps[right][event_id] for event_id in common_events]
+        paired_lead[left + '_minus_' + right] = {'common_matched_events': len(common_events),
+            'delta_p10_seconds': _quantile(lead_delta, .1), 'delta_p50_seconds': _quantile(lead_delta, .5),
+            'left_misses': sum(lead_maps[left].get(event_id) is None for event_id in by_event) if ready else None,
+            'right_misses': sum(lead_maps[right].get(event_id) is None for event_id in by_event) if ready else None,
+            'missing_reason': None if common_events else 'no-common-matched-events' if ready else 'episodes-not-ready'}
         samples = []
         if ready and len(declared_groups) >= 5:
             counts = {g: sum(e['group_id'] == g for e in events) for g in declared_groups}
@@ -202,6 +227,7 @@ def forecast_report(rows, events, *, thresholds=None, policy_identity=None,
             'bootstrap': {'groups': len(declared_groups), 'group_ids': declared_groups,
                           'event_groups': len({e['group_id'] for e in events}), 'replicates': 1000, 'seed': 42, 'intervals': intervals,
                           'method': 'paired-whole-group-percentile-linear'},
+            'paired_lead': paired_lead,
             'limitations': ['Caller certifies truth, identities and cutoff clocks.',
                             'Healthy exposure supports whole verified no-breach run/service timelines only.',
                             'Five declared groups is a computational guard, not a scientific threshold or evidence of IID support.']}
