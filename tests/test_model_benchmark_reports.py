@@ -47,6 +47,9 @@ def test_lead_denominators_and_group_bootstrap():
     assert result['bootstrap']['intervals']['ltfp_graph_minus_ltfp_self_only']['valid_replicates'] == 1000
     assert result['bootstrap']['intervals']['ltfp_graph_minus_ltfp_self_only']['upper'] == 1
     assert result['bootstrap']['intervals']['ltfp_graph_minus_xgboost']['lower'] == 0
+    paired = result['paired_lead']['ltfp_graph_minus_xgboost']
+    assert paired['common_matched_events'] == 5 and paired['delta_p50_seconds'] == 0
+    assert result['paired_lead']['ltfp_graph_minus_ltfp_self_only']['right_misses'] == 5
     assert report(list(reversed(rows)), list(reversed(events))) == result
     assert (rows, events) == before
     assert result['models']['slope']['no_breach']['warnings'] is None

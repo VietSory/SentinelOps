@@ -13,7 +13,7 @@ from sentinelops.telemetry.core import stable_id
 def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
                 node_ids, topology, expected_graph_sha256, config, bundle,
                 manifest_sha256, oracle, health_policy, run_id, group_id,
-                models=None, fixture_scope=False, xgboost_refit=None):
+                models=None, fixture_scope=False, xgboost_refit=None, runtime=None):
     """Score a target with trusted local, digest-pinned artifacts.
 
     models optionally maps ltfp_graph/ltfp_self_only to directory,
@@ -42,7 +42,14 @@ def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
     specs = models or {}
     if set(specs) - {'ltfp_graph', 'ltfp_self_only'} or not expected_graph_sha256:
         raise ValueError('unknown model or missing inference topology pin')
-    manifest = read_bundle_manifest(Path(bundle), expected_manifest_sha256=manifest_sha256)
+    if runtime is None:
+        manifest = read_bundle_manifest(Path(bundle), expected_manifest_sha256=manifest_sha256)
+    else:
+        loaded_bundle = runtime['bundle']
+        if (Path(loaded_bundle['directory']).resolve() != Path(bundle).resolve()
+                or loaded_bundle['manifest_sha256'] != manifest_sha256):
+            raise ValueError('preloaded baseline differs from the pinned bundle')
+        manifest = loaded_bundle['manifest']
     if (manifest['provenance']['config_sha256'] != stable_id(config)
             or manifest['ordered_features'] != config['features']):
         raise ValueError('baseline and graph feature config mismatch')
@@ -51,7 +58,7 @@ def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
                 or spec['identity']['config_sha256'] != stable_id(config)):
             raise ValueError('model variant or config mismatch')
     baseline = baseline_scores(store, batch_ref, service, as_of=cutoff, bundle=bundle,
-                               manifest_sha256=manifest_sha256)
+                               manifest_sha256=manifest_sha256, loaded=runtime['bundle'] if runtime is not None else None)
     if baseline['config_sha256'] != stable_id(config):
         raise ValueError('baseline and graph feature config mismatch')
     scores = dict(baseline['scores'])
@@ -59,7 +66,8 @@ def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
                         'manifest_sha256': manifest_sha256, 'scope': 'pinned-baseline'}
                   for name in scores}
     if xgboost_refit is not None:
-        scores['xgboost'], identities['xgboost'] = refit_score(store, baseline, config, **xgboost_refit)
+        scores['xgboost'], identities['xgboost'] = refit_score(
+            store, baseline, config, **xgboost_refit, loaded=runtime['xgboost'] if runtime is not None else None)
     elif not fixture_scope:
         scores['xgboost'] = {'score': None, 'missing_reason': 'benchmark-refit-required'}
         identities['xgboost'] = {'scope': 'unavailable'}
@@ -72,8 +80,15 @@ def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
             identity = spec['identity']
             from sentinelops.ml.ltfp_model import load, predict
 
-            model = load(spec['directory'], metadata_sha256=spec['metadata_sha256'],
-                         expected_identity=identity)
+            if runtime is None:
+                model = load(spec['directory'], metadata_sha256=spec['metadata_sha256'], expected_identity=identity)
+            else:
+                item = runtime['ltfp'][name]
+                if (Path(item['directory']).resolve() != Path(spec['directory']).resolve()
+                        or item['metadata_sha256'] != spec['metadata_sha256']
+                        or item['identity_sha256'] != stable_id(identity)):
+                    raise ValueError('preloaded LTFP differs from its pinned identity')
+                model = item['model']
             fitted = identity['weights_status'] == 'development-fitted' and spec.get('fitted_verified') is True
             scope = 'development-fitted' if fitted else 'fixture' if fixture_scope else 'unavailable'
             identities[name] = {'identity': dict(identity), 'metadata_sha256': spec['metadata_sha256'],
@@ -91,7 +106,8 @@ def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
                         value = predict(model, identity, graph,
                                         expected_graph_sha256=expected_graph_sha256)[service]
                         index = graph['node_ids'].index(service)
-                        neighbor_count = sum(graph['attention_mask'][index]) - graph['attention_mask'][index][index]
+                        neighbor_count = (sum(graph['attention_mask'][index]) - graph['attention_mask'][index][index]
+                                          if graph['target_available'][index] else None)
                         graph_provenance[name] = {'graph_sha256': graph['graph_sha256'],
                             'mask_sha256': graph['mask_sha256'], 'input_sha256': stable_id(graph),
                             'raw_refs': graph['raw_refs'], 'as_of': graph['as_of'],

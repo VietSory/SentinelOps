@@ -91,6 +91,62 @@ def test_four_scores_shared_frame_and_future_suffix(batch_case):
     assert args == before
 
 
+def test_replayed_batch_scores_all_services_with_real_fixture_models(batch_case, monkeypatch):
+    from sentinelops.contracts import utc_time
+    from sentinelops.ml import model_benchmark_forecast_replay as replay
+
+    store, args = batch_case
+    anchor, cutoff = args['anchor'], args['as_of']
+    base = store.read(args['source_feature_ref'])
+    features = [store.write('features', {**base, 'service': service}) for service in BUSINESS_ROUTES]
+    normalization = store.write('manifests', {'feature_refs': features})
+    batch = {**store.read(args['batch_ref']), 'normalization_manifest_ref': normalization}
+    batch_ref = store.write('manifests', batch)
+    actual_score_batch = replay.score_batch
+    def score_fixture(store, **kwargs):
+        return actual_score_batch(store, **{**kwargs, 'fixture_scope': True})
+    monkeypatch.setattr(replay, 'score_batch', score_fixture)
+    run = {'run_id': args['run_id'], 'session_id': args['group_id'], 'warmup_end_at': anchor,
+           'ended_at': timestamp(utc_time(anchor) + timedelta(minutes=2))}
+    graph = {'node_ids': args['node_ids'], 'topology': args['topology'], 'graph_sha256': args['expected_graph_sha256']}
+    models = {'config': args['config'], 'bundle': args['bundle'], 'manifest_sha256': args['manifest_sha256'],
+              'models': args['models'], 'xgboost_refit': None}
+    case = {'run_id': args['run_id'], 'group_id': args['group_id']}
+    batches = [{'bucket_end': anchor, 'prediction_cutoff': cutoff, 'source_available_at': cutoff,
+                'batch_ref': batch_ref, 'missing_reason': None}]
+    result = replay.score_batches(store, batches, case=case, run=run, graph=graph, models=models,
+                                  oracle=args['oracle'], policy=args['health_policy'])
+    assert len(result['rows']) == 12 and all(row['score'] is not None for row in result['rows'])
+    assert {row['service'] for row in result['rows']} == set(BUSINESS_ROUTES)
+    assert all(row['source_available_at'] == cutoff for row in result['rows'])
+
+
+def test_preloaded_models_match_uncached_scores_without_reloading(batch_case, monkeypatch):
+    from sentinelops.ml import ltfp_model, model_benchmark_scoring
+    from sentinelops.ml.models import load_bundle
+    from sentinelops.telemetry.core import stable_id
+
+    store, args = batch_case
+    expected = score_batch(store, **args)
+    manifest, _, risk = load_bundle(args['bundle'], expected_manifest_sha256=args['manifest_sha256'])
+    loaded = {}
+    for name, spec in args['models'].items():
+        loaded[name] = {'directory': spec['directory'], 'metadata_sha256': spec['metadata_sha256'],
+                        'identity_sha256': stable_id(spec['identity']),
+                        'model': ltfp_model.load(spec['directory'], metadata_sha256=spec['metadata_sha256'],
+                                                 expected_identity=spec['identity'])}
+    runtime = {'bundle': {'directory': args['bundle'], 'manifest_sha256': args['manifest_sha256'],
+                          'manifest': manifest, 'risk': risk}, 'ltfp': loaded}
+    def forbidden(*args, **kwargs):
+        raise AssertionError('frozen model unexpectedly reloaded')
+    monkeypatch.setattr(model_benchmark_scoring, 'load_bundle', forbidden)
+    monkeypatch.setattr(ltfp_model, 'load', forbidden)
+    assert score_batch(store, **args, runtime=runtime) == expected
+    runtime['ltfp']['ltfp_graph']['metadata_sha256'] = '0' * 64
+    with pytest.raises(ValueError, match='preloaded LTFP differs'):
+        score_batch(store, **args, runtime=runtime)
+
+
 def test_missing_models_untrained_and_missing_history(batch_case):
     store, args = batch_case
     rows = score_batch(store, **{**args, 'models': {}})
@@ -184,3 +240,5 @@ def test_missing_neighbor_or_target(batch_case, missing_service):
         if row['model'].startswith('ltfp'):
             assert row['graph_provenance']['raw_refs']
             assert row['graph_provenance']['input_sha256']
+            if missing_service == args['service']:
+                assert row['graph_provenance']['neighbor_count'] is None
