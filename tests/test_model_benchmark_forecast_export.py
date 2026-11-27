@@ -35,6 +35,15 @@ def test_forecast_ledgers_match_events_and_keep_unmatched_alerts():
     assert sum(row['status'] == 'matched' for row in tables['matches']) == len(MODELS)
     assert sum(row['status'] == 'unmatched' for row in tables['matches']) == 2 * len(MODELS)
     assert all(row['lead_seconds'] == 60 for row in tables['matches'] if row['status'] == 'matched')
+    moved = deepcopy(scored)
+    for case in moved['cases']:
+        for row in case['rows']:
+            row['source_feature_ref'] = 'stable-source-feature'
+    stable = forecast_tables(moved, summarize_sealed_forecasts(moved))
+    for case in moved['cases']:
+        for row in case['rows']:
+            row['feature_ref'] = 'different-batch-derived-feature'
+    assert forecast_tables(moved, summarize_sealed_forecasts(moved)) == stable
     broken = deepcopy(summary)
     broken['reports']['gradual']['models']['slope']['episodes']['alerts'] += 1
     with pytest.raises(ValueError, match='alert count differs'):
@@ -85,6 +94,7 @@ def test_forecast_artifacts_are_complete_utc_and_immutable(tmp_path):
     assert {row['model_id'] for row in rows} == set(MODELS)
     assert json.loads((tmp_path / 'report/forecast.json').read_bytes())['q07']['status'] == 'FAIL'
     assert write_forecast_artifacts(tmp_path, scored) == manifest
+    assert write_forecast_artifacts(tmp_path, scored, verify_only=True) == manifest
     improved = deepcopy(scored)
     for case in improved['cases']:
         for row in case['rows']:
@@ -95,5 +105,12 @@ def test_forecast_artifacts_are_complete_utc_and_immutable(tmp_path):
         case['events'] = []
     assert summarize_sealed_forecasts(improved)['q07']['status'] == 'INCONCLUSIVE'
     (tmp_path / 'report/forecast.csv').write_text('changed')
+    with pytest.raises(ValueError, match='forecast verification artifact differs'):
+        write_forecast_artifacts(tmp_path, scored, verify_only=True)
     with pytest.raises(ValueError, match='different forecast artifact'):
         write_forecast_artifacts(tmp_path, scored)
+    missing = tmp_path / 'report/forecast.csv'
+    missing.unlink()
+    with pytest.raises(ValueError, match='forecast verification artifact missing'):
+        write_forecast_artifacts(tmp_path, scored, verify_only=True)
+    assert not missing.exists()

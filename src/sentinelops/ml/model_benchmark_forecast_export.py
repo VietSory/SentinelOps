@@ -58,7 +58,8 @@ def forecast_tables(scored, summary):
             'clock': scored['clock'], 'eligible': row['risk_label'] is not None,
             'reason': row['risk_missing_reason'] or row.get('score_missing_reason'), 'y': row['risk_label'],
             'score': row['score'], 'state': state, 'episode_id': episode_id, 'alert_id': alert_id,
-            'graph_neighbor_count': graph.get('neighbor_count'), 'feature_ref': row.get('feature_ref')})
+            'graph_neighbor_count': graph.get('neighbor_count'),
+            'feature_ref': row.get('source_feature_ref', row.get('feature_ref'))})
     events = []
     for case in scored['cases']:
         for event in case['events']:
@@ -115,12 +116,14 @@ def forecast_tables(scored, summary):
     return {'predictions': predictions, 'events': events, 'matches': matches}
 
 
-def write_forecast_artifacts(root, scored):
-    """Publish immutable local-only Lane A tables after a complete sealed replay."""
+def write_forecast_artifacts(root, scored, *, verify_only=False):
+    """Publish or read-only verify Lane A tables after a complete sealed replay."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
     root = Path(root).resolve()
+    if type(verify_only) is not bool:
+        raise ValueError('forecast verification mode must be boolean')
     expected_kinds = {'healthy', 'payment-abrupt', 'inventory-abrupt', 'payment-gradual-high',
                       'inventory-gradual-high', 'payment-gradual-low', 'inventory-gradual-low'}
     groups = {}
@@ -225,8 +228,16 @@ def write_forecast_artifacts(root, scored):
         'row_counts': counts, 'artifacts': artifacts, 'q07_status': summary['q07']['status'],
         'python_version': platform.python_version(),
         'pyarrow_version': pa.__version__, 'activation_allowed': False}
-    for relative, data in sorted(payloads.items()):
-        publish_freeze(root / relative, data, conflict='different forecast artifact already exists')
-    publish_freeze(root / 'report/forecast-manifest.json', _bytes(manifest),
-                   conflict='different forecast manifest already exists')
+    outputs = [*sorted(payloads.items()), ('report/forecast-manifest.json', _bytes(manifest))]
+    for relative, data in outputs:
+        path = root / relative
+        if verify_only:
+            try:
+                existing = path.read_bytes()
+            except FileNotFoundError as error:
+                raise ValueError('forecast verification artifact missing: ' + relative) from error
+            if existing != data:
+                raise ValueError('forecast verification artifact differs: ' + relative)
+        else:
+            publish_freeze(path, data, conflict='different forecast artifact already exists')
     return manifest

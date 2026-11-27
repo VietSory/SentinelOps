@@ -67,8 +67,13 @@ def main(argv=None):
     candidates.add_argument('--lane-b-fit-sha256')
     for name in ('report', 'verify-report'):
         sub = commands.add_parser(name)
-        sub.add_argument('--lane', choices=('b',))
+        sub.add_argument('--lane', choices=('a', 'b') if name == 'verify-report' else ('b',))
         sub.add_argument('--lane-b-input', type=Path)
+        if name == 'verify-report':
+            sub.add_argument('--candidates-sha256')
+            sub.add_argument('--registration-sha256')
+            sub.add_argument('--seal-sha256')
+            sub.add_argument('--capture-project', type=Path, default=Path(__file__).resolve().parents[1])
     for name in ('capture', 'verify-group'):
         sub = commands.add_parser(name)
         sub.add_argument('--group', required=True)
@@ -117,9 +122,9 @@ def main(argv=None):
             result.update(status='ready', verified_slots=receipt['slot_count'],
                           registration_sha256=args.registration_sha256, capture_sealed=True,
                           seal_sha256=hashlib.sha256((args.root / 'capture/sealed.json').read_bytes()).hexdigest())
-        elif args.command == 'score' and any(value is not None for value in
+        elif args.command in ('score', 'verify-report') and any(value is not None for value in
                 (args.candidates_sha256, args.registration_sha256, args.seal_sha256)):
-            if (args.lane != 'a' or args.lane_a_evidence is not None or args.lane_b_input is not None
+            if (args.lane != 'a' or getattr(args, 'lane_a_evidence', None) is not None or args.lane_b_input is not None
                     or not all((args.candidates_sha256, args.registration_sha256, args.seal_sha256))):
                 raise ValueError('sealed scoring requires Lane A and all three pins without development inputs')
             from sentinelops.ml.model_benchmark_forecast_export import write_forecast_artifacts
@@ -128,10 +133,11 @@ def main(argv=None):
             scored = score_sealed(args.root, candidates_sha256=args.candidates_sha256,
                 registration_sha256=args.registration_sha256, seal_sha256=args.seal_sha256,
                 capture_project=args.capture_project)
-            manifest = write_forecast_artifacts(args.root, scored)
+            manifest = write_forecast_artifacts(args.root, scored, verify_only=args.command == 'verify-report')
             result.update(status='ready', scope=manifest['dataset'], runs=manifest['runs'],
                           row_counts=manifest['row_counts'], q07_status=manifest['q07_status'],
-                          manifest='report/forecast-manifest.json', activation_allowed=False)
+                          manifest='report/forecast-manifest.json', activation_allowed=False,
+                          verified=args.command == 'verify-report')
         elif args.command == 'freeze-candidates':
             if not args.lane_a_evidence or not args.lane_b_fit_sha256:
                 result.update(status='blocked', reasons=[BLOCKED[args.command]])

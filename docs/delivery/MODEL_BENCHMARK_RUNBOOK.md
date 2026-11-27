@@ -309,6 +309,8 @@ Preflight hiện nhận `--candidates-sha256`, `--pilot-root` và `--pilot-ordin
 
 Sau khi seal, lấy SHA-256 của `capture/sealed.json`. Trên checkout scoring sạch, chạy `score --lane a` với `--candidates-sha256`, `--registration-sha256` và `--seal-sha256`. Scorer xác minh toàn bộ nguồn và model đã freeze, phát lại clock theo thời điểm dữ liệu đến, rồi ghi `score/a/{predictions,events,matches}.parquet`, `report/forecast.csv`, JSON và manifest. Báo cáo tách gradual, healthy và abrupt; không có kết quả final trước khi capture đủ năm nhóm. Bảng detector và báo cáo chung vẫn do handoff B đảm nhiệm.
 
+Để đối soát Lane A, chạy `verify-report --lane a` với cùng ba SHA và cùng commit scoring ghi trong manifest. Lệnh phát lại cohort, so từng byte của bảng và manifest, không ghi đè report; các artifact cache replay có thể được tạo lại. Lệnh này chưa xác minh bảng detector hoặc report chung.
+
 ```bash
 bm capture-preflight
 for group in 01 02 03 04 05; do

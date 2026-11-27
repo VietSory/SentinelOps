@@ -60,6 +60,30 @@ def test_replay_uses_real_health_worker_for_gap(tmp_path):
     assert last['previous_batch_ref'] == batches[1]['batch_ref']
 
 
+def test_replayed_source_features_are_stable_across_output_roots(tmp_path):
+    from datetime import timedelta
+    from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
+    from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
+    from test_health_source import POLICY, START, capture
+
+    rows = []
+    for minute in (1, 2):
+        end = START + timedelta(minutes=minute)
+        captures = [capture(service, end, errors=0, profile=SOURCE_PROFILE_V2) for service in BUSINESS_ROUTES]
+        rows.append({'bucket_end': timestamp(end), 'cutoff': timestamp(end + timedelta(seconds=30)),
+                     'missing_reason': None,
+                     'captures': [('artifact://raw/' + stable_id(raw) + '.json', raw) for raw in captures]})
+    async def run():
+        return [await replay_batches(rows, output_root=tmp_path / name, policy=POLICY) for name in ('first', 'second')]
+    outputs = asyncio.run(run())
+    features, batches = [], []
+    for store, records in outputs:
+        batches.append(records[-1]['batch_ref'])
+        batch = store.read(batches[-1])
+        features.append(store.read(batch['normalization_manifest_ref'])['feature_refs'])
+    assert batches[0] != batches[1] and features[0] == features[1]
+
+
 def test_scoring_keeps_every_service_and_missing_clock(tmp_path, monkeypatch):
     from sentinelops.ml.model_benchmark_forecast import MODELS, summarize_forecasts
     from sentinelops.telemetry.core import stable_id
