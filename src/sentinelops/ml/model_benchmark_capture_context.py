@@ -14,6 +14,7 @@ from sentinelops.experiments.local_corpus import (
     validate_end_context, volume_created_within,
 )
 from sentinelops.ml.model_benchmark_holdout import (
+    holdout_compose_project,
     verify_candidate_freeze, verify_capture_group, verify_capture_order, verify_capture_registration,
 )
 from sentinelops.ml.model_benchmark_protocol import _bytes, _ref, publish_freeze
@@ -47,7 +48,7 @@ def inspect_group_continuity(group, *, completed_at=None, require_running=True):
     return observed
 
 
-def ensure_previous_contexts_stopped(matrix, group_id, pilot_group):
+def ensure_previous_contexts_stopped(matrix, group_id, pilot_group, registration_sha256):
     """Keep pilot and prior holdout contexts stopped before each workload."""
     groups = matrix['groups']
     selected = [index for index, group in enumerate(groups) if group['group_id'] == group_id]
@@ -56,7 +57,7 @@ def ensure_previous_contexts_stopped(matrix, group_id, pilot_group):
     if docker('ps', '-q', '--filter', 'label=com.docker.compose.project=sentinelops-corpus-' + pilot_group).strip():
         raise ValueError('pilot source context is still running; finish and close it first')
     for group in groups[:selected[0]]:
-        previous = 'sentinelops-corpus-' + group['group_id']
+        previous = holdout_compose_project(registration_sha256, group['group_id'])
         if docker('ps', '-q', '--filter', 'label=com.docker.compose.project=' + previous).strip():
             raise ValueError('previous holdout source context is still running')
 
@@ -101,8 +102,8 @@ def _prepare_group(root, group_id, registration_sha256, *, project):
             matrix_sha256=registration['matrix_sha256'], candidates_sha256=registration['candidates_sha256'],
             source_profile=matrix['source_profile'])
         return {'status': 'complete', 'group_id': group_id}
-    name = 'sentinelops-corpus-' + group_id
-    ensure_previous_contexts_stopped(matrix, group_id, pilot['group_id'])
+    name = holdout_compose_project(registration_sha256, group_id)
+    ensure_previous_contexts_stopped(matrix, group_id, pilot['group_id'], registration_sha256)
     if group_path.exists():
         value = json.loads(group_path.read_bytes())
         if (value.get('schema_version') != 'benchmark-holdout-group-registration/v1'
@@ -110,7 +111,7 @@ def _prepare_group(root, group_id, registration_sha256, *, project):
                 or value.get('capture_registration_sha256') != registration_sha256 or value.get('compose_project') != name
                 or value.get('initial_payment_rows') != 0):
             raise ValueError('existing holdout group registration differs')
-        configure_compose(project, root / 'capture', group_id)
+        configure_compose(project, root / 'capture', group_id, name)
         if context_snapshot(project, name) != value['context']:
             raise ValueError('holdout source context changed after registration')
         inspect_group_continuity(value)
@@ -128,7 +129,7 @@ def _prepare_group(root, group_id, registration_sha256, *, project):
               'capture_registration_sha256': registration_sha256, 'capture_commit': registration['capture_commit'],
               'compose_project': name, 'created_at': timestamp(created)}
     publish_freeze(intent_path, _bytes(intent), conflict='different holdout provisioning intent exists')
-    configure_compose(project, root / 'capture', group_id)
+    configure_compose(project, root / 'capture', group_id, name)
     subprocess.run(['docker', 'compose', 'up', '--build', '-d', '--wait', '--wait-timeout', '180', *SOURCE_SERVICES],
                    cwd=project, check=True, timeout=600)
     context = context_snapshot(project, name)
@@ -280,7 +281,7 @@ def verify_slot_context(root, group_id, slot, run_id, registration_sha256, *, ca
             or not re.fullmatch(r'artifact://raw/[0-9a-f]{64}\.json', receipt['inspection_ref'])
             or group.get('schema_version') != 'benchmark-holdout-group-registration/v1'
             or group.get('group_id') != group_id or group.get('capture_registration_sha256') != registration_sha256
-            or group.get('capture_commit') != capture_commit or group.get('compose_project') != 'sentinelops-corpus-' + group_id
+            or group.get('capture_commit') != capture_commit or group.get('compose_project') != holdout_compose_project(registration_sha256, group_id)
             or type(group.get('initial_payment_rows')) is not int or group['initial_payment_rows'] != 0
             or registered_slot.get('schema_version') != 'benchmark-holdout-slot-registration/v1'
             or registered_slot.get('group_id') != group_id or registered_slot.get('slot_id') != slot['slot_id']

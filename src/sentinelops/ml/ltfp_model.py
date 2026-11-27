@@ -12,6 +12,8 @@ from sentinelops.telemetry.core import stable_id
 FEATURES = ('rt_log_level_rel', 'rt_slope_rel_per_min', 'rate_log_level_rel',
             'rate_slope_rel_per_min', 'rt_log_peak_rel', 'rt_log_baseline_to_breach')
 VERSION = 'ltfp-six-feature-gru-attention/development-v1'
+# Same member architecture; the score is the mean member probability.
+ENSEMBLE_VERSION = 'ltfp-six-feature-gru-attention-seed-mean/development-v2'
 
 
 class Forecast(nn.Module):
@@ -34,24 +36,54 @@ class Forecast(nn.Module):
         return self.risk(torch.cat((encoded, attended), dim=-1)).squeeze(-1)
 
 
+class SeedMean(nn.Module):
+    """Mean probability of independently seeded members, returned as a logit."""
+
+    def __init__(self, members):
+        super().__init__()
+        self.members = nn.ModuleList(Forecast() for _ in range(members))
+
+    def forward(self, values, attention_mask):
+        probability = torch.stack([torch.sigmoid(member(values, attention_mask)) for member in self.members]).mean(0)
+        return torch.logit(probability.clamp(1e-7, 1 - 1e-7))
+
+
+IDENTITY_KEYS = ('config_sha256', 'graph_sha256', 'self_only', 'seed', 'train_split',
+                 'calibration_split', 'weights_status')
+
+
 def metadata(*, config_sha256, graph_sha256, self_only, seed, train_split, calibration_split,
-             weights_status='untrained'):
-    """Caller supplies split identities; metadata never implies a fitted artifact."""
+             weights_status='untrained', member_seeds=None):
+    """Caller supplies split identities; metadata never implies a fitted artifact.
+
+    member_seeds selects the seed-mean architecture; seed is then its first member.
+    """
     if (any(not isinstance(value, str) or not value for value in
             (config_sha256, graph_sha256, train_split, calibration_split))
         or type(self_only) is not bool or type(seed) is not int
-        or weights_status not in ('untrained', 'development-fitted')):
+        or weights_status not in ('untrained', 'development-fitted')
+        or member_seeds is not None and (not isinstance(member_seeds, list) or len(member_seeds) < 2
+            or any(type(item) is not int for item in member_seeds) or len(set(member_seeds)) != len(member_seeds)
+            or member_seeds[0] != seed)):
         raise ValueError('invalid development model identity')
-    return dict(architecture=VERSION, feature_names=list(FEATURES), sequence_length=5,
-                dtype='float32', config_sha256=config_sha256, graph_sha256=graph_sha256,
-                self_only=self_only, seed=seed, train_split=train_split,
-                calibration_split=calibration_split, weights_status=weights_status)
+    identity = dict(architecture=VERSION if member_seeds is None else ENSEMBLE_VERSION,
+                    feature_names=list(FEATURES), sequence_length=5,
+                    dtype='float32', config_sha256=config_sha256, graph_sha256=graph_sha256,
+                    self_only=self_only, seed=seed, train_split=train_split,
+                    calibration_split=calibration_split, weights_status=weights_status)
+    if member_seeds is not None:
+        identity['member_seeds'] = list(member_seeds)
+    return identity
+
+
+def _expected_identity(identity):
+    options = {'member_seeds': identity['member_seeds']} if 'member_seeds' in identity else {}
+    return metadata(**{key: identity[key] for key in IDENTITY_KEYS}, **options)
 
 
 def predict(model, identity, graph_input, *, expected_graph_sha256):
     """Consume W2 build_graph_input output; return node-ID probabilities or None."""
-    expected = metadata(**{key: identity[key] for key in ('config_sha256', 'graph_sha256', 'self_only',
-                         'seed', 'train_split', 'calibration_split', 'weights_status')})
+    expected = _expected_identity(identity)
     if identity != expected:
         raise ValueError('unsupported model architecture/feature identity')
     data = graph_input
@@ -136,7 +168,10 @@ def load(directory, *, metadata_sha256, expected_identity):
     if hashlib.sha256(weights).hexdigest() != record['weights_sha256']:
         raise ValueError('weights checksum mismatch')
     import io
-    model = Forecast()
+    if _expected_identity(record['identity']) != record['identity']:
+        raise ValueError('unsupported model architecture/feature identity')
+    members = record['identity'].get('member_seeds')
+    model = Forecast() if members is None else SeedMean(len(members))
     model.load_state_dict(torch.load(io.BytesIO(weights), map_location='cpu', weights_only=True), strict=True)
     model.eval()
     return model

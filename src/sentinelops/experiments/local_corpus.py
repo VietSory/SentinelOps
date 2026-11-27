@@ -234,8 +234,8 @@ def acquisition_lock(store):
             fcntl.flock(stream, fcntl.LOCK_UN)
 
 
-def configure_compose(project, root, group):
-    name = 'sentinelops-corpus-' + group
+def configure_compose(project, root, group, name=None):
+    name = name or 'sentinelops-corpus-' + group
     directory = root / 'contexts' / group
     directory.mkdir(parents=True, exist_ok=True)
     override = directory / 'ports.yml'

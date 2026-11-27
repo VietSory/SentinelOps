@@ -14,6 +14,19 @@ from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id
 from sentinelops.telemetry.store import ArtifactStore
 
 
+# The first registration predates per-registration names; its capture keeps the group-only name.
+LEGACY_COMPOSE_REGISTRATIONS = frozenset({'8c4d842efe4327a5fab2bbd2c9f24899e75d70562d6473d64f1eee3c0ce247bf'})
+
+
+def holdout_compose_project(registration_sha256, group_id):
+    """Compose project for one registered holdout group; distinct registrations never share containers."""
+    if not _sha(registration_sha256) or not re.fullmatch('bench-final-[0-9]{2}', group_id):
+        raise ValueError('holdout compose project requires a registration and group')
+    if registration_sha256 in LEGACY_COMPOSE_REGISTRATIONS:
+        return 'sentinelops-corpus-' + group_id
+    return f'sentinelops-bench-{registration_sha256[:12]}-{group_id}'
+
+
 def _sha(value):
     return isinstance(value, str) and re.fullmatch('[0-9a-f]{64}', value) is not None
 
@@ -184,7 +197,8 @@ def verify_candidate_freeze(root, candidates_sha256):
             or candidate.get('protocol_sha256') != frozen['protocol_sha256']
             or candidate.get('holdout_opened') is not False
             or candidate.get('activation_allowed') is not False
-            or any(candidate.get('lanes', {}).get(lane, {}).get('status') != 'ready' for lane in ('a', 'b'))):
+            or candidate.get('frozen_lanes', ['a', 'b']) != frozen.get('frozen_lanes', ['a', 'b'])
+            or any(candidate.get('lanes', {}).get(lane, {}).get('status') != 'ready' for lane in frozen.get('frozen_lanes', ['a', 'b']))):
         raise ValueError('verified protocol and candidates required before reading holdout sources')
     return frozen
 
@@ -271,7 +285,7 @@ def verify_holdout_execution(project, config, session_id, output, authorization)
     if (group['schema_version'] != 'benchmark-holdout-group-registration/v1'
             or group['group_id'] != session_id or group['capture_commit'] != commit
             or group['capture_registration_sha256'] != authorization['registration_sha256']
-            or group['compose_project'] != 'sentinelops-corpus-' + session_id
+            or group['compose_project'] != holdout_compose_project(authorization['registration_sha256'], session_id)
             or type(group['initial_payment_rows']) is not int or group['initial_payment_rows'] != 0
             or not utc_time(registration['registered_at']) <= group_time <= slot_time <= datetime.now(timezone.utc)):
         raise ValueError('holdout group is not prospectively registered')
@@ -289,7 +303,7 @@ def verify_holdout_execution(project, config, session_id, output, authorization)
         raise ValueError('holdout source context changed after registration')
     from sentinelops.ml.model_benchmark_capture_context import ensure_previous_contexts_stopped, inspect_group_continuity
     pilot = json.loads(_ref(root, registration['pilot_receipt']))
-    ensure_previous_contexts_stopped(matrix, session_id, pilot['group_id'])
+    ensure_previous_contexts_stopped(matrix, session_id, pilot['group_id'], authorization['registration_sha256'])
     inspect_group_continuity(group)
     return {'capture_commit': commit, 'registered_at': slot['registered_at'], 'slot_id': slot['slot_id']}
 

@@ -272,3 +272,23 @@ def test_per_check_software_and_real_scopes(tmp_path,name):
         source_manifest_sha256=protocol['code']['source_manifest']['sha256']))
     result=audit_protocol(protocol,tmp_path)
     assert (result['status']=='ready') == (name not in ('A07','A08','B02','B06'))
+
+
+def test_lane_a_freezes_while_lane_b_is_blocked(tmp_path):
+    protocol,_=fixture(tmp_path)
+    protocol['checks']=[check for check in protocol['checks'] if check['test_id']!='B06']
+    assert audit_protocol(protocol,tmp_path)['lanes']['b']['status']=='blocked'
+    assert freeze_protocol(protocol,tmp_path)['status']=='blocked'
+    assert not (tmp_path/'freeze/protocol.json').exists()
+    result=freeze_protocol(protocol,tmp_path,lanes=('a',))
+    assert result['status']=='ready' and result['frozen_lanes']==['a'] and result['reasons']==[]
+    assert result['lanes']['b']['status']=='blocked'
+    assert verify_protocol(tmp_path)==result
+    wrapper=json.loads((tmp_path/'freeze/protocol.json').read_bytes())
+    assert wrapper['lanes']==['a']
+    content=(tmp_path/'freeze/protocol.json').read_bytes()
+    assert freeze_protocol(protocol,tmp_path)['status']=='blocked'
+    assert (tmp_path/'freeze/protocol.json').read_bytes()==content
+    wrapper['lanes']=['a','b']
+    (tmp_path/'freeze/protocol.json').write_bytes(json.dumps(wrapper,sort_keys=True,separators=(',',':')).encode())
+    with pytest.raises(ValueError,match='changed protocol freeze'): verify_protocol(tmp_path)

@@ -159,7 +159,7 @@ def run(root):
                   'positive_rows': int(labels.sum()), 'weighting': 'unit sample weight; baseline class balancing',
                   'estimator': config['risk']['estimator'], 'seed': 42,
                   'runtime': {'python': platform.python_version(), 'numpy': version('numpy'),
-                              'xgboost': version('xgboost')},
+                              'xgboost-cpu': version('xgboost-cpu')},
                   'model_sha256': file_sha256(stage / 'risk.json'),
                   'predictions_sha256': file_sha256(stage / 'predictions.json'), 'reload_max_abs_delta': delta,
                   'limitations': ['Training scores are in-sample and do not measure generalization.',

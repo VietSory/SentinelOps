@@ -14,7 +14,7 @@ from scripts.audit_ltfp_cohort import FIT_REPORT_SHA, runtime_feature_minutes, v
 from scripts.audit_ltfp_graph_support import read_graph
 from sentinelops.ml.alibaba_training import load_config, load_minutes, service_window_arrays, split_of
 from sentinelops.ml.ltfp_graph import build_graph_input
-from sentinelops.ml.ltfp_training import fit_pair
+from sentinelops.ml.ltfp_training import WEIGHTED_SETTINGS, fit_pair, fit_weighted_pair
 from sentinelops.public_data.alibaba import file_sha256
 from sentinelops.telemetry.core import stable_id, timestamp
 
@@ -42,7 +42,7 @@ def select_records(candidates):
     return positives + negatives[:MAX_SAMPLES - len(positives)]
 
 
-def run(root):
+def run(root, *, weighted=False):
     root = Path(root)
     validate_partitions({'train': TRAIN_PARTITION, 'calibration': CALIBRATION_PARTITION},
                         {'train': TRAIN_WINDOW, 'calibration': CALIBRATION_WINDOW})
@@ -116,6 +116,8 @@ def run(root):
                 'selection': 'all-positive-then-seed-hash-ranked-negative',
                 'availability': 'simulated-at-bucket-time',
                 'selection_sha256': stable_id(selected)}
+    if weighted:
+        protocol['fit_method'] = {'name': 'class-weighted-seed-mean', 'settings': WEIGHTED_SETTINGS}
     source = {'fit_report_sha256': FIT_REPORT_SHA, 'scope': 'alibaba-train-development',
               'clock': 'relative-minute-replay', 'availability': protocol['availability'],
               'rate_unit': 'normalized_call_rate_sum',
@@ -150,7 +152,8 @@ def run(root):
                  'train_split': 'sha256-service-buckets-0-5:minutes-0-179',
                  'calibration_split': 'sha256-service-buckets-6-7:minutes-180-359', 'role': 'train'}
     output = root / 'preflight/development-k16-fit-v5'
-    receipt = fit_pair(samples, admission=admission, expected_admission_sha256=stable_id(admission), output=output)
+    fit = fit_weighted_pair if weighted else fit_pair
+    receipt = fit(samples, admission=admission, expected_admission_sha256=stable_id(admission), output=output)
     return {'scope': 'development-only-not-holdout', 'activation_allowed': False,
             'protocol': protocol, 'admission': admission, 'fit_input_sha256': receipt['input_sha256'],
             'candidate_counts': {str(label): sum(row['label'] == label for row in candidates) for label in (0, 1)},
@@ -165,8 +168,10 @@ def run(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', required=True, type=Path)
+    parser.add_argument('--weighted', action='store_true',
+                        help='Class-weighted seed-mean fit (ltfp-paired-fit/development-v2).')
     args = parser.parse_args()
-    print(json.dumps(run(args.root), sort_keys=True, indent=2))
+    print(json.dumps(run(args.root, weighted=args.weighted), sort_keys=True, indent=2))
 
 
 if __name__ == '__main__':

@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from sentinelops.ml import model_benchmark_holdout as holdout
 from scripts.draft_benchmark_holdout import draft_matrix
 from sentinelops.ml import model_benchmark_capture_context as capture
 from sentinelops.telemetry.core import timestamp
@@ -158,7 +159,7 @@ def test_slot_context_seal_binds_run_and_cannot_be_replaced(tmp_path, monkeypatc
     selected = matrix['groups'][0]
     spec = selected['slots'][0]
     group_id, slot_id = selected['group_id'], spec['slot_id']
-    name, old = 'sentinelops-corpus-' + group_id, '2026-01-01T00:00:00Z'
+    name, old = holdout.holdout_compose_project('d' * 64, group_id), '2026-01-01T00:00:00Z'
     commit = 'a' * 40
     group = {'schema_version': 'benchmark-holdout-group-registration/v1', 'group_id': group_id,
              'capture_registration_sha256': 'd' * 64, 'capture_commit': commit, 'initial_payment_rows': 0,
@@ -216,3 +217,12 @@ def test_slot_context_seal_binds_run_and_cannot_be_replaced(tmp_path, monkeypatc
     with pytest.raises(ValueError, match='identity or timing differs'):
         capture.verify_slot_context(tmp_path, group_id, spec, run_id, 'd' * 64,
             capture_commit=commit, run_path=run_path, source_profile=matrix['source_profile'], registered_at=old)
+
+
+def test_holdout_compose_project_separates_registrations():
+    legacy = '8c4d842efe4327a5fab2bbd2c9f24899e75d70562d6473d64f1eee3c0ce247bf'
+    assert holdout.holdout_compose_project(legacy, 'bench-final-01') == 'sentinelops-corpus-bench-final-01'
+    assert holdout.holdout_compose_project('d' * 64, 'bench-final-01') == 'sentinelops-bench-dddddddddddd-bench-final-01'
+    assert holdout.holdout_compose_project('d' * 64, 'bench-final-01') != holdout.holdout_compose_project('e' * 64, 'bench-final-01')
+    with pytest.raises(ValueError):
+        holdout.holdout_compose_project('d' * 64, 'ale-02')

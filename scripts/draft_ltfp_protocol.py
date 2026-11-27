@@ -54,6 +54,7 @@ def run(root, base_commit):
     if output.exists():
         raise ValueError('protocol draft already exists')
     from scripts.verify_ltfp_development_score import verify as verify_score
+    from sentinelops.ml.ltfp_training import protocol_training
 
     if verify_score(root)['status'] != 'verified':
         raise ValueError('verified development scoring required')
@@ -127,8 +128,7 @@ def run(root, base_commit):
             graph=dict(message_policy='bidirectional-plus-self',
                 train_topology=write('train-topology.json', _bytes(graphs['train'])),
                 inference_topologies=[write('calibration-topology.json', _bytes(graphs['calibration']))]),
-            training=dict(seed=42, hidden_size=8, attention_size=8, optimizer='Adam', learning_rate=.001,
-                          batch_size=32, max_steps=100, early_stopping='none', trials=1),
+            training=protocol_training(fit_receipt),
             scoring=dict(oracle='latency-only', latency_ms=750, entry_buckets=2, horizon_seconds=300,
                 step_seconds=60, feature_window_seconds=300, cutoff_policy='recorded-source-availability',
                 episode_policy='workers.risk.EpisodeTracker', matching='earliest-unused-per-run-service',

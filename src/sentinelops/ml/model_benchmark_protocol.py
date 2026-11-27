@@ -264,12 +264,27 @@ def publish_freeze(path, content, *, conflict):
         temporary.unlink(missing_ok=True)
 
 
-def freeze_protocol(protocol, root):
-    result = audit_protocol(protocol, root)
+LANES = ('a', 'b')
+
+
+def _scoped(result, lanes):
+    """Readiness of the frozen lanes only; other lanes keep their audit reasons."""
+    reasons = [lane + ': ' + reason for lane in lanes for reason in result['lanes'][lane]['reasons']]
+    return {**result, 'status': 'blocked' if reasons else 'ready', 'reasons': reasons, 'frozen_lanes': list(lanes)}
+
+
+def freeze_protocol(protocol, root, lanes=LANES):
+    """Freeze the protocol for the given lanes; a lane can freeze before the other is ready."""
+    lanes = tuple(sorted(set(lanes)))
+    if not lanes or set(lanes) - set(LANES):
+        raise ValueError('freeze requires lanes a and/or b')
+    result = _scoped(audit_protocol(protocol, root), lanes)
     if result['status'] != 'ready':
         return result
     wrapper = {'schema_version':'benchmark-protocol-freeze/development-v1', 'protocol':protocol,
                'protocol_content_sha256':result['protocol_sha256']}
+    if lanes != LANES:
+        wrapper['lanes'] = list(lanes)
     path = _path(Path(root).resolve(), 'freeze/protocol.json')
     publish_freeze(path, _bytes(wrapper), conflict='different protocol already frozen')
     return result
@@ -280,10 +295,13 @@ def verify_protocol(root):
     try:
         content = path.read_bytes()
         wrapper = json.loads(content)
-        _keys(wrapper, 'schema_version protocol protocol_content_sha256')
+        _keys(wrapper, 'schema_version protocol protocol_content_sha256' + (' lanes' if 'lanes' in wrapper else ''))
+        lanes = tuple(wrapper.get('lanes', LANES))
         if (wrapper['schema_version'] != 'benchmark-protocol-freeze/development-v1'
-                or wrapper['protocol_content_sha256'] != stable_id(wrapper['protocol']) or content != _bytes(wrapper)):
+                or wrapper['protocol_content_sha256'] != stable_id(wrapper['protocol']) or content != _bytes(wrapper)
+                or not lanes or list(lanes) != sorted(set(lanes)) or set(lanes) - set(LANES)
+                or 'lanes' in wrapper and lanes == LANES):
             raise ValueError('changed protocol freeze')
-        return audit_protocol(wrapper['protocol'], root)
+        return _scoped(audit_protocol(wrapper['protocol'], root), lanes)
     except FileNotFoundError as exc:
         raise ValueError('protocol freeze missing') from exc
