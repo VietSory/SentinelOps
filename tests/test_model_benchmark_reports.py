@@ -131,6 +131,33 @@ def test_no_breach_counts_runs_once_and_excludes_breached_or_unknown_runs():
     assert result['missing_reason'] == 'incomplete-scored-exposure'
 
 
+def test_lane_a_recommendation_requires_paired_gain_and_no_higher_warning_cost():
+    from sentinelops.ml.model_benchmark_reports import lane_a_recommendation
+
+    sample = {'runs': 5, 'warned_runs': 1, 'unknown_runs': 0, 'missing_reason': None}
+    gradual = {'bootstrap': {'intervals': {'ltfp_graph_minus_xgboost': {'lower': .1}}},
+               'run_no_breach': {'ltfp_graph': dict(sample), 'xgboost': dict(sample)}}
+    exposure = {'coverage_complete': True, 'per_service_hour': .2}
+    healthy = {'models': {'ltfp_graph': {'healthy_exposure': dict(exposure)},
+                          'xgboost': {'healthy_exposure': dict(exposure)}}}
+    rules = {'calibration_budget': .01, 'calibration_cohort': 'shared'}
+    decide = lambda q07={'status': 'PASS'}: lane_a_recommendation(gradual, healthy, q07, rules)
+    assert decide()['benchmark'] == 'REPLACE' and decide()['release'] == 'KEEP'
+    assert decide({'status': 'FAIL'})['benchmark'] == 'KEEP'
+    assert decide({'status': 'INCONCLUSIVE'})['benchmark'] == 'INCONCLUSIVE'
+    gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']['lower'] = 0
+    assert decide()['reason'] == 'recall-improvement-not-established'
+    gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']['lower'] = .1
+    gradual['run_no_breach']['ltfp_graph']['unknown_runs'] = 1
+    assert decide()['reason'] == 'false-warning-comparison-incomplete'
+    gradual['run_no_breach']['ltfp_graph']['unknown_runs'] = 0
+    healthy['models']['ltfp_graph']['healthy_exposure']['per_service_hour'] = .3
+    assert decide()['benchmark'] == 'KEEP' and decide()['reason'] == 'higher-false-warning-cost'
+    healthy['models']['ltfp_graph']['healthy_exposure']['per_service_hour'] = .2
+    rules['calibration_budget'] = None
+    assert decide()['reason'] == 'common-calibration-budget-unverified'
+
+
 def test_exposure_uses_each_recorded_source_cutoff():
     rows, _ = fixture((60,))
     cutoffs = {'2026-01-01T00:05:00Z': '2026-01-01T00:05:30.125Z',

@@ -19,6 +19,35 @@ def forecast_report_from_oracles(store, rows, cases, *, thresholds=None, policy_
                            truth=truth, provenance=provenance)
 
 
+def lane_a_recommendation(gradual, healthy, q07, rules):
+    """Apply the frozen primary comparison without authorizing a release."""
+    result = {'benchmark': 'INCONCLUSIVE', 'release': 'KEEP', 'runtime_parity': 'NOT_RUN',
+              'reason': None, 'activation_allowed': False}
+    if q07['status'] == 'FAIL':
+        return {**result, 'benchmark': 'KEEP', 'reason': 'q07-failed'}
+    if q07['status'] != 'PASS':
+        return {**result, 'reason': 'q07-inconclusive'}
+    if rules.get('calibration_budget') != .01 or not rules.get('calibration_cohort'):
+        return {**result, 'reason': 'common-calibration-budget-unverified'}
+    interval = gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']
+    lower = interval['lower']
+    if lower is None or lower <= 0:
+        return {**result, 'reason': 'recall-improvement-not-established'}
+    no_breach = gradual['run_no_breach']
+    graph, baseline = (no_breach[name] for name in ('ltfp_graph', 'xgboost'))
+    graph_exposure, baseline_exposure = (healthy['models'][name]['healthy_exposure']
+                                        for name in ('ltfp_graph', 'xgboost'))
+    if (graph['missing_reason'] or baseline['missing_reason'] or graph['unknown_runs'] or baseline['unknown_runs']
+            or graph['runs'] != baseline['runs'] or not graph_exposure['coverage_complete']
+            or not baseline_exposure['coverage_complete']
+            or graph_exposure['per_service_hour'] is None or baseline_exposure['per_service_hour'] is None):
+        return {**result, 'reason': 'false-warning-comparison-incomplete'}
+    if (graph['warned_runs'] > baseline['warned_runs']
+            or graph_exposure['per_service_hour'] > baseline_exposure['per_service_hour']):
+        return {**result, 'benchmark': 'KEEP', 'reason': 'higher-false-warning-cost'}
+    return {**result, 'benchmark': 'REPLACE', 'reason': 'qualified-recall-improved-without-higher-warning-cost'}
+
+
 def summarize_sealed_forecasts(scored):
     """Keep gradual, healthy and abrupt holdout denominators separate."""
     if (scored.get('scope') != 'sealed-local-latency-holdout' or scored.get('activation_allowed') is not False
@@ -92,9 +121,10 @@ def summarize_sealed_forecasts(scored):
                 'criteria': criteria, 'eligible_events': graph['lead']['events'],
                 'groups': gradual['bootstrap']['groups'],
                 'reason': None if available else 'insufficient-groups-events-or-labelled-common-windows'}
+    recommendation = lane_a_recommendation(gradual, reports['healthy'], decision, rules)
     return {'schema_version': 'benchmark-forecast-report/sealed-v1', 'scope': scored['scope'],
             'clock': scored['clock'], 'provenance': provenance, 'cases': len(run_ids),
-            'reports': reports, 'q07': decision, 'activation_allowed': False}
+            'reports': reports, 'q07': decision, 'recommendation': recommendation, 'activation_allowed': False}
 
 
 def _quantile(values, probability):

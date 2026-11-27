@@ -236,6 +236,8 @@ def write_forecast_artifacts(root, scored, *, verify_only=False):
         'seal_sha256': scored['seal_sha256'], 'groups': sorted(groups), 'runs': len(scored['cases']),
         'kind_counts': dict(sorted(Counter(case['kind'] for case in scored['cases']).items())),
         'row_counts': counts, 'artifacts': artifacts, 'q07_status': summary['q07']['status'],
+        'benchmark_recommendation': summary['recommendation']['benchmark'],
+        'release_decision': summary['recommendation']['release'],
         'python_version': platform.python_version(),
         'pyarrow_version': pa.__version__, 'activation_allowed': False}
     outputs = [*sorted(payloads.items()), ('report/forecast-manifest.json', _bytes(manifest))]

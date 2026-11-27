@@ -128,8 +128,15 @@ def test_forecast_rules_are_derived_from_verified_freezes(tmp_path, monkeypatch)
     from sentinelops.telemetry.core import stable_id
 
     protocol = {'scoring': {'fixed_slope': {'threshold': .05, 'comparison': '>'}}}
-    candidates = {'lanes': {'a': {'slope_comparison': '>', 'thresholds': {
-        'slope': .05, 'xgboost': .8, 'ltfp_self_only': .2, 'ltfp_graph': .3}}}}
+    points = {model: {'status': 'ready', 'budget': .01, 'comparison': '>=', 'threshold': threshold,
+                      'eligible_negative_windows': 100, 'negative_windows': 100, 'negative_flags': 1,
+                      'calibration_identity': 'shared-cohort'}
+              for model, threshold in (('xgboost', .8), ('ltfp_self_only', .2), ('ltfp_graph', .3))}
+    calibration = tmp_path / 'preflight/development-k16-calibration-v5/manifest.json'
+    calibration.parent.mkdir(parents=True)
+    calibration.write_text(json.dumps({'points': points}))
+    candidates = {'lanes': {'a': {'slope_comparison': '>', 'calibration_sha256': hashlib.sha256(calibration.read_bytes()).hexdigest(),
+        'thresholds': {'slope': .05, 'xgboost': .8, 'ltfp_self_only': .2, 'ltfp_graph': .3}}}}
     directory = tmp_path / 'freeze'
     directory.mkdir()
     (directory / 'protocol.json').write_text(json.dumps({'protocol': protocol}))
@@ -142,6 +149,21 @@ def test_forecast_rules_are_derived_from_verified_freezes(tmp_path, monkeypatch)
     assert result['policy_identity'] == pin
     assert result['thresholds']['slope'] == {'watch': .05, 'degrading': .05, 'comparison': '>'}
     assert result['thresholds']['xgboost']['comparison'] == '>='
+    assert result['calibration_budget'] == .01 and result['calibration_cohort'] == 'shared-cohort'
+    points['ltfp_graph']['negative_flags'] = 2
+    calibration.write_text(json.dumps({'points': points}))
+    with pytest.raises(ValueError, match='changed reference'):
+        thresholds_from_freeze(tmp_path, pin)
+    candidates['lanes']['a']['calibration_sha256'] = hashlib.sha256(calibration.read_bytes()).hexdigest()
+    path.write_text(json.dumps(candidates))
+    changed_pin = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(ValueError, match='common false-positive budget'):
+        thresholds_from_freeze(tmp_path, changed_pin)
+    points['ltfp_graph']['negative_flags'] = 1
+    calibration.write_text(json.dumps({'points': points}))
+    candidates['lanes']['a']['calibration_sha256'] = hashlib.sha256(calibration.read_bytes()).hexdigest()
+    path.write_text(json.dumps(candidates))
+    pin = hashlib.sha256(path.read_bytes()).hexdigest()
     protocol['scoring']['fixed_slope']['comparison'] = '>='
     (directory / 'protocol.json').write_text(json.dumps({'protocol': protocol}))
     with pytest.raises(ValueError, match='differ from the protocol'):

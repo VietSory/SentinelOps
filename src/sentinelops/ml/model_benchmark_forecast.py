@@ -75,7 +75,22 @@ def thresholds_from_freeze(root, candidates_sha256):
             or any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
                    for value in values.values())):
         raise ValueError('frozen forecast thresholds differ from the protocol')
-    return {'policy_identity': candidates_sha256, 'thresholds': {
+    calibration = json.loads(_ref(root, {'path': 'preflight/development-k16-calibration-v5/manifest.json',
+                                          'sha256': lane['calibration_sha256']}))
+    identities = set()
+    for model in ('xgboost', 'ltfp_self_only', 'ltfp_graph'):
+        point = calibration['points'][model]
+        count, flags = point['eligible_negative_windows'], point['negative_flags']
+        if (point.get('status') != 'ready' or point.get('budget') != .01 or point.get('comparison') != '>='
+                or point.get('threshold') != values[model] or type(count) is not int or count < 100
+                or type(flags) is not int or not 0 <= flags <= count or flags / count > .01
+                or point.get('negative_windows') != count or not point.get('calibration_identity')):
+            raise ValueError('frozen forecast calibration does not satisfy the common false-positive budget')
+        identities.add(point['calibration_identity'])
+    if len(identities) != 1:
+        raise ValueError('frozen forecast models do not share a calibration cohort')
+    return {'policy_identity': candidates_sha256, 'calibration_sha256': lane['calibration_sha256'],
+            'calibration_budget': .01, 'calibration_cohort': next(iter(identities)), 'thresholds': {
         model: {'watch': values[model], 'degrading': values[model],
                 'comparison': '>' if model == 'slope' else '>='} for model in MODELS}}
 
