@@ -19,6 +19,47 @@ def forecast_report_from_oracles(store, rows, cases, *, thresholds=None, policy_
                            truth=truth, provenance=provenance)
 
 
+def primary_event_coverage(cases):
+    """Check both compared models over each independently eligible event horizon."""
+    from datetime import timedelta
+
+    total, incomplete = 0, []
+    for case in cases:
+        truth = {item['service']: item for item in case['truth']}
+        lookup = {(row['service'], row['model'], utc_time(row['window_end'])): row for row in case['rows']}
+        for event in case['events']:
+            total += 1
+            onset, service = utc_time(event['onset_at']), event['service']
+            record = truth.get(service)
+            if record is None or not record.get('score_schedule'):
+                incomplete.append(event['event_id'])
+                continue
+            schedule = record['score_schedule']
+            cutoffs = schedule_cutoffs(schedule)
+            if utc_time(schedule['start']) > onset - timedelta(minutes=5):
+                incomplete.append(event['event_id'])
+                continue
+            considered, valid = 0, True
+            for anchor, cutoff in cutoffs.items():
+                if not onset - timedelta(minutes=6) <= anchor < onset:
+                    continue
+                if cutoff is None:
+                    valid = False
+                    continue
+                if not onset - timedelta(minutes=5) <= cutoff < onset:
+                    continue
+                considered += 1
+                for model in ('ltfp_graph', 'xgboost'):
+                    row = lookup.get((service, model, anchor))
+                    if (row is None or row['score'] is None or row['prediction_cutoff'] is None
+                            or utc_time(row['prediction_cutoff']) != cutoff):
+                        valid = False
+            if not valid or not considered:
+                incomplete.append(event['event_id'])
+    return {'events': total, 'complete_events': total - len(incomplete), 'incomplete_events': len(incomplete),
+            'incomplete_event_ids': sorted(incomplete)}
+
+
 def lane_a_recommendation(gradual, healthy, q07, rules):
     """Apply the frozen primary comparison without authorizing a release."""
     result = {'benchmark': 'INCONCLUSIVE', 'release': 'KEEP', 'runtime_parity': 'NOT_RUN',
@@ -29,6 +70,9 @@ def lane_a_recommendation(gradual, healthy, q07, rules):
         return {**result, 'reason': 'q07-inconclusive'}
     if rules.get('calibration_budget') != .01 or not rules.get('calibration_cohort'):
         return {**result, 'reason': 'common-calibration-budget-unverified'}
+    coverage = gradual['primary_event_coverage']
+    if not coverage['events'] or coverage['incomplete_events']:
+        return {**result, 'reason': 'primary-event-score-coverage-incomplete'}
     interval = gradual['bootstrap']['intervals']['ltfp_graph_minus_xgboost']
     lower = interval['lower']
     if lower is None or lower <= 0:
@@ -83,6 +127,7 @@ def summarize_sealed_forecasts(scored):
                for name, items in subsets.items()}
     gradual = reports['gradual']
     gradual_cases = [case for case in scored['cases'] if kinds[case['kind']] == 'gradual']
+    gradual['primary_event_coverage'] = primary_event_coverage(gradual_cases)
     no_breach, unknown = [], 0
     for case in gradual_cases:
         truth = {item['service']: item for item in case['truth']}

@@ -311,7 +311,7 @@ Sau khi seal, lấy SHA-256 của `capture/sealed.json`. Trên checkout scoring 
 
 Để đối soát Lane A, chạy `verify-report --lane a` với cùng ba SHA và cùng commit scoring ghi trong manifest. Lệnh phát lại cohort, so từng byte của bảng và manifest, không ghi đè report; các artifact cache replay có thể được tạo lại. Lệnh này chưa xác minh bảng detector hoặc report chung.
 
-Khuyến nghị benchmark chỉ ghi `REPLACE` khi Q-07 đạt, calibration dùng chung budget 1%, cận dưới CI của Δ recall so với XGBoost lớn hơn 0 và chi phí cảnh báo sai không tăng. Trường hợp thiếu dữ liệu hoặc CI không xác lập cải thiện ghi `INCONCLUSIVE`; nếu Q-07 trượt hoặc chi phí cảnh báo sai tăng thì giữ baseline. Đây chưa phải quyết định triển khai: release vẫn `KEEP` cho đến khi có loader và parity runtime được xác minh.
+Khuyến nghị benchmark chỉ ghi `REPLACE` khi Q-07 đạt, calibration dùng chung budget 1%, hai model có đủ score trong khoảng dự báo của mỗi event, cận dưới CI của Δ recall so với XGBoost lớn hơn 0 và chi phí cảnh báo sai không tăng. Trường hợp thiếu dữ liệu hoặc CI không xác lập cải thiện ghi `INCONCLUSIVE`; nếu Q-07 trượt hoặc chi phí cảnh báo sai tăng thì giữ baseline. Đây chưa phải quyết định triển khai: release vẫn `KEEP` cho đến khi có loader và parity runtime được xác minh.
 
 ```bash
 bm capture-preflight

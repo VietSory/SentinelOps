@@ -136,6 +136,7 @@ def test_lane_a_recommendation_requires_paired_gain_and_no_higher_warning_cost()
 
     sample = {'runs': 5, 'warned_runs': 1, 'unknown_runs': 0, 'missing_reason': None}
     gradual = {'bootstrap': {'intervals': {'ltfp_graph_minus_xgboost': {'lower': .1}}},
+               'primary_event_coverage': {'events': 1, 'incomplete_events': 0},
                'run_no_breach': {'ltfp_graph': dict(sample), 'xgboost': dict(sample)}}
     exposure = {'coverage_complete': True, 'per_service_hour': .2}
     healthy = {'models': {'ltfp_graph': {'healthy_exposure': dict(exposure)},
@@ -156,6 +157,27 @@ def test_lane_a_recommendation_requires_paired_gain_and_no_higher_warning_cost()
     healthy['models']['ltfp_graph']['healthy_exposure']['per_service_hour'] = .2
     rules['calibration_budget'] = None
     assert decide()['reason'] == 'common-calibration-budget-unverified'
+
+
+def test_primary_event_coverage_detects_missing_comparator_scores():
+    from sentinelops.ml.model_benchmark_reports import primary_event_coverage
+
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    schedule = {'start': start.isoformat(), 'stop': (start + timedelta(minutes=8)).isoformat(),
+                'cadence_seconds': 60, 'cutoff_delay_seconds': 30}
+    rows = []
+    for minute in range(8):
+        for model in ('ltfp_graph', 'xgboost'):
+            rows.append({'service': 'payment-service', 'model': model,
+                         'window_end': (start + timedelta(minutes=minute)).isoformat(),
+                         'prediction_cutoff': (start + timedelta(minutes=minute, seconds=30)).isoformat(), 'score': .5})
+    case = {'truth': [{'service': 'payment-service', 'score_schedule': schedule}], 'rows': rows,
+            'events': [{'event_id': 'event', 'service': 'payment-service',
+                        'onset_at': (start + timedelta(minutes=7)).isoformat()}]}
+    result = primary_event_coverage([case])
+    assert result == {'events': 1, 'complete_events': 1, 'incomplete_events': 0, 'incomplete_event_ids': []}
+    next(row for row in rows if row['model'] == 'xgboost' and row['window_end'] == (start + timedelta(minutes=4)).isoformat())['score'] = None
+    assert primary_event_coverage([case])['incomplete_event_ids'] == ['event']
 
 
 def test_exposure_uses_each_recorded_source_cutoff():
