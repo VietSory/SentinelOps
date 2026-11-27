@@ -1,0 +1,74 @@
+{
+  "activation_allowed": false,
+  "calibration": {
+    "ledger_sha256": "0433659a2ca4cc40c5af18dd20e310a3da492a675956e6be5c943d26264a69d6",
+    "manifest_sha256": "c5f723f3b95d8da6b0f93c043ccaf48d70c60144fe28750f4e8e720b642dd42f",
+    "thresholds": {
+      "ltfp_graph": 0.6123001575469971,
+      "ltfp_self_only": 0.787137508392334,
+      "slope": 0.05,
+      "xgboost": 0.8543160557746887
+    }
+  },
+  "development_support": {
+    "lane_a_sha256": "99a7202802f9cec5eb3e0da56fb23d4d6cb726f511af85f76065e07192352d7f",
+    "split_sha256": "3ab8606ed07ca65bbd8fec9900775c9b9a945dbbe349712c8832bfd06688c2d7"
+  },
+  "fit_input_sha256": "13b14af2dc0514cb6e93125d5b1ffd935008fc47bc41d3496398e4be45c58ca3",
+  "fit_metadata_sha256": {
+    "graph": "e5deb0aadf31f151a5b9f0f592a883fe52b25f624ad16210458378ac525f4175",
+    "self_only": "79d8d3ac2a97a05e459624fd1a511a71b26be4ee76e606628af3554323576541"
+  },
+  "fit_receipt_sha256": "6c2161f48f2cccd08cc0f14a1a59992deb3ce219b822c219d014e0f89150e520",
+  "fit_report_sha256": "58a30c257fb6e181215c600dd1385faa16f5bc15ccacb35df87db69e6838f315",
+  "fit_settings": {
+    "batch_size": 32,
+    "combine": "mean-probability",
+    "dtype": "float32",
+    "epochs": 30,
+    "learning_rate": 0.001,
+    "loss": "bce-pos-weight-negative-over-positive",
+    "optimizer": "Adam",
+    "ordering": "seed42-record-hash-then-seeded-permutation-v1",
+    "seeds": [
+      42,
+      7,
+      13
+    ],
+    "selection": "max-ap-on-train-service-hash-byte0-lt-51"
+  },
+  "holdout_opened": false,
+  "independent_fit_replay": {
+    "calibration_ledger_bitwise_equal": true,
+    "scope": "second root, same commit and inputs",
+    "weights_bitwise_equal": true
+  },
+  "limitations": [
+    "Alibaba labels are relative-latency proxies; local holdout outcomes are not measured here.",
+    "Thresholds and window metrics come from the same development calibration window.",
+    "Lane B is not frozen in this revision."
+  ],
+  "protocol": {
+    "code_commit": "b78ae059c4a8a3aad06da1a9244d9e29d0957f86",
+    "freeze_sha256": "70ac0da31a837be4d5b4a842b6006c7b5e9b153fc4419ccd12bdb7379e4f867b",
+    "frozen_lanes": [
+      "a"
+    ],
+    "protocol_sha256": "1721b3316f53cbdba94efb4e469b4a837f363d31ca4739f0a38df9c447a531f2"
+  },
+  "revision": "v17-class-weighted-seed-mean",
+  "scope": "alibaba-proxy-development",
+  "score": {
+    "average_precision": {
+      "ltfp_graph": 0.050350373165097884,
+      "ltfp_self_only": 0.06128505645075084,
+      "slope": 0.01607267364649915,
+      "xgboost": 0.024225682562094182
+    },
+    "manifest_sha256": "e834bc968e26a9ee154ff778bd06e59a2b17814d8fde7b4bbeb66334e06d7439",
+    "predictions_sha256": "85ed957e771ef1559c2212a8b0b9208178dc9bd02a04abe585ed8c44893950d7",
+    "score_script_sha256": "d999bf435a52574a998df69d0131839ac7b4dd84a38278d8bc2c57f4b93b5554",
+    "verify_script_sha256": "99c70d8dd8803f3eddd427cb44003d72984a6e5c55c037cf592be16c351f7bea"
+  },
+  "xgboost_model_sha256": "535f11abdb8467acddcaab20fd8ac94bb15e9faa4da80cc6eb6400fd6deb62bc"
+}
