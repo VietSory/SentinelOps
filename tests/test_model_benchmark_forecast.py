@@ -91,6 +91,21 @@ def test_common_cohort_unknown_and_missing_thresholds(tmp_path):
     assert rows == before
 
 
+def test_missing_source_clock_remains_unavailable_without_fabricating_time(tmp_path):
+    from sentinelops.ml.model_benchmark_forecast import summarize_forecasts
+
+    rows = timeline(tmp_path, [(5, None, None)])
+    for row in rows:
+        row['prediction_cutoff'] = None
+        row['score_missing_reason'] = 'incomplete-source-bucket'
+    result = summarize_forecasts(rows, [])
+    assert result['windows'] == result['unknown_windows'] == 1
+    assert all(result['models'][name]['unavailable_windows'] == 1 for name in MODELS)
+    rows[0]['score'] = .5
+    with pytest.raises(ValueError, match='invalid cutoff'):
+        summarize_forecasts(rows, [])
+
+
 def test_frozen_slope_strict_comparison_preserves_boundary(tmp_path):
     from sentinelops.ml.model_benchmark_forecast import summarize_forecasts
 
@@ -195,6 +210,8 @@ def test_summary_rejects_duplicates_and_reports_single_class_na(tmp_path):
     rows = timeline(tmp_path, [(5, .8, 1)])
     assert summarize_forecasts(rows, [])['models']['slope']['average_precision'] is None
     with pytest.raises(ValueError, match='duplicate'): summarize_forecasts(rows + rows[:1], [])
+    shifted = {**rows[0], 'prediction_cutoff': rows[0]['prediction_cutoff'].replace(':30Z', ':31Z')}
+    with pytest.raises(ValueError, match='duplicate'): summarize_forecasts(rows + [shifted], [])
     with pytest.raises(ValueError, match='missing model'): summarize_forecasts(rows[:-1], [])
     altered = deepcopy(rows)
     altered[-1]['risk_label'] = 0

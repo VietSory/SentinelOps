@@ -158,11 +158,11 @@ def summarize_forecasts(rows, events, *, thresholds=None, policy_identity=None):
 
     keyed = {}
     for row in rows:
-        key = (row['run_id'], row['service'], utc_time(row['window_end']),
-               utc_time(row['prediction_cutoff']))
+        key = (row['run_id'], row['service'], utc_time(row['window_end']))
+        cutoff = utc_time(row['prediction_cutoff']) if row['prediction_cutoff'] is not None else None
         if row['model'] not in MODELS or (key, row['model']) in keyed:
             raise ValueError('unknown model or duplicate forecast key')
-        if not key[2] <= key[3] < key[2] + timedelta(minutes=1):
+        if cutoff is None or not key[2] <= cutoff < key[2] + timedelta(minutes=1):
             if row['risk_label'] is not None or row['score'] is not None:
                 raise ValueError('available forecast has invalid cutoff')
         if row['score'] is not None and (type(row['score']) not in (int, float) or not math.isfinite(row['score'])):
@@ -175,6 +175,9 @@ def summarize_forecasts(rows, events, *, thresholds=None, policy_identity=None):
         cohort = [keyed.get((key, model)) for model in MODELS]
         if any(row is None for row in cohort):
             raise ValueError('missing model row; use explicit unavailable score')
+        cutoffs = {utc_time(row['prediction_cutoff']) if row['prediction_cutoff'] is not None else None for row in cohort}
+        if len(cutoffs) != 1:
+            raise ValueError('forecast cutoff differs across models')
         fields = ('group_id', 'feature_ref', 'oracle_sha256', 'health_policy_sha256',
                   'risk_label', 'risk_missing_reason', 'slo_onset_at')
         if any(any(row[field] != cohort[0][field] for field in fields) for row in cohort[1:]):
@@ -215,7 +218,7 @@ def summarize_forecasts(rows, events, *, thresholds=None, policy_identity=None):
             state = 'unavailable' if score is None else 'degrading' if above_degrading else 'watch' if above_watch else 'normal'
             episode = tracker.update((key[0], key[1]), key[2], state)
             if episode['event'] == 'started':
-                alerts.append((key[0], key[1], key[3]))
+                alerts.append((key[0], key[1], utc_time(row['prediction_cutoff'])))
         used, matches = set(), []
         for event in ordered_events:
             onset = utc_time(event['onset_at'])

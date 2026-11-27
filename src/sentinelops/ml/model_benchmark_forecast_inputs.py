@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 import re
 import subprocess
+from datetime import timedelta
 
 import yaml
 
@@ -14,6 +15,52 @@ from sentinelops.ml.model_benchmark_holdout import (
 from sentinelops.ml.model_benchmark_protocol import _keys, _ref
 from sentinelops.telemetry.core import BUSINESS_ROUTES, stable_id, timestamp
 from sentinelops.telemetry.store import ArtifactStore
+from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
+
+
+def index_recorded_captures(store, run):
+    """Index every elapsed minute, retaining explicit gaps and late source clocks."""
+    if (run.get('status') != 'completed' or run.get('declared_split') != 'test'
+            or run.get('source_profile') != SOURCE_PROFILE_V2):
+        raise ValueError('forecast replay requires a completed registered v2 test run')
+    started, ended = utc_time(run['started_at']), utc_time(run['ended_at'])
+    first = started.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    last = ended.replace(second=0, microsecond=0)
+    if last < first:
+        raise ValueError('forecast source has no complete minute')
+    manifest = store.read(run['source_manifest_ref'])
+    refs = manifest['raw_refs']
+    if (manifest.get('source_profile') != SOURCE_PROFILE_V2 or not isinstance(refs, list)
+            or len(refs) != len(set(refs))):
+        raise ValueError('forecast source manifest has foreign or duplicate captures')
+    buckets = {}
+    for ref in refs:
+        raw = store.read(ref)
+        end = utc_time(raw['bucket_end'])
+        if (not ref.startswith('artifact://raw/') or raw.get('source_profile') != SOURCE_PROFILE_V2
+                or raw.get('service') not in BUSINESS_ROUTES or end.second or end.microsecond
+                or not first <= end <= last):
+            raise ValueError('forecast source contains a foreign capture or bucket')
+        bucket = buckets.setdefault(end, {})
+        if raw['service'] in bucket:
+            raise ValueError('forecast source duplicates a service bucket')
+        bucket[raw['service']] = (ref, raw)
+    result = []
+    for index in range(int((last - first).total_seconds() // 60) + 1):
+        end = first + timedelta(minutes=index)
+        captures = buckets.get(end, {})
+        observed = [utc_time(raw['collected_at']) for _, raw in captures.values()]
+        if set(captures) != set(BUSINESS_ROUTES):
+            cutoff, reason = None, 'incomplete-source-bucket'
+        else:
+            latest = max(observed)
+            cutoff = max(latest, end + timedelta(seconds=30)) if all(
+                end <= point < end + timedelta(minutes=1) for point in observed) else None
+            reason = None if cutoff is not None else 'source-clock-outside-anchor-minute'
+        result.append({'bucket_end': timestamp(end), 'cutoff': timestamp(cutoff) if cutoff else None,
+                       'observed_at': timestamp(max(observed)) if observed else None,
+                       'missing_reason': reason, 'captures': [captures[key] for key in sorted(captures)]})
+    return result
 
 
 def load_frozen_models(root, *, candidates_sha256):
@@ -150,6 +197,7 @@ def load_sealed_inputs(root, *, candidates_sha256, registration_sha256, seal_sha
             raise ValueError('verified source identity differs from the sealed inventory')
         slot = slots[row['slot_id']]
         cases.append({**source, 'slot_id': row['slot_id'], 'kind': slot['kind'],
+                      'source_manifest_sha256': row['source_manifest_sha256'], 'raw_refs': row['raw_refs'],
                       'run_path': str(paths[row['slot_id']])})
     return {'schema_version': 'benchmark-forecast-inputs/sealed-v1', 'candidates_sha256': candidates_sha256,
             'registration_sha256': registration_sha256, 'seal_sha256': seal_sha256,

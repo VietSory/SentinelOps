@@ -90,10 +90,13 @@ def score_batch(store, *, batch_ref, anchor, as_of, service, source_feature_ref,
                             raise ValueError('inference topology pin mismatch')
                         value = predict(model, identity, graph,
                                         expected_graph_sha256=expected_graph_sha256)[service]
+                        index = graph['node_ids'].index(service)
+                        neighbor_count = sum(graph['attention_mask'][index]) - graph['attention_mask'][index][index]
                         graph_provenance[name] = {'graph_sha256': graph['graph_sha256'],
                             'mask_sha256': graph['mask_sha256'], 'input_sha256': stable_id(graph),
                             'raw_refs': graph['raw_refs'], 'as_of': graph['as_of'],
-                            'step_minutes': graph['step_minutes'], 'source_identity': graph['source_identity']}
+                            'step_minutes': graph['step_minutes'], 'source_identity': graph['source_identity'],
+                            'neighbor_count': neighbor_count}
                         reason = None if value is not None else 'incomplete-feature-sequence'
         scores[name] = {'score': value, 'missing_reason': reason}
     feature_ref = baseline['feature_ref'] or source_feature_ref

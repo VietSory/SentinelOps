@@ -107,6 +107,7 @@ def test_source_topology_uses_pinned_commit_and_excludes_unobserved_nodes(tmp_pa
 
 
 def test_frozen_models_bind_bundle_refit_and_both_ltfp_variants(tmp_path, monkeypatch):
+    pytest.importorskip('torch', reason='optional CPU research dependency; required in ltfp-cpu CI')
     from sentinelops.ml import ltfp_model, models
     from sentinelops.telemetry.core import stable_id
     import xgboost
@@ -148,3 +149,33 @@ def test_frozen_models_bind_bundle_refit_and_both_ltfp_variants(tmp_path, monkey
     (xgb_dir / 'risk.json').write_bytes(b'changed')
     with pytest.raises(ValueError, match='changed reference'):
         inputs.load_frozen_models(tmp_path, candidates_sha256=candidate_sha)
+
+
+def test_capture_index_preserves_missing_minutes_and_late_cutoffs(tmp_path):
+    from sentinelops.telemetry.core import BUSINESS_ROUTES
+    from sentinelops.telemetry.prometheus import SOURCE_PROFILE_V2
+    from sentinelops.telemetry.store import ArtifactStore
+
+    store = ArtifactStore(tmp_path)
+    refs = []
+    for minute in (1, 3):
+        for index, service in enumerate(BUSINESS_ROUTES):
+            observed = f'2026-01-01T00:0{minute}:3{index}Z'
+            if minute == 3 and index == 2:
+                observed = '2026-01-01T00:04:00Z'
+            refs.append(store.write('raw', {'source_profile': SOURCE_PROFILE_V2, 'service': service,
+                'bucket_end': f'2026-01-01T00:0{minute}:00Z', 'collected_at': observed}))
+    def run_for(raw_refs):
+        ref = store.write('manifests', {'source_profile': SOURCE_PROFILE_V2, 'raw_refs': raw_refs})
+        return {'status': 'completed', 'declared_split': 'test', 'source_profile': SOURCE_PROFILE_V2,
+                'source_manifest_ref': ref, 'started_at': '2026-01-01T00:00:15Z',
+                'ended_at': '2026-01-01T00:03:17Z'}
+    result = inputs.index_recorded_captures(store, run_for(refs))
+    assert [row['bucket_end'] for row in result] == [f'2026-01-01T00:0{i}:00Z' for i in (1, 2, 3)]
+    assert result[0]['cutoff'] == '2026-01-01T00:01:32Z'
+    assert result[1]['missing_reason'] == 'incomplete-source-bucket' and result[1]['cutoff'] is None
+    assert result[2]['missing_reason'] == 'source-clock-outside-anchor-minute' and result[2]['cutoff'] is None
+    assert result[2]['observed_at'] == '2026-01-01T00:04:00Z'
+    duplicate = {**store.read(refs[0]), 'extra': 'different-content'}
+    with pytest.raises(ValueError, match='duplicates a service bucket'):
+        inputs.index_recorded_captures(store, run_for(refs + [store.write('raw', duplicate)]))
