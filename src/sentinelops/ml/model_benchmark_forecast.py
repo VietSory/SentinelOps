@@ -9,6 +9,31 @@ from sentinelops.ml.alibaba_local_evaluation import latency_event_intervals, lat
 MODELS = ('slope', 'xgboost', 'ltfp_self_only', 'ltfp_graph')
 
 
+def thresholds_from_freeze(root, candidates_sha256):
+    """Derive episode rules from the verified candidates and protocol freezes."""
+    import json
+    from pathlib import Path
+    from sentinelops.ml.model_benchmark_holdout import verify_candidate_freeze
+    from sentinelops.ml.model_benchmark_protocol import _ref
+
+    root = Path(root).resolve()
+    frozen = verify_candidate_freeze(root, candidates_sha256)
+    candidates = json.loads(_ref(root, {'path': 'freeze/candidates.json', 'sha256': candidates_sha256}))
+    lane = candidates['lanes']['a']
+    values = lane['thresholds']
+    protocol = json.loads((root / 'freeze/protocol.json').read_bytes())['protocol']
+    slope = protocol['scoring']['fixed_slope']
+    if (stable_id(protocol) != frozen['protocol_sha256'] or set(values) != set(MODELS)
+            or slope != {'comparison': '>', 'threshold': values['slope']}
+            or lane.get('slope_comparison') != '>'
+            or any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
+                   for value in values.values())):
+        raise ValueError('frozen forecast thresholds differ from the protocol')
+    return {'policy_identity': candidates_sha256, 'thresholds': {
+        model: {'watch': values[model], 'degrading': values[model],
+                'comparison': '>' if model == 'slope' else '>='} for model in MODELS}}
+
+
 def project_latency_truth(store, case, service, schedule):
     """Project one independently admitted request timeline onto a frozen score schedule."""
     if not case['oracle_ref'].startswith('artifact://manifests/'):
@@ -98,7 +123,8 @@ def summarize_forecasts(rows, events, *, thresholds=None, policy_identity=None):
     """Summarize adapter rows; events are independent eligible latency onsets.
 
     Events require event_id, run_id, service, onset_at. Thresholds map each model
-    to watch/degrading. policy_identity identifies caller-frozen calibration;
+    to watch/degrading and an optional comparison ('>=' by default, or '>').
+    policy_identity identifies caller-frozen calibration;
     this helper does not certify calibration or open any data split.
     """
     from sentinelops.ml.local_evaluation import risk_curve
@@ -150,15 +176,17 @@ def summarize_forecasts(rows, events, *, thresholds=None, policy_identity=None):
             models[model] = metrics
             continue
         watch, degrading = threshold['watch'], threshold['degrading']
+        comparison = threshold.get('comparison', '>=')
         if (any(type(value) not in (int, float) or not math.isfinite(value) for value in (watch, degrading))
-            or watch > degrading):
+            or watch > degrading or comparison not in ('>', '>=')):
             raise ValueError('invalid watch/degrading thresholds')
         tracker, alerts = EpisodeTracker(), []
         for key in keys:
             row = keyed[key, model]
             score = row['score']
-            state = ('unavailable' if score is None else 'degrading' if score >= degrading
-                     else 'watch' if score >= watch else 'normal')
+            above_degrading = score is not None and (score > degrading if comparison == '>' else score >= degrading)
+            above_watch = score is not None and (score > watch if comparison == '>' else score >= watch)
+            state = 'unavailable' if score is None else 'degrading' if above_degrading else 'watch' if above_watch else 'normal'
             episode = tracker.update((key[0], key[1]), key[2], state)
             if episode['event'] == 'started':
                 alerts.append((key[0], key[1], key[3]))
