@@ -37,6 +37,28 @@ Trên hai lượt development local `ale-02` (ramp 400 ms, không breach), Check
 
 Trên `ald`, XGBoost cảnh báo đúng 20/20 sự kiện gradual với lead khoảng 270 s, sát horizon 300 s. Recall và lead ở local đã bão hòa.
 
+### Lane A: fit lại LTFP có cân lớp (development)
+
+Owner yêu cầu giữ LTFP. Train cũ không hội tụ: loss tăng từ 0,972 lên 1,604 sau 100 bước. Thử nghiệm dùng đúng 3.200 mẫu train (81 positive) và 55.730 window calibration (89 positive) như ledger `development-k16-score-v5`. Biến thể tái tạo cách train cũ cho đúng AP 0,0023, nên đường đo khớp ledger.
+
+Cách train mới, kiến trúc `Forecast` giữ nguyên:
+
+- `pos_weight` = số negative / số positive trong loss BCE.
+- Adam, learning rate 0,001, batch 32, 30 epoch.
+- Chọn epoch theo AP trên 20% service của tập train, tách theo hash tên service. Calibration không dùng để chọn epoch.
+- Không chuẩn hóa feature. Chuẩn hóa làm AP giảm còn khoảng 0,027, vì feature thứ hai có độ lệch chuẩn 294.
+- Lấy trung bình score của 3 seed (42, 7, 13).
+
+Kết quả trên window calibration, ngưỡng mỗi model chọn cho ~1% flag trên negative. CI là bootstrap ghép cặp theo service, 1.000 lần, seed 42:
+
+| Model | AP | Recall | Δ AP so với XGBoost, CI 95% | Δ recall so với XGBoost, CI 95% |
+| --- | --- | --- | --- | --- |
+| XGBoost | 0,0242 | 0,292 | — | — |
+| LTFP graph, 3 seed | 0,0504 | 0,404 | [+0,0008; +0,0676] | [−0,045; +0,241] |
+| LTFP self-only, 3 seed | 0,0613 | 0,427 | [−0,0005; +0,0926] | [−0,051; +0,314] |
+
+Từng seed riêng lẻ: graph AP 0,042–0,055, self-only AP 0,049–0,077; mọi seed đều cao hơn XGBoost về điểm ước lượng. LTFP graph 3 seed đạt tiêu chí mục 2 trên development: không kém về recall với margin −0,05 và hơn về AP. Phần graph vẫn chưa đo được tác dụng riêng vì window có hàng xóm không có positive. Đây là development; khoảng calibration này cũng là nơi chọn ngưỡng.
+
 ## 2. Tiêu chí thay model
 
 Ứng viên được đề xuất thay baseline khi cả hai điều kiện sau đúng:
@@ -59,9 +81,11 @@ Các gate tuyệt đối Q-04 đến Q-07 vẫn giữ nguyên và đo trên hold
 
 ### Lane A
 
-1. Fit lại LTFP với cân lớp ngang XGBoost: `pos_weight` trong loss, số bước lớn hơn, early stopping trên development. Cả `ltfp_graph` và `ltfp_self_only` dùng cùng cài đặt; chỉ adjacency khác nhau.
-2. Đạt khi AP và recall của LTFP nằm trong margin −0,05 so với XGBoost trên development. Không đạt thì Lane A giữ XGBoost và báo kết quả âm.
-3. Kiểm protocol có split đánh giá Alibaba chưa dùng. Không có thì chia split mới trước khi freeze.
+1. Đưa cách train ở mục 1 vào `src/sentinelops/ml/ltfp_training.py`: `pos_weight`, 30 epoch, chọn epoch trên split service trong train, 3 seed. Receipt hiện kiểm cứng `steps == 100`; cần cập nhật receipt, test và export. Cả `ltfp_graph` và `ltfp_self_only` dùng cùng cài đặt; chỉ adjacency khác nhau.
+2. Hỗ trợ trung bình 3 seed ở scorer benchmark và loader runtime, hoặc chốt một seed duy nhất và chấp nhận phương sai cao hơn.
+3. Hiệu chuẩn lại ngưỡng LTFP trên calibration với budget 1%.
+4. Chấm lại hai lượt local `ale-02` để xem số cảnh báo trên lượt không breach.
+5. Kiểm protocol có split đánh giá Alibaba chưa dùng. Không có thì chia split mới trước khi freeze.
 
 ### Lane B
 
