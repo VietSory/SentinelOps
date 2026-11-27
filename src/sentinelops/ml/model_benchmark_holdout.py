@@ -184,7 +184,8 @@ def verify_candidate_freeze(root, candidates_sha256):
             or candidate.get('protocol_sha256') != frozen['protocol_sha256']
             or candidate.get('holdout_opened') is not False
             or candidate.get('activation_allowed') is not False
-            or any(candidate.get('lanes', {}).get(lane, {}).get('status') != 'ready' for lane in ('a', 'b'))):
+            or candidate.get('frozen_lanes', ['a', 'b']) != frozen.get('frozen_lanes', ['a', 'b'])
+            or any(candidate.get('lanes', {}).get(lane, {}).get('status') != 'ready' for lane in frozen.get('frozen_lanes', ['a', 'b']))):
         raise ValueError('verified protocol and candidates required before reading holdout sources')
     return frozen
 

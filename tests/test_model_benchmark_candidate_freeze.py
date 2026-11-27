@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -45,3 +46,20 @@ def test_candidate_freeze_requires_verified_inputs_and_is_immutable(tmp_path, mo
     with pytest.raises(ValueError, match='already frozen'):
         candidates.run(tmp_path, protocol, evidence, detector_pin)
     assert output.read_bytes() == saved
+
+
+def test_lane_a_candidate_freeze_skips_an_unfrozen_lane_b(tmp_path, monkeypatch):
+    from sentinelops.ml.model_benchmark_holdout import verify_candidate_freeze
+    from sentinelops.public_data.alibaba import file_sha256
+
+    protocol, _ = fixture(tmp_path)
+    protocol['checks'] = [check for check in protocol['checks'] if check['test_id'] != 'B06']
+    freeze_protocol(protocol, tmp_path, lanes=('a',))
+    monkeypatch.setattr(detector_fit, 'verify_detector_fit', lambda *args, **kwargs: pytest.fail('lane B read'))
+    assert candidates.run(tmp_path, protocol, None, None)['reasons'] == ['lane-a-evidence-required']
+    monkeypatch.setattr(candidates, '_lane_a', lambda *args: {'status': 'ready', 'thresholds': {'slope': .05}})
+    result = candidates.run(tmp_path, protocol, tmp_path / 'lane-a-evidence.json', None)
+    assert result['status'] == 'ready'
+    manifest = json.loads((tmp_path / 'freeze/candidates.json').read_bytes())
+    assert manifest['frozen_lanes'] == ['a'] and set(manifest['lanes']) == {'a'}
+    assert verify_candidate_freeze(tmp_path, file_sha256(tmp_path / 'freeze/candidates.json'))['frozen_lanes'] == ['a']

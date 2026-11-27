@@ -51,8 +51,11 @@ def main(argv=None):
             sub.add_argument('--registration-sha256')
             sub.add_argument('--seal-sha256')
             sub.add_argument('--capture-project', type=Path, default=Path(__file__).resolve().parents[1])
-    for name in ('freeze-protocol', 'verify', 'package'):
+    for name in ('verify', 'package'):
         commands.add_parser(name)
+    commands.add_parser('freeze-protocol').add_argument(
+        '--lanes', choices=('a', 'b', 'ab'), default='ab',
+        help='Freeze one lane before the other is ready; the default freezes both.')
     seal = commands.add_parser('seal-capture')
     seal.add_argument('--registration-sha256')
     seal.add_argument('--capture-project', type=Path, default=Path(__file__).resolve().parents[1])
@@ -139,7 +142,7 @@ def main(argv=None):
                           manifest='report/forecast-manifest.json', activation_allowed=False,
                           verified=args.command == 'verify-report')
         elif args.command == 'freeze-candidates':
-            if not args.lane_a_evidence or not args.lane_b_fit_sha256:
+            if not args.lane_a_evidence and not args.lane_b_fit_sha256:
                 result.update(status='blocked', reasons=[BLOCKED[args.command]])
             else:
                 from scripts.freeze_benchmark_candidates import run
@@ -176,8 +179,8 @@ def main(argv=None):
                 if args.command == 'audit':
                     lane = audit['lanes'][args.lane]
                     result.update(status=lane['status'], reasons=lane['reasons'])
-                elif audit['status'] == 'ready':
-                    result.update(freeze_protocol(protocol, args.root))
+                else:
+                    result.update(freeze_protocol(protocol, args.root, lanes=tuple(args.lanes)))
         if result.get('status') not in ('ready', 'blocked'):
             raise ValueError('protocol API returned an invalid stage status')
         output = json.dumps(result, sort_keys=True, allow_nan=False)
