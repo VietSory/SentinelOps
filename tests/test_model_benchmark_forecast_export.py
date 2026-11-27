@@ -92,6 +92,9 @@ def test_forecast_artifacts_are_complete_utc_and_immutable(tmp_path):
     with (tmp_path / 'report/forecast.csv').open(newline='') as stream:
         rows = list(csv.DictReader(stream))
     assert {row['model_id'] for row in rows} == set(MODELS)
+    graph_row = next(row for row in rows if row['model_id'] == 'ltfp_graph')
+    assert float(graph_row['delta_recall_vs_xgboost']) == 0
+    assert float(graph_row['delta_recall_graph_vs_self']) == 0
     assert json.loads((tmp_path / 'report/forecast.json').read_bytes())['q07']['status'] == 'FAIL'
     assert write_forecast_artifacts(tmp_path, scored) == manifest
     assert write_forecast_artifacts(tmp_path, scored, verify_only=True) == manifest

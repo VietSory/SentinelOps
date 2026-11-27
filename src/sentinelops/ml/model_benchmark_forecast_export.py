@@ -168,6 +168,7 @@ def write_forecast_artifacts(root, scored, *, verify_only=False):
                   'late', 'miss', 'lead_missing_reason', 'no_breach_runs', 'no_breach_warned_runs',
                   'no_breach_unknown_runs', 'no_breach_missing_reason',
                   'healthy_service_hours', 'false_warnings', 'false_warnings_per_hour', 'exposure_missing_reason',
+                  'delta_recall_vs_xgboost', 'delta_recall_graph_vs_self',
                   'delta_recall_vs_xgboost_ci_lower', 'delta_recall_vs_xgboost_ci_upper',
                   'delta_recall_graph_vs_self_ci_lower', 'delta_recall_graph_vs_self_ci_upper',
                   'paired_vs_xgboost_events', 'paired_vs_xgboost_lead_p50_seconds',
@@ -181,6 +182,9 @@ def write_forecast_artifacts(root, scored, *, verify_only=False):
         metrics = gradual['models'][model]
         lead, no_breach = metrics['lead'], gradual['run_no_breach'][model]
         exposure = healthy['models'][model]['healthy_exposure']
+        own_recall = lead['recall_ge60']
+        xgb_recall = gradual['models']['xgboost']['lead']['recall_ge60']
+        self_recall = gradual['models']['ltfp_self_only']['lead']['recall_ge60']
         intervals = gradual['bootstrap']['intervals']
         versus_xgb = intervals.get(model + '_minus_xgboost', {})
         versus_self = intervals.get('ltfp_graph_minus_ltfp_self_only', {}) if model == 'ltfp_graph' else {}
@@ -201,6 +205,10 @@ def write_forecast_artifacts(root, scored, *, verify_only=False):
             'no_breach_unknown_runs': no_breach['unknown_runs'], 'no_breach_missing_reason': no_breach['missing_reason'],
             'healthy_service_hours': exposure['service_hours'], 'false_warnings': exposure['false_warnings'],
             'false_warnings_per_hour': exposure['per_service_hour'], 'exposure_missing_reason': exposure['missing_reason'],
+            'delta_recall_vs_xgboost': own_recall - xgb_recall
+                if model != 'xgboost' and own_recall is not None and xgb_recall is not None else None,
+            'delta_recall_graph_vs_self': own_recall - self_recall
+                if model == 'ltfp_graph' and own_recall is not None and self_recall is not None else None,
             'delta_recall_vs_xgboost_ci_lower': versus_xgb.get('lower'),
             'delta_recall_vs_xgboost_ci_upper': versus_xgb.get('upper'),
             'delta_recall_graph_vs_self_ci_lower': versus_self.get('lower'),
