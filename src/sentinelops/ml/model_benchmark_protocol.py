@@ -11,6 +11,58 @@ from sentinelops.ml.alibaba_training import BASE_FEATURES, BREACH_FEATURE, split
 from sentinelops.telemetry.core import stable_id
 
 
+NON_INFERIORITY_MARGIN = .05
+LANE_B_CANDIDATE = 'adsketch_mad_or'
+LANE_B_BASELINE = 'isolation_forest'
+LANE_B_COST_METRIC = 'false_incidents_per_healthy_service_hour'
+LANE_B_PAIRS = ((LANE_B_CANDIDATE, LANE_B_BASELINE), ('median_mad', LANE_B_BASELINE),
+                (LANE_B_CANDIDATE, 'median_mad'), ('adsketch', LANE_B_BASELINE), ('adsketch', 'median_mad'))
+
+
+def lane_b_rules(event_rule_id, combo_selection_rule_id, *, calibration_cohort='eligible-scored-calibration-only'):
+    """Construct the reporting declaration with the two pinned rule identities."""
+    return {'candidate': LANE_B_CANDIDATE, 'baseline': LANE_B_BASELINE, 'primary_metric': 'f1',
+            'non_inferiority_margin': NON_INFERIORITY_MARGIN, 'cost_metric': LANE_B_COST_METRIC,
+            'advantages': ['f1-ci-lower-gt-zero', 'false-incident-rate-ci-upper-lt-zero'],
+            'calibration_budget': .01, 'calibration_cohort': calibration_cohort,
+            'event_rule_id': event_rule_id, 'combo_selection_rule_id': combo_selection_rule_id}
+
+
+def lane_b_rule_gaps(rules, *, preregistration=True):
+    if rules is None:
+        return ['lane-b-rules-missing']
+    if not isinstance(rules, dict):
+        return ['lane-b-rules-invalid']
+    from sentinelops.ml.model_benchmark_alibaba_events import ALIBABA_EVENT_RULE_ID
+    from sentinelops.ml.model_benchmark_detector_combo import COMBO_SELECTION_RULE_ID
+
+    rule_ids = {'event_rule_id': (ALIBABA_EVENT_RULE_ID, 'event-rule-id-mismatch'),
+                'combo_selection_rule_id': (COMBO_SELECTION_RULE_ID, 'combo-rule-id-mismatch')}
+    expected = lane_b_rules(None, None)
+    if not preregistration:
+        expected = {field: expected[field] for field in (
+            'calibration_budget', 'calibration_cohort', 'event_rule_id', 'combo_selection_rule_id')}
+    gaps = []
+    for field, value in expected.items():
+        if field not in rules:
+            gaps.append(f'lane-b-rule-missing: {field}')
+            continue
+        actual = rules[field]
+        if field == 'calibration_cohort':
+            valid = isinstance(actual, str) and bool(actual.strip())
+        elif value is None:
+            valid = isinstance(actual, str) and re.fullmatch('[0-9a-f]{64}', actual)
+        else:
+            valid = type(actual) is type(value) and actual == value
+        if not valid:
+            gaps.append(f'lane-b-rule-invalid: {field}')
+        elif field in rule_ids and actual != rule_ids[field][0]:
+            gaps.append(rule_ids[field][1])
+    if preregistration and rules.keys() - expected.keys():
+        gaps.append('lane-b-rules-unexpected-fields')
+    return gaps
+
+
 def _bytes(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
 
@@ -136,14 +188,18 @@ def audit_protocol(protocol, root):
         cohort='eligible-scored-calibration-only'):
         raise ValueError('scoring/calibration contract mismatch')
     reporting = protocol['reporting']
-    _keys(reporting, 'bootstrap_replicates seed unit interval primary lead_secondary required_tables')
-    if reporting != dict(bootstrap_replicates=1000, seed=42, unit='whole-group', interval='percentile-linear',
+    _keys(reporting, 'bootstrap_replicates seed unit interval primary lead_secondary required_tables'
+          + (' lane_b' if isinstance(reporting, dict) and 'lane_b' in reporting else ''))
+    if {key: value for key, value in reporting.items() if key != 'lane_b'} != dict(
+        bootstrap_replicates=1000, seed=42, unit='whole-group', interval='percentile-linear',
         primary='delta-recall-lead-ge60', lead_secondary='paired-common-matched-events', required_tables=['forecast','detector']):
         raise ValueError('reporting contract mismatch')
     lanes = {lane: {'status': 'ready', 'reasons': []} for lane in ('a', 'b')}
     def gap(lane, reason):
         lanes[lane]['status'] = 'blocked'
         lanes[lane]['reasons'].append(reason)
+    for reason in lane_b_rule_gaps(reporting.get('lane_b')):
+        gap('b', reason)
     ids, assignments, partitions = set(), {}, []
     if not splits['records']:
         for lane in lanes: gap(lane, 'split records unavailable')

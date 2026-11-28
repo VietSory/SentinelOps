@@ -15,11 +15,25 @@ from sentinelops.ml.model_benchmark_protocol import audit_protocol, verify_proto
 
 _TABLES = ('predictions', 'events', 'matches')
 _BASELINE_FIT_SHA256 = '58a30c257fb6e181215c600dd1385faa16f5bc15ccacb35df87db69e6838f315'
+_PREDICTION_FIELDS = ('dataset group_id run_id service bucket_end available_at decision_at clock eligible '
+                      'eligibility_reason y label_reason healthy raw_ref oracle_ref model_id score status reason '
+                      'pattern_kind pattern_id inference_seconds graph_neighbor_count component_availability '
+                      'state episode_id emitted_at').split()
 _MATCH_TEXT = ('dataset group_id run_id service model_id clock event_id event_pattern_kind onset_at '
                'deadline_at event_oracle_ref bucket_end raw_ref oracle_ref episode_id emitted_at '
                'pattern_kind pattern_id status reason').split()
 _EVENT_TEXT = ('dataset group_id run_id service event_id onset_at confirmed_at kind reason '
-               'oracle_ref pattern_kind deadline_at').split()
+               'oracle_ref pattern_kind deadline_at end_at censor_until').split()
+_MODEL_NAMES = {'adsketch': 'ADSketch, biến thể tìm kiếm giới hạn',
+                'adsketch_mad_or': 'ADSketch + MAD', 'isolation_forest': 'Isolation Forest',
+                'median_mad': 'Median/MAD'}
+_PROXY_LABEL_DISCLOSURE = (
+    'All three detectors filter the normal training reference using proxy labels. '
+    'ADSketch confirms discovery patterns with positive proxy labels. Solo IF/MAD constrain the '
+    'negative calibration budget using threshold candidates from all labelled calibration scores. '
+    'The combo directly maximizes positive proxy calibration flags. Alibaba evaluation uses the same '
+    '2.0-times-median proxy family, giving models trained with these labels a structural advantage.'
+)
 
 
 def _json_bytes(value):
@@ -142,6 +156,11 @@ def _verify_report(output, identity, *, reevaluate=None):
         raise ValueError('Lane B report file inventory differs')
     for name, digest in files.items():
         _pinned(output, {'path': name, 'sha256': digest})
+    for name in _TABLES:
+        schema = parquet.read_schema(output / (name + '.parquet'))
+        if not schema.equals(_ledger_schema(name), check_metadata=False):
+            raise ValueError(f'Lane B report {name}.parquet Arrow schema differs from stage '
+                             '(column names/order, types or nullability)')
     if set(manifest['rows']) != set(_TABLES) or any(
         parquet.ParquetFile(output / (name + '.parquet')).metadata.num_rows != manifest['rows'][name]
         for name in _TABLES
@@ -170,15 +189,27 @@ def _table_rows(rows):
     return [{key: row.get(key) for key in columns} for row in rows]
 
 
-def _ledger_table(name, rows):
+def _ledger_schema(name):
     import pyarrow as arrow
 
     if name == 'predictions':
-        return arrow.Table.from_pylist(rows)
+        types = {'eligible': arrow.bool_(), 'healthy': arrow.bool_(), 'y': arrow.int64(),
+                 'graph_neighbor_count': arrow.int64(), 'score': arrow.float64(),
+                 'inference_seconds': arrow.float64()}
+        return arrow.schema([(field, types.get(field, arrow.string())) for field in _PREDICTION_FIELDS])
+    if name not in ('events', 'matches'):
+        raise ValueError('unrecognized detector ledger: ' + name)
     text = _MATCH_TEXT if name == 'matches' else _EVENT_TEXT
     trailing = ([('detection_delay_seconds', arrow.float64())] if name == 'matches' else
-                [('eligible', arrow.bool_()), ('in_scope', arrow.bool_())])
-    schema = arrow.schema([(key, arrow.string()) for key in text] + trailing)
+                [('eligible', arrow.bool_()), ('in_scope', arrow.bool_()),
+                 ('length_minutes', arrow.int64()), ('positive_minutes', arrow.int64())])
+    return arrow.schema([(key, arrow.string()) for key in text] + trailing)
+
+
+def _ledger_table(name, rows):
+    import pyarrow as arrow
+
+    schema = _ledger_schema(name)
     extras = set().union(*(row.keys() for row in rows)) - set(schema.names)
     if extras:
         raise ValueError('unrecognized detector ledger fields: ' + ', '.join(sorted(extras)))
@@ -186,7 +217,10 @@ def _ledger_table(name, rows):
 
 
 def _detector_csv(result):
-    rows = [{'model_id': name, 'dataset': result['dataset'], 'clock': result['clock'],
+    rows = [{'model_id': name, 'model_name': _MODEL_NAMES[name],
+             'dataset': result['dataset'], 'clock': result['clock'],
+             'novel_pattern_status': 'NA', 'novel_pattern_reason': 'insufficient-support',
+             'proxy_label_disclosure': _PROXY_LABEL_DISCLOSURE,
              **{key: value for key, value in metrics.items() if not isinstance(value, (dict, list, tuple))}}
             for name, metrics in sorted(result['models'].items())]
     columns = list(dict.fromkeys(key for row in rows for key in row))
@@ -226,7 +260,8 @@ def _write_report(output, identity, result):
 
 
 def _score(command, root, spec):
-    _require_fields(spec, 'schema_version dataset clock fit_sha256 windows events admission')
+    projection_field = ' event_projection' if isinstance(spec, dict) and spec.get('dataset') == 'alibaba-proxy' else ''
+    _require_fields(spec, 'schema_version dataset clock fit_sha256 windows events admission' + projection_field)
     if spec['schema_version'] != 'detector-score-input/development-v1':
         raise ValueError('Lane B scoring requires an admitted development projection')
     dataset, clock = spec['dataset'], spec['clock']
@@ -242,6 +277,17 @@ def _score(command, root, spec):
         return _blocked(*lane['reasons'])
     windows_path = _pinned(root, spec['windows'])
     events_path = _pinned(root, spec['events'])
+    event_rule_id = None
+    if dataset == 'alibaba-proxy':
+        projection_path = _pinned(root, spec['event_projection'])
+        projection = _read_json(projection_path)
+        event_rule_id = projection.get('rule_id')
+        if (projection.get('schema_version') != 'alibaba-detector-event-projection/v1'
+                or not isinstance(event_rule_id, str) or not re.fullmatch(r'[0-9a-f]{64}', event_rule_id)):
+            raise ValueError('invalid Alibaba event projection receipt')
+        for field, path in (('projected_windows', windows_path), ('events', events_path)):
+            if _pinned(projection_path.parent, projection.get(field)) != path:
+                raise ValueError('Alibaba event projection differs from the scored windows or events')
     admission = _read_json(_pinned(root, spec['admission']))
     source = admission.get('source_identity')
     if (admission.get('schema_version') != 'detector-projection/development-v1'
@@ -276,7 +322,9 @@ def _score(command, root, spec):
         return _verify_report(output, identity)
 
     import pyarrow.parquet as parquet
+    from sentinelops.ml.model_benchmark_detector_combo import COMBO_MODEL, append_combo_predictions
     from sentinelops.ml.model_benchmark_detector_evaluation import evaluate_detectors, score_detector_windows
+    from sentinelops.ml.model_benchmark_reports import lane_b_recommendation
 
     windows = parquet.read_table(windows_path).to_pylist()
     events = parquet.read_table(events_path).to_pylist()
@@ -288,16 +336,30 @@ def _score(command, root, spec):
         if dataset == 'alibaba-proxy' and split_of(row['service']) != 'evaluation':
             raise ValueError('Alibaba event and score ledgers require evaluation services')
     def evaluate(predictions):
-        return evaluate_detectors(
-            windows, events, predictions, clock=clock, thresholds={
+        combined = append_combo_predictions(predictions, fit.calibration[COMBO_MODEL])
+        result = evaluate_detectors(
+            windows, events, combined, clock=clock, thresholds={
                 model: operating['threshold'] for model, operating in fit.calibration.items()
             }, policy_identity=fit.fit_sha256,
+            component_thresholds=fit.calibration[COMBO_MODEL]['thresholds'],
             persistence={'step_seconds': 60, 'entry_windows': fit.persistence, 'exit_windows': fit.persistence},
             event_kind='alibaba-proxy' if dataset == 'alibaba-proxy' else 'latency',
         )
+        result['model_names'] = dict(_MODEL_NAMES)
+        result['novel_pattern'] = {'status': 'NA', 'reason': 'insufficient-support'}
+        for metrics in result['models'].values():
+            metrics['patterns']['novel'].update(status='NA', reason='insufficient-support',
+                                                recall=None, missing_reason='insufficient-support')
+        result['proxy_label_disclosure'] = _PROXY_LABEL_DISCLOSURE
+        result['combo_selection_rule_id'] = fit.calibration[COMBO_MODEL]['selection_rule']
+        if dataset == 'alibaba-proxy':
+            result['event_rule_id'] = event_rule_id
+            result['recommendation'] = lane_b_recommendation(result, protocol['reporting'].get('lane_b', {}))
+        return result
 
     if command == 'verify-report':
-        replayed = score_detector_windows(fit.model, windows, clock=clock)
+        replayed = append_combo_predictions(score_detector_windows(fit.model, windows, clock=clock),
+                                            fit.calibration[COMBO_MODEL])
 
         def verify_scores(saved):
             if len(saved) != len(replayed) or any(
@@ -305,7 +367,7 @@ def _score(command, root, spec):
                 for row, expected in zip(saved, replayed)
             ):
                 raise ValueError('Lane B report predictions differ from the pinned model and windows')
-            return evaluate(saved)
+            return evaluate([row for row in saved if row['model_id'] != COMBO_MODEL])
 
         return _verify_report(output, identity, reevaluate=verify_scores)
     predictions = score_detector_windows(fit.model, windows, clock=clock, measure_inference=True)

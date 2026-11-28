@@ -5,11 +5,16 @@ import pytest
 pytest.importorskip("sklearn")
 
 from sentinelops.ml.model_benchmark_forecast import MODELS
+from sentinelops.ml.model_benchmark_alibaba_events import ALIBABA_EVENT_RULE_ID
+from sentinelops.ml.model_benchmark_detector_combo import COMBO_SELECTION_RULE_ID
+from sentinelops.ml.model_benchmark_protocol import LANE_B_BASELINE, LANE_B_CANDIDATE, LANE_B_COST_METRIC, lane_b_rules
 from sentinelops.ml.model_benchmark_reports import forecast_report
+from sentinelops.ml.model_benchmark_reports import lane_b_recommendation
 from sentinelops.ml.model_benchmark_reports import summarize_sealed_forecasts
 
 PROVENANCE = dict(code='fixture', config='fixture', data='fixture', models='fixture')
 THRESHOLDS = {model: dict(watch=.4, degrading=.7) for model in MODELS}
+LANE_B_RULE_IDS = {'event_rule_id': ALIBABA_EVENT_RULE_ID, 'combo_selection_rule_id': COMBO_SELECTION_RULE_ID}
 
 
 def fixture(leads=(59, 60, 180, 200, 240)):
@@ -169,6 +174,246 @@ def test_lane_a_recommendation_requires_paired_gain_and_no_higher_warning_cost()
     healthy['models']['ltfp_graph']['healthy_exposure']['per_service_hour'] = .2
     rules['calibration_budget'] = None
     assert decide()['reason'] == 'common-calibration-budget-unverified'
+
+
+def lane_b_evaluation(lower, cost_upper, candidate_cost):
+    def interval(lower, upper):
+        return dict(lower=lower, upper=upper, valid_replicates=1000, undefined_replicates=0,
+                    denominators={LANE_B_CANDIDATE: 12, LANE_B_BASELINE: 12}, missing_reason=None)
+
+    model = dict(healthy_scored_service_hours=10., healthy_false_incidents=3)
+    return {**LANE_B_RULE_IDS, 'event_kind': 'alibaba-proxy',
+            'coverage': {'pairs': {'adsketch_mad_or_minus_isolation_forest': {
+                'healthy_minutes': 20, 'healthy_both_scored': 20,
+                'events': 20, 'events_both_scored': 20, 'coverage': 1.}}},
+            'models': {LANE_B_CANDIDATE: {**model, LANE_B_COST_METRIC: candidate_cost},
+                       LANE_B_BASELINE: {**model, LANE_B_COST_METRIC: .4}},
+            'bootstrap': {'event_groups': 5, 'groups': 100, 'intervals': {
+                'adsketch_mad_or_minus_isolation_forest': {'f1': interval(lower, .2),
+                                                          LANE_B_COST_METRIC: interval(-.2, cost_upper)},
+                'median_mad_minus_isolation_forest': {'f1': interval(-.2, .1),
+                                                     LANE_B_COST_METRIC: interval(-.1, .3)},
+                'adsketch_mad_or_minus_median_mad': {'f1': interval(-.02, .2),
+                                                   LANE_B_COST_METRIC: interval(-.1, .3)},
+                'adsketch_minus_isolation_forest': {'f1': interval(-.3, .4),
+                                                   LANE_B_COST_METRIC: interval(-.2, .4)},
+                'adsketch_minus_median_mad': {'f1': interval(-.4, .3),
+                                            LANE_B_COST_METRIC: interval(-.2, .3)}}}}
+
+
+@pytest.mark.parametrize('lower, cost_upper, candidate_cost, benchmark, reason', [
+    (.01, 0., .4, 'REPLACE', 'f1-improved-without-higher-cost'),
+    (-.05, -.01, .3, 'REPLACE', 'non-inferior-with-lower-false-incident-cost'),
+    (-.05, 0., .3, 'INCONCLUSIVE', 'non-inferior-without-measured-advantage'),
+    (0., 0., .4, 'INCONCLUSIVE', 'non-inferior-without-measured-advantage'),
+    (-.05001, -.01, .3, 'INCONCLUSIVE', 'f1-non-inferiority-not-established'),
+    (.01, .2, .5, 'KEEP', 'higher-false-incident-cost'),
+])
+def test_lane_b_recommendation_decision_table(lower, cost_upper, candidate_cost, benchmark, reason):
+    evaluation = lane_b_evaluation(lower, cost_upper, candidate_cost)
+    result = lane_b_recommendation(evaluation, lane_b_rules(**LANE_B_RULE_IDS))
+    assert (result['benchmark'], result['reason']) == (benchmark, reason)
+    assert result['release'] == 'KEEP' and result['activation_allowed'] is False and result['runtime_parity'] == 'NOT_RUN'
+    assert result['novel_pattern'] == {'status': 'NA', 'reason': 'insufficient-support'}
+    assert result['local_gates'] == dict.fromkeys(('Q-04', 'Q-05', 'Q-06'), 'NOT_RUN')
+    assert result['scope'] == 'alibaba-proxy-ranking' and result['uses_proxy_positive_labels'] is True
+    mad = result['comparisons']['median_mad_minus_isolation_forest']
+    assert (mad['f1']['lower'], mad['f1']['upper']) == (-.2, .1)
+    assert (mad[LANE_B_COST_METRIC]['lower'], mad[LANE_B_COST_METRIC]['upper']) == (-.1, .3)
+    assert result['comparisons'] == evaluation['bootstrap']['intervals']
+    assert list(result['comparisons']) == [
+        'adsketch_mad_or_minus_isolation_forest', 'median_mad_minus_isolation_forest',
+        'adsketch_mad_or_minus_median_mad', 'adsketch_minus_isolation_forest', 'adsketch_minus_median_mad']
+
+
+@pytest.mark.parametrize('case, reason', [
+    ('healthy-only-groups', 'insufficient-event-support'),
+    ('support-missing', 'insufficient-event-support'),
+    ('coverage-incomplete', 'pairwise-coverage-incomplete'),
+    ('coverage-missing', 'pairwise-coverage-incomplete'),
+    ('f1-bootstrap-missing', 'bootstrap-undefined'),
+    ('cost-bootstrap-missing', 'bootstrap-undefined'),
+    ('rate-missing', 'bootstrap-undefined'),
+    ('preregistration-missing', 'rules-unverified'),
+])
+def test_lane_b_recommendation_rejects_incomplete_evidence(case, reason):
+    evaluation = lane_b_evaluation(.01, -.01, .3)
+    rules = lane_b_rules(**LANE_B_RULE_IDS)
+    if case == 'healthy-only-groups':
+        evaluation['bootstrap']['event_groups'] = 4
+    elif case == 'support-missing':
+        del evaluation['bootstrap']['event_groups']
+    elif case == 'coverage-incomplete':
+        evaluation['coverage']['pairs']['adsketch_mad_or_minus_isolation_forest'].update(
+            events_both_scored=18, coverage=.9)
+    elif case == 'coverage-missing':
+        del evaluation['coverage']['pairs']['adsketch_mad_or_minus_isolation_forest']
+    elif case == 'f1-bootstrap-missing':
+        evaluation['bootstrap']['intervals']['adsketch_mad_or_minus_isolation_forest']['f1'].update(
+            missing_reason='no-defined-paired-replicates', valid_replicates=0, lower=None, upper=None)
+    elif case == 'cost-bootstrap-missing':
+        evaluation['bootstrap']['intervals']['adsketch_mad_or_minus_isolation_forest'][LANE_B_COST_METRIC].update(
+            missing_reason='insufficient-valid-replicates')
+    elif case == 'rate-missing':
+        evaluation['models'][LANE_B_CANDIDATE][LANE_B_COST_METRIC] = None
+    elif case == 'preregistration-missing':
+        rules = {}
+    result = lane_b_recommendation(evaluation, rules)
+    assert (result['benchmark'], result['reason']) == ('INCONCLUSIVE', reason)
+    assert result['release'] == 'KEEP' and result['activation_allowed'] is False and result['runtime_parity'] == 'NOT_RUN'
+
+
+@pytest.mark.parametrize('field, value', [
+    ('calibration_budget', None), ('calibration_budget', .02), ('calibration_budget', '.01'),
+    ('calibration_cohort', ''), ('calibration_cohort', ' '), ('calibration_cohort', []),
+    ('event_rule_id', None), ('combo_selection_rule_id', ''),
+])
+def test_lane_b_recommendation_requires_calibration_and_rule_identity(field, value):
+    rules = lane_b_rules(**LANE_B_RULE_IDS)
+    rules[field] = value
+    result = lane_b_recommendation(lane_b_evaluation(.01, -.01, .3), rules)
+    assert result['benchmark'] == 'INCONCLUSIVE' and result['reason'] == 'rules-unverified'
+
+
+@pytest.mark.parametrize('field', ['event_rule_id', 'combo_selection_rule_id'])
+@pytest.mark.parametrize('invalid', ['missing', '0' * 64, None])
+def test_lane_b_recommendation_requires_evaluation_rule_attestation(field, invalid):
+    evaluation = lane_b_evaluation(.01, -.01, .3)
+    rules = lane_b_rules(**LANE_B_RULE_IDS)
+    assert lane_b_recommendation(evaluation, rules)['benchmark'] == 'REPLACE'
+    if invalid == 'missing':
+        del evaluation[field]
+    else:
+        evaluation[field] = invalid
+    evaluation['bootstrap']['event_groups'] = 4
+    result = lane_b_recommendation(evaluation, rules)
+    assert (result['benchmark'], result['reason']) == ('INCONCLUSIVE', 'rules-unverified')
+    assert result['activation_allowed'] is False and result['release'] == 'KEEP'
+
+
+@pytest.mark.parametrize('field, reason', [
+    ('event_rule_id', 'event-rule-id-mismatch'), ('combo_selection_rule_id', 'combo-rule-id-mismatch'),
+])
+def test_wrong_rule_sha_blocks_freeze_and_gate_on_the_same_ledger(tmp_path, field, reason):
+    from sentinelops.ml.model_benchmark_protocol import freeze_protocol
+    from test_model_benchmark_protocol import fixture
+
+    protocol, _ = fixture(tmp_path)
+    rules = protocol['reporting']['lane_b']
+    evaluation = lane_b_evaluation(.01, -.01, .3)
+    assert lane_b_recommendation(evaluation, rules)['benchmark'] == 'REPLACE'
+    rules[field] = '0' * 64
+    frozen = freeze_protocol(protocol, tmp_path, lanes=('b',))
+    assert frozen['status'] == 'blocked' and frozen['reasons'] == ['b: ' + reason]
+    assert not (tmp_path / 'freeze/protocol.json').exists()
+    result = lane_b_recommendation(evaluation, rules)
+    assert (result['benchmark'], result['reason']) == ('INCONCLUSIVE', 'rules-unverified')
+    evaluation[field] = rules[field]
+    assert lane_b_recommendation(evaluation, rules)['reason'] == 'rules-unverified'
+
+
+@pytest.mark.parametrize('coverage, accepted', [(None, False), (.949, False), (.95, True), (1., True)])
+def test_lane_b_recommendation_pairwise_coverage_boundary(coverage, accepted):
+    evaluation = lane_b_evaluation(.01, -.01, .3)
+    evaluation['coverage']['pairs']['adsketch_mad_or_minus_isolation_forest']['coverage'] = coverage
+    evaluation['models'][LANE_B_CANDIDATE]['healthy_scored_service_hours'] = 9.5
+    result = lane_b_recommendation(evaluation, lane_b_rules(**LANE_B_RULE_IDS))
+    assert result['benchmark'] == ('REPLACE' if accepted else 'INCONCLUSIVE')
+    if not accepted:
+        assert result['reason'] == 'pairwise-coverage-incomplete'
+
+
+@pytest.mark.parametrize('metric', ['f1', LANE_B_COST_METRIC])
+@pytest.mark.parametrize('replicates, accepted', [(949, False), (950, True)])
+def test_lane_b_recommendation_paired_replicate_boundary(metric, replicates, accepted):
+    evaluation = lane_b_evaluation(.01, -.01, .3)
+    evaluation['bootstrap']['intervals']['adsketch_mad_or_minus_isolation_forest'][metric].update(
+        valid_replicates=replicates, undefined_replicates=1000-replicates)
+    result = lane_b_recommendation(evaluation, lane_b_rules(**LANE_B_RULE_IDS))
+    assert result['benchmark'] == ('REPLACE' if accepted else 'INCONCLUSIVE')
+    if not accepted:
+        assert result['reason'] == 'bootstrap-undefined'
+
+
+def test_lane_b_recommendation_branch_priority_and_minimal_rules():
+    evaluation = lane_b_evaluation(-.06, -.01, .5)
+    rules = {**LANE_B_RULE_IDS, 'calibration_budget': .02, 'calibration_cohort': 'calibration-anchor-fixture'}
+    evaluation['bootstrap']['event_groups'] = 4
+    coverage = evaluation['coverage']['pairs']['adsketch_mad_or_minus_isolation_forest']
+    coverage['coverage'] = .9
+    interval = evaluation['bootstrap']['intervals']['adsketch_mad_or_minus_isolation_forest']['f1']
+    interval['valid_replicates'] = 949
+    assert lane_b_recommendation(evaluation, rules)['reason'] == 'rules-unverified'
+    rules['calibration_budget'] = .01
+    assert lane_b_recommendation(evaluation, rules)['reason'] == 'insufficient-event-support'
+    evaluation['bootstrap']['event_groups'] = 5
+    assert lane_b_recommendation(evaluation, rules)['reason'] == 'pairwise-coverage-incomplete'
+    coverage['coverage'] = .95
+    assert lane_b_recommendation(evaluation, rules)['reason'] == 'bootstrap-undefined'
+    interval['valid_replicates'] = 950
+    assert lane_b_recommendation(evaluation, rules)['reason'] == 'f1-non-inferiority-not-established'
+    interval['lower'] = .01
+    assert lane_b_recommendation(evaluation, rules)['reason'] == 'higher-false-incident-cost'
+    evaluation['models'][LANE_B_CANDIDATE][LANE_B_COST_METRIC] = .3
+    assert lane_b_recommendation(evaluation, rules)['reason'] == 'f1-improved-without-higher-cost'
+    interval['lower'] = -.05
+    assert lane_b_recommendation(evaluation, rules)['reason'] == 'non-inferior-with-lower-false-incident-cost'
+    evaluation['bootstrap']['intervals']['adsketch_mad_or_minus_isolation_forest'][LANE_B_COST_METRIC]['upper'] = 0.
+    assert lane_b_recommendation(evaluation, rules)['reason'] == 'non-inferior-without-measured-advantage'
+
+
+def test_lane_b_recommendation_requires_directed_bootstrap_pairs():
+    evaluation = lane_b_evaluation(.01, -.01, .3)
+    intervals = evaluation['bootstrap']['intervals']
+    intervals['isolation_forest_minus_adsketch_mad_or'] = intervals.pop('adsketch_mad_or_minus_isolation_forest')
+    result = lane_b_recommendation(evaluation, lane_b_rules(**LANE_B_RULE_IDS))
+    assert result['reason'] == 'bootstrap-undefined'
+    assert result['comparisons']['adsketch_mad_or_minus_isolation_forest'] == {}
+    assert 'isolation_forest_minus_adsketch_mad_or' not in result['comparisons']
+
+
+def test_lane_b_recommendation_consumes_evaluator_coverage_and_directed_intervals():
+    from sentinelops.ml.model_benchmark_detector_evaluation import MODELS, evaluate_detectors
+
+    windows, events, predictions = [], [], []
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    onset = (start + timedelta(minutes=324)).isoformat()
+    for index in range(5):
+        identity = dict(dataset='alibaba-proxy-fixture', group_id=f'service-{index}',
+                        run_id=f'service-{index}', service=f'service-{index}')
+        events.append({**identity, 'event_id': f'event-{index}', 'kind': 'alibaba-proxy',
+                       'eligible': True, 'onset_at': onset, 'confirmed_at': onset})
+        for minute in range(319, 336):
+            key = {**identity, 'bucket_end': (start + timedelta(minutes=minute)).isoformat()}
+            windows.append({**key, 'eligible': minute >= 324, 'y': int(minute == 324),
+                            'healthy': minute >= 330, 'reason': 'warmup' if minute < 324 else None})
+            if minute < 324:
+                continue
+            for model in MODELS:
+                predictions.append({**key, 'model_id': model,
+                                    'score': .8 if model == 'median_mad' and minute == 324 else .1})
+
+    def evaluate(rows):
+        result = evaluate_detectors(windows, events, rows, clock='replay',
+            thresholds={**dict.fromkeys(MODELS, .5), LANE_B_CANDIDATE: 1.},
+            component_thresholds={'median_mad': .5, 'adsketch': .5}, policy_identity='fixture-policy',
+            persistence={'step_seconds': 60, 'entry_windows': 1, 'exit_windows': 1}, event_kind='alibaba-proxy')
+        return {**result, **LANE_B_RULE_IDS}
+
+    evaluation = evaluate(predictions)
+    rules = lane_b_rules(**LANE_B_RULE_IDS)
+    result = lane_b_recommendation(evaluation, rules)
+    assert (result['benchmark'], result['reason']) == ('REPLACE', 'f1-improved-without-higher-cost')
+    assert result['comparisons'] == evaluation['bootstrap']['intervals']
+    primary = result['comparisons']['adsketch_mad_or_minus_isolation_forest']
+    assert primary['f1']['lower'] == primary['f1']['upper'] == 1.
+    assert primary[LANE_B_COST_METRIC]['valid_replicates'] == 1000
+    assert primary[LANE_B_COST_METRIC]['denominators'] == {LANE_B_CANDIDATE: .5, LANE_B_BASELINE: .5}
+    missing_at = (start + timedelta(minutes=330)).isoformat()
+    incomplete = evaluate([row for row in predictions if not (
+        row['model_id'] == LANE_B_BASELINE and row['service'] in ('service-0', 'service-1')
+        and row['bucket_end'] == missing_at)])
+    assert lane_b_recommendation(incomplete, rules)['reason'] == 'pairwise-coverage-incomplete'
 
 
 def test_primary_event_coverage_detects_missing_comparator_scores():

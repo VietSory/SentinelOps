@@ -2,19 +2,22 @@
 from bisect import bisect_left
 from collections import Counter, defaultdict
 from datetime import timedelta
-from itertools import combinations
 import math
 import random
 
 from sentinelops.contracts import utc_time
 from sentinelops.ml.evaluation import event_metrics
 from sentinelops.ml.local_evaluation import persistent_states, risk_curve
+from sentinelops.ml.model_benchmark_detector_combo import (
+    COMBO_MODEL, COMPONENT_AVAILABILITIES, KEY_FIELDS, append_combo_predictions,
+)
 from sentinelops.ml.model_benchmark_reports import _quantile
 from sentinelops.telemetry.core import stable_id, timestamp
 
 
 MODELS = ('median_mad', 'isolation_forest', 'adsketch')
-KEY_FIELDS = ('dataset', 'group_id', 'run_id', 'service', 'bucket_end')
+PAIRS = ((COMBO_MODEL, 'isolation_forest'), ('median_mad', 'isolation_forest'),
+         (COMBO_MODEL, 'median_mad'), ('adsketch', 'isolation_forest'), ('adsketch', 'median_mad'))
 CLOCKS = ('replay', 'arrival-aware')
 PATTERNS = ('known', 'novel')
 STEP_SECONDS = 60
@@ -89,7 +92,10 @@ def _windows(windows, clock):
 
 
 def _availability_reason(window):
-    if not window['eligible']:
+    relative_minute = window.get('relative_minute')
+    warmup = (window['dataset'] == 'alibaba-proxy' and type(relative_minute) is int
+              and 259 <= relative_minute < 324)
+    if not window['eligible'] and not warmup:
         return window['eligibility_reason']
     if window['clock'] == 'arrival-aware':
         if window['available_at'] is None:
@@ -100,7 +106,7 @@ def _availability_reason(window):
 
 
 def _prediction(window, model, *, score=None, reason=None, pattern_kind=None,
-                pattern_id=None, inference_seconds=None):
+                pattern_id=None, inference_seconds=None, component_availability=None):
     fields = KEY_FIELDS + ('available_at', 'decision_at', 'clock', 'eligible', 'eligibility_reason',
                            'y', 'label_reason', 'healthy')
     return {**{field: window[field] for field in fields},
@@ -108,11 +114,11 @@ def _prediction(window, model, *, score=None, reason=None, pattern_kind=None,
             'model_id': model, 'score': score,
             'status': 'available' if score is not None else 'unavailable', 'reason': reason,
             'pattern_kind': pattern_kind, 'pattern_id': pattern_id, 'inference_seconds': inference_seconds,
-            'graph_neighbor_count': None}
+            'graph_neighbor_count': None, 'component_availability': component_availability}
 
 
 def score_detector_windows(frozen, windows, *, clock, measure_inference=False):
-    """Return one row per window/model using raw latency in the window's ``value`` field.
+    """Score the base models using raw latency in the window's ``value`` field.
 
     Past ineligible anchors may provide predictor history when they carry a valid
     observation. Arrival-aware replay requires their recorded observation arrival.
@@ -174,7 +180,7 @@ def score_detector_windows(frozen, windows, *, clock, measure_inference=False):
     return [results[key, model] for key in indexed for model in MODELS]
 
 
-def _audit_predictions(windows, predictions):
+def _audit_predictions(windows, predictions, models, component_thresholds):
     indexed = {}
     for prediction in predictions:
         key_fields = {*KEY_FIELDS, 'model_id'}
@@ -182,22 +188,25 @@ def _audit_predictions(windows, predictions):
             raise ValueError('detector prediction identity is required')
         key = (*_key(prediction)[:-1], timestamp(utc_time(prediction['bucket_end'])))
         model = prediction['model_id']
-        if key not in windows or model not in MODELS or (key, model) in indexed:
+        if key not in windows or model not in models or (key, model) in indexed:
             raise ValueError('duplicate detector prediction or undeclared window/model')
         window = windows[key]
         score, reason = prediction.get('score'), prediction.get('reason')
         timing = prediction.get('inference_seconds')
         pattern, pattern_id = prediction.get('pattern_kind'), prediction.get('pattern_id')
+        components = prediction.get('component_availability')
         unavailable = _availability_reason(window)
         if (score is None and (not _text(reason) or pattern is not None or pattern_id is not None or timing is not None
                                or unavailable is not None and reason != unavailable)
                 or score is not None and (not _number(score) or reason is not None or unavailable is not None)
                 or timing is not None and (not _number(timing) or timing < 0)
+                or model == COMBO_MODEL and (components not in COMPONENT_AVAILABILITIES or timing is not None)
+                or model != COMBO_MODEL and components is not None
                 or pattern is not None and (model != 'adsketch' or pattern not in ('normal', *PATTERNS))
                 or pattern_id is not None and (pattern is None or not _text(pattern_id))):
             raise ValueError('invalid or noncausal detector prediction')
         canonical = _prediction(window, model, score=score, reason=reason, pattern_kind=pattern,
-                                pattern_id=pattern_id, inference_seconds=timing)
+                                pattern_id=pattern_id, inference_seconds=timing, component_availability=components)
         for field, value in canonical.items():
             if field not in prediction:
                 continue
@@ -207,9 +216,17 @@ def _audit_predictions(windows, predictions):
             if supplied != value:
                 raise ValueError(f'detector prediction disagrees with declared window: {field}')
         indexed[key, model] = canonical
-    return [indexed.get((key, model)) or _prediction(window, model, reason=_availability_reason(window)
-                                                    or 'missing-model-prediction')
+    base = [indexed.get((key, model)) or _prediction(window, model, reason=_availability_reason(window)
+                                                     or 'missing-model-prediction')
             for key, window in windows.items() for model in MODELS]
+    if COMBO_MODEL not in models:
+        return base
+    rows = append_combo_predictions(base, {'status': 'ready', 'threshold': 1.0, 'thresholds': component_thresholds})
+    for row in rows[len(base):]:
+        supplied = indexed.get((_key(row), COMBO_MODEL))
+        if supplied is not None and any(supplied[field] != row[field] for field in ('score', 'component_availability')):
+            raise ValueError('combo prediction disagrees with component scores or availability')
+    return rows
 
 
 def _audit_events(windows, events, event_kind):
@@ -226,8 +243,10 @@ def _audit_events(windows, events, event_kind):
         eligible, reason = event['eligible'], event.get('reason')
         onset = utc_time(event['onset_at']) if event.get('onset_at') is not None else None
         confirmed = utc_time(event['confirmed_at']) if event.get('confirmed_at') is not None else None
+        censor_until = utc_time(event['censor_until']) if event.get('censor_until') is not None else None
         if (type(eligible) is not bool or eligible and (onset is None or confirmed is None)
                 or not eligible and not _text(reason) or confirmed is not None and (onset is None or confirmed < onset)
+                or censor_until is not None and (onset is None or censor_until < onset or eligible)
                 or event.get('pattern_kind') not in (None, *PATTERNS)):
             raise ValueError('invalid independent detector oracle event')
         identity = run, service, onset, event['kind']
@@ -236,6 +255,7 @@ def _audit_events(windows, events, event_kind):
         event_ids.add(event['event_id'])
         event_keys.add(identity)
         output.append({**event, 'dataset': dataset, 'oracle_ref': event.get('oracle_ref'),
+                       **({'censor_until': timestamp(censor_until)} if censor_until is not None else {}),
                        'onset_at': timestamp(onset) if onset is not None else None,
                        'confirmed_at': timestamp(confirmed) if confirmed is not None else None, 'reason': reason,
                        'in_scope': eligible and event['kind'] == event_kind,
@@ -256,30 +276,42 @@ def _episodes(rows, threshold, persistence):
                 episode = None
             if state['entered']:
                 episode = stable_id([row['clock'], *_key(row), row['model_id']])
-                alerts.append(row)
+                if row['eligible']:
+                    alerts.append(row)
             row.update(state='unavailable' if not state['available'] else 'incident' if state['active'] else 'normal',
-                       episode_id=episode, emitted_at=row['decision_at'] if state['entered'] else None)
+                       episode_id=episode, emitted_at=row['decision_at'] if state['entered'] and row['eligible'] else None)
     return alerts
 
 
-def _ratio_metrics(tp, fp, fn, healthy_windows):
-    exposure = healthy_windows * STEP_SECONDS / 3600
+def _ratio_metrics(tp, fp, fn, healthy_fp, healthy_scored_minutes):
+    exposure = healthy_scored_minutes * STEP_SECONDS / 3600
     denominators = {'precision': tp + fp, 'recall': tp + fn, 'f1': 2 * tp + fp + fn,
                     'false_incidents_per_healthy_service_hour': exposure}
     numerators = {'precision': tp, 'recall': tp, 'f1': 2 * tp,
-                  'false_incidents_per_healthy_service_hour': fp}
+                  'false_incidents_per_healthy_service_hour': healthy_fp}
     metrics = {key: numerators[key] / denom if denom else None for key, denom in denominators.items()}
     reasons = {'precision': 'no-alerts', 'recall': 'no-eligible-events', 'f1': 'no-alerts-or-eligible-events',
                'false_incidents_per_healthy_service_hour': 'no-eligible-healthy-exposure'}
     return {**metrics, 'tp': tp, 'fp': fp, 'fn': fn, 'miss': fn, 'eligible_events': tp + fn,
-            'eligible_healthy_service_hours': exposure, 'denominators': denominators,
+            'healthy_false_incidents': healthy_fp, 'healthy_scored_service_hours': exposure,
+            'denominators': denominators,
             'missing_reasons': {metric: reasons[metric] for metric in metrics if metrics[metric] is None}}
 
 
-def _match_audit(rows, alerts, events, model, clock):
-    scope = lambda row: (row['run_id'], row['service'])
-    candidates = _grouped(events, scope)
-    decisions = _grouped((row for row in rows if row['score'] is not None), scope)
+def _scope(row):
+    return row['run_id'], row['service']
+
+
+def _supported_events(rows, events):
+    decisions = _grouped((row for row in rows if row['eligible'] and row['score'] is not None), _scope)
+    return {event['event_id'] for event in events
+            if any(utc_time(event['onset_at']) <= utc_time(row['decision_at']) <= utc_time(event['deadline_at'])
+                   for row in decisions[_scope(event)])}
+
+
+def _match_audit(alerts, events, censored_events, supported, model, clock):
+    candidates = _grouped(events, _scope)
+    exclusions = _grouped(censored_events, _scope)
     unmatched = {event['event_id'] for event in events}
     matches = []
 
@@ -304,20 +336,24 @@ def _match_audit(rows, alerts, events, model, clock):
 
     for alert in sorted(alerts, key=lambda row: (utc_time(row['emitted_at']), _key(row))):
         emission = utc_time(alert['emitted_at'])
-        event = next((candidate for candidate in candidates[scope(alert)]
+        event = next((candidate for candidate in candidates[_scope(alert)]
                       if candidate['event_id'] in unmatched
                       and utc_time(candidate['onset_at']) <= emission <= utc_time(candidate['deadline_at'])), None)
         if event is None:
-            matches.append(audit('unmatched', alert=alert, reason='no-unmatched-eligible-event-in-window'))
+            exclusion = next((candidate for candidate in exclusions[_scope(alert)]
+                              if utc_time(candidate['onset_at']) <= emission <= utc_time(candidate['censor_until'])), None)
+            if exclusion is None:
+                matches.append(audit('unmatched', alert=alert, reason='no-unmatched-eligible-event-in-window'))
+            else:
+                matches.append(audit('censored', event=exclusion, alert=alert, reason='ineligible-event-censor-window'))
             continue
         unmatched.remove(event['event_id'])
         matches.append(audit('matched', event=event, alert=alert))
     for event in events:
         if event['event_id'] not in unmatched:
             continue
-        onset, deadline = utc_time(event['onset_at']), utc_time(event['deadline_at'])
-        supported = any(onset <= utc_time(row['decision_at']) <= deadline for row in decisions[scope(event)])
-        matches.append(audit('miss', event=event, reason='no-matching-alert' if supported else 'no-available-score-in-window'))
+        reason = 'no-matching-alert' if event['event_id'] in supported else 'no-available-score-in-window'
+        matches.append(audit('miss', event=event, reason=reason))
     return matches
 
 
@@ -338,30 +374,52 @@ def _event_report(rows, alerts, events):
 
 
 def _window_ranking(rows, common=None):
-    selected = [row for row in rows if row['score'] is not None and row['y'] is not None
+    selected = [row for row in rows if row['eligible'] and row['score'] is not None and row['y'] is not None
                 and (common is None or _key(row) in common)]
     return risk_curve([row['y'] for row in selected], [row['score'] for row in selected])
 
 
-def _cohort_metrics(rows, event_counts, common):
-    return {**_ratio_metrics(*event_counts, sum(row['eligible'] and row['healthy'] for row in rows)),
-            'available_windows': sum(row['score'] is not None for row in rows), 'windows': len(rows),
-            'window_ranking': _window_ranking(rows), 'paired_window_ranking': _window_ranking(rows, common)}
-
-
-def _model_report(rows, alerts, events, matches, common):
-    groups = sorted({row['group_id'] for row in rows})
-    by_group = [_grouped(items, lambda row: row['group_id']) for items in (rows, alerts, events)]
-    counts = {group: _event_report(*(items[group] for items in by_group)) for group in groups}
-    tp, fp, fn = (sum(values) for values in zip(*counts.values()))
+def _cohort_counts(rows, alerts, events, matches, legacy_rate):
+    tp, fp, fn = _event_report(rows, alerts, events)
+    healthy = {_key(row) for row in rows if row['eligible'] and row['healthy']}
+    healthy_scored = sum(row['score'] is not None and _key(row) in healthy for row in rows)
+    healthy_fp = sum(row['status'] == 'unmatched' and _key(row) in healthy for row in matches)
     trace = Counter(row['status'] for row in matches)
     if (tp, fp, fn) != (trace['matched'], trace['unmatched'], trace['miss']):
         raise ValueError('detector event metrics disagree with the one-to-one audit')
-    available = [row for row in rows if row['score'] is not None]
+    return (tp, fp, fn, fp if legacy_rate else healthy_fp, len(healthy) if legacy_rate else healthy_scored)
+
+
+def _window_availability(rows):
+    eligible = [row for row in rows if row['eligible']]
+    unavailable = [row for row in eligible if row['score'] is None]
+    warmup = [row for row in rows if row['dataset'] == 'alibaba-proxy' and not row['eligible']
+              and row['eligibility_reason'] == 'causal-warmup']
+    return {'windows': len(eligible), 'available_windows': len(eligible) - len(unavailable),
+            'unavailable_windows': len(unavailable),
+            'unavailable_reasons': dict(sorted(Counter(row['reason'] for row in unavailable).items())),
+            'warmup_windows': len(warmup), 'warmup_scored': sum(row['score'] is not None for row in warmup)}
+
+
+def _cohort_metrics(rows, event_counts, common):
+    return {**_ratio_metrics(*event_counts),
+            'eligible_healthy_service_hours': sum(row['eligible'] and row['healthy'] for row in rows) / 60,
+            **_window_availability(rows),
+            'window_ranking': _window_ranking(rows), 'paired_window_ranking': _window_ranking(rows, common)}
+
+
+def _model_report(rows, alerts, events, matches, common, legacy_rate):
+    groups = sorted({row['group_id'] for row in rows})
+    censored = {row['episode_id'] for row in matches if row['status'] == 'censored'}
+    alerts = [row for row in alerts if row['episode_id'] not in censored]
+    scored_matches = [row for row in matches if row['status'] != 'censored']
+    by_group = [_grouped(items, lambda row: row['group_id']) for items in (rows, alerts, events, scored_matches)]
+    counts = {group: _cohort_counts(*(items[group] for items in by_group), legacy_rate) for group in groups}
+    report = _ratio_metrics(*(sum(values) for values in zip(*counts.values())))
+    available = [row for row in rows if row['eligible'] and row['score'] is not None]
     healthy = [row for row in rows if row['eligible'] and row['healthy']]
     delays = [row['detection_delay_seconds'] for row in matches if row['status'] == 'matched']
     timings = [row['inference_seconds'] for row in available if row['inference_seconds'] is not None]
-    report = _ratio_metrics(tp, fp, fn, len(healthy))
     report['denominators'].update(mttd_p50_seconds=len(delays), mttd_p90_seconds=len(delays),
                                   inference_p95_seconds=len(timings))
     missing = report['missing_reasons']
@@ -369,10 +427,9 @@ def _model_report(rows, alerts, events, matches, common):
         missing['mttd'] = 'no-matched-events'
     if not timings:
         missing['inference_p95_seconds'] = 'no-timed-predictions'
-    reasons = Counter(row['reason'] for row in rows if row['score'] is None)
     patterns = {}
     for pattern in PATTERNS:
-        independent = [row for row in matches if row['event_pattern_kind'] == pattern]
+        independent = [row for row in scored_matches if row['event_pattern_kind'] == pattern]
         matched = sum(row['status'] == 'matched' for row in independent)
         patterns[pattern] = {'eligible_events': len(independent), 'matched_events': matched,
                              'recall': matched / len(independent) if independent else None,
@@ -380,8 +437,8 @@ def _model_report(rows, alerts, events, matches, common):
                              'alert_patterns': sum(row['pattern_kind'] == pattern for row in alerts),
                              'matched_alert_patterns': sum(row['status'] == 'matched' and row['pattern_kind'] == pattern
                                                            for row in matches)}
-    return {**report, 'available_windows': len(available),
-            'unavailable_windows': len(rows) - len(available), 'unavailable_reasons': dict(sorted(reasons.items())),
+    return {**report, **_window_availability(rows),
+            'eligible_healthy_service_hours': len(healthy) / 60, 'censored_alerts': len(censored),
             'scored_healthy_service_hours': sum(row['score'] is not None for row in healthy) * STEP_SECONDS / 3600,
             'unavailable_event_misses': sum(row['reason'] == 'no-available-score-in-window' for row in matches),
             'mttd_p50_seconds': _quantile(delays, .5), 'mttd_p90_seconds': _quantile(delays, .9),
@@ -389,8 +446,8 @@ def _model_report(rows, alerts, events, matches, common):
             'window_ranking': _window_ranking(rows), 'paired_window_ranking': _window_ranking(rows, common),
             'patterns': patterns, 'groups': {
                 group: _cohort_metrics(by_group[0][group], counts[group], common) for group in groups},
-            'services': {service: _cohort_metrics(items[0], _event_report(*items), common)
-                         for service, items in _service_cohorts(rows, alerts, events)}}, counts
+            'services': {service: _cohort_metrics(items[0], _cohort_counts(*items, legacy_rate), common)
+                         for service, items in _service_cohorts(rows, alerts, events, scored_matches)}}, counts
 
 
 def _service_cohorts(*items):
@@ -399,15 +456,15 @@ def _service_cohorts(*items):
         yield service, [group[service] for group in grouped]
 
 
-def _bootstrap(group_counts, models):
+def _bootstrap(group_counts, models, pairs, event_groups):
     groups = sorted(group_counts[MODELS[0]])
     rng = random.Random(BOOTSTRAP_SEED)
     draws = [Counter(rng.choices(groups, k=len(groups))) for _ in range(BOOTSTRAP_REPLICATES)] if len(groups) >= 5 else []
-    metrics = ('precision', 'recall', 'f1')
+    metrics = ('precision', 'recall', 'f1', 'false_incidents_per_healthy_service_hour')
     sampled = {model: [_ratio_metrics(*(sum(group_counts[model][group][index] * times for group, times in draw.items())
-                                       for index in range(3)), 0) for draw in draws] for model in MODELS}
+                                       for index in range(5))) for draw in draws] for model in models}
     intervals = {}
-    for baseline, candidate in combinations(MODELS, 2):
+    for candidate, baseline in pairs:
         intervals[f'{candidate}_minus_{baseline}'] = {}
         for metric in metrics:
             values = [left[metric] - right[metric] for left, right in zip(sampled[candidate], sampled[baseline])
@@ -419,26 +476,74 @@ def _bootstrap(group_counts, models):
                 'denominators': {model: models[model]['denominators'][metric] for model in (candidate, baseline)},
                 'missing_reason': (None if values else 'at-least-five-declared-groups-required'
                                    if not draws else 'no-defined-paired-replicates')}
-    return {'group_ids': groups, 'groups': len(groups), 'seed': BOOTSTRAP_SEED,
+    return {'group_ids': groups, 'groups': len(groups), 'event_groups': event_groups, 'seed': BOOTSTRAP_SEED,
             'replicates': BOOTSTRAP_REPLICATES, 'attempted_replicates': len(draws), 'intervals': intervals,
             'method': 'paired-whole-group-percentile-linear'}
 
 
+def _pair_coverage(healthy, truth, scored, supported, pairs):
+    coverage = {}
+    for candidate, baseline in pairs:
+        healthy_both = len(healthy & scored[candidate] & scored[baseline])
+        events_both = len(supported[candidate] & supported[baseline])
+        coverage[f'{candidate}_minus_{baseline}'] = {
+            'healthy_minutes': len(healthy), 'healthy_both_scored': healthy_both,
+            'events': len(truth), 'events_both_scored': events_both,
+            'coverage': min(healthy_both / len(healthy), events_both / len(truth)) if healthy and truth else None,
+        }
+    return coverage
+
+
+def _adsketch_increment(rows, model_reports, matches, truth, exclusions, points, clock, persistence):
+    base = [row for row in rows if row['model_id'] in MODELS]
+    mad_point = {'status': 'ready', 'threshold': 1.0, 'thresholds': {**points, 'adsketch': None}}
+    counterfactual = append_combo_predictions(base, mad_point)[len(base):]
+    model = 'mad_at_combo_threshold'
+    for row in counterfactual:
+        row['model_id'] = model
+    alerts = _episodes(counterfactual, 1.0, persistence)
+    supported = _supported_events(counterfactual, truth)
+    audit = _match_audit(alerts, truth, exclusions, supported, model, clock)
+    censored = {row['episode_id'] for row in audit if row['status'] == 'censored'}
+    control = _ratio_metrics(*_cohort_counts(counterfactual, [row for row in alerts if row['episode_id'] not in censored],
+                                             truth, audit, False))
+    matched = defaultdict(set)
+    for row in (*matches, *audit):
+        if row['status'] == 'matched':
+            matched[row['model_id']].add(row['event_id'])
+    combo, solo = model_reports[COMBO_MODEL], model_reports['median_mad']
+    combo_events, mad_events = matched[COMBO_MODEL], matched['median_mad']
+    metric = 'false_incidents_per_healthy_service_hour'
+    return {'combo_only_matched_events': sorted(combo_events - mad_events),
+            'mad_only_matched_events': sorted(mad_events - combo_events),
+            'delta_tp': combo['tp'] - solo['tp'], 'delta_fp': combo['fp'] - solo['fp'],
+            f'delta_{metric}': combo[metric] - solo[metric] if combo[metric] is not None and solo[metric] is not None else None,
+            model: {key: control[key] for key in ('tp', 'fp', 'fn', 'healthy_false_incidents',
+                                                   'healthy_scored_service_hours', metric)},
+            'attributable_matched_events': sorted(combo_events - matched[model]),
+            'attributable_false_incidents': combo['fp'] - control['fp']}
+
+
 def evaluate_detectors(windows, events, predictions, *, clock, thresholds, policy_identity, persistence,
-                       event_kind='latency'):
+                       event_kind='latency', component_thresholds=None):
     """Apply pinned operating points and report independent event and window denominators."""
+    has_combo = COMBO_MODEL in thresholds
+    active_models = (*MODELS, COMBO_MODEL) if has_combo else MODELS
     if (not _text(policy_identity) or event_kind not in ('latency', 'alibaba-proxy')
-            or set(thresholds) != set(MODELS) or not all(_number(value) for value in thresholds.values())
+            or set(thresholds) != set(active_models) or not all(_number(value) for value in thresholds.values())
+            or has_combo and (thresholds[COMBO_MODEL] != 1.0 or component_thresholds is None)
             or persistence.get('step_seconds') != STEP_SECONDS
             or any(type(persistence.get(field)) is not int or persistence[field] < 1
                    for field in ('entry_windows', 'exit_windows'))):
-        raise ValueError('detector evaluation requires the pinned policy and all three operating points')
+        raise ValueError('detector evaluation requires pinned operating points with any combo fixed at 1.0')
     ordered = _windows(windows, clock)
-    rows = _audit_predictions(ordered, predictions)
+    rows = _audit_predictions(ordered, predictions, active_models, component_thresholds)
     events = _audit_events(ordered, events, event_kind)
     truth = [event for event in events if event['in_scope']]
-    score_counts = Counter(_key(row) for row in rows if row['score'] is not None)
-    common = {key for key, count in score_counts.items() if count == len(MODELS)}
+    exclusions = [event for event in events if event['kind'] == event_kind == 'alibaba-proxy'
+                  and not event['eligible'] and event.get('censor_until') is not None]
+    score_counts = Counter(_key(row) for row in rows if row['eligible'] and row['score'] is not None)
+    common = {key for key, count in score_counts.items() if count == len(active_models)}
     eligible = [window for window in ordered.values() if window['eligible']]
     coverage = {'windows': len(ordered), 'eligible_windows': len(eligible),
                 'unknown_windows': sum(window['y'] is None for window in eligible),
@@ -447,13 +552,24 @@ def evaluate_detectors(windows, events, predictions, *, clock, thresholds, polic
                 'oracle_events': len(truth), 'excluded_oracle_events': len(events) - len(truth)}
     models, group_counts, matches = {}, {}, []
     by_model = _grouped(rows, lambda row: row['model_id'])
-    for model in MODELS:
+    scored, supported = {}, {}
+    for model in active_models:
         model_rows = by_model[model]
+        scored[model] = {_key(row) for row in model_rows if row['eligible'] and row['score'] is not None}
+        supported[model] = _supported_events(model_rows, truth)
         alerts = _episodes(model_rows, thresholds[model], persistence)
-        audit = _match_audit(model_rows, alerts, truth, model, clock)
-        models[model], group_counts[model] = _model_report(model_rows, alerts, truth, audit, common)
+        audit = _match_audit(alerts, truth, exclusions, supported[model], model, clock)
+        models[model], group_counts[model] = _model_report(
+            model_rows, alerts, truth, audit, common, legacy_rate=not has_combo and event_kind == 'latency')
         matches.extend(audit)
-    return {'dataset': next(iter(ordered))[0], 'clock': clock, 'event_kind': event_kind,
+    pairs = [(candidate, baseline) for candidate, baseline in PAIRS if candidate in models and baseline in models]
+    healthy = {_key(window) for window in eligible if window['healthy']}
+    coverage['pairs'] = _pair_coverage(healthy, truth, scored, supported, pairs)
+    result = {'dataset': next(iter(ordered))[0], 'clock': clock, 'event_kind': event_kind,
             'policy_identity': policy_identity, 'persistence': dict(persistence), 'thresholds': dict(thresholds),
             'predictions': rows, 'events': events, 'matches': matches, 'models': models, 'coverage': coverage,
-            'bootstrap': _bootstrap(group_counts, models)}
+            'bootstrap': _bootstrap(group_counts, models, pairs, len({event['service'] for event in truth}))}
+    if has_combo:
+        result['adsketch_increment'] = _adsketch_increment(
+            rows, models, matches, truth, exclusions, component_thresholds, clock, persistence)
+    return result

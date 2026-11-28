@@ -208,3 +208,22 @@ def test_actual_protocol_fixture_audit_freeze_verify_and_lane_block(tmp_path):
     assert call('audit', '--lane', 'b').returncode == 0
     assert call('freeze-protocol').returncode == 2
     assert (tmp_path / 'freeze/protocol.json').read_bytes() == before
+
+
+def test_freeze_protocol_lane_b_requires_rules_but_not_lane_a(tmp_path, capsys):
+    from scripts.model_benchmark import main
+    from test_model_benchmark_protocol import fixture, fixture_lane_b_rules
+
+    protocol, _ = fixture(tmp_path)
+    protocol['checks'] = [check for check in protocol['checks'] if check['test_id'] != 'A07']
+    del protocol['reporting']['lane_b']
+    path = tmp_path / 'draft.json'
+    command = ['--root', str(tmp_path), '--protocol', str(path), 'freeze-protocol', '--lanes', 'b']
+    path.write_text(json.dumps(protocol))
+    assert main(command) == 2
+    assert json.loads(capsys.readouterr().out)['reasons'] == ['b: lane-b-rules-missing']
+    protocol['reporting']['lane_b'] = fixture_lane_b_rules()
+    path.write_text(json.dumps(protocol))
+    assert main(command) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['frozen_lanes'] == ['b'] and result['lanes']['a']['status'] == 'blocked'

@@ -1,0 +1,17 @@
+{
+  "normal_period": [10.0, 12.0, 15.0, 12.0, 10.0, 9.0],
+  "normal_periods": 100,
+  "discovery_periods_per_tile": 9,
+  "discovery_tiles": 10,
+  "episodes": [
+    {"start": 17, "values": [30.0, 58.0, 65.0, 32.0]},
+    {"start": 41, "values": [30.0, 57.0, 66.0, 31.0]}
+  ],
+  "bucket_seconds": 60,
+  "window_length": 5,
+  "seed": 42,
+  "discovery_quantile": 0.95,
+  "max_fit_windows": 512,
+  "normal_patterns": 8,
+  "anomalous_patterns": 8
+}

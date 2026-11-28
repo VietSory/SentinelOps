@@ -6,6 +6,7 @@ import pytest
 
 from sentinelops.ml.alibaba_training import MINUTE_MS, load_config, load_minutes, split_of
 from sentinelops.ml.model_benchmark_detector import DetectorConfig
+from sentinelops.ml.model_benchmark_detector_combo import COMBO_MODEL, COMBO_SELECTION_RULE_ID
 from sentinelops.ml.model_benchmark_detector_fit import (
     ALIBABA_SCOPE,
     BASELINE_LOOKBACK,
@@ -179,7 +180,8 @@ def test_protocol_bound_fit_pins_splits_and_ignores_outside_minutes(tmp_path, mo
     current[0] = [item for item in minutes if (item.service, item.timestamp) != (calibration_service, 9 * 60)]
     third = fit(tmp_path / 'missing')
     assert all(point['rows'] == 102 and point['missing_scores'] == 1 and point['unknown_windows'] == 1
-               for point in third['calibration'].values())
+               for model, point in third['calibration'].items() if model != COMBO_MODEL)
+    assert third['calibration'][COMBO_MODEL]['negatives'] == 100
     path = tmp_path / 'first' / FIT_PATH
     artifact = json.loads(path.read_bytes())
     artifact['calibration_rows']['adsketch'][0]['service'] = 'unregistered-service'
@@ -210,12 +212,42 @@ def test_synthetic_fit_reloads_and_preserves_tied_negative_budget(tmp_path):
     assert receipt['recovery']['scored_predictions'] == 306
     assert all(point['negative_windows'] == 101 and point['positive_windows'] == 1
                and point['negative_flags'] == 0 and point['comparison'] == '>='
-               for point in checkpoint.calibration.values())
+               for model, point in checkpoint.calibration.items() if model != COMBO_MODEL)
+    combo = checkpoint.calibration[COMBO_MODEL]
+    assert (combo['negatives'], combo['positives'], combo['negative_flags'], combo['positive_flags']) == (101, 1, 0, 1)
+    assert combo['threshold'] == 1.0 and combo['comparison'] == '>='
+    assert combo['thresholds']['median_mad'] > 0 and combo['thresholds']['adsketch'] is None
+    assert combo['selection_rule'] == COMBO_SELECTION_RULE_ID and combo['grid_size'] > 0
     assert fit_synthetic_detector_benchmark(tmp_path, minutes=reversed(minutes), config=_cfg()) == receipt
     with pytest.raises(ValueError, match='explicit development'):
         verify_detector_fit(tmp_path, expected_fit_sha256=pin)
     with pytest.raises(ValueError, match='different detector fit'):
         fit_synthetic_detector_benchmark(tmp_path, minutes=minutes, config=_cfg(), persistence=3)
+
+
+@pytest.mark.parametrize('changed_field', ['status', 'thresholds', 'selection_rule'])
+def test_fit_rejects_changed_combo_operating_point_on_round_trip(tmp_path, monkeypatch, changed_field):
+    from sentinelops.ml import model_benchmark_detector_fit as fitting
+
+    operating_points = fitting._operating_points
+    calls = 0
+
+    def changed_replay(*args):
+        nonlocal calls
+        points = operating_points(*args)
+        calls += 1
+        if calls == 2:
+            if changed_field == 'thresholds':
+                points[COMBO_MODEL]['thresholds']['median_mad'] *= 2
+            else:
+                points[COMBO_MODEL][changed_field] = 'changed'
+        return points
+
+    monkeypatch.setattr(fitting, '_operating_points', changed_replay)
+    with pytest.raises(ValueError, match='restored detector operating points changed'):
+        fit_synthetic_detector_benchmark(tmp_path, minutes=_inputs(), config=_cfg())
+    assert calls == 2
+    assert not (tmp_path / FIT_PATH).exists()
 
 
 def test_calibration_and_evaluation_cannot_change_fitted_model(tmp_path):
@@ -234,14 +266,17 @@ def test_calibration_and_evaluation_cannot_change_fitted_model(tmp_path):
     assert receipt['cohorts']['discovery'] == second['cohorts']['discovery']
     assert receipt['cohorts']['calibration'] != second['cohorts']['calibration']
     assert receipt['status'] == second['status'] == 'not-ready'
-    assert all(point['threshold'] is None for point in second['calibration'].values())
+    assert all(point['threshold'] is None for model, point in second['calibration'].items() if model != COMBO_MODEL)
+    assert second['calibration'][COMBO_MODEL]['status'] == 'not-ready'
+    assert second['calibration'][COMBO_MODEL]['threshold'] == 1.0
 
 
-def test_verifier_rejects_changed_bytes_and_inconsistent_operating_point(tmp_path):
+@pytest.mark.parametrize('model, field', [('adsketch', 'threshold'), (COMBO_MODEL, 'thresholds')])
+def test_verifier_rejects_changed_bytes_and_inconsistent_operating_point(tmp_path, model, field):
     receipt = fit_synthetic_detector_benchmark(tmp_path, minutes=_inputs(2), config=_cfg())
     path = tmp_path / FIT_PATH
     artifact = json.loads(path.read_bytes())
-    artifact['calibration']['adsketch']['threshold'] = 0.1
+    artifact['calibration'][model][field] = 0.1
     edited = json.dumps(artifact, sort_keys=True, separators=(',', ':')).encode()
     path.write_bytes(edited)
 

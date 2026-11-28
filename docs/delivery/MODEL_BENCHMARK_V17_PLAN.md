@@ -16,7 +16,7 @@ Nguồn: `calibration_rows` trong `preflight/detector-bound-pilot-v3/fit/b/fit.j
 
 ADSketch và MAD cùng bắt 73 positive. MAD bắt thêm 12, ADSketch bắt thêm 2, 96 positive không model nào bắt. Gộp MAD hoặc ADSketch chỉ tăng recall lên 0,475 và tăng flag negative lên 1,23%. IF không bắt thêm positive nào ngoài hai model kia.
 
-Trên epoch local `ald` ([layer 2](../reports/LAYER2_LOCAL_ALIBABA_DE38FC6B.md)), IF và MAD cùng đạt event F1 1,000 trên ba service, 12/12 sự kiện, 0 false incident. Local không còn chỗ để ứng viên vượt baseline.
+Trên epoch local `ald` ([layer 2](../reports/LAYER2_LOCAL_ALIBABA_DE38FC6B.md)), IF và MAD cùng đạt event F1 1,000 trên ba service, 12/12 ca latency S1/S3, 0 false incident — F1 chạm trần trên cohort development `ald` này.
 
 ### Lane A: LTFP, XGBoost, slope
 
@@ -68,14 +68,14 @@ Từng seed riêng lẻ: graph AP 0,042–0,055, self-only AP 0,049–0,077; m�
 
 Các gate tuyệt đối Q-04 đến Q-07 vẫn giữ nguyên và đo trên holdout local. Quyết định release vẫn `KEEP` cho tới khi có loader và parity runtime.
 
-| | Lane A: LTFP thay XGBoost | Lane B: ADSketch thay IF |
+| | Lane A: LTFP thay XGBoost | Lane B: ADSketch + MAD thay IF |
 | --- | --- | --- |
-| Chỉ số chính | Recall gradual ở lead ≥60 s; AP | Event F1 |
-| Nơi so xếp hạng | Split đánh giá Alibaba chưa dùng | Split đánh giá Alibaba chưa dùng |
-| Nơi kiểm gate | Holdout local | Holdout local |
-| Ưu điểm khai báo | Lượt không breach bị cảnh báo; tác dụng graph theo service có hàng xóm | Recall trên Alibaba so với IF; pattern ID giải thích cảnh báo |
-| Không dùng làm ưu điểm | Lead time local (bị horizon chặn) | Mẫu novel (chỉ 6 positive, báo NA) |
-| Báo kèm bắt buộc | Số Alibaba của LTFP dù thua | ADSketch so với MAD (development: ngang, không hơn) |
+| Chỉ số chính | Recall gradual ở lead ≥60 s; AP | Event F1 (rule `alibaba-proxy-event/v1`, mục 5; nhãn `> 2,0×` median) |
+| Nơi so xếp hạng | Split đánh giá Alibaba chưa dùng | Split evaluation Alibaba (bucket 8–9, phút 324–352, warmup từ 259; support D1 chưa đo, cần bundle) |
+| Nơi kiểm gate | Holdout local | Holdout local (Q-04..Q-06, tách khỏi `scope='alibaba-proxy-ranking'`) |
+| Ưu điểm khai báo | Lượt không breach bị cảnh báo; tác dụng graph theo service có hàng xóm | (a) Cận dưới CI 95% của Δ event F1 > 0, hoặc (b) cận trên CI 95% của Δ (false incident / healthy service-hour) < 0, cùng bootstrap, coverage cặp ≥ 0,95 |
+| Không dùng làm ưu điểm | Lead time local (bị horizon chặn) | MTTD (bucket 60 s, Q-06 cần clock arrival-aware); mẫu novel (chỉ 6 positive, báo NA lý do `insufficient-support`); bỏ tiêu chí cũ "recall hơn IF" và "pattern ID" |
+| Báo kèm bắt buộc | Số Alibaba của LTFP dù thua | Mọi cặp trong `PAIRS` (kèm `adsketch_mad_or` − `median_mad`, `median_mad` − `isolation_forest` cùng CI) và đóng góp ADSketch kèm đối chứng `mad_at_combo_threshold` (kể cả khi bằng 0) |
 
 ## 3. Việc cần làm
 
@@ -121,9 +121,67 @@ B-1 đến B-4 cần xong trước freeze v17. B-5 đến B-8 cần xong trướ
 | 4 | Ưu điểm khai báo của Lane B | B thay bằng một chỉ số đo được có ngưỡng khai báo trước, hoặc bỏ. |
 | 5 | Split evaluation có sẵn | Đúng: `split_of()` gán bucket 8–9. Split này **đã được dùng** để báo cáo baseline cũ `de38fc6b` (layer 1, XGB so với slope) và IF/MAD trong kế hoạch. Chưa ai chấm ứng viên v17 (LTFP, ADSketch) trên split này. Support ở phút 324–352, K=16: 55.901 window có nhãn, 96 positive trên 21 service, 621 window có hàng xóm, 0 positive có hàng xóm. Tác dụng graph trên Alibaba khai NA. Bootstrap theo service chỉ có 21 service dương. |
 | 6a | Early stopping có dùng phút 324–352 không | Không. `fit_weighted_pair` chọn epoch trên 20% service của tập train (hash tên service), cửa sổ train 162–172. Calibration không được đọc khi fit. |
-| 6b | Positive có hàng xóm ở evaluation | 0. Xem mục 5. |
+| 6b | Positive có hàng xóm ở evaluation | 0. Xem dòng #5 ở bảng trên. |
 | 7 | Có nên đăng ký capture sau khi chốt Lane B | Capture cũ đã dừng nên phải đăng ký lại. Owner quyết định chạy riêng Lane A ngay hay gộp với Lane B. |
 
 **Lệch 75 và 71 của ADSketch.** Hai số đo hai thứ khác nhau. 75 là `positive_flags` trong `freeze/candidates.json`: số positive có score ≥ ngưỡng ở budget 1%. 71 là số positive được xếp loại pattern known (65) hoặc novel (6), không xét ngưỡng. 112 positive còn lại xếp loại normal; 65 + 6 + 112 = 183.
 
 **Bundle cho Lane B** nằm ở `artifacts/handoff-lane-b-v17` trên máy A. Gồm 120 Parquet và sidecar, `report.json` của fit, `splits.json` (`3ab8606e…`, giống v16 và v17), protocol draft v16 kèm B01–B06, freeze protocol v17 Lane A, `fit.json` của `936ae30e…`, receipt support, và `SHA256SUMS`.
+
+## 5. Lane B: khai báo trước v17
+
+Ngày 28-11-2026 (cập nhật SPEC v2). Mục này ghi đầy đủ các khai báo trước của Lane B v17 (đề xuất của B, chờ owner duyệt trước khi freeze; xem chi tiết tại [ADR-021](../adr/ADR-021-lane-b-v17-preregistration.md)). Holdout chưa mở; chưa có kết quả đánh giá thật trên dữ liệu Alibaba evaluation hay capture local v17.
+
+### D1 · Event Alibaba proxy (`alibaba-proxy-event/v1`)
+
+**Nhãn từng phút (oracle B):** dùng đúng công thức đường fit Lane B (`src/sentinelops/ml/model_benchmark_detector_fit.py`, dòng 29–33, 107–121): `y = int(latency_ms > 2,0 × baseline)` (so sánh strict `>`), với `baseline` là median của tối đa 60 phút liền trước cùng service (cần ≥ 5 phút, `baseline > 0`); bước khác 60 s hoặc latency thiếu thì xóa history. Thiếu điều kiện ⇒ `y = None` (`UNKNOWN`). Đây là nhãn từng phút, không phải nhãn anchor OR-5-phút của calibration và **không phải K=16**: con số 96 positive / 21 service ở mục 4 (#5) là support K=16 của Lane A, không áp cho Lane B; **support D1 chưa đo, cần bundle** `handoff-lane-b-v17` (B-1).
+
+**Phạm vi và warmup:** service thuộc split evaluation (`split_of(msname) == 'evaluation'`, bucket 8–9). Khoảng chấm là phút tương đối **324–352** bao gồm hai đầu. Input nạp kèm **warmup nhân quả từ phút 259** (`= 324 − 60 − 5`) với `eligible=False` để cấp history nhãn, history detector và persistence (không chấm). Phút thiếu row (bước > 60 s) là `UNKNOWN`.
+
+Rule `alibaba-proxy-event/v1` (ghim bằng `stable_id` của dict cấu hình):
+
+1. **Đoạn dương:** các phút `y=1` liên tiếp (cách đúng 60 s), xét trên toàn timeline kể cả warmup.
+2. **Gộp:** hai đoạn dương cách nhau `< 5` phút âm có nhãn liên tiếp và không có phút `UNKNOWN` hoặc thiếu row xen giữa thuộc cùng một event. Có `UNKNOWN` xen giữa thì không gộp.
+3. **Mốc thời gian:** `onset_at` = `bucket_end` phút dương đầu tiên; `confirmed_at = onset_at`; `end_at` = `bucket_end` phút dương cuối; `deadline_at = onset_at + 300 s`; ghi `length_minutes` (elapsed bao gồm hai đầu) và `positive_minutes` (số phút `y=1`).
+4. **Eligible:** `onset_at` thuộc `[324, 352]`, 5 phút ngay trước `onset_at` đều có row và `y=0`, và `onset_at + 300 s <=` `bucket_end` phút 352 (tức onset `<=` phút 347). Event có onset sau 352 không tạo. Event ineligible vẫn giữ trong ledger với `eligible=false` và `reason` theo thứ tự ưu tiên: `onset-before-scoring-range` → `insufficient-pre-onset-history` → `unknown-pre-onset-history` → `insufficient-follow-up`; không vào mẫu số recall nhưng phải đếm và báo.
+5. **Match và censor:** giữ luật một-một trong `[onset, onset+300 s]` cùng run/service, lấy alert sớm nhất, alert trước phút 324 không chấm; event không có score trong cửa sổ vẫn tính miss. Alert unmatched phát trong `[onset, end_at + 300 s]` của một event ineligible mang status `censored` — không tính TP, không tính FP, có đếm và báo.
+6. **Phút khỏe (`healthy_keys`):** phút trong `[324, 352]`, `y=0`, không nằm trong `[onset − 300 s, end_at + 300 s]` của bất kỳ event nào (eligible hay không). **FP rate** (`false_incidents_per_healthy_service_hour`) chỉ tính alert unmatched phát tại `healthy_keys` chia cho số giờ-service khỏe mà model có score (còn FP của event F1 là mọi alert unmatched không censored).
+7. `group_id = run_id = service`, để bootstrap lấy lại nguyên service.
+
+### D2 · Ứng viên `adsketch_mad_or` và hiệu chuẩn chung
+
+- Bảng B có bốn hàng: `isolation_forest`, `median_mad`, `adsketch` (gọi là **"ADSketch, biến thể tìm kiếm giới hạn"** theo kết quả B-3), và `adsketch_mad_or`.
+- **Score và availability:** MAD luôn bật; ADSketch bật khi `t_ads` khác `None`. Score combo = `max(s_i / t_i)` trên các thành phần đang bật có score, ngưỡng combo cố định `1,0`. Nhánh chỉ-MAD (tắt ADSketch) dùng `t_ads = None` trong API và receipt JSON; `+inf` chỉ dùng trong công thức/thứ tự tie-break (`None` xếp lớn nhất). Combo available khi ít nhất một thành phần đang bật có score (nhánh chỉ-MAD ⇒ availability đúng bằng MAD); thành phần đang bật thiếu score đóng góp 0. Hàng combo ghi `component_availability ∈ {'both', 'median_mad_only', 'adsketch_only', 'none'}` (`None` ở 3 model đơn). Vi phạm `t_mad > 0` hữu hạn, `t_ads > 0` hữu hạn (khi khác `None`) hoặc score hữu hạn `>= 0` thì báo lỗi. Persistence áp lên cờ combo như ba model kia.
+- **Hiệu chuẩn chung** trên `calibration_rows` (bucket 6–7, anchor `eligible=True`, `risk_label ∈ {0, 1}`): mẫu số negative là số negative anchor mà combo available theo cặp ngưỡng đang xét, cần `>= 100` negative, ngân sách nguyên `negative_flags <= negatives // 100`. Tập ứng viên mỗi ngưỡng = `{ngưỡng solo} ∪ {score có của model đó >= ngưỡng solo}`, ADSketch thêm `None`. Tìm kiếm vét cạn, tất định: tối đa `positive_flags` → ít `negative_flags` hơn → `t_ads` lớn hơn (`None` lớn nhất) → `t_mad` lớn hơn.
+- **Đóng góp ADSketch (`adsketch_increment`):** báo chênh lệch quan sát so với MAD solo (`combo_only_matched_events`, `mad_only_matched_events`, `delta_tp`, `delta_fp`, `delta_false_incidents_per_healthy_service_hour`) và thêm đối chứng **`mad_at_combo_threshold`** (combo với `t_ads=None`, cùng `t_mad` combo) để tách phần quy được cho ADSketch (`attributable_matched_events`, `attributable_false_incidents`). Đối chứng này chỉ nằm trong mục increment, không phải hàng bảng chính; báo cả khi bằng 0.
+- **Công khai 3 cách dùng nhãn proxy:** (1) cả ba detector lọc normal reference bằng nhãn train; (2) ADSketch dùng nhãn dương để xác nhận pattern discovery; (3) ngưỡng combo `adsketch_mad_or` tối đa hóa trực tiếp số positive calibration bị flag, còn với IF và MAD solo thì ràng buộc budget chỉ dựa trên negative nhưng tập ngưỡng ứng viên lấy từ mọi score calibration có nhãn (kể cả positive) theo `calibrate()`, và solo không tối ưu theo số positive bị flag. Oracle chấm D1 dùng cùng họ nhãn `2,0×`, tạo lợi thế cấu trúc cho model học từ nhãn.
+
+### D3 · Gate Lane B (`lane_b_recommendation`, đối xứng Lane A)
+
+- **Cặp có hướng cố định (`PAIRS`):** `adsketch_mad_or−isolation_forest` (chính), `median_mad−isolation_forest`, `adsketch_mad_or−median_mad`, `adsketch−isolation_forest`, `adsketch−median_mad`. Bootstrap ghép cặp nguyên service, 1.000 lần, seed 42.
+- **Coverage cặp chính:** `min(tỷ lệ phút khỏe cả hai model cùng có score, tỷ lệ event eligible mà cả hai có >= 1 score trong [onset, onset+300 s])`; ngưỡng yêu cầu `>= 0,95`.
+- **Thứ tự 9 nhánh gate** (nhánh đầu tiên đúng thì trả):
+  1. Thiếu/sai `rules` (`calibration_budget == 0,01`, `calibration_cohort`, `event_rule_id`, `combo_selection_rule_id`) ⇒ `INCONCLUSIVE` `rules-unverified`;
+  2. `< 5` service có event eligible ⇒ `INCONCLUSIVE` `insufficient-event-support`;
+  3. Coverage cặp chính `< 0,95` ⇒ `INCONCLUSIVE` `pairwise-coverage-incomplete`;
+  4. CI quyết định có `< 950` replicate hợp lệ ⇒ `INCONCLUSIVE` `bootstrap-undefined`;
+  5. Cận dưới CI 95% của Δ event F1 `< -0,05` (`NON_INFERIORITY_MARGIN`) ⇒ `INCONCLUSIVE` `f1-non-inferiority-not-established`;
+  6. Rate ứng viên (`false_incidents_per_healthy_service_hour`) `>` IF theo điểm ước lượng ⇒ `KEEP` `higher-false-incident-cost`;
+  7. Cận dưới CI 95% của Δ event F1 `> 0` ⇒ `REPLACE` `f1-improved-without-higher-cost`;
+  8. Cận trên CI 95% của Δ rate `< 0` ⇒ `REPLACE` `non-inferior-with-lower-false-incident-cost`;
+  9. Còn lại ⇒ `INCONCLUSIVE` `non-inferior-without-measured-advantage`.
+- **Tách phạm vi:** mọi nhánh trả `scope='alibaba-proxy-ranking'`, `release='KEEP'`, `activation_allowed=False`, `runtime_parity='NOT_RUN'`, `uses_proxy_positive_labels=True`, `local_gates={'Q-04','Q-05','Q-06'}` mặc định `'NOT_RUN'`. `REPLACE` ở đây chỉ là kết quả xếp hạng Alibaba, tách khỏi gate tuyệt đối Q-04..Q-06 trên holdout local và quyết định release.
+- Bỏ ưu điểm cũ "recall hơn IF" và "pattern ID". Không dùng MTTD (bucket 60 s, Q-06 cần clock arrival-aware) và không dùng mẫu novel (báo `NA`, `insufficient-support`, 6 positive) làm ưu điểm. Báo kèm mọi cặp trong `PAIRS` với CI, số replicate hợp lệ/undefined và mẫu số.
+
+### Trạng thái B-1..B-8 (tính đến 28-11-2026)
+
+| # | Trạng thái hiện tại | Ghi chú |
+| --- | --- | --- |
+| B-1 | **BLOCKED** | Chờ bundle `handoff-lane-b-v17` từ máy A để đo support D1 và fit lại trên clean commit dùng cho freeze v17 |
+| B-2 | Chưa freeze | Giữ nguyên config ADSketch (`window_length=5`, 8 normal, 8 anomalous, `max_fit_windows=512`, seed 42), không tune thêm |
+| B-3 | Đã đo trên fixture | Đường fit benchmark lệch reference tác giả trên fixture synthetic (gán khớp 456/536, lệch bán kính 11,2); mọi report gọi là **"ADSketch, biến thể tìm kiếm giới hạn"** |
+| B-4 | Đã khai báo trước | Report ghi mẫu novel là `NA`, lý do `insufficient-support` (6 positive ở calibration development) |
+| B-5 | Review xong, chờ xác nhận nguồn gốc | Review mã nguồn hỗ trợ kết luận triển khai độc lập theo bài báo, không thấy mã logic sao chép từ `OpsPAI/ADSketch` (`f7bd642c`); cần người triển khai hoặc owner xác nhận lịch sử phát triển trước khi đưa vào image |
+| B-6 | **NOT_RUN** | Chưa có loader và parity runtime cho ADSketch / `adsketch_mad_or`; release giữ `KEEP` |
+| B-7 | **NOT_RUN** | Hai host release rollback lịch sử vắng mặt; cần khôi phục hoặc chốt release thay thế trước khi đổi release |
+| B-8 | **NOT_RUN** | Chưa có cặp Payment image đã ghim, namespace riêng và receipt rehearsal ngày 8–9 / CI đúng SHA |
