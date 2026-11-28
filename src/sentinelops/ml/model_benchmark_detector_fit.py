@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from sentinelops.ml.alibaba_training import MINUTE_MS, split_of
 from sentinelops.ml.model_benchmark_calibration import calibrate
+from sentinelops.ml.model_benchmark_detector_combo import COMBO_MODEL, calibrate_or_combo
 from sentinelops.public_data.alibaba import AGGREGATE_VERSION, SOURCE
 from sentinelops.telemetry.core import stable_id
 
@@ -40,7 +41,8 @@ _MODEL_IDS = ('adsketch', 'isolation_forest', 'median_mad')
 _ROLE_NAMES = ('reference', 'discovery', 'calibration')
 _FIT_CODE_PATHS = ('src/sentinelops/ml/model_benchmark_detector_fit.py',
                    'src/sentinelops/ml/model_benchmark_detector.py',
-                   'src/sentinelops/ml/model_benchmark_calibration.py')
+                   'src/sentinelops/ml/model_benchmark_calibration.py',
+                   'src/sentinelops/ml/model_benchmark_detector_combo.py')
 
 
 @dataclass(frozen=True)
@@ -333,8 +335,11 @@ def _operating_points(ledger, identity, model_sha256):
                  for name in _MODEL_IDS]
     if any(timeline != timelines[0] for timeline in timelines[1:]):
         raise ValueError('calibration models must share a timeline and labels')
-    return {name: calibrate(ledger[name], calibration_identity=stable_id(
+    points = {name: calibrate(ledger[name], calibration_identity=stable_id(
         {'fit_input_sha256': identity, 'model_sha256': model_sha256, 'model_id': name})) for name in _MODEL_IDS}
+    combo = calibrate_or_combo(ledger)
+    points[COMBO_MODEL] = {**combo, 'comparison': '>='}
+    return points
 
 
 def _status(points):
@@ -402,8 +407,9 @@ def _fit(root, minutes, source, config, persistence, *, constraints=None):
         recovery = _verify_replay(ledger, replay)
         points = _operating_points(ledger, identity_sha256, model.digest)
         restored_points = _operating_points(replay, identity_sha256, model.digest)
-        if any((points[name]['status'], points[name]['threshold'])
-               != (restored_points[name]['status'], restored_points[name]['threshold']) for name in _MODEL_IDS):
+        if (any((points[name]['status'], points[name]['threshold'])
+                != (restored_points[name]['status'], restored_points[name]['threshold']) for name in _MODEL_IDS)
+                or points[COMBO_MODEL] != restored_points[COMBO_MODEL]):
             raise ValueError('restored detector operating points changed')
         artifact = {'schema_version': _VERSION, 'identity': identity, 'input_sha256': identity_sha256,
                     'model': payload, 'model_sha256': model.digest, 'fit_seconds': seconds,

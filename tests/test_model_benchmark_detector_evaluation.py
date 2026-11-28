@@ -1,9 +1,14 @@
 from datetime import datetime, timedelta, timezone
+import math
+from sys import float_info
 
 import pytest
 
 from sentinelops.ml.model_benchmark_detector import DetectorConfig, DetectorRow, fit_detectors
-from sentinelops.ml.model_benchmark_detector_evaluation import KEY_FIELDS, MODELS, evaluate_detectors, score_detector_windows
+from sentinelops.ml.model_benchmark_detector_combo import COMBO_MODEL, append_combo_predictions
+from sentinelops.ml.model_benchmark_detector_evaluation import (
+    KEY_FIELDS, MODELS, PAIRS, evaluate_detectors, score_detector_windows,
+)
 from sentinelops.telemetry.core import timestamp
 
 
@@ -31,11 +36,18 @@ def _prediction(window, model, score, **extras):
 
 
 def _scores(windows, scores):
-    return [_prediction(window, model, score) for window, score in zip(windows, scores, strict=True) for model in MODELS]
+    return [_prediction(window, model, score) for window, score in zip(windows, scores, strict=True)
+            for model in MODELS]
 
 
-def _evaluate(windows, events, predictions, *, clock='replay', entry=1):
-    return evaluate_detectors(windows, events, predictions, clock=clock, thresholds=dict.fromkeys(MODELS, .5),
+def _evaluate(windows, events, predictions, *, clock='replay', entry=1, combo_threshold=None,
+              mad_threshold=.5, ads_threshold=.5, event_kind='latency'):
+    thresholds = dict.fromkeys(MODELS, .5)
+    if combo_threshold is not None:
+        thresholds[COMBO_MODEL] = combo_threshold
+    return evaluate_detectors(windows, events, predictions, clock=clock,
+                              thresholds=thresholds, event_kind=event_kind,
+                              component_thresholds={'median_mad': mad_threshold, 'adsketch': ads_threshold},
                               policy_identity='test-policy',
                               persistence={'step_seconds': 60, 'entry_windows': entry, 'exit_windows': 1})
 
@@ -79,8 +91,9 @@ def test_h02_coverage_preserves_unknown_and_missing_predictions_and_rejects_dupl
     event = _event(windows[1], 60)
     result = _evaluate(windows, [event], predictions)
 
-    assert len(result['predictions']) == 15
-    assert result['coverage'] == {'windows': 5, 'eligible_windows': 4, 'unknown_windows': 1, 'labelled_windows': 3,
+    assert len(result['predictions']) == len(windows) * len(MODELS)
+    assert {key: value for key, value in result['coverage'].items() if key != 'pairs'} == {
+                                  'windows': 5, 'eligible_windows': 4, 'unknown_windows': 1, 'labelled_windows': 3,
                                   'common_windows': 2, 'common_labelled_windows': 1,
                                   'oracle_events': 1, 'excluded_oracle_events': 0}
     unknown = [row for row in result['predictions'] if row['bucket_end'] == _at(0)]
@@ -88,10 +101,13 @@ def test_h02_coverage_preserves_unknown_and_missing_predictions_and_rejects_dupl
                ('available', None, 'oracle-unknown', None) for row in unknown)
     assert all((row['raw_ref'], row['oracle_ref']) == ('raw/unknown', 'oracle/unknown') for row in unknown)
     forest = result['models']['isolation_forest']
-    assert forest['unavailable_reasons'] == {'archive-warmup': 1, 'missing-model-prediction': 1}
+    assert forest['unavailable_reasons'] == {'missing-model-prediction': 1}
     assert forest['eligible_healthy_service_hours'] == 2 / 60
     assert forest['scored_healthy_service_hours'] == 1 / 60
-    assert result['models']['adsketch']['unavailable_reasons'] == {'archive-warmup': 1, 'insufficient_history': 1}
+    assert result['models']['adsketch']['unavailable_reasons'] == {'insufficient_history': 1}
+    for model in result['models'].values():
+        assert model['windows'] == model['available_windows'] + model['unavailable_windows'] == 4
+        assert sum(model['unavailable_reasons'].values()) == model['unavailable_windows']
     assert forest['window_ranking']['average_precision'] == 1
     assert forest['paired_window_ranking']['average_precision'] is None
     with pytest.raises(ValueError, match='duplicate detector window key'):
@@ -215,7 +231,8 @@ def test_h06_missing_group_is_retained_in_deterministic_paired_bootstrap():
     bootstrap = result['bootstrap']
     assert bootstrap['group_ids'] == list(models['adsketch']['groups'])
     assert (bootstrap['groups'], bootstrap['seed'], bootstrap['attempted_replicates']) == (5, 42, 1000)
-    equal = bootstrap['intervals']['isolation_forest_minus_median_mad']['recall']
+    assert bootstrap['event_groups'] == 1
+    equal = bootstrap['intervals']['median_mad_minus_isolation_forest']['recall']
     assert (equal['lower'], equal['upper'], equal['valid_replicates']) == (0, 0, 1000)
     recall = bootstrap['intervals']['adsketch_minus_median_mad']['recall']
     assert recall['denominators'] == {'adsketch': 5, 'median_mad': 5}
@@ -248,3 +265,149 @@ def test_frozen_scoring_preserves_sources_and_censors_late_history():
     expected_refs = {window['bucket_end']: (window['raw_ref'], window['oracle_ref']) for window in windows}
     assert all((row['raw_ref'], row['oracle_ref']) == expected_refs[row['bucket_end']] for row in arrival)
     assert _evaluate(windows, [], arrival, clock='arrival-aware')['coverage']['windows'] == 12
+
+
+def test_combo_is_derived_before_persistence_and_reports_added_matches_and_false_incidents():
+    windows = [_window(0), _window(60), _window(120), _window(180, run='false', label=0, healthy=True),
+               _window(240, run='false', label=0, healthy=True), _window(300, run='miss')]
+    events = [_event(windows[0], 0), _event(windows[-1], 300)]
+    predictions = [_prediction(windows[0], 'adsketch', 4), _prediction(windows[1], 'median_mad', .8),
+                   _prediction(windows[2], 'median_mad', .6), _prediction(windows[3], 'adsketch', 5),
+                   _prediction(windows[4], 'adsketch', 5)]
+    result = _evaluate(windows, events, predictions, entry=2, combo_threshold=1.0, mad_threshold=.8, ads_threshold=4)
+    assert set(result['models']) == {*MODELS, COMBO_MODEL}
+    increment = result['adsketch_increment']
+    assert increment['combo_only_matched_events'] == increment['mad_only_matched_events'] == []
+    assert (increment['delta_tp'], increment['delta_fp']) == (0, 1)
+    assert increment['attributable_matched_events'] == [events[0]['event_id']]
+    assert increment['attributable_false_incidents'] == 1
+    assert increment['mad_at_combo_threshold']['tp'] == 0
+    combo, mad = (_matches(result, model) for model in (COMBO_MODEL, 'median_mad'))
+    assert [(row['status'], row['emitted_at']) for row in combo] == [
+        ('matched', _at(60)), ('unmatched', _at(240)), ('miss', None)]
+    assert mad[0]['emitted_at'] == _at(120)
+    assert combo[-1]['reason'] == 'no-available-score-in-window'
+    combo_rows = {row['bucket_end']: row for row in result['predictions'] if row['model_id'] == COMBO_MODEL}
+    assert combo_rows[_at(0)]['component_availability'] == 'adsketch_only'
+    assert combo_rows[_at(60)]['component_availability'] == 'median_mad_only'
+    assert combo_rows[_at(300)]['component_availability'] == 'none'
+    assert combo_rows[_at(0)]['score'] == 1.0 and combo_rows[_at(120)]['score'] == pytest.approx(.75)
+    assert combo_rows[_at(300)]['status'] == 'unavailable'
+    result = _evaluate(windows, events, predictions[:2] + predictions[3:], entry=2, combo_threshold=1.0,
+                       mad_threshold=.8, ads_threshold=4)
+    increment = result['adsketch_increment']
+    assert increment['combo_only_matched_events'] == [events[0]['event_id']]
+    assert (increment['delta_tp'], increment['delta_fp']) == (1, 1)
+
+
+def test_combo_threshold_and_audit_of_precomputed_predictions():
+    window = _window(0)
+    with pytest.raises(ValueError, match='combo fixed at 1.0'):
+        _evaluate([window], [], [], combo_threshold=.5)
+    with pytest.raises(ValueError, match='undeclared window/model'):
+        _evaluate([window], [], [_prediction(window, COMBO_MODEL, 1)])
+    points = {'status': 'ready', 'threshold': 1.0, 'thresholds': {'median_mad': .5, 'adsketch': .5}}
+    base = _scores([window], [.5])
+    derived = append_combo_predictions(base, points)
+    assert _evaluate([window], [], derived, combo_threshold=1.0) == _evaluate([window], [], base, combo_threshold=1.0)
+    with pytest.raises(ValueError, match='disagrees with component'):
+        _evaluate([window], [], [*derived[:-1], {**derived[-1], 'score': 2}], combo_threshold=1.0)
+    with pytest.raises(ValueError, match='invalid or noncausal'):
+        _evaluate([window], [], [*derived[:-1], {**derived[-1], 'component_availability': 'unknown'}], combo_threshold=1.0)
+
+
+def test_combo_ranking_handles_overflow_from_a_finite_normalized_input():
+    windows = [_window(0, label=0), _window(60)]
+    predictions = _scores(windows, [math.ulp(0.0), 1.0])
+    result = _evaluate(windows, [], predictions, combo_threshold=1.0, mad_threshold=math.ulp(0.0), ads_threshold=None)
+    scores = [row['score'] for row in result['predictions'] if row['model_id'] == COMBO_MODEL]
+    assert scores == [1.0, float_info.max]
+    assert result['models'][COMBO_MODEL]['window_ranking']['average_precision'] == 1.0
+
+
+def test_bootstrap_false_incident_delta_uses_only_healthy_alerts_and_scored_exposure():
+    windows, predictions = [], []
+    for index in range(5):
+        group = f'group-{index}'
+        alert = _window(0, run=group, group=group, label=0, healthy=True)
+        healthy = _window(60, run=group, group=group, label=0, healthy=True)
+        windows.extend([alert, healthy])
+        predictions.append(_prediction(alert, 'adsketch', 1))
+        predictions.extend(_prediction(alert, model, 0) for model in ('isolation_forest', 'median_mad'))
+    result = _evaluate(windows, [], predictions, combo_threshold=1.0)
+    metric = 'false_incidents_per_healthy_service_hour'
+    intervals = result['bootstrap']['intervals']
+    assert set(intervals) == {f'{candidate}_minus_{baseline}' for candidate, baseline in PAIRS}
+    assert all(metric in pair for pair in intervals.values())
+    for baseline in ('isolation_forest', 'median_mad'):
+        interval = intervals[f'{COMBO_MODEL}_minus_{baseline}'][metric]
+        assert interval['lower'] == interval['upper'] == 60
+        assert (interval['valid_replicates'], interval['undefined_replicates']) == (1000, 0)
+        assert interval['denominators'] == {COMBO_MODEL: 5 / 60, baseline: 5 / 60}
+    assert result['models'][COMBO_MODEL]['healthy_false_incidents'] == 5
+    assert result['models'][COMBO_MODEL]['healthy_scored_service_hours'] == 5 / 60
+    pair = result['coverage']['pairs'][f'{COMBO_MODEL}_minus_isolation_forest']
+    assert pair == {'healthy_minutes': 10, 'healthy_both_scored': 5, 'events': 0,
+                    'events_both_scored': 0, 'coverage': None}
+
+    no_healthy = _evaluate([{**window, 'healthy': False} for window in windows], [], predictions, combo_threshold=1.0)
+    interval = no_healthy['bootstrap']['intervals'][f'{COMBO_MODEL}_minus_median_mad'][metric]
+    assert interval['lower'] is interval['upper'] is None
+    assert (interval['valid_replicates'], interval['undefined_replicates']) == (0, 1000)
+
+
+def _alibaba_window(minute, service='api', **extras):
+    return _window(minute * 60, run=service, service=service, group=service,
+                   dataset='alibaba-proxy', relative_minute=minute, **extras)
+
+
+def test_pair_coverage_requires_two_scores_on_the_same_event():
+    first, second = _alibaba_window(330), _alibaba_window(330, service='other')
+    healthy = _alibaba_window(345, label=0, healthy=True)
+    events = [_event(row, 330 * 60, kind='alibaba-proxy') for row in (first, second)]
+    predictions = [_prediction(first, 'median_mad', .2), _prediction(second, 'isolation_forest', .2),
+                   *_scores([healthy], [.2])]
+    result = _evaluate([first, second, healthy], events, predictions, combo_threshold=1.0, event_kind='alibaba-proxy')
+    primary = result['coverage']['pairs'][f'{COMBO_MODEL}_minus_isolation_forest']
+    assert primary == {'healthy_minutes': 1, 'healthy_both_scored': 1, 'events': 2,
+                       'events_both_scored': 0, 'coverage': 0}
+    assert result['bootstrap']['event_groups'] == 2
+
+
+def test_alibaba_censors_only_unmatched_alerts_and_uses_scored_healthy_exposure():
+    windows = [_alibaba_window(minute, label=0, healthy=minute in (336, 338, 340))
+               for minute in (324, 325, 326, 327, 328, 336, 337, 338, 339, 340)]
+    eligible = _event(windows[0], 324 * 60, kind='alibaba-proxy')
+    excluded = _event(windows[0], 323 * 60, kind='alibaba-proxy', eligible=False,
+                      reason='onset-before-scoring-range', censor_until=_at(328 * 60))
+    predictions = _scores(windows[:-1], [1, 0, 1, 0, 1, 0, 1, 0, 1])
+    result = _evaluate(windows, [eligible, excluded], predictions, combo_threshold=1.0, event_kind='alibaba-proxy')
+    audit = _matches(result, COMBO_MODEL)
+    assert [row['status'] for row in audit] == ['matched', 'censored', 'censored', 'unmatched', 'unmatched']
+    assert audit[1]['event_id'] == audit[2]['event_id'] == excluded['event_id']
+    model = result['models'][COMBO_MODEL]
+    assert (model['tp'], model['fp'], model['fn'], model['censored_alerts']) == (1, 2, 0, 2)
+    assert (model['healthy_false_incidents'], model['healthy_scored_service_hours']) == (0, 2 / 60)
+    assert model['false_incidents_per_healthy_service_hour'] == 0
+
+
+@pytest.mark.parametrize('missing_minutes', [(), (320, 325)])
+def test_alibaba_warmup_contributes_to_persistence_without_emitting_alerts(missing_minutes):
+    windows = [_alibaba_window(minute, eligible=minute >= 324,
+                               eligibility_reason='causal-warmup' if minute < 324 else None)
+               for minute in range(320, 326)]
+    predictions = _scores(windows, [1, 1, 0, 1, 1, 0])
+    predictions = [row for row in predictions if row['bucket_end'] not in {_at(minute * 60) for minute in missing_minutes}]
+    result = _evaluate(windows, [], predictions, combo_threshold=1.0, entry=2, event_kind='alibaba-proxy')
+    assert [(row['status'], row['emitted_at']) for row in _matches(result, COMBO_MODEL)] == [('unmatched', _at(324 * 60))]
+    assert result['coverage']['common_windows'] == (1 if missing_minutes else 2)
+    for model in result['models'].values():
+        cohorts = [model, model['groups']['api'], model['services']['api']]
+        expected_available = 1 if missing_minutes else 2
+        expected_warmup_scored = 3 if missing_minutes else 4
+        for cohort in cohorts:
+            assert cohort['windows'] == cohort['available_windows'] + cohort['unavailable_windows'] == 2
+            assert cohort['available_windows'] == expected_available
+            assert sum(cohort['unavailable_reasons'].values()) == cohort['unavailable_windows'] == 2 - expected_available
+            assert (cohort['warmup_windows'], cohort['warmup_scored']) == (4, expected_warmup_scored)
+            assert cohort['window_ranking']['windows'] == expected_available

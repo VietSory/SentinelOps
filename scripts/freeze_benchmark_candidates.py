@@ -1,9 +1,11 @@
 """Pin both verified development candidates before preparing holdout capture."""
+import hashlib
 import json
+import math
 from pathlib import Path
 
 from scripts.verify_ltfp_development_stage import verify_stage
-from sentinelops.ml.model_benchmark_protocol import _bytes, _path, publish_freeze, verify_protocol
+from sentinelops.ml.model_benchmark_protocol import LANE_B_CANDIDATE, _bytes, _path, publish_freeze, verify_protocol
 from sentinelops.public_data.alibaba import file_sha256
 from sentinelops.telemetry.core import stable_id
 
@@ -43,6 +45,18 @@ def _lane_a(root, protocol, evidence_path):
             'recovery': 'completed-fit-and-independent-calibration-replay'}
 
 
+def _pinned_fit_lacks_combo(path, detector_sha256):
+    content = path.read_bytes()
+    if hashlib.sha256(content).hexdigest() != detector_sha256:
+        return False
+    try:
+        artifact = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    calibration = artifact.get('calibration') if isinstance(artifact, dict) else None
+    return isinstance(calibration, dict) and calibration.get(LANE_B_CANDIDATE) is None
+
+
 def run(root, protocol, evidence_path, detector_sha256):
     root = Path(root).resolve()
     frozen_path = _path(root, 'freeze/protocol.json')
@@ -60,9 +74,16 @@ def run(root, protocol, evidence_path, detector_sha256):
 
         if not detector_sha256:
             return {'status': 'blocked', 'reasons': ['lane-b-fit-sha256-required']}
-        if not (root / FIT_PATH).is_file():
+        fit_path = root / FIT_PATH
+        if not fit_path.is_file():
             return {'status': 'blocked', 'reasons': ['verified-detector-fit-required']}
-        detector = verify_detector_fit(root, expected_fit_sha256=detector_sha256)
+        missing_combo = {'status': 'blocked', 'reasons': ['combo-operating-point-missing']}
+        try:
+            detector = verify_detector_fit(root, expected_fit_sha256=detector_sha256)
+        except ValueError:
+            if _pinned_fit_lacks_combo(fit_path, detector_sha256):
+                return missing_combo
+            raise
         if detector.provenance_sha256 != protocol['data']['manifest']['sha256']:
             raise ValueError('Lane B checkpoint data differs from the frozen protocol')
         if detector.protocol_splits_sha256 != protocol['data']['splits']['sha256']:
@@ -71,8 +92,22 @@ def run(root, protocol, evidence_path, detector_sha256):
             protocol_splits=_ref(root, protocol['data']['splits']),
             protocol_splits_sha256=protocol['data']['splits']['sha256'],
             protocol_source_manifest=_ref(root, protocol['code']['source_manifest']))
+        combo = detector.calibration.get(LANE_B_CANDIDATE)
+        if combo is None:
+            return missing_combo
         if detector.status != 'ready':
             return {'status': 'blocked', 'reasons': ['lane-b-operating-points-not-ready']}
+        thresholds = combo.get('thresholds') if isinstance(combo, dict) else None
+        if (not isinstance(thresholds, dict) or set(thresholds) != {'median_mad', 'adsketch'}
+                or any((type(value) not in (int, float) or not math.isfinite(value) or value <= 0)
+                       for model, value in thresholds.items() if model != 'adsketch' or value is not None)
+                or combo.get('status') != 'ready'
+                or type(combo.get('threshold')) not in (int, float) or combo['threshold'] != 1.0
+                or type(combo.get('budget')) not in (int, float)
+                or combo['budget'] != protocol['reporting']['lane_b']['calibration_budget']):
+            return {'status': 'blocked', 'reasons': ['combo-operating-point-invalid']}
+        if combo.get('selection_rule') != protocol['reporting']['lane_b']['combo_selection_rule_id']:
+            return {'status': 'blocked', 'reasons': ['combo-selection-rule-mismatch']}
         lanes['b'] = {'status': detector.status, 'fit_sha256': detector.fit_sha256,
                       'model_sha256': detector.model.digest, 'persistence': detector.persistence,
                       'operating_points': detector.calibration}

@@ -4,6 +4,10 @@ import random
 from sentinelops.contracts import utc_time
 
 from sentinelops.ml.model_benchmark_forecast import MODELS, project_latency_truth, schedule_cutoffs, summarize_forecasts
+from sentinelops.ml.model_benchmark_protocol import (
+    LANE_B_BASELINE, LANE_B_CANDIDATE, LANE_B_COST_METRIC, LANE_B_PAIRS,
+    NON_INFERIORITY_MARGIN, lane_b_rule_gaps,
+)
 from sentinelops.telemetry.core import BUSINESS_ROUTES
 
 
@@ -60,10 +64,6 @@ def primary_event_coverage(cases):
             'incomplete_event_ids': sorted(incomplete)}
 
 
-# v17: recall at lead >= 60 s may be at most this much below XGBoost (95% CI lower bound).
-NON_INFERIORITY_MARGIN = .05
-
-
 def lane_a_recommendation(gradual, healthy, q07, rules):
     """Apply the frozen primary comparison without authorizing a release.
 
@@ -102,6 +102,59 @@ def lane_a_recommendation(gradual, healthy, q07, rules):
     if (graph['warned_runs'] < baseline['warned_runs']
             or graph_exposure['per_service_hour'] < baseline_exposure['per_service_hour']):
         return {**result, 'benchmark': 'REPLACE', 'reason': 'recall-non-inferior-with-lower-warning-cost'}
+    return {**result, 'reason': 'non-inferior-without-measured-advantage'}
+
+
+def _finite_number(value):
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def lane_b_recommendation(evaluation: dict, rules: dict) -> dict:
+    """Apply the preregistered Alibaba event gate to an audited detector evaluation."""
+    bootstrap = evaluation.get('bootstrap', {})
+    intervals = bootstrap.get('intervals', {})
+    event_groups = bootstrap.get('event_groups')
+    primary_key = f'{LANE_B_CANDIDATE}_minus_{LANE_B_BASELINE}'
+    result = {'benchmark': 'INCONCLUSIVE', 'release': 'KEEP', 'runtime_parity': 'NOT_RUN',
+              'activation_allowed': False, 'eligible_event_services': event_groups,
+              'scope': 'alibaba-proxy-ranking', 'uses_proxy_positive_labels': True,
+              'novel_pattern': {'status': 'NA', 'reason': 'insufficient-support'},
+              'local_gates': {gate: 'NOT_RUN' for gate in ('Q-04', 'Q-05', 'Q-06')},
+              'comparisons': {f'{candidate}_minus_{baseline}': intervals.get(f'{candidate}_minus_{baseline}', {})
+                              for candidate, baseline in LANE_B_PAIRS}}
+    gaps = lane_b_rule_gaps(rules, preregistration=False)
+    if not gaps:
+        for field in ('event_rule_id', 'combo_selection_rule_id'):
+            if field not in evaluation:
+                gaps.append(f'evaluation-rule-missing: {field}')
+            elif evaluation[field] != rules[field]:
+                gaps.append(f'evaluation-rule-mismatch: {field}')
+    if gaps:
+        return {**result, 'reason': 'rules-unverified', 'rule_gaps': gaps}
+    if type(event_groups) is not int or event_groups < 5:
+        return {**result, 'reason': 'insufficient-event-support'}
+    coverage = evaluation.get('coverage', {}).get('pairs', {}).get(primary_key, {}).get('coverage')
+    if not _finite_number(coverage) or not .95 <= coverage <= 1:
+        return {**result, 'reason': 'pairwise-coverage-incomplete'}
+    models = evaluation.get('models', {})
+    candidate, baseline = (models.get(model, {}) for model in (LANE_B_CANDIDATE, LANE_B_BASELINE))
+    primary = result['comparisons'][primary_key]
+    f1_interval, cost_interval = (primary.get(key, {}) for key in ('f1', LANE_B_COST_METRIC))
+    if any(interval.get('missing_reason') or type(interval.get('valid_replicates')) is not int
+           or interval['valid_replicates'] < 950
+           or not all(_finite_number(interval.get(bound)) for bound in ('lower', 'upper'))
+           or interval['lower'] > interval['upper'] for interval in (f1_interval, cost_interval)) or any(
+               not _finite_number(model.get(LANE_B_COST_METRIC)) for model in (candidate, baseline)):
+        return {**result, 'reason': 'bootstrap-undefined'}
+    lower = f1_interval['lower']
+    if lower < -NON_INFERIORITY_MARGIN:
+        return {**result, 'reason': 'f1-non-inferiority-not-established'}
+    if candidate[LANE_B_COST_METRIC] > baseline[LANE_B_COST_METRIC]:
+        return {**result, 'benchmark': 'KEEP', 'reason': 'higher-false-incident-cost'}
+    if lower > 0:
+        return {**result, 'benchmark': 'REPLACE', 'reason': 'f1-improved-without-higher-cost'}
+    if cost_interval['upper'] < 0:
+        return {**result, 'benchmark': 'REPLACE', 'reason': 'non-inferior-with-lower-false-incident-cost'}
     return {**result, 'reason': 'non-inferior-without-measured-advantage'}
 
 

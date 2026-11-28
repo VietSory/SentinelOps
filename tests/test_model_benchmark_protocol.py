@@ -7,7 +7,14 @@ import random
 import pytest
 
 from sentinelops.ml.alibaba_training import load_config, split_of
+from sentinelops.ml.model_benchmark_alibaba_events import ALIBABA_EVENT_RULE_ID
+from sentinelops.ml.model_benchmark_detector_combo import COMBO_SELECTION_RULE_ID
 from sentinelops.ml.model_benchmark_protocol import _overlapping_partitions, audit_protocol, freeze_protocol, verify_protocol
+from sentinelops.ml.model_benchmark_protocol import lane_b_rules
+
+
+def fixture_lane_b_rules():
+    return lane_b_rules(ALIBABA_EVENT_RULE_ID, COMBO_SELECTION_RULE_ID)
 
 
 def fixture(root):
@@ -39,7 +46,8 @@ def fixture(root):
         calibration=dict(comparison='>=',budget=.01,minimum_scored_negative_windows=100,ties='preserve',
             fallback='nextafter-observed-max',cohort='eligible-scored-calibration-only'),
         reporting=dict(bootstrap_replicates=1000,seed=42,unit='whole-group',interval='percentile-linear',
-            primary='delta-recall-lead-ge60',lead_secondary='paired-common-matched-events',required_tables=['forecast','detector']),checks=[])
+            primary='delta-recall-lead-ge60',lead_secondary='paired-common-matched-events',required_tables=['forecast','detector'],
+            lane_b=fixture_lane_b_rules()),checks=[])
     for lane,count in [('A',9),('B',6)]:
         for i in range(1,count+1):
             name=f'{lane}{i:02}'
@@ -292,3 +300,66 @@ def test_lane_a_freezes_while_lane_b_is_blocked(tmp_path):
     wrapper['lanes']=['a','b']
     (tmp_path/'freeze/protocol.json').write_bytes(json.dumps(wrapper,sort_keys=True,separators=(',',':')).encode())
     with pytest.raises(ValueError,match='changed protocol freeze'): verify_protocol(tmp_path)
+
+
+@pytest.mark.parametrize('field, invalid', [
+    ('candidate', 'adsketch'), ('baseline', 'median_mad'), ('primary_metric', 'recall'),
+    ('non_inferiority_margin', '0.05'), ('advantages', 'recall'),
+    ('calibration_budget', .02), ('calibration_cohort', ' '),
+    ('event_rule_id', 42), ('combo_selection_rule_id', 'unhashed-rule'),
+])
+def test_lane_b_rules_are_required_and_typed(tmp_path, field, invalid):
+    protocol, _ = fixture(tmp_path)
+    rules = protocol['reporting']['lane_b']
+    del rules[field]
+    result = freeze_protocol(protocol, tmp_path, lanes=('b',))
+    assert result['status'] == 'blocked'
+    assert result['reasons'] == [f'b: lane-b-rule-missing: {field}']
+    assert result['lanes']['a']['status'] == 'ready'
+    rules[field] = invalid
+    assert freeze_protocol(protocol, tmp_path, lanes=('b',))['reasons'] == [f'b: lane-b-rule-invalid: {field}']
+    assert not (tmp_path / 'freeze/protocol.json').exists()
+
+
+def test_legacy_lane_a_protocol_does_not_require_lane_b_rules(tmp_path):
+    protocol, _ = fixture(tmp_path)
+    del protocol['reporting']['lane_b']
+    assert freeze_protocol(protocol, tmp_path, lanes=('b',))['reasons'] == ['b: lane-b-rules-missing']
+    assert freeze_protocol(protocol, tmp_path, lanes=('a',))['status'] == 'ready'
+    assert verify_protocol(tmp_path)['frozen_lanes'] == ['a']
+
+
+def test_lane_b_rules_are_in_protocol_digest_and_freeze(tmp_path):
+    protocol, _ = fixture(tmp_path)
+    protocol['checks'] = [check for check in protocol['checks'] if check['test_id'] != 'A07']
+    result = freeze_protocol(protocol, tmp_path, lanes=('b',))
+    assert result['status'] == 'ready' and result['lanes']['a']['status'] == 'blocked'
+    assert verify_protocol(tmp_path) == result
+    wrapper = json.loads((tmp_path / 'freeze/protocol.json').read_bytes())
+    assert wrapper['protocol']['reporting']['lane_b'] == fixture_lane_b_rules()
+    for field, reason in [('event_rule_id', 'event-rule-id-mismatch'),
+                          ('combo_selection_rule_id', 'combo-rule-id-mismatch')]:
+        variant = deepcopy(protocol)
+        variant['reporting']['lane_b'][field] = '3' * 64
+        assert audit_protocol(variant, tmp_path)['protocol_sha256'] != result['protocol_sha256']
+        assert freeze_protocol(variant, tmp_path, lanes=('b',))['reasons'] == ['b: ' + reason]
+        assert json.loads((tmp_path / 'freeze/protocol.json').read_bytes()) == wrapper
+    variant = deepcopy(protocol)
+    variant['reporting']['lane_b']['calibration_cohort'] = 'another-frozen-anchor-cohort'
+    assert audit_protocol(variant, tmp_path)['protocol_sha256'] != result['protocol_sha256']
+    with pytest.raises(ValueError, match='already frozen'):
+        freeze_protocol(variant, tmp_path, lanes=('b',))
+
+
+@pytest.mark.parametrize('field, reason', [
+    ('event_rule_id', 'event-rule-id-mismatch'), ('combo_selection_rule_id', 'combo-rule-id-mismatch'),
+])
+def test_lane_b_freeze_requires_current_rule_ids_but_lane_a_remains_independent(tmp_path, field, reason):
+    protocol, _ = fixture(tmp_path)
+    assert audit_protocol(protocol, tmp_path)['lanes']['b']['status'] == 'ready'
+    protocol['reporting']['lane_b'][field] = '0' * 64
+    result = freeze_protocol(protocol, tmp_path, lanes=('b',))
+    assert result['status'] == 'blocked' and result['reasons'] == ['b: ' + reason]
+    assert result['lanes']['b']['reasons'] == [reason] and result['lanes']['a']['status'] == 'ready'
+    assert not (tmp_path / 'freeze/protocol.json').exists()
+    assert freeze_protocol(protocol, tmp_path, lanes=('a',))['status'] == 'ready'

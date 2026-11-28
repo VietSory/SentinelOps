@@ -55,7 +55,7 @@ def main(argv=None):
         commands.add_parser(name)
     commands.add_parser('freeze-protocol').add_argument(
         '--lanes', choices=('a', 'b', 'ab'), default='ab',
-        help='Freeze one lane before the other is ready; the default freezes both.')
+        help='Freeze one lane before the other is ready. Lane B requires reporting.lane_b. Defaults to both.')
     seal = commands.add_parser('seal-capture')
     seal.add_argument('--registration-sha256')
     seal.add_argument('--capture-project', type=Path, default=Path(__file__).resolve().parents[1])
