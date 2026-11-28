@@ -1,12 +1,14 @@
 # Lane B benchmark và nghiệm thu local
 
 > Cập nhật 27-11-2026: tiêu chí non-inferiority và việc cần làm trước freeze v17 nằm trong [kế hoạch v17](MODEL_BENCHMARK_V17_PLAN.md).
+>
+> Cập nhật 28-11-2026: khai báo trước Lane B v17 theo SPEC v2 (rule event Alibaba proxy D1 nhãn `> 2,0×` median với warmup từ phút 259, ứng viên `adsketch_mad_or` D2, 9 nhánh gate đối xứng D3 tách `scope='alibaba-proxy-ranking'`, tên hàng "ADSketch, biến thể tìm kiếm giới hạn" và trạng thái B-1..B-8) nằm trong [mục 5 kế hoạch v17](MODEL_BENCHMARK_V17_PLAN.md#5-lane-b-khai-báo-trước-v17) và [ADR-021](../adr/ADR-021-lane-b-v17-preregistration.md).
 
 Worktree `/tmp/sentinelops-model-benchmark-b`, nhánh `feat/model-benchmark-b`, nền `f5615ae`. Đặc tả đối chiếu là [runbook tại 5f9067c](https://github.com/VietSory/SentinelOps/blob/5f9067cac29f05f975a8dddbdc610ea1d8e819d2/docs/delivery/MODEL_BENCHMARK_RUNBOOK.md). B phát triển detector ADSketch frozen, Isolation Forest và Median/MAD ngoài đường inference phục vụ. Quyết định release hiện tại là **KEEP** đối với baseline `de38fc6b`. Hiệu quả của ứng viên mới còn **INCONCLUSIVE**.
 
-Cập nhật development: B01–B06 đã được kiểm tra lại trên source `09b3bef`; B02 và B06 có support từ Alibaba proxy thật. Trong 2.039 anchor calibration, có 65 known và 6 novel mang nhãn proxy dương, cùng 72 anchor thiếu score. Protocol và candidates chung đã freeze. [Evidence và hash](../reports/evidence/model-benchmark-freeze-development.json). Bảng dưới ghi trạng thái bàn giao lịch sử trước cập nhật này.
+Cập nhật development (mốc lịch sử 27-11-2026, trước v17): B01–B06 đã được kiểm tra lại trên source `09b3bef`; B02 và B06 có support từ Alibaba proxy thật. Trong 2.039 anchor calibration, có 65 known và 6 novel mang nhãn proxy dương, cùng 72 anchor thiếu score. Protocol và candidates chung bản tiền v17 (`36a64094…`) đã freeze ở mốc này (v17 chưa freeze). [Evidence và hash](../reports/evidence/model-benchmark-freeze-development.json). Bảng dưới ghi trạng thái bàn giao lịch sử trước cập nhật này.
 
-Cập nhật ngày 27-11-2026: A đã đăng ký ma trận chung 35 slot và bắt đầu thu nhóm `bench-final-01` trên capture revision `45294cc`. Slot đầu tiên đang warmup; chưa có group receipt hoặc kết quả detector holdout. B dùng cùng group, run, raw refs và oracle đã xác minh của A sau khi capture được seal; không thu lại dữ liệu riêng.
+Cập nhật lịch sử ngày 27-11-2026: A đã đăng ký ma trận chung 35 slot và bắt đầu thu nhóm `bench-final-01` trên capture revision `45294cc` (lúc ghi nhận, slot đầu tiên đang warmup). Đến khoảng 18:00 ngày 27-11-2026, máy khởi động lại khiến capture `bench-final-01` (registration `5a2d7629…`) dừng khi slot healthy đang warmup; registration này bị bỏ, chưa có slot nào hoàn tất và chưa có kết quả detector holdout ([mục 4 kế hoạch v17](MODEL_BENCHMARK_V17_PLAN.md#4-phản-hồi-review-ngày-27-11-và-sự-cố-capture)). B dùng cùng group, run, raw refs và oracle đã xác minh của A sau khi đợt capture mới được seal; không thu lại dữ liệu riêng.
 
 | Chặng | Bằng chứng cần bàn giao | Tình trạng |
 | --- | --- | --- |
